@@ -17,23 +17,19 @@ class Workspace:
         self.path.mkdir(parents=True, exist_ok=True)
 
     def git_clone(self, repo_url: str, commit_sha: str | None, project_root: str) -> Path:
-        # safe.directory=*: a source repo may be owned by another uid (e.g. CI bind mounts), which
-        # git 2.35+ refuses with "dubious ownership"; trust it for the clone.
-        subprocess.run(
-            [
-                "git",
-                "-c",
-                "safe.directory=*",
-                "clone",
-                "--depth",
-                "1",
-                repo_url,
-                str(self.path / "repo"),
-            ],
-            check=True,
+        # A source repo may be owned by another uid (e.g. CI bind mounts); the worker image trusts
+        # all repos via `git config --system safe.directory '*'` (a `-c` override is ignored by git).
+        # Surface git's stderr so a clone failure isn't an opaque "exit status 128".
+        result = subprocess.run(
+            ["git", "clone", "--depth", "1", repo_url, str(self.path / "repo")],
             capture_output=True,
+            text=True,
             env={**os.environ, "GIT_TERMINAL_PROMPT": "0"},
         )
+        if result.returncode != 0:
+            raise RuntimeError(
+                f"git clone failed: {result.stderr.strip() or result.stdout.strip()}"
+            )
         if commit_sha:
             subprocess.run(
                 ["git", "fetch", "--depth", "1", "origin", commit_sha],

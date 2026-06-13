@@ -9,6 +9,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends git jq curl unz
     && unzip /tmp/tofu.zip -d /usr/local/bin tofu && rm /tmp/tofu.zip \
     && rm -rf /var/lib/apt/lists/*
 
+# Trust repos owned by another uid (CI bind-mounts the fixture repos as the runner user, while the
+# agent runs as root). safe.directory must live in system/global config — git ignores `-c` for it.
+RUN git config --system --add safe.directory '*'
+
 ENV UV_LINK_MODE=copy UV_PROJECT_ENVIRONMENT=/opt/venv PATH=/opt/venv/bin:$PATH
 WORKDIR /app
 COPY pyproject.toml uv.lock* ./
