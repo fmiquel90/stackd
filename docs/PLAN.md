@@ -1,55 +1,55 @@
-# PLAN.md — Plateforme d'orchestration Terraform (type Spacelift, version simplifiée)
+# PLAN.md — Terraform orchestration platform (Spacelift-like, simplified version)
 
-> Nom de code projet : **Stackd** (placeholder, à renommer)
-> Objectif : une plateforme self-hostable d'orchestration Terraform avec stacks multi-environnements, variable sets, runs, workers, hooks, credentials cloud dynamiques (OIDC), audit complet et dépendances inter-stacks.
+> Project code name: **Stackd** (placeholder, to be renamed)
+> Goal: a self-hostable Terraform orchestration platform with multi-environment stacks, variable sets, runs, workers, hooks, dynamic cloud credentials (OIDC), full audit, and inter-stack dependencies.
 
 ---
 
-## 1. Vision et périmètre
+## 1. Vision and scope
 
-### 1.1 Ce qu'on construit (MVP)
+### 1.1 What we are building (MVP)
 
-Une plateforme qui permet de :
+A platform that allows you to:
 
-1. Déclarer des **stacks** : un repo Git + un sous-dossier = une unité d'infrastructure, déclinée en **environnements** (dev, staging, prod) ayant chacun leur state Terraform et leurs variables.
-2. Factoriser la configuration via des **variable sets** : ensembles réutilisables de variables attachables à N stacks/environnements (inspiré des Contexts Spacelift / Variable Sets HCP).
-3. Déclencher des **runs** (plan / apply) par environnement, manuellement ou via webhook Git.
-4. Exécuter ces runs sur des **workers** distants (agents auto-hébergés, modèle pull) avec **logs streamés en direct** dans l'UI.
-5. Personnaliser le cycle de vie via des **hooks** (commandes avant/après init/plan/apply, déclarées en YAML) avec checks bloquants ou soft-fail.
-6. Fournir des **credentials cloud dynamiques par OIDC** : la plateforme signe un token d'identité par run, échangé contre un rôle IAM — zéro credential statique, ni côté plateforme, ni côté worker.
-7. **Auditer** : qui a déclenché, confirmé, appliqué quoi, quand, sur quel environnement — trail immuable et consultable.
-8. Gérer les **states dans S3**, exposés à Terraform via le **backend HTTP** de la plateforme (locking + tokens scoped), avec mode "bring your own S3 backend".
-9. Gérer un **graphe de dépendances** entre environnements avec propagation des outputs et **mock outputs** pour le bootstrap (inspiré de Terragrunt).
-10. S'authentifier avec un **compte Google** (OIDC), restreint au domaine de l'organisation.
+1. Declare **stacks**: a Git repo + a subfolder = a unit of infrastructure, broken down into **environments** (dev, staging, prod), each with their own Terraform state and variables.
+2. Factor out configuration via **variable sets**: reusable sets of variables attachable to N stacks/environments (inspired by Spacelift Contexts / HCP Variable Sets).
+3. Trigger **runs** (plan / apply) per environment, manually or via Git webhook.
+4. Execute these runs on remote **workers** (self-hosted agents, pull model) with **live-streamed logs** in the UI.
+5. Customize the lifecycle via **hooks** (commands before/after init/plan/apply, declared in YAML) with blocking or soft-fail checks.
+6. Provide **dynamic cloud credentials via OIDC**: the platform signs an identity token per run, exchanged for an IAM role — zero static credentials, neither on the platform side nor on the worker side.
+7. **Audit**: who triggered, confirmed, applied what, when, on which environment — an immutable and queryable trail.
+8. Manage **states in S3**, exposed to Terraform via the platform's **HTTP backend** (locking + scoped tokens), with a "bring your own S3 backend" mode.
+9. Manage a **dependency graph** between environments with output propagation and **mock outputs** for bootstrapping (inspired by Terragrunt).
+10. Authenticate with a **Google account** (OIDC), restricted to the organization's domain.
 
-### 1.2 Ce qu'on ne construit PAS dans le MVP (anti-scope)
+### 1.2 What we are NOT building in the MVP (anti-scope)
 
-| Hors scope MVP | Raison | Phase future |
+| Out of MVP scope | Reason | Future phase |
 |---|---|---|
-| Policies OPA/Rego | Les hooks + checks couvrent 80 % des besoins de gouvernance v1 | Phase 7+ |
-| Run tasks HTTP (webhooks externes bloquants type Infracost SaaS) | Les hooks par commande suffisent (Infracost CLI s'exécute en hook) | Phase 7 |
-| Drift detection schedulée | Nécessite un scheduler robuste | Phase 7+ |
-| Multi-IaC (Pulumi, CloudFormation) | Terraform/OpenTofu only | Jamais peut-être |
-| SSO SAML / autres IdP que Google | Google OIDC suffit | Phase 7 |
-| Worker pool public/partagé | Workers privés uniquement | Jamais (positionnement self-hosted) |
-| OIDC vers GCP/Azure | AWS d'abord (audience cible), interface générique prévue | Phase 7 |
-| Module registry privé, no-code provisioning | Gros chantier, faible valeur sans utilisateurs | — |
-| Export SIEM de l'audit | L'audit DB + UI suffit | Phase 7 |
+| OPA/Rego policies | Hooks + checks cover 80% of v1 governance needs | Phase 7+ |
+| HTTP run tasks (blocking external webhooks like Infracost SaaS) | Command hooks are sufficient (Infracost CLI runs as a hook) | Phase 7 |
+| Scheduled drift detection | Requires a robust scheduler | Phase 7+ |
+| Multi-IaC (Pulumi, CloudFormation) | Terraform/OpenTofu only | Maybe never |
+| SAML SSO / IdPs other than Google | Google OIDC is sufficient | Phase 7 |
+| Public/shared worker pool | Private workers only | Never (self-hosted positioning) |
+| OIDC to GCP/Azure | AWS first (target audience), generic interface planned | Phase 7 |
+| Private module registry, no-code provisioning | Large undertaking, low value without users | — |
+| SIEM export of the audit | DB audit + UI are sufficient | Phase 7 |
 
-### 1.3 Principes directeurs
+### 1.3 Guiding principles
 
-- **Pull, pas push** : les workers tirent les jobs depuis l'API.
-- **L'API est la seule source de vérité** : workers stateless et jetables.
-- **State machine explicite** pour les runs : chaque transition est un événement persisté → base du système d'audit.
-- **Auditabilité par construction** : toute action mutante écrit un événement d'audit immuable.
-- **Environnement = unité d'exécution** : stack = template (repo + code), environnement = instance (state + variables + protections). Un run appartient à un environnement.
-- **Zéro credential statique comme objectif** : OIDC pour les humains (Google), OIDC pour les workloads (rôles IAM par run). Les secrets statiques restent possibles (variable sets sensibles) mais sont le fallback, pas la norme.
-- **Configuration par couches** : variable set → stack → environnement, chaque couche pouvant écraser la précédente. Même logique pour les hooks.
-- **Blast radius minimal** : un environnement = un state = un scope. Dépendances par outputs explicites uniquement.
+- **Pull, not push**: workers pull jobs from the API.
+- **The API is the single source of truth**: stateless and disposable workers.
+- **Explicit state machine** for runs: each transition is a persisted event → the foundation of the audit system.
+- **Auditability by construction**: every mutating action writes an immutable audit event.
+- **Environment = execution unit**: stack = template (repo + code), environment = instance (state + variables + protections). A run belongs to an environment.
+- **Zero static credentials as a goal**: OIDC for humans (Google), OIDC for workloads (per-run IAM roles). Static secrets remain possible (sensitive variable sets) but are the fallback, not the norm.
+- **Layered configuration**: variable set → stack → environment, each layer able to override the previous one. Same logic for hooks.
+- **Minimal blast radius**: one environment = one state = one scope. Dependencies via explicit outputs only.
 
 ---
 
-## 2. Architecture cible (vue d'ensemble)
+## 2. Target architecture (overview)
 
 ```
 ┌─────────────┐         ┌───────────────────────────────────┐
@@ -72,246 +72,246 @@ Une plateforme qui permet de :
 ┌─────────────┐  poll   └───────┬──────────────┬────────────┘
 │  Worker 1   │────────▶ ┌──────▼─────┐ ┌──────▼─────┐
 │  (agent)    │          │ PostgreSQL │ │     S3     │
-├─────────────┤          │ (état app, │ │ (tfstate,  │
+├─────────────┤          │ (app state,│ │ (tfstate,  │
 │  Worker 2   │──┐       │  audit)    │ │  logs,     │
 └─────────────┘  │       └────────────┘ │  artifacts)│
                  │                      └────────────┘
                  │ AssumeRoleWithWebIdentity
-                 │ (token workload signé par l'API)
+                 │ (workload token signed by the API)
                  ▼
           ┌────────────┐
-          │  AWS STS   │──▶ credentials temporaires scoped au run
+          │  AWS STS   │──▶ temporary credentials scoped to the run
           └────────────┘
 ```
 
-### 2.1 Composants
+### 2.1 Components
 
-| Composant | Techno | Rôle |
+| Component | Technology | Role |
 |---|---|---|
-| **Front** | React 19 + Vite 7 + TypeScript, TanStack Query, Tailwind v4 | SPA — design spécifié dans **DESIGN.md** |
-| **API** | FastAPI (Python 3.13+), Pydantic v2, SQLAlchemy 2 async | REST + WS, auth Google, webhooks, worker API, state backend, audit, **issuer OIDC workload** |
-| **Scheduler** | Module interne de l'API | DAG, queue, propagation des outputs |
-| **Workers** | Agent Python (tout le MVP) ; réécriture Go = piste post-MVP, hors phases 0–6 | Poll, clone, hooks, terraform, échange OIDC→STS, streaming logs |
-| **DB** | PostgreSQL 18 | Tout l'état applicatif + queue (`SKIP LOCKED`) |
-| **Object storage** | S3 (Garage en dev) | tfstate versionné, logs archivés, artifacts |
+| **Front** | React 19 + Vite 7 + TypeScript, TanStack Query, Tailwind v4 | SPA — design specified in **DESIGN.md** |
+| **API** | FastAPI (Python 3.13+), Pydantic v2, SQLAlchemy 2 async | REST + WS, Google auth, webhooks, worker API, state backend, audit, **workload OIDC issuer** |
+| **Scheduler** | Internal API module | DAG, queue, output propagation |
+| **Workers** | Python agent (entire MVP); Go rewrite = post-MVP track, outside phases 0–6 | Poll, clone, hooks, terraform, OIDC→STS exchange, log streaming |
+| **DB** | PostgreSQL 18 | All application state + queue (`SKIP LOCKED`) |
+| **Object storage** | S3 (Garage in dev) | Versioned tfstate, archived logs, artifacts |
 
-### 2.2 Décision : states dans S3, exposés via backend HTTP
+### 2.2 Decision: states in S3, exposed via HTTP backend
 
-- **Stockage physique : S3** (durabilité, versioning, lifecycle, SSE-KMS).
-- **Interface Terraform : backend HTTP** de la plateforme, qui écrit/lit dans S3 :
-  1. **Credentials** : tokens scoped par run (RO pour les PR), aucun droit IAM sur le bucket de states distribué aux workers.
-  2. **Locking** en Postgres, visible dans l'UI, force-unlock en un clic (audité).
-  3. **Audit & versions** : chaque écriture liée au run qui l'a produite.
-  4. **Contrôle** : refus de serial régressif, rétention pilotée.
-- **Mode compatibilité** : `managed_state: false` pour les backends S3 existants.
+- **Physical storage: S3** (durability, versioning, lifecycle, SSE-KMS).
+- **Terraform interface: the platform's HTTP backend**, which writes/reads in S3:
+  1. **Credentials**: per-run scoped tokens (RO for PRs), no IAM rights on the states bucket distributed to workers.
+  2. **Locking** in Postgres, visible in the UI, one-click force-unlock (audited).
+  3. **Audit & versions**: each write linked to the run that produced it.
+  4. **Control**: rejection of regressive serial, managed retention.
+- **Compatibility mode**: `managed_state: false` for existing S3 backends.
 
-### 2.3 Décision : credentials cloud dynamiques (OIDC workload identity)
+### 2.3 Decision: dynamic cloud credentials (OIDC workload identity)
 
-La plateforme devient un **émetteur OIDC** (le même mécanisme que GitHub Actions OIDC) :
+The platform becomes an **OIDC issuer** (the same mechanism as GitHub Actions OIDC):
 
-- L'API expose `/.well-known/openid-configuration` + JWKS publics.
-- À chaque claim de job, l'API signe un **token workload** avec des claims riches : `sub=run:{env}:{stack}:{phase}`, `environment`, `stack`, `run_id`, `phase` (plan/apply), TTL court.
-- Côté AWS : un Identity Provider OIDC + des rôles IAM dont la trust policy filtre sur ces claims. Exemple : le rôle apply de prod n'est assumable que si `sub` matche `run:prod:*:apply`.
-- Le worker écrit le token dans un fichier et exporte `AWS_WEB_IDENTITY_TOKEN_FILE` + `AWS_ROLE_ARN` : les providers AWS le consomment nativement, **zéro code spécifique dans le code Terraform des utilisateurs**.
-- Conséquences : plan et apply peuvent assumer des rôles différents (plan = ReadOnly + s3 modules, apply = droits d'écriture), un plan de PR ne peut physiquement pas modifier l'infra, et la rotation de credentials disparaît du modèle.
-
----
-
-## 3. Phases d'implémentation
-
-### Phase 0 — Fondations + Auth Google (1,5 semaine)
-
-- [ ] Monorepo : `api/`, `worker/`, `front/`, `deploy/`, `docs/`
-- [ ] `docker-compose.yml` dev : Postgres, Garage (S3 local), API hot-reload, front Vite — **mode dev complet spécifié dans DEV.md** (dev login 3 personas, repos fixtures `file://`, seed + scénario e2e, timings raccourcis)
-- [ ] FastAPI : healthcheck, settings, modules (`auth/`, `stacks/`, `environments/`, `variable_sets/`, `runs/`, `workers/`, `audit/`, `oidc/`, ...)
-- [ ] **Auth Google OIDC** (Authorization Code + PKCE) : flow complet, upsert sur `google_sub`, restriction `hd` au domaine, sessions JWT + refresh rotatif (table `refresh_tokens`, détection de réutilisation → révocation de famille, SPECS §2.5), CSRF sur `/auth/refresh`, bootstrap premier admin
-- [ ] Migrations Alembic, modèles `User`, `RefreshToken`, **`Space` (space `default` créé au bootstrap, SPECS §3.0)** — toutes les FK `space_id` en dépendent dès Phase 1
-- [ ] Front : scaffold + **mise en place du design system de DESIGN.md** (tokens, thème, composants de base) + **Storybook/Ladle** des composants identitaires (PhaseRail, StateBadge, ProvenanceBadge...) — le contrat visuel exigé par DESIGN.md §8, page login
-- [ ] CI GitHub Actions, `CLAUDE.md` racine
-
-**Livrable : `docker compose up` → Sign in with Google → coquille de l'app au design final.**
+- The API exposes `/.well-known/openid-configuration` + public JWKS.
+- On each job claim, the API signs a **workload token** with rich claims: `sub=run:{env}:{stack}:{phase}`, `environment`, `stack`, `run_id`, `phase` (plan/apply), short TTL.
+- On the AWS side: an OIDC Identity Provider + IAM roles whose trust policy filters on these claims. Example: the prod apply role is only assumable if `sub` matches `run:prod:*:apply`.
+- The worker writes the token to a file and exports `AWS_WEB_IDENTITY_TOKEN_FILE` + `AWS_ROLE_ARN`: the AWS providers consume it natively, **zero specific code in the users' Terraform code**.
+- Consequences: plan and apply can assume different roles (plan = ReadOnly + s3 modules, apply = write rights), a PR plan physically cannot modify the infrastructure, and credential rotation disappears from the model.
 
 ---
 
-### Phase 1 — Stacks + Environnements + Variable sets (3 semaines)
+## 3. Implementation phases
 
-**Objectif : le modèle de configuration en couches complet.**
+### Phase 0 — Foundations + Google Auth (1.5 weeks)
 
-- [ ] Modèle `Stack` (template : repo, project_root, tool, version)
-- [ ] Modèle `Environment` (instance : **tier dev/staging/prod**, branche, autodeploy, protected, 4-eyes, managed_state, labels, position)
-- [ ] **Permissions d'apply par tier** (voir SPECS §2.4) : `users.max_apply_tier` + `users.can_destroy` ; helper `can_apply(user, env)` appelé dans la transition `unconfirmed → confirmed` ; `protected` recentré sur ses effets propres (confirmation forcée + 4-eyes), le contrôle d'accès passant au tier ; page admin Users (rôle, tier, destroy) + audit des changements
-- [ ] **Variable sets** (voir SPECS §3.4) :
-  - ensembles nommés de variables (terraform + environment), au niveau space
-  - attachables à des stacks (→ tous leurs envs) ou à des environnements précis
-  - `auto_attach: true` = attaché à toutes les stacks du space (ex. `common-aws`)
-  - priorité d'attachement pour ordonner les sets entre eux
-  - résolution finale : **variable sets (par priorité) < stack < environnement**
-  - UI : badge de provenance sur chaque variable résolue ("héritée de `common-aws`", "écrasée ici")
-- [ ] Variables stack + overrides env (modèle existant, intégré à la résolution)
-- [ ] Intégration Git par token/deploy key (chiffré), endpoint check-repo
-- [ ] Chiffrement AES-256-GCM des valeurs sensibles (write-only)
-- [ ] Front : liste stacks × envs, wizard de création, page stack, **page Variable Sets** (CRUD + liste des attachements + "où est utilisé ce set")
-- [ ] Audit : CRUD stacks/envs/variables/variable sets + attachements
+- [ ] Monorepo: `api/`, `worker/`, `front/`, `deploy/`, `docs/`
+- [ ] `docker-compose.yml` dev: Postgres, Garage (local S3), hot-reload API, Vite front — **full dev mode specified in DEV.md** (dev login 3 personas, `file://` fixture repos, seed + e2e scenario, shortened timings)
+- [ ] FastAPI: healthcheck, settings, modules (`auth/`, `stacks/`, `environments/`, `variable_sets/`, `runs/`, `workers/`, `audit/`, `oidc/`, ...)
+- [ ] **Google OIDC auth** (Authorization Code + PKCE): full flow, upsert on `google_sub`, `hd` restriction to the domain, JWT sessions + rotating refresh (table `refresh_tokens`, reuse detection → family revocation, SPECS §2.5), CSRF on `/auth/refresh`, first-admin bootstrap
+- [ ] Alembic migrations, `User`, `RefreshToken` models, **`Space` (`default` space created at bootstrap, SPECS §3.0)** — all `space_id` FKs depend on it starting in Phase 1
+- [ ] Front: scaffold + **setup of the DESIGN.md design system** (tokens, theme, base components) + **Storybook/Ladle** of the identity components (PhaseRail, StateBadge, ProvenanceBadge...) — the visual contract required by DESIGN.md §8, login page
+- [ ] GitHub Actions CI, root `CLAUDE.md`
 
-**Livrable : un set `common-aws` (région, tags par défaut, token Datadog) attaché à 3 stacks, surchargé ponctuellement par un env.**
+**Deliverable: `docker compose up` → Sign in with Google → app shell with the final design.**
 
 ---
 
-### Phase 2 — Runs + Workers + Logs + Hooks (3,5 semaines) ⭐ phase critique
+### Phase 1 — Stacks + Environments + Variable sets (3 weeks)
 
-#### 2a. State machine des runs
-- [ ] Modèle `Run` (par environnement) + `RunEvent`
-- [ ] États : `queued → preparing → planning → [checking] → unconfirmed → confirmed → applying → finished` (+ `failed`, `discarded`, `canceled`)
-- [ ] Trigger manuel, confirm/discard (gardé par `can_apply` : tier + rôle, voir §2.4 ; 4-eyes auto sur tier prod)
-- [ ] Concurrence : 1 run actif par environnement
+**Goal: the complete layered configuration model.**
 
-#### 2b. API Worker (protocole pull)
-- [ ] Register/heartbeat/claim (`SKIP LOCKED`), events, logs chunkés, artifacts
-- [ ] Détection worker mort → `worker_lost`
+- [ ] `Stack` model (template: repo, project_root, tool, version)
+- [ ] `Environment` model (instance: **tier dev/staging/prod**, branch, autodeploy, protected, 4-eyes, managed_state, labels, position)
+- [ ] **Per-tier apply permissions** (see SPECS §2.4): `users.max_apply_tier` + `users.can_destroy`; `can_apply(user, env)` helper called in the `unconfirmed → confirmed` transition; `protected` refocused on its own effects (forced confirmation + 4-eyes), with access control moving to the tier; admin Users page (role, tier, destroy) + audit of changes
+- [ ] **Variable sets** (see SPECS §3.4):
+  - named sets of variables (terraform + environment), at the space level
+  - attachable to stacks (→ all their envs) or to specific environments
+  - `auto_attach: true` = attached to all stacks in the space (e.g. `common-aws`)
+  - attachment priority to order the sets relative to each other
+  - final resolution: **variable sets (by priority) < stack < environment**
+  - UI: provenance badge on each resolved variable ("inherited from `common-aws`", "overridden here")
+- [ ] Stack variables + env overrides (existing model, integrated into the resolution)
+- [ ] Git integration via token/deploy key (encrypted), check-repo endpoint
+- [ ] AES-256-GCM encryption of sensitive values (write-only)
+- [ ] Front: list of stacks × envs, creation wizard, stack page, **Variable Sets page** (CRUD + list of attachments + "where is this set used")
+- [ ] Audit: CRUD stacks/envs/variables/variable sets + attachments
 
-#### 2c. L'agent worker
-- [ ] Boucle claim → clone → setup outil → **hooks** → init → plan → upload → confirmation → **hooks** → apply → report
-- [ ] Workspace éphémère, runner Docker, masquage des secrets dans les logs
-
-#### 2d. Hooks & checks (custom flows, voir SPECS §8)
-- [ ] Déclaration **YAML** à deux endroits, fusionnés : fichier `.stackd.yml` dans le repo (versionné avec le code) + hooks définis au niveau stack/environnement dans l'UI (gouvernance imposée par la plateforme, non contournable par une PR)
-- [ ] Points d'ancrage : `before_init`, `after_init`, `before_plan`, `after_plan`, `before_apply`, `after_apply`
-- [ ] Chaque hook = une commande exécutée dans le workspace, avec accès en lecture à `plan.json` (pour les checks post-plan : tfsec, checkov, infracost, scripts maison)
-- [ ] Modes d'échec : `fail` (run → failed), `warn` (continue, warning visible, confirmation manuelle forcée même si autodeploy)
-- [ ] Logs des hooks intégrés à la visionneuse (sections dédiées)
-
-#### 2e. Logs des jobs Terraform
-- [ ] Live : WebSocket multiplexé, suivi ligne à ligne par phase
-- [ ] Visionneuse : virtualisée, ANSI, recherche, ancres partageables, follow-tail
-- [ ] Stockage deux étages (DB chaude 7 j → S3 gz 1 an), téléchargement, rétention configurable
-
-#### 2f. Front runs
-- [ ] Page run : timeline des phases (hooks inclus), visionneuse, résumé du plan, barre d'action
-- [ ] Page **/queue** : runs en cours et en attente avec **raison de blocage** calculée par l'API (run actif sur l'env, env verrouillé, aucun worker compatible, réservation d'affinité apply) — cf. DESIGN.md §5.5
-
-**Livrable : un run avec hook `after_plan: infracost breakdown` en mode warn, logs en direct, apply confirmé.**
+**Deliverable: a `common-aws` set (region, default tags, Datadog token) attached to 3 stacks, occasionally overridden by an env.**
 
 ---
 
-### Phase 3 — States S3 via backend HTTP + Audit trail UI (2 semaines)
+### Phase 2 — Runs + Workers + Logs + Hooks (3.5 weeks) ⭐ critical phase
 
-#### 3a. State managé
-- [ ] Protocole HTTP backend complet (GET/POST/LOCK/UNLOCK/423), stockage S3 SSE-KMS
-- [ ] Versioning applicatif lié aux runs, locking Postgres visible UI, force-unlock audité
-- [ ] Tokens scoped par run (RO pour proposed), injection auto `-backend-config`
-- [ ] Mode "bring your own S3 backend"
-- [ ] Front : onglet State par env (versions, lock, download admin)
+#### 2a. Run state machine
+- [ ] `Run` model (per environment) + `RunEvent`
+- [ ] States: `queued → preparing → planning → [checking] → unconfirmed → confirmed → applying → finished` (+ `failed`, `discarded`, `canceled`)
+- [ ] Manual trigger, confirm/discard (guarded by `can_apply`: tier + role, see §2.4; automatic 4-eyes on prod tier)
+- [ ] Concurrency: 1 active run per environment
 
-#### 3b. Audit : "qui a apply quoi"
-- [ ] `audit_events` complété : trigger, confirm (identité Google), discard, apply, force-unlock, rotations, rôles
-- [ ] Page /audit filtrable + export CSV, onglet Activity par env, vue par utilisateur
-- [ ] Immutabilité, rétention 2 ans
+#### 2b. Worker API (pull protocol)
+- [ ] Register/heartbeat/claim (`SKIP LOCKED`), events, chunked logs, artifacts
+- [ ] Dead worker detection → `worker_lost`
 
-**Livrable : "qui a appliqué quoi sur prod la semaine dernière, avec quel plan ?" en 10 secondes.**
+#### 2c. The worker agent
+- [ ] Loop claim → clone → tool setup → **hooks** → init → plan → upload → confirmation → **hooks** → apply → report
+- [ ] Ephemeral workspace, Docker runner, secret masking in the logs
 
----
+#### 2d. Hooks & checks (custom flows, see SPECS §8)
+- [ ] **YAML** declaration in two places, merged: `.stackd.yml` file in the repo (versioned with the code) + hooks defined at the stack/environment level in the UI (governance imposed by the platform, not bypassable by a PR)
+- [ ] Anchor points: `before_init`, `after_init`, `before_plan`, `after_plan`, `before_apply`, `after_apply`
+- [ ] Each hook = a command executed in the workspace, with read access to `plan.json` (for post-plan checks: tfsec, checkov, infracost, in-house scripts)
+- [ ] Failure modes: `fail` (run → failed), `warn` (continue, visible warning, manual confirmation forced even if autodeploy)
+- [ ] Hook logs integrated into the viewer (dedicated sections)
 
-### Phase 4 — Dépendances + outputs + mock outputs (2,5 semaines) ⭐ le différenciateur
+#### 2e. Terraform job logs
+- [ ] Live: multiplexed WebSocket, line-by-line tracking per phase
+- [ ] Viewer: virtualized, ANSI, search, shareable anchors, follow-tail
+- [ ] Two-tier storage (hot DB 7 d → S3 gz 1 year), download, configurable retention
 
-- [ ] Dépendances entre **environnements** + helper "lier les homonymes"
-- [ ] `OutputReference` (mapping output amont → variable avale), anti-cycle
-- [ ] Capture des outputs après apply, hash, jamais les sensibles
-- [ ] **Mock outputs** (inspiré Terragrunt, voir SPECS §9.3) :
-  - chaque `output_reference` peut porter une `mock_value`
-  - utilisée quand l'amont n'a **jamais produit** l'output (bootstrap d'une nouvelle cascade) ou sur les **proposed runs** si l'amont n'est pas appliqué
-  - un run qui a consommé au moins un mock est marqué `used_mocks: true` : badge visible, **apply interdit** (plan-only de validation) sauf opt-in explicite par env
-  - résout le problème de l'œuf et la poule : écrire `app/dev` et planifier sa config avant que `network/dev` n'ait tourné
-- [ ] Scheduler de propagation : cascade topologique, politiques, multi-parents, arrêt sur échec
-- [ ] Run groups + vue graphe ; la cascade ne contourne jamais les protections
+#### 2f. Runs front
+- [ ] Run page: phase timeline (hooks included), viewer, plan summary, action bar
+- [ ] **/queue** page: in-progress and pending runs with **blocking reason** computed by the API (active run on the env, locked env, no compatible worker, apply affinity reservation) — see DESIGN.md §5.5
 
-**Livrable : planifier `app/dev` avec `vpc_id = "vpc-mock00000"` avant le premier apply de `network/dev`, puis cascade réelle.**
-
----
-
-### Phase 5 — Webhooks Git + runs proposés (2 semaines)
-
-- [ ] Webhook GitHub/GitLab : HMAC, mapping branche → environnements, filtrage par `project_root`
-- [ ] **Retard Git (staleness)** : suivi du `head_sha` par env (webhook + polling ls-remote 15 min + refresh manuel), chip `↑N` sur les envs en retard, bandeau "plan obsolète" + re-plan sur les runs unconfirmed dépassés — voir SPECS §9.6 / DESIGN §5.1-5.2
-- [ ] Push → runs tracked ; PR → **proposed runs** plan-only (state RO, secrets non injectés par défaut, mocks autorisés)
-- [ ] (Optionnel) Commentaire de PR : résumé du plan + résultats des checks (hooks warn/fail)
-
-**Livrable : `git push` → plans automatiques + checks visibles dans la PR.**
+**Deliverable: a run with an `after_plan: infracost breakdown` hook in warn mode, live logs, confirmed apply.**
 
 ---
 
-### Phase 6 — Credentials cloud dynamiques OIDC (1,5 semaine)
+### Phase 3 — S3 states via HTTP backend + Audit trail UI (2 weeks)
 
-- [ ] **Issuer OIDC** : `/.well-known/openid-configuration`, JWKS (clés RS256, rotation), signature des tokens workload au claim
-- [ ] Modèle `CloudIntegration` par environnement : provider `aws`, `plan_role_arn`, `apply_role_arn` (voir SPECS §10)
-- [ ] Agent : écriture du token, export `AWS_WEB_IDENTITY_TOKEN_FILE`/`AWS_ROLE_ARN` (ou AssumeRoleWithWebIdentity explicite + export des 3 variables si besoin de compat)
-- [ ] Documentation + module Terraform fourni : créer l'Identity Provider AWS + des rôles d'exemple avec trust policies filtrées sur les claims
-- [ ] UI : config de l'intégration par env, indicateur "credentials dynamiques" vs "variables statiques", test de l'AssumeRole
-- [ ] Audit : `cloud_integration.created/updated`, rôle assumé tracé dans le contexte du run
+#### 3a. Managed state
+- [ ] Complete HTTP backend protocol (GET/POST/LOCK/UNLOCK/423), S3 SSE-KMS storage
+- [ ] Application versioning linked to runs, Postgres locking visible in UI, audited force-unlock
+- [ ] Per-run scoped tokens (RO for proposed), automatic `-backend-config` injection
+- [ ] "Bring your own S3 backend" mode
+- [ ] Front: State tab per env (versions, lock, admin download)
 
-**Livrable : un env prod sans aucun secret AWS stocké nulle part — le plan assume un rôle ReadOnly, l'apply un rôle d'écriture, trust policy à l'appui.**
+#### 3b. Audit: "who applied what"
+- [ ] `audit_events` completed: trigger, confirm (Google identity), discard, apply, force-unlock, rotations, roles
+- [ ] Filterable /audit page + CSV export, Activity tab per env, per-user view
+- [ ] Immutability, 2-year retention
 
----
-
-### Phase 7 — Production-ready (continu)
-
-- [ ] RBAC par space, mapping groupes Google — étend les permissions par tier (§2.4) vers des périmètres par space/équipe, et permet l'env « sensible mais pas prod » que le tier linéaire ne couvre pas
-- [ ] **Environment matrix** (piste, non specifiée) : déclarer `{eu-west-1, us-east-1} × {dev, prod}` sur une stack et générer/synchroniser les environnements correspondants — le multi-région se fait par convention de nommage + variable sets au MVP
-- [ ] Run tasks HTTP (webhooks externes bloquants), policies avancées (OPA) si besoin réel
-- [ ] OIDC vers GCP/Azure (interface `CloudIntegration` déjà générique)
-- [ ] Drift detection schedulée
-- [ ] Export audit, rétention/purge automatisées
-- [ ] Observabilité plateforme (Prometheus, OTel, dashboard Datadog)
-- [ ] Helm chart / module Terraform de déploiement (dogfooding)
-- [ ] **Réécriture Go du worker** (binaire unique, distribution facilitée) — l'agent Python du MVP reste la référence fonctionnelle ; le port Go ne change pas le protocole (§7)
+**Deliverable: "who applied what to prod last week, with which plan?" in 10 seconds.**
 
 ---
 
-## 4. Estimation globale
+### Phase 4 — Dependencies + outputs + mock outputs (2.5 weeks) ⭐ the differentiator
 
-| Phase | Durée (1 dev, temps partiel réaliste) |
+- [ ] Dependencies between **environments** + "link homonyms" helper
+- [ ] `OutputReference` (upstream output → downstream variable mapping), anti-cycle
+- [ ] Output capture after apply, hash, never the sensitive ones
+- [ ] **Mock outputs** (inspired by Terragrunt, see SPECS §9.3):
+  - each `output_reference` can carry a `mock_value`
+  - used when the upstream has **never produced** the output (bootstrapping a new cascade) or on **proposed runs** if the upstream is not applied
+  - a run that has consumed at least one mock is marked `used_mocks: true`: visible badge, **apply forbidden** (validation plan-only) unless explicit opt-in per env
+  - solves the chicken-and-egg problem: write `app/dev` and plan its config before `network/dev` has run
+- [ ] Propagation scheduler: topological cascade, policies, multi-parents, stop on failure
+- [ ] Run groups + graph view; the cascade never bypasses the protections
+
+**Deliverable: plan `app/dev` with `vpc_id = "vpc-mock00000"` before the first apply of `network/dev`, then a real cascade.**
+
+---
+
+### Phase 5 — Git webhooks + proposed runs (2 weeks)
+
+- [ ] GitHub/GitLab webhook: HMAC, branch → environments mapping, filtering by `project_root`
+- [ ] **Git staleness**: tracking of `head_sha` per env (webhook + ls-remote polling 15 min + manual refresh), `↑N` chip on lagging envs, "stale plan" banner + re-plan on stale unconfirmed runs — see SPECS §9.6 / DESIGN §5.1-5.2
+- [ ] Push → tracked runs; PR → **proposed runs** plan-only (RO state, secrets not injected by default, mocks allowed)
+- [ ] (Optional) PR comment: plan summary + check results (warn/fail hooks)
+
+**Deliverable: `git push` → automatic plans + checks visible in the PR.**
+
+---
+
+### Phase 6 — Dynamic cloud credentials OIDC (1.5 weeks)
+
+- [ ] **OIDC issuer**: `/.well-known/openid-configuration`, JWKS (RS256 keys, rotation), signing of workload tokens at claim time
+- [ ] `CloudIntegration` model per environment: provider `aws`, `plan_role_arn`, `apply_role_arn` (see SPECS §10)
+- [ ] Agent: token writing, export of `AWS_WEB_IDENTITY_TOKEN_FILE`/`AWS_ROLE_ARN` (or explicit AssumeRoleWithWebIdentity + export of the 3 variables if compatibility is needed)
+- [ ] Documentation + provided Terraform module: create the AWS Identity Provider + example roles with trust policies filtered on the claims
+- [ ] UI: integration config per env, "dynamic credentials" vs "static variables" indicator, AssumeRole test
+- [ ] Audit: `cloud_integration.created/updated`, assumed role traced in the run context
+
+**Deliverable: a prod env with no AWS secret stored anywhere — the plan assumes a ReadOnly role, the apply a write role, backed by a trust policy.**
+
+---
+
+### Phase 7 — Production-ready (ongoing)
+
+- [ ] RBAC per space, Google group mapping — extends per-tier permissions (§2.4) toward per-space/team scopes, and enables the "sensitive but not prod" env that the linear tier does not cover
+- [ ] **Environment matrix** (track, not specified): declare `{eu-west-1, us-east-1} × {dev, prod}` on a stack and generate/synchronize the corresponding environments — multi-region is done by naming convention + variable sets in the MVP
+- [ ] HTTP run tasks (blocking external webhooks), advanced policies (OPA) if there is a real need
+- [ ] OIDC to GCP/Azure (the `CloudIntegration` interface is already generic)
+- [ ] Scheduled drift detection
+- [ ] Audit export, automated retention/purge
+- [ ] Platform observability (Prometheus, OTel, Datadog dashboard)
+- [ ] Helm chart / Terraform deployment module (dogfooding)
+- [ ] **Go rewrite of the worker** (single binary, easier distribution) — the MVP Python agent remains the functional reference; the Go port does not change the protocol (§7)
+
+---
+
+## 4. Overall estimate
+
+| Phase | Duration (1 dev, realistic part-time) |
 |---|---|
-| 0 — Fondations + Google OIDC | 1,5 semaine |
-| 1 — Stacks + Envs + Variable sets | 3 semaines |
-| 2 — Runs + Workers + Logs + Hooks | 3,5 semaines |
-| 3 — State S3/HTTP + Audit UI | 2 semaines |
-| 4 — Dépendances + outputs + mocks | 2,5 semaines |
-| 5 — Webhooks + proposed runs | 2 semaines |
-| 6 — OIDC workload credentials | 1,5 semaine |
-| **Total MVP démontrable** | **~16 semaines** |
+| 0 — Foundations + Google OIDC | 1.5 weeks |
+| 1 — Stacks + Envs + Variable sets | 3 weeks |
+| 2 — Runs + Workers + Logs + Hooks | 3.5 weeks |
+| 3 — S3/HTTP State + Audit UI | 2 weeks |
+| 4 — Dependencies + outputs + mocks | 2.5 weeks |
+| 5 — Webhooks + proposed runs | 2 weeks |
+| 6 — OIDC workload credentials | 1.5 weeks |
+| **Total demonstrable MVP** | **~16 weeks** |
 
-> Jalon intermédiaire : fin de Phase 2 (≈ 8 semaines) = produit utilisable en solo avec logs live et hooks. Phases 3–6 = les différenciateurs (audit, cascade+mocks, zéro credential).
+> Intermediate milestone: end of Phase 2 (≈ 8 weeks) = product usable solo with live logs and hooks. Phases 3–6 = the differentiators (audit, cascade+mocks, zero credential).
 
 ---
 
-## 5. Risques et décisions ouvertes
+## 5. Risks and open decisions
 
-| Risque / décision | Impact | Mitigation / position actuelle |
+| Risk / decision | Impact | Mitigation / current position |
 |---|---|---|
-| Sécurité de l'exécution (providers/provisioners = code arbitraire) | Élevé | Workers self-hosted, Docker par run, pas de multi-tenant. Les hooks plateforme (non contournables) sont le garde-fou de gouvernance |
-| Hooks du repo (`.stackd.yml`) modifiables par PR | Moyen | Les hooks **plateforme** (stack/env) s'exécutent toujours et ne sont pas contournables ; les checks de sécurité critiques vont là, pas dans le repo |
-| Issuer OIDC : compromission de la clé de signature = accès à tous les rôles | Élevé | Clés en KMS (signature `kms:Sign`, clé jamais en mémoire) ou volume chiffré, rotation avec chevauchement, JWKS avec kid, TTL tokens ≤ durée du run, claims précis dans les trust policies (wildcard `sub` toléré sur le seul segment stack, jamais tier/phase) |
-| Issuer OIDC et state backend dans le même process API | Moyen | Au MVP, toutes les surfaces (API humaine, worker API, state backend, issuer OIDC, webhooks) partagent un process → une faille sur l'une approche la clé de signature. Mitigation forte = KMS (la clé privée ne réside jamais dans le process). Isolation du signataire dans un service dédié = piste Phase 7 si le modèle de menace l'exige |
-| Mock outputs appliqués par erreur | Moyen | `used_mocks` → apply interdit par défaut, badge UI très visible, opt-in par env uniquement |
-| Dépendance à Google pour l'auth | Moyen | Interface `AuthProvider` abstraite, autres IdP en Phase 7 |
-| Explosion des arêtes de dépendance par env | Faible | Helper homonymes + conventions de nommage |
-| Postgres comme queue à grande échelle | Faible (MVP) | Interface `JobQueue` abstraite |
-| Licence Terraform (BUSL) | Moyen | **OpenTofu first**, Terraform en option utilisateur |
+| Execution security (providers/provisioners = arbitrary code) | High | Self-hosted workers, Docker per run, no multi-tenant. Platform hooks (non-bypassable) are the governance safeguard |
+| Repo hooks (`.stackd.yml`) modifiable by PR | Medium | The **platform** hooks (stack/env) always run and are not bypassable; critical security checks go there, not in the repo |
+| OIDC issuer: compromise of the signing key = access to all roles | High | Keys in KMS (`kms:Sign` signing, key never in memory) or encrypted volume, rotation with overlap, JWKS with kid, token TTL ≤ run duration, precise claims in the trust policies (`sub` wildcard tolerated only on the stack segment, never tier/phase) |
+| OIDC issuer and state backend in the same API process | Medium | In the MVP, all surfaces (human API, worker API, state backend, OIDC issuer, webhooks) share one process → a flaw in any one of them approaches the signing key. Strong mitigation = KMS (the private key never resides in the process). Isolating the signer in a dedicated service = Phase 7 track if the threat model requires it |
+| Mock outputs applied by mistake | Medium | `used_mocks` → apply forbidden by default, very visible UI badge, opt-in per env only |
+| Dependency on Google for auth | Medium | Abstract `AuthProvider` interface, other IdPs in Phase 7 |
+| Explosion of per-env dependency edges | Low | Homonyms helper + naming conventions |
+| Postgres as a queue at large scale | Low (MVP) | Abstract `JobQueue` interface |
+| Terraform license (BUSL) | Medium | **OpenTofu first**, Terraform as a user option |
 
 ---
 
-## 6. Socle technique — versions de référence et améliorations débloquées
+## 6. Technical foundation — reference versions and unlocked improvements
 
-Versions cibles (juin 2026). Même choix de techno qu'à l'origine, version courante. Le tableau lie chaque bump à ce qu'il **débloque concrètement** dans Stackd.
+Target versions (June 2026). Same technology choices as originally, current version. The table links each bump to what it **concretely unlocks** in Stackd.
 
-| Composant | Initial | Cible | Ce que ça débloque (et où) |
+| Component | Initial | Target | What it unlocks (and where) |
 |---|---|---|---|
-| **PostgreSQL** | 16 | **18** (GA 25/09/2025) | `uuidv7()` natif → `DEFAULT` côté DB, fin de la génération applicative d'ID (SPECS §1). I/O asynchrone (seq scans / vacuum 2-3×) → scans d'audit et `run_logs` plus rapides (mettre `io_method=worker`/`io_uring`). `RETURNING` ancien+nouveau tuple → `transition()` émet le `run_event` `from→to` en une requête (SPECS §4.2). OAUTHBEARER et colonnes générées virtuelles : non requis au MVP |
-| **Python** | 3.12 | **3.13** (3.14 adoptable) | meilleurs messages d'erreur, typing affiné, REPL. Free-threading (`python3.14t`, officiel en 3.14) **non pertinent** pour une API async I/O-bound — à n'envisager que si le worker devient CPU-bound (peu probable : il délègue à terraform) |
-| **React** | 18 | **19** (GA début 2025) | Actions + `useActionState` → gestion native pending/erreur des formulaires, sert directement l'état `loading` des actions (DESIGN §7) et les wizards (DESIGN §5.7). `ref` comme prop → moins de `forwardRef` dans les 7 composants identitaires. Metadata document → `title` par run partageable. **À éviter : `useOptimistic` sur l'état des runs** — l'invariant est que les events WS *invalident* les queries, ils ne patchent pas le cache (DESIGN §6). **React Compiler** : opt-in à évaluer (auto-mémoïsation utile sur rail/logs très rafraîchis), pas un prérequis |
-| **Vite** | (non figé) | **7.x** | Node 20.19+/22.12+. Tailwind v4 via le plugin **`@tailwindcss/vite`** (pas PostCSS — évite le conflit connu) |
-| **Tailwind** | v4 | **v4.1.x** | déjà le bon major ; intégration `@tailwindcss/vite`. Aucun changement de contrat (tokens CSS, DESIGN §8) |
-| **OpenTofu** (image dev) | (non figé) | **1.12.x** | l'image dev pré-installe une version récente ; `tool_version` reste piloté **par stack** (SPECS §3.1, choix utilisateur). 1.10 a introduit la **distribution OCI** des modules/providers — piste si on héberge des modules privés (sinon hors scope) |
+| **PostgreSQL** | 16 | **18** (GA 2025-09-25) | Native `uuidv7()` → `DEFAULT` on the DB side, end of application-side ID generation (SPECS §1). Asynchronous I/O (seq scans / vacuum 2-3×) → faster audit and `run_logs` scans (set `io_method=worker`/`io_uring`). `RETURNING` old+new tuple → `transition()` emits the `from→to` `run_event` in a single query (SPECS §4.2). OAUTHBEARER and virtual generated columns: not required in the MVP |
+| **Python** | 3.12 | **3.13** (3.14 adoptable) | better error messages, refined typing, REPL. Free-threading (`python3.14t`, official in 3.14) **not relevant** for an async I/O-bound API — to be considered only if the worker becomes CPU-bound (unlikely: it delegates to terraform) |
+| **React** | 18 | **19** (GA early 2025) | Actions + `useActionState` → native pending/error handling of forms, directly serves the `loading` state of actions (DESIGN §7) and the wizards (DESIGN §5.7). `ref` as a prop → less `forwardRef` in the 7 identity components. Document metadata → shareable `title` per run. **To avoid: `useOptimistic` on the runs state** — the invariant is that WS events *invalidate* the queries, they do not patch the cache (DESIGN §6). **React Compiler**: opt-in to evaluate (auto-memoization useful on the heavily-refreshed rail/logs), not a prerequisite |
+| **Vite** | (not fixed) | **7.x** | Node 20.19+/22.12+. Tailwind v4 via the **`@tailwindcss/vite`** plugin (not PostCSS — avoids the known conflict) |
+| **Tailwind** | v4 | **v4.1.x** | already the right major; `@tailwindcss/vite` integration. No contract change (CSS tokens, DESIGN §8) |
+| **OpenTofu** (dev image) | (not fixed) | **1.12.x** | the dev image pre-installs a recent version; `tool_version` remains driven **per stack** (SPECS §3.1, user choice). 1.10 introduced **OCI distribution** of modules/providers — a track if we host private modules (otherwise out of scope) |
 
-**Inchangés (déjà au bon major)** : FastAPI, Pydantic v2, SQLAlchemy 2 async, Alembic, uv, TanStack Query v5, react-flow + dagre, react-virtuoso, anser, pnpm.
+**Unchanged (already at the right major)**: FastAPI, Pydantic v2, SQLAlchemy 2 async, Alembic, uv, TanStack Query v5, react-flow + dagre, react-virtuoso, anser, pnpm.
 
-**Règle de mise à jour** : ces cibles sont des **planchers** au démarrage, pas une politique de suivi continu. Pas de bump de major en cours de phase sans raison (une faille, une feature requise) ; les minors/patches suivent `uv.lock` / `pnpm-lock.yaml` committés. Le seul bump à effet structurel sur le code déjà spécifié est **PG16→18** (ID natifs + `RETURNING`), reflété dans SPECS §1 et §4.2.
+**Update rule**: these targets are **floors** at startup, not a continuous-tracking policy. No major bump mid-phase without reason (a vulnerability, a required feature); minors/patches follow the committed `uv.lock` / `pnpm-lock.yaml`. The only bump with a structural effect on the already-specified code is **PG16→18** (native IDs + `RETURNING`), reflected in SPECS §1 and §4.2.

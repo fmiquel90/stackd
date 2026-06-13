@@ -1,228 +1,228 @@
-# DESIGN.md — Décisions de design du front
+# DESIGN.md — Front-end design decisions
 
-> Compagnon de PLAN.md et SPECS.md. Ce document fige les décisions de design de l'interface : direction visuelle, tokens, navigation, patterns des écrans clés. Objectif : que chaque écran construit (par un humain ou par Claude Code) soit cohérent sans re-débattre des choix.
-
----
-
-## 1. Sujet, audience, intention
-
-- **Sujet** : une salle de contrôle pour l'infrastructure. On y vient pour répondre vite à trois questions : *qu'est-ce qui tourne ?*, *qu'est-ce qui attend une décision humaine ?*, *qui a fait quoi ?*
-- **Audience** : ingénieurs cloud/DevOps/SRE. Utilisateurs experts, quotidiens, au clavier, souvent sur grand écran, parfois en astreinte sur un écran quelconque. Zéro besoin de séduction marketing dans l'app.
-- **Intention émotionnelle** : **confiance opérationnelle**. L'interface d'un outil qui applique des changements destructifs sur de la prod doit être calme, dense, lisible, sans ambiguïté. Pas de gamification, pas de décoration, pas d'animation gratuite.
-- **Anti-références** : le look "dashboard SaaS générique" (cards arrondies flottantes, dégradés, illustrations 3D) et le look "terminal hacker" (noir pur + vert acide). Les deux sont des défauts, pas des choix.
+> Companion to PLAN.md and SPECS.md. This document locks in the design decisions for the interface: visual direction, tokens, navigation, patterns for the key screens. Goal: that every screen built (by a human or by Claude Code) is consistent without re-litigating the choices.
 
 ---
 
-## 2. Direction visuelle
+## 1. Subject, audience, intent
 
-### 2.1 Concept : « blueprint opérationnel »
-
-L'esthétique s'inspire des **dessins techniques et des schémas d'ingénierie** : fonds bleu-ardoise profonds, traits fins, étiquettes en monospace, hiérarchie portée par la typographie et les filets plutôt que par des boîtes ombrées. C'est l'univers naturel du sujet (on dessine de l'infrastructure) et il vieillit bien.
-
-- **Dark-first** : le thème sombre est le thème de référence (logs, astreinte, habitudes du métier). Un thème clair existe dès le départ (même système de tokens, jamais "ajouté plus tard").
-- **Densité élevée assumée** : tables compactes, line-height serré sur les données, marges généreuses uniquement autour des zones de décision. La densité est un service rendu à un expert, pas un défaut.
-- **Plat et délimité par des filets** : séparations par bordures 1px et variations de fond subtiles. Pas d'ombres portées, pas de glassmorphism. Radius faible (4 px) — l'outil est anguleux comme un schéma.
-
-### 2.2 Élément signature : le **rail de phases**
-
-LA chose mémorable de l'interface : un **rail vertical** présent sur chaque page de run, qui matérialise la state machine (queued → preparing → planning → checking → unconfirmed → applying → finished ; `checking` n'apparaît que si des checks existent, `confirmed` est transitoire et s'affiche comme le départ du segment applying). Chaque segment :
-
-- code couleur sémantique (cf. §3.2), segment actif animé d'une pulsation discrète (la seule animation ambiante de l'app) ;
-- cliquable : navigue directement vers la section de logs de cette phase ;
-- porte ses métadonnées en mono (durée, exit code, nb de checks) ;
-- réutilisé en miniature **horizontale** partout où un run est listé (tableau des stacks, audit, run groups) — une signature visuelle qu'on apprend une fois et qu'on relit partout.
-
-Le rail EST la pédagogie du produit : il rend la state machine visible au lieu de l'expliquer.
+- **Subject**: a control room for infrastructure. You come here to quickly answer three questions: *what is running?*, *what is waiting on a human decision?*, *who did what?*
+- **Audience**: cloud/DevOps/SRE engineers. Expert, daily users, on the keyboard, often on a large screen, sometimes on call on whatever screen is at hand. Zero need for marketing seduction in the app.
+- **Emotional intent**: **operational confidence**. The interface of a tool that applies destructive changes to production must be calm, dense, legible, unambiguous. No gamification, no decoration, no gratuitous animation.
+- **Anti-references**: the "generic SaaS dashboard" look (floating rounded cards, gradients, 3D illustrations) and the "hacker terminal" look (pure black + acid green). Both are defaults, not choices.
 
 ---
 
-## 3. Tokens de design
+## 2. Visual direction
 
-### 3.1 Palette (thème sombre, référence)
+### 2.1 Concept: "operational blueprint"
+
+The aesthetic draws on **technical drawings and engineering schematics**: deep slate-blue backgrounds, fine strokes, monospace labels, hierarchy carried by typography and rules rather than by shadowed boxes. It is the natural universe of the subject (you draw infrastructure) and it ages well.
+
+- **Dark-first**: the dark theme is the reference theme (logs, on-call duty, the habits of the trade). A light theme exists from the start (same token system, never "added later").
+- **Deliberately high density**: compact tables, tight line-height on data, generous margins only around decision areas. Density is a service rendered to an expert, not a defect.
+- **Flat and delimited by rules**: separations via 1px borders and subtle background variations. No drop shadows, no glassmorphism. Low radius (4 px) — the tool is angular like a schematic.
+
+### 2.2 Signature element: the **phase rail**
+
+THE memorable thing about the interface: a **vertical rail** present on every run page, which materializes the state machine (queued → preparing → planning → checking → unconfirmed → applying → finished; `checking` only appears if checks exist, `confirmed` is transient and is displayed as the start of the applying segment). Each segment:
+
+- semantic color code (cf. §3.2), the active segment animated with a discreet pulse (the only ambient animation in the app);
+- clickable: navigates directly to the log section for that phase;
+- carries its metadata in mono (duration, exit code, number of checks);
+- reused as a **horizontal** miniature everywhere a run is listed (stacks table, audit, run groups) — a visual signature you learn once and re-read everywhere.
+
+The rail IS the product's pedagogy: it makes the state machine visible instead of explaining it.
+
+---
+
+## 3. Design tokens
+
+### 3.1 Palette (dark theme, reference)
 
 | Token | Hex | Usage |
 |---|---|---|
-| `bg-base` | `#0D1117` → ajusté `#0E141B` | fond app (ardoise bleutée, jamais noir pur) |
-| `bg-surface` | `#151C24` | panneaux, tables |
-| `bg-raised` | `#1C2530` | éléments interactifs, hover, en-têtes collants |
-| `border` | `#2A3441` | filets 1px (le matériau structurel principal) |
-| `text-primary` | `#E6EDF3` | texte courant |
-| `text-secondary` | `#8B98A5` | labels, méta |
-| `accent` | `#D9A23B` (ambre signal) | actions de décision humaine : Confirm, focus, liens actifs |
+| `bg-base` | `#0D1117` → adjusted `#0E141B` | app background (bluish slate, never pure black) |
+| `bg-surface` | `#151C24` | panels, tables |
+| `bg-raised` | `#1C2530` | interactive elements, hover, sticky headers |
+| `border` | `#2A3441` | 1px rules (the main structural material) |
+| `text-primary` | `#E6EDF3` | body text |
+| `text-secondary` | `#8B98A5` | labels, meta |
+| `accent` | `#D9A23B` (signal amber) | human-decision actions: Confirm, focus, active links |
 
-L'**ambre** comme accent unique est un choix : c'est la couleur de la décision (confirmer un apply), elle se détache du fond bleu sans crier, et elle laisse tout le spectre vert/rouge disponible pour la sémantique d'état. Le bouton le plus important de l'app (Confirm sur prod) est ambre — pas vert, car vert dirait "tout va bien" alors qu'il dit "à toi de juger".
+**Amber** as the single accent is a deliberate choice: it is the color of decision (confirming an apply), it stands out from the blue background without shouting, and it leaves the entire green/red spectrum available for state semantics. The most important button in the app (Confirm on prod) is amber — not green, because green would say "all is well" whereas it says "your judgment is needed".
 
-Thème clair : mêmes tokens inversés (`bg-base #F7F9FB`, ardoise pour le texte, ambre assombri `#A87A1F` pour le contraste AA).
+Light theme: same tokens inverted (`bg-base #F7F9FB`, slate for text, darkened amber `#A87A1F` for AA contrast).
 
-### 3.2 Couleurs d'état (le langage sémantique, identique dans les deux thèmes)
+### 3.2 State colors (the semantic language, identical in both themes)
 
-| État | Couleur | Hex (dark) | Où |
+| State | Color | Hex (dark) | Where |
 |---|---|---|---|
-| `queued` / neutre | gris | `#6E7B8B` | badges, rail, nœuds de graphe |
-| `running` (preparing/planning/checking/applying) | bleu | `#4C8DFF` | + pulsation sur l'élément actif |
-| `unconfirmed` (attend un humain) | ambre | `#D9A23B` | la même couleur que l'accent : *attendre un humain EST l'action* |
-| `finished` | vert | `#3FB950` | |
-| `failed` | rouge | `#F85149` | |
-| `discarded` / `canceled` | gris barré | `#6E7B8B` | |
+| `queued` / neutral | gray | `#6E7B8B` | badges, rail, graph nodes |
+| `running` (preparing/planning/checking/applying) | blue | `#4C8DFF` | + pulse on the active element |
+| `unconfirmed` (waiting on a human) | amber | `#D9A23B` | the same color as the accent: *waiting on a human IS the action* |
+| `finished` | green | `#3FB950` | |
+| `failed` | red | `#F85149` | |
+| `discarded` / `canceled` | struck-through gray | `#6E7B8B` | |
 
-`mocked` n'est pas un état mais un **modificateur** qui se superpose à l'état courant (un run mocké est aussi `unconfirmed`, `planning`...) — rendu par un badge violet `#A371F7` distinct, volontairement hors du spectre opérationnel ("ceci n'est pas réel") : badge MOCKED, valeurs mockées.
+`mocked` is not a state but a **modifier** that overlays the current state (a mocked run is also `unconfirmed`, `planning`...) — rendered by a distinct purple badge `#A371F7`, deliberately outside the operational spectrum ("this is not real"): MOCKED badge, mocked values.
 
-Règle absolue : ces couleurs ne servent **que** la sémantique d'état. Jamais de bleu décoratif, jamais de vert sur un bouton non lié à un succès. C'est ce qui rend l'app lisible en un coup d'œil à 3 h du matin.
+Absolute rule: these colors serve **only** state semantics. Never decorative blue, never green on a button unrelated to a success. This is what makes the app legible at a glance at 3 a.m.
 
-### 3.3 Typographie
+### 3.3 Typography
 
-| Rôle | Fonte | Usage |
+| Role | Font | Usage |
 |---|---|---|
-| UI / corps | **IBM Plex Sans** | navigation, formulaires, prose |
-| Données / structure | **JetBrains Mono** | ⭐ tout ce qui est *donnée* : IDs, SHA, noms de ressources, valeurs de variables, durées, labels d'eyebrow, en-têtes de colonnes, logs |
-| Display | IBM Plex Sans SemiBold, tracking -1% | titres de pages, login, états vides |
+| UI / body | **IBM Plex Sans** | navigation, forms, prose |
+| Data / structure | **JetBrains Mono** | ⭐ everything that is *data*: IDs, SHAs, resource names, variable values, durations, eyebrow labels, column headers, logs |
+| Display | IBM Plex Sans SemiBold, tracking -1% | page titles, login, empty states |
 
-**Règle "la donnée est mono"** : c'est le deuxième marqueur identitaire après le rail. Un `commit abc1234`, un `vpc-0f3a...`, un `+3 ~1 −0` sont toujours en mono — l'œil distingue instantanément ce qui vient du système de ce qui vient de l'interface. Échelle : 13 px base UI (densité), 12 px tables et logs, 16/20/24 px titres. Pas de graisse au-delà de SemiBold.
+**"Data is mono" rule**: this is the second identity marker after the rail. A `commit abc1234`, a `vpc-0f3a...`, a `+3 ~1 −0` are always in mono — the eye instantly distinguishes what comes from the system from what comes from the interface. Scale: 13 px base UI (density), 12 px tables and logs, 16/20/24 px titles. No weight beyond SemiBold.
 
-### 3.4 Espacement, radius, élévation
+### 3.4 Spacing, radius, elevation
 
-- Grille 4 px. Padding cellules de table : 6×10 px (dense), formulaires : 12 px.
-- Radius : 4 px partout, 2 px sur les badges. Pas de pilules sauf badges d'état.
-- Élévation : aucune ombre ; la hiérarchie = fond (`base < surface < raised`) + filets.
-- Iconographie : Lucide, 16 px, stroke 1.5, toujours accompagnée d'un libellé (jamais d'icône seule sur une action destructive).
+- 4 px grid. Table cell padding: 6×10 px (dense), forms: 12 px.
+- Radius: 4 px everywhere, 2 px on badges. No pills except state badges.
+- Elevation: no shadows; hierarchy = background (`base < surface < raised`) + rules.
+- Iconography: Lucide, 16 px, stroke 1.5, always accompanied by a label (never an icon alone on a destructive action).
 
 ---
 
-## 4. Architecture de navigation
+## 4. Navigation architecture
 
 ```
 ┌──────────┬─────────────────────────────────────────┐
-│ Stackd   │ topbar : breadcrumb · santé · user       │
+│ Stackd   │ topbar : breadcrumb · health · user      │
 │──────────├─────────────────────────────────────────┤
 │ ▣ Stacks │                                          │
-│ ⎇ Graph  │              contenu                     │
-│ ▤ Audit  │   (largeur max 1440px, tables full-width)│
+│ ⎇ Graph  │              content                     │
+│ ▤ Audit  │   (max width 1440px, tables full-width)  │
 │ ▥ Workers│                                          │
 │ ⚙ Sets   │                                          │
 └──────────┴─────────────────────────────────────────┘
 ```
 
-- **Nav latérale labellisée (≈ 208 px, icône + libellé texte)** : Stacks, Graph, Audit, Workers, Variable Sets, Settings, avec le wordmark `Stackd` en tête. Item actif = texte ambre + fond `raised`. Le produit a peu de sections : pas de méga-menu.
-  - **Décision (révisée) : les libellés sont toujours visibles, pas seulement au survol.** Une nav icônes-seules force le *rappel* (deviner ce qu'une icône signifie) ; une nav labellisée joue sur la *reconnaissance* — plus rapide, moins ambiguë, et meilleure pour l'accessibilité (le libellé n'est pas porté par le seul `aria-label`). Pour un outil expert utilisé quotidiennement, la clarté prime sur les 150 px gagnés. L'ancienne piste « 56 px icônes + tooltip, extensible au hover » est abandonnée : le tooltip cache l'information derrière une interaction.
-- **Breadcrumb structurel** : `space / stack / environment / run #142` — toujours présent, chaque segment cliquable. C'est la colonne vertébrale de l'orientation, vu la hiérarchie à 4 niveaux.
-- **⌘K command palette** dès la v1 : aller à une stack/env, déclencher un run, copier un ID. Pour une audience experte, c'est la navigation principale réelle ; la nav visuelle est le fallback.
-- Routing : URLs propres et partageables (`/stacks/core-network/prod/runs/142?phase=plan&line=87`) — un lien collé dans Slack pendant un incident doit arriver exactement au bon endroit.
+- **Labeled side nav (≈ 208 px, icon + text label)**: Stacks, Graph, Audit, Workers, Variable Sets, Settings, with the `Stackd` wordmark at the top. Active item = amber text + `raised` background. The product has few sections: no mega-menu.
+  - **Decision (revised): labels are always visible, not only on hover.** An icons-only nav forces *recall* (guessing what an icon means); a labeled nav plays on *recognition* — faster, less ambiguous, and better for accessibility (the label is not carried by the `aria-label` alone). For an expert tool used daily, clarity wins over the 150 px gained. The earlier "56 px icons + tooltip, expandable on hover" track is abandoned: the tooltip hides information behind an interaction.
+- **Structural breadcrumb**: `space / stack / environment / run #142` — always present, each segment clickable. It is the backbone of orientation, given the 4-level hierarchy.
+- **⌘K command palette** from v1: go to a stack/env, trigger a run, copy an ID. For an expert audience, this is the real primary navigation; the visual nav is the fallback.
+- Routing: clean, shareable URLs (`/stacks/core-network/prod/runs/142?phase=plan&line=87`) — a link pasted in Slack during an incident must land exactly at the right place.
 
 ---
 
-## 5. Écrans clés — décisions
+## 5. Key screens — decisions
 
-### 5.1 `/stacks` — la vue d'ensemble (home)
+### 5.1 `/stacks` — the overview (home)
 
-- **Table dense**, pas de cards. Une ligne = une stack ; colonnes = environnements (dev, staging, prod, dans l'ordre `position`).
-- Chaque cellule env = mini-rail horizontal du dernier run + horodatage relatif + **chip de retard Git `↑3`** (mono, gris-bleu neutre — c'est une information, pas une décision : l'ambre reste réservé) quand la branche a avancé depuis le dernier apply ; version atténuée si les commits ne touchent pas le `project_root`. Tooltip = liste des commits, clic = trigger d'un run. Cellule cliquable → l'env.
-- Ligne d'en-tête collante, tri, filtre par texte et par état ("montre-moi tout ce qui est failed ou unconfirmed").
-- **Zone "Attention requise" épinglée en haut** : tous les runs `unconfirmed` et `failed` du space, tous environnements confondus. C'est la réponse à "qu'est-ce qui attend une décision ?" sans chercher.
+- **Dense table**, no cards. One row = one stack; columns = environments (dev, staging, prod, in `position` order).
+- Each env cell = horizontal mini-rail of the last run + relative timestamp + **Git lag chip `↑3`** (mono, neutral blue-gray — this is information, not a decision: amber stays reserved) when the branch has advanced since the last apply; an attenuated version if the commits do not touch the `project_root`. Tooltip = list of commits, click = trigger a run. Clickable cell → the env.
+- Sticky header row, sorting, filter by text and by state ("show me everything that is failed or unconfirmed").
+- **"Attention required" zone pinned at the top**: all `unconfirmed` and `failed` runs of the space, across all environments. This is the answer to "what is waiting on a decision?" without searching.
 
-### 5.2 `/runs/{id}` — l'écran le plus important
+### 5.2 `/runs/{id}` — the most important screen
 
 ```
 ┌──────────────────────────────────────────────────────────┐
-│ core-network / prod / run #142        [Confirm] [Discard]│ ← barre sticky
+│ core-network / prod / run #142        [Confirm] [Discard]│ ← sticky bar
 │ abc1234 "add NAT gateway" · J.Dupont · via cascade       │
 ├────────┬─────────────────────────────────────────────────┤
 │ RAIL   │  [Plan ±]  [Checks 2✓ 1⚠]  [Logs]  [Inputs]     │
-│ de     │ ┌─────────────────────────────────────────────┐ │
-│ phases │ │            contenu de l'onglet              │ │
+│ of     │ ┌─────────────────────────────────────────────┐ │
+│ phases │ │                 tab content                 │ │
 │ (§2.2) │ │                                             │ │
 └────────┴─┴─────────────────────────────────────────────┴─┘
 ```
 
-- **Barre d'action sticky** en haut, pas en bas : la décision est toujours visible, avec le contexte (qui a déclenché, tier de l'env). Bouton Confirm **ambre**, désactivé avec la raison en clair ("tier prod requis — votre plafond est staging", "rôle approver requis", "permission destroy requise", "run mocké — apply désactivé", "vous avez déclenché ce run prod"). Le triggerer et le confirmeur sont affichés avec leur tier.
-- **Friction proportionnelle au risque.** Un apply non-prod habilité = un clic. Mais confirmer un apply sur **`tier=prod`** ou **tout run `destroy`** exige une **confirmation explicite** dans une popover ancrée au bouton : saisie du **nom de l'environnement** (pattern GitHub, cohérent avec les suppressions §5.7) + récapitulatif `+a ~c −d` du plan, les destructions en évidence. Cohérence avec le principe : supprimer une stack demande déjà de taper son nom — appliquer une destruction sur prod ne peut pas être moins exigeant qu'éditer de la config. La popover ne contourne aucune règle d'accès (`can_apply` reste évalué côté API) : c'est un garde-fou anti-erreur-de-clic, pas un contrôle de permission.
-- **Bandeau d'obsolescence** : si la branche trackée avance pendant qu'un plan attend confirmation, bandeau au-dessus du contenu — "Plan calculé sur `abc1234` · la branche a avancé de 2 commits" — avec action *Re-plan*. Confirmer reste possible (appliquer un commit précis est légitime), mais jamais sans le savoir.
-- En-tête : triggerer ET confirmeur affichés (avatars Google) — l'audit est dans l'interface, pas caché dans une page.
-- Onglet **Plan** : résumé `+3 ~1 −0` en mono géant, puis liste des ressources groupées par action (create/update/delete), chaque ressource dépliable en diff attribut par attribut (ajouté vert / modifié ambre / supprimé rouge, valeurs en mono). **Les destructions sont toujours dépliées par défaut** — on ne cache jamais un delete.
-- Onglet **Checks** : un bloc par hook after_plan (nom, statut, durée, sortie), warn = ambre avec la mention "confirmation manuelle requise".
-- Onglet **Inputs** : variables résolues avec leur **provenance en badge mono** (`set:common-aws`, `stack`, `env`, `dependency`, `MOCK` en violet). Valeurs sensibles : `•••` sans bouton "révéler".
+- **Sticky action bar** at the top, not at the bottom: the decision is always visible, with the context (who triggered, env tier). Confirm button **amber**, disabled with the reason spelled out ("prod tier required — your cap is staging", "approver role required", "destroy permission required", "mocked run — apply disabled", "you triggered this prod run"). The triggerer and the confirmer are shown with their tier.
+- **Friction proportional to risk.** An authorized non-prod apply = one click. But confirming an apply on **`tier=prod`** or **any `destroy` run** requires an **explicit confirmation** in a popover anchored to the button: typing the **name of the environment** (GitHub pattern, consistent with deletions §5.7) + a `+a ~c −d` summary of the plan, destructions highlighted. Consistent with the principle: deleting a stack already requires typing its name — applying a destruction on prod cannot be less demanding than editing config. The popover bypasses no access rule (`can_apply` is still evaluated on the API side): it is a misclick safeguard, not a permission check.
+- **Staleness banner**: if the tracked branch advances while a plan awaits confirmation, a banner above the content — "Plan computed on `abc1234` · the branch has advanced by 2 commits" — with a *Re-plan* action. Confirming remains possible (applying a precise commit is legitimate), but never unknowingly.
+- Header: triggerer AND confirmer shown (Google avatars) — audit is in the interface, not hidden in a page.
+- **Plan** tab: `+3 ~1 −0` summary in giant mono, then a list of resources grouped by action (create/update/delete), each resource expandable into an attribute-by-attribute diff (added green / modified amber / deleted red, values in mono). **Destructions are always expanded by default** — a delete is never hidden.
+- **Checks** tab: one block per after_plan hook (name, status, duration, output), warn = amber with the note "manual confirmation required".
+- **Inputs** tab: resolved variables with their **provenance as a mono badge** (`set:common-aws`, `stack`, `env`, `dependency`, `MOCK` in purple). Sensitive values: `•••` with no "reveal" button.
 
-### 5.3 Visionneuse de logs (dans la page run)
+### 5.3 Log viewer (in the run page)
 
-- Plein écran disponible (`f`), fond `bg-base`, JetBrains Mono 12 px, line-height 1.5.
-- Sections repliables par phase **et par hook** (chevron + durée + exit code dans l'en-tête de section).
-- Numéros de ligne en gouttière, clic = ancre partageable, surlignage de la ligne ciblée à l'arrivée.
-- Follow-tail actif par défaut sur un run en cours ; le moindre scroll vers le haut le suspend (bouton flottant "↓ Reprendre le suivi" avec compteur de nouvelles lignes).
-- Rendu ANSI complet (palette mappée sur nos tokens, pas les couleurs terminal brutes). Recherche `⌘F` interne avec compteur d'occurrences. Toggle timestamps. Virtualisation obligatoire (react-virtuoso).
+- Full screen available (`f`), `bg-base` background, JetBrains Mono 12 px, line-height 1.5.
+- Sections collapsible by phase **and by hook** (chevron + duration + exit code in the section header).
+- Line numbers in the gutter, click = shareable anchor, highlight of the targeted line on arrival.
+- Follow-tail active by default on a run in progress; the slightest scroll up suspends it (floating "↓ Resume following" button with a counter of new lines).
+- Full ANSI rendering (palette mapped onto our tokens, not raw terminal colors). Internal `⌘F` search with an occurrence counter. Timestamps toggle. Mandatory virtualization (react-virtuoso).
 
-### 5.4 `/graph` et run groups
+### 5.4 `/graph` and run groups
 
-- react-flow, layout dagre gauche→droite, **filtre par nom d'environnement en tête** (voir le graphe "prod" sans le bruit de dev).
-- Nœud = carte minimale : stack/env + mini-rail du dernier run. Arête étiquetée du nombre d'output references ; arête pointillée violette si des mocks sont en jeu.
-- Vue run group : même graphe, les nœuds se colorent en temps réel pendant la cascade. Pas de confettis à la fin — un état `finished` vert suffit.
-- **Alternative accessible obligatoire** : un graphe react-flow n'est pas navigable au lecteur d'écran ni au clavier seul. Toggle **« vue liste »** systématique = table d'adjacence (`env amont → env aval · N references · MOCK?`) triable, focusable, avec le même filtre. Le graphe est l'affichage par défaut ; la liste est l'équivalent fonctionnel complet, pas un pis-aller. Les nœuds du graphe restent atteignables au `Tab` (ordre topologique) avec annonce `aria-label` de l'état du dernier run.
+- react-flow, dagre layout left→right, **filter by environment name at the top** (see the "prod" graph without the dev noise).
+- Node = minimal card: stack/env + mini-rail of the last run. Edge labeled with the number of output references; dashed purple edge if mocks are involved.
+- Run group view: same graph, the nodes color in real time during the cascade. No confetti at the end — a green `finished` state is enough.
+- **Mandatory accessible alternative**: a react-flow graph is not navigable by screen reader nor by keyboard alone. A systematic **"list view"** toggle = an adjacency table (`upstream env → downstream env · N references · MOCK?`) that is sortable, focusable, with the same filter. The graph is the default display; the list is the complete functional equivalent, not a stopgap. The graph nodes remain reachable via `Tab` (topological order) with an `aria-label` announcement of the last run's state.
 
-### 5.5 `/queue` — la file d'exécution
+### 5.5 `/queue` — the execution queue
 
-La réponse visuelle à "pourquoi mon run ne part pas ?".
+The visual answer to "why isn't my run starting?".
 
-- Deux groupes : **En cours** (runs claimés, avec worker, phase active et durée) et **En attente** (`queued` + `confirmed` non claimés), triés par ancienneté.
-- Chaque run en attente affiche sa **raison de blocage calculée par l'API**, en clair et en mono : `run #141 actif sur cet environnement`, `environnement verrouillé`, `aucun worker compatible avec {pool: prod}`, `réservation d'affinité apply (worker-aws-1, 38s restantes)`.
-- Filtre par stack/env/pool ; lien direct vers le run bloquant et vers `/workers`.
-- Un compteur de file dans la nav latérale (badge sur l'icône) quand des runs attendent depuis > 2 min — signal discret, pas de toast.
+- Two groups: **In progress** (claimed runs, with worker, active phase and duration) and **Waiting** (`queued` + `confirmed` not claimed), sorted by age.
+- Each waiting run displays its **blocking reason computed by the API**, spelled out and in mono: `run #141 active on this environment`, `environment locked`, `no worker compatible with {pool: prod}`, `apply affinity reservation (worker-aws-1, 38s remaining)`.
+- Filter by stack/env/pool; direct link to the blocking run and to `/workers`.
+- A queue counter in the side nav (badge on the icon) when runs have been waiting for > 2 min — a discreet signal, no toast.
 
 ### 5.6 `/audit`
 
-- Table chronologique dense : horodatage mono, avatar + email, action en badge, cible en breadcrumb cliquable, contexte résumé.
-- Les actions ⭐ (`run.confirmed`, `run.applied`) ont une rangée légèrement contrastée.
-- Filtres combinables en barre supérieure (acteur, action, stack, env, période) reflétés dans l'URL → une investigation se partage par lien. Export CSV discret à droite.
+- Dense chronological table: mono timestamp, avatar + email, action as a badge, target as a clickable breadcrumb, summarized context.
+- The ⭐ actions (`run.confirmed`, `run.applied`) have a slightly contrasted row.
+- Combinable filters in a top bar (actor, action, stack, env, period) reflected in the URL → an investigation is shared by link. Discreet CSV export on the right.
 
-### 5.7 Formulaires (wizard stack, variables, hooks)
+### 5.7 Forms (stack wizard, variables, hooks)
 
-- Une colonne, max 560 px, labels au-dessus, aide en `text-secondary` sous le champ.
-- Tout nom technique saisi (stack, env, variable) s'affiche en mono dès la frappe.
-- Les actions destructives exigent la saisie du nom de la cible (pattern GitHub) — pas de simple modal "Êtes-vous sûr ?".
-- Wizard : étapes numérotées car c'est une vraie séquence ; chaque étape validable indépendamment (le check-repo se lance à l'étape 1, pas à la fin).
-
----
-
-## 6. Patterns temps réel
-
-- Un seul WebSocket multiplexé ; TanStack Query reste la source de vérité (les events WS **invalident** les queries, ils ne patchent pas le cache à la main — sauf les logs, streamés directement).
-- Changement d'état d'un run visible partout où il apparaît (rail, badges) sans refresh, via abonnement aux topics des entités affichées.
-- Indicateur de connexion discret dans la topbar ; en cas de coupure : bandeau fin "Reconnexion…" + rattrapage `after_seq`, jamais de modal bloquante.
-- Pas de toast pour les événements de fond (un run qui se termine se voit sur son rail). Les toasts sont réservés aux retours d'actions de l'utilisateur courant.
+- One column, max 560 px, labels above, help in `text-secondary` under the field.
+- Every technical name typed (stack, env, variable) is displayed in mono from the first keystroke.
+- Destructive actions require typing the name of the target (GitHub pattern) — not a plain "Are you sure?" modal.
+- Wizard: numbered steps because it is a real sequence; each step independently validatable (the repo check runs at step 1, not at the end).
 
 ---
 
-## 7. Accessibilité, états, qualité
+## 6. Real-time patterns
 
-- Contraste AA minimum sur les deux thèmes (vérifié sur les couleurs d'état sur leurs fonds réels).
-- **La couleur n'est jamais le seul porteur d'état** : chaque badge a son libellé texte, le rail a des icônes par segment (✓ ✕ ⏸ ▶). Daltonisme = cas nominal dans ce métier.
-- Navigation clavier complète : `j/k` dans les tables, `f` plein écran logs, `⌘K` palette, focus visible ambre 2 px. `prefers-reduced-motion` : la pulsation du rail devient un changement d'opacité statique.
-- **Skip-link** « Aller au contenu » en premier focusable (nav latérale + breadcrumb = beaucoup de tab stops avant le contenu sur une app dense).
-- **Régions live polies, jamais de vol de focus** : les changements d'état temps réel (rail, badges, bandeau « Reconnexion… ») s'annoncent en `aria-live="polite"` et ne déplacent jamais le focus de l'utilisateur (il peut être en train de lire des logs ou de remplir un formulaire). Les toasts d'action utilisent `aria-live` et ne capturent pas le focus.
-- **Chiffres tabulaires** : `font-variant-numeric: tabular-nums` sur toute donnée alignée en colonne (durées, `+a ~c −d`, compteurs, horodatages) — JetBrains Mono est déjà chasse fixe, mais on force les tabular-nums pour que les colonnes ne dansent pas au streaming.
-- **Boutons d'action async** : `Confirm`/`Discard`/`Trigger`/`Re-plan` passent en état `loading` (spinner + disabled) pendant l'appel, pour éviter la double soumission — distinct du `disabled` « permission manquante » qui, lui, porte la raison.
-- **Parcours mobile d'astreinte** : sur les deux écrans soignés mobile (lire un run/logs, confirmer/discarder), les cibles tactiles respectent **44 px** min ; ailleurs la densité desktop prime.
-- États vides = invitations à agir, dans le vocabulaire du produit : "Aucune stack. Connectez un repo pour commencer." + bouton. Pas d'illustrations décoratives.
-- Erreurs : factuelles, en français technique clair, avec l'action de sortie ("Le webhook a été rejeté : signature HMAC invalide. Vérifiez le secret dans Settings → Webhooks."). Jamais d'excuses, jamais de vague.
-- Skeletons fidèles à la forme finale pour les tables ; spinners réservés aux actions ponctuelles.
-- Responsive : optimisé desktop (métier), mais consultation mobile soignée pour deux parcours précis — **lire un run/ses logs et confirmer/discarder** (astreinte). Le reste peut dégrader.
+- A single multiplexed WebSocket; TanStack Query remains the source of truth (WS events **invalidate** queries, they do not patch the cache by hand — except logs, which are streamed directly).
+- A run's state change is visible everywhere it appears (rail, badges) without a refresh, via subscription to the topics of the displayed entities.
+- Discreet connection indicator in the topbar; on a disconnect: a thin "Reconnecting…" banner + `after_seq` catch-up, never a blocking modal.
+- No toast for background events (a run that finishes is seen on its rail). Toasts are reserved for feedback on the current user's actions.
 
 ---
 
-## 8. Implémentation
+## 7. Accessibility, states, quality
 
-- **Tailwind v4 + tokens CSS custom properties** (`--color-bg-base`, `--color-state-running`, ...) : les deux thèmes = deux jeux de variables, les composants n'utilisent que les tokens. Aucune couleur en dur dans un composant.
-- **shadcn/ui comme base mécanique** (Dialog, Popover, Command, DropdownMenu) **re-skinné intégralement** sur nos tokens : on garde l'accessibilité Radix, on remplace l'esthétique par défaut (qui est précisément le look générique qu'on refuse).
-- Composants maison (le cœur identitaire) : `<PhaseRail>` (+ variante `mini`), `<StateBadge>`, `<LogViewer>`, `<PlanDiff>`, `<ProvenanceBadge>`, `<RunActionBar>`, `<EnvCell>`.
-- Storybook (ou Ladle) dès la Phase 0 pour ces composants : c'est le contrat visuel que Claude Code doit respecter en construisant les pages.
-- Fontes self-hosted (IBM Plex Sans, JetBrains Mono) — l'app peut tourner en réseau privé sans CDN externe. `font-display: swap`, preload des seules graisses critiques (Sans 400/600, Mono 400), métriques de fallback (`size-adjust`/`ascent-override`) pour éviter le CLS au chargement.
-- **Préférence de thème sans browser storage** (invariant produit : ni localStorage ni sessionStorage). Conséquence : le thème suit `prefers-color-scheme` par défaut ; un override manuel vit **en mémoire** (perdu au reload) et, si une persistance par utilisateur est souhaitée, elle est **stockée côté serveur** sur le profil (`GET /me`), jamais dans le navigateur. À acter au moment du build de la topbar (toggle thème).
-- Graphes : react-flow + dagre. Logs : react-virtuoso + anser (ANSI). Dates : `Intl` natif, format relatif < 24 h puis absolu ISO local.
+- Minimum AA contrast on both themes (verified on the state colors over their actual backgrounds).
+- **Color is never the sole carrier of state**: each badge has its text label, the rail has icons per segment (✓ ✕ ⏸ ▶). Color blindness = the nominal case in this trade.
+- Full keyboard navigation: `j/k` in tables, `f` full-screen logs, `⌘K` palette, visible amber 2 px focus. `prefers-reduced-motion`: the rail's pulse becomes a static opacity change.
+- **Skip-link** "Go to content" as the first focusable element (side nav + breadcrumb = many tab stops before the content on a dense app).
+- **Polite live regions, never focus stealing**: real-time state changes (rail, badges, "Reconnecting…" banner) are announced via `aria-live="polite"` and never move the user's focus (they may be reading logs or filling out a form). Action toasts use `aria-live` and do not capture focus.
+- **Tabular figures**: `font-variant-numeric: tabular-nums` on any data aligned in a column (durations, `+a ~c −d`, counters, timestamps) — JetBrains Mono is already monospaced, but we force tabular-nums so the columns do not dance during streaming.
+- **Async action buttons**: `Confirm`/`Discard`/`Trigger`/`Re-plan` go into a `loading` state (spinner + disabled) during the call, to avoid double submission — distinct from the "missing permission" `disabled` which, for its part, carries the reason.
+- **On-call mobile journey**: on the two mobile-polished screens (read a run/logs, confirm/discard), touch targets respect a **44 px** minimum; elsewhere desktop density prevails.
+- Empty states = invitations to act, in the product's vocabulary: "No stack. Connect a repo to get started." + button. No decorative illustrations.
+- Errors: factual, in clear technical English, with the way out ("The webhook was rejected: invalid HMAC signature. Check the secret in Settings → Webhooks."). Never apologies, never vague.
+- Skeletons faithful to the final shape for tables; spinners reserved for one-off actions.
+- Responsive: optimized for desktop (the trade), but polished mobile consultation for two precise journeys — **reading a run/its logs and confirming/discarding** (on-call). The rest may degrade.
 
 ---
 
-## 9. Ce qu'on s'interdit (rappel)
+## 8. Implementation
 
-- Ombres portées, dégradés, glassmorphism, illustrations décoratives, emojis dans l'UI.
-- Couleurs d'état utilisées pour autre chose que l'état ; accent ambre utilisé pour autre chose que la décision/le focus.
-- Icône seule sur une action destructive ; confirmation sans saisie du nom pour les suppressions **et pour tout apply `tier=prod` ou `destroy`** (§5.2).
-- Toasts pour les événements de fond ; animations non sollicitées hors pulsation du rail.
-- Masquer ou replier une destruction de ressource dans un plan.
-- Tout texte système (ID, SHA, valeur, durée) dans la fonte UI : la donnée est mono, toujours.
+- **Tailwind v4 + CSS custom-property tokens** (`--color-bg-base`, `--color-state-running`, ...): the two themes = two sets of variables, components use only the tokens. No hardcoded color in a component.
+- **shadcn/ui as the mechanical base** (Dialog, Popover, Command, DropdownMenu) **fully re-skinned** onto our tokens: we keep Radix's accessibility, we replace the default aesthetic (which is precisely the generic look we refuse).
+- In-house components (the identity core): `<PhaseRail>` (+ `mini` variant), `<StateBadge>`, `<LogViewer>`, `<PlanDiff>`, `<ProvenanceBadge>`, `<RunActionBar>`, `<EnvCell>`.
+- Storybook (or Ladle) from Phase 0 for these components: it is the visual contract that Claude Code must respect when building the pages.
+- Self-hosted fonts (IBM Plex Sans, JetBrains Mono) — the app can run on a private network without an external CDN. `font-display: swap`, preload of only the critical weights (Sans 400/600, Mono 400), fallback metrics (`size-adjust`/`ascent-override`) to avoid CLS on load.
+- **Theme preference without browser storage** (product invariant: neither localStorage nor sessionStorage). Consequence: the theme follows `prefers-color-scheme` by default; a manual override lives **in memory** (lost on reload) and, if per-user persistence is desired, it is **stored server-side** on the profile (`GET /me`), never in the browser. To be settled when building the topbar (theme toggle).
+- Graphs: react-flow + dagre. Logs: react-virtuoso + anser (ANSI). Dates: native `Intl`, relative format < 24 h then absolute local ISO.
+
+---
+
+## 9. What we forbid ourselves (reminder)
+
+- Drop shadows, gradients, glassmorphism, decorative illustrations, emojis in the UI.
+- State colors used for anything other than state; amber accent used for anything other than decision/focus.
+- An icon alone on a destructive action; confirmation without typing the name for deletions **and for any `tier=prod` or `destroy` apply** (§5.2).
+- Toasts for background events; unsolicited animations beyond the rail's pulse.
+- Hiding or collapsing a resource destruction in a plan.
+- Any system text (ID, SHA, value, duration) in the UI font: data is mono, always.
