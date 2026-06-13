@@ -17,8 +17,19 @@ class Workspace:
         self.path.mkdir(parents=True, exist_ok=True)
 
     def git_clone(self, repo_url: str, commit_sha: str | None, project_root: str) -> Path:
+        # safe.directory=*: a source repo may be owned by another uid (e.g. CI bind mounts), which
+        # git 2.35+ refuses with "dubious ownership"; trust it for the clone.
         subprocess.run(
-            ["git", "clone", "--depth", "1", repo_url, str(self.path / "repo")],
+            [
+                "git",
+                "-c",
+                "safe.directory=*",
+                "clone",
+                "--depth",
+                "1",
+                repo_url,
+                str(self.path / "repo"),
+            ],
             check=True,
             capture_output=True,
             env={**os.environ, "GIT_TERMINAL_PROMPT": "0"},

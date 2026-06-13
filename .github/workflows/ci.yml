@@ -46,11 +46,10 @@ jobs:
       - name: Tests (pytest on real Postgres 18 via testcontainers)
         run: uv run pytest -q
 
-  # mypy is strict (CLAUDE §5) but the codebase is not yet clean — advisory until the existing
-  # errors are cleared, then drop `continue-on-error` to make it a required gate.
+  # mypy is strict (CLAUDE §5) but the codebase is not yet clean — the mypy step is allowed to
+  # fail (continue-on-error) so the job stays green; drop that once the existing errors are cleared.
   api-typecheck:
     runs-on: ubuntu-latest
-    continue-on-error: true
     defaults:
       run:
         working-directory: api
@@ -62,6 +61,7 @@ jobs:
           cache-dependency-glob: api/uv.lock
       - run: uv sync --frozen
       - run: uv run mypy app
+        continue-on-error: true
 
   worker:
     runs-on: ubuntu-latest
