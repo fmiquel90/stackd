@@ -1,0 +1,95 @@
+version: '3'
+dotenv: ['.env']
+
+vars:
+  COMPOSE: docker compose -f deploy/docker-compose.dev.yml
+
+tasks:
+  default:
+    cmds: [task --list]
+    silent: true
+
+  env:
+    desc: Generate .env and dev keys on first launch
+    cmds: [bash scripts/bootstrap-env.sh]
+    status: [test -f .env]
+
+  dev:
+    desc: Full local stack (compose + migrations + seed)
+    deps: [env]
+    cmds:
+      - "{{.COMPOSE}} up -d --wait"
+      - task: migrate
+      - task: seed-fixtures
+      - task: seed
+
+  dev-git:
+    desc: Dev stack + Gitea (real webhooks)
+    deps: [env]
+    cmds:
+      - "{{.COMPOSE}} --profile git up -d --wait"
+      - task: migrate
+      - task: seed
+
+  dev-aws:
+    desc: Dev stack + LocalStack
+    deps: [env]
+    cmds:
+      - "{{.COMPOSE}} --profile aws up -d --wait"
+      - task: migrate
+      - task: seed
+
+  migrate:
+    desc: Apply Alembic migrations
+    cmds: ["{{.COMPOSE}} exec -T api uv run alembic upgrade head"]
+
+  makemigration:
+    desc: Autogenerate an Alembic migration (pass NAME=...)
+    cmds: ['{{.COMPOSE}} exec -T api uv run alembic revision --autogenerate -m "{{.NAME}}"']
+
+  seed-fixtures:
+    desc: Create the demo fixture git repos in .dev/repos (host git, idempotent)
+    cmds: [bash scripts/seed-fixtures.sh]
+
+  seed:
+    desc: Demo data (idempotent — spaces, stacks, envs, deps, worker pool token)
+    cmds: ["{{.COMPOSE}} exec -T api uv run python -m app.seed"]
+
+  reset:
+    desc: Tear everything down and start fresh
+    cmds:
+      - "{{.COMPOSE}} down -v"
+      - task: dev
+
+  test:
+    desc: pytest + vitest
+    cmds:
+      - "{{.COMPOSE}} exec -T api uv run pytest"
+      - cmd: "cd front && pnpm test --run"
+        ignore_error: true
+
+  e2e:
+    desc: Full non-regression scenario against the live stack + real worker (DEV §7)
+    deps: [dev]
+    cmds: ["{{.COMPOSE}} exec -T api uv run pytest e2e -v"]
+
+  logs:
+    desc: Aggregated colored logs (api, worker)
+    cmds: ["{{.COMPOSE}} logs -f api worker"]
+
+  psql:
+    desc: Postgres shell
+    cmds: ["{{.COMPOSE}} exec postgres psql -U stackd stackd"]
+
+  lint:
+    desc: ruff + mypy
+    cmds:
+      - "{{.COMPOSE}} exec -T api uv run ruff check ."
+      - "{{.COMPOSE}} exec -T api uv run ruff format --check ."
+
+  push-change:
+    desc: Simulate a merge in demo-network (staleness test)
+    dir: .dev/repos/demo-network
+    cmds:
+      - date >> CHANGELOG.txt
+      - git add -A && git commit -m "feat: simulated merge"

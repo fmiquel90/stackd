@@ -1,0 +1,56 @@
+[project]
+name = "stackd-api"
+version = "0.1.0"
+description = "Stackd — Terraform orchestration platform API"
+requires-python = ">=3.13"
+dependencies = [
+    "fastapi>=0.115",
+    "uvicorn[standard]>=0.34",
+    "pydantic>=2.10",
+    "pydantic-settings>=2.7",
+    "sqlalchemy[asyncio]>=2.0.36",
+    "asyncpg>=0.30",
+    "alembic>=1.14",
+    "pyjwt>=2.10",
+    "cryptography>=44.0",
+    "httpx>=0.28",
+    "boto3>=1.35",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=8.3",
+    "pytest-asyncio>=0.25",
+    "testcontainers[postgres]>=4.9",
+    "moto[s3,sts]>=5.0",
+    "ruff>=0.9",
+    "mypy>=1.14",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py313"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "ASYNC", "RUF"]
+
+[tool.ruff.lint.per-file-ignores]
+# Tests favor inline JSON fixtures over wrapping for readability.
+"tests/**" = ["E501"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "session"
+asyncio_default_test_loop_scope = "session"
+# Unit/integration tests only. The e2e scenario lives in api/e2e (hits the live compose stack +
+# a real worker over HTTP, DEV §7) and is run separately via `task e2e`.
+testpaths = ["tests"]
+pythonpath = ["."]  # make `app` importable regardless of which dir pytest is pointed at (tests/ or e2e/)
+
+[tool.mypy]
+python_version = "3.13"
+strict = true
+plugins = ["pydantic.mypy"]
+
+[tool.setuptools.packages.find]
+include = ["app*"]

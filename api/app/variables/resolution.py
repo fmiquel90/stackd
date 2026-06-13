@@ -1,0 +1,140 @@
+from __future__ import annotations
+
+import uuid
+from dataclasses import dataclass
+
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.enums import AttachmentTarget, VariableKind
+from app.models.environment import Environment
+from app.models.stack import Stack
+from app.models.variable import Variable
+from app.models.variable_set import VariableSet, VariableSetAttachment
+from app.variables.values import reveal_value
+
+
+@dataclass
+class ResolvedVariable:
+    name: str
+    kind: VariableKind
+    sensitive: bool
+    hcl: bool
+    provenance: str  # "set:<name>" | "stack" | "env"; dependency/mock are merged in at claim (§9)
+    value: str | None  # masked (None) unless reveal_sensitive and sensitive
+
+    @property
+    def injected_name(self) -> str:
+        return f"TF_VAR_{self.name}" if self.kind == VariableKind.terraform else self.name
+
+
+def _key(var: Variable) -> tuple[VariableKind, str]:
+    return (var.kind, var.name)
+
+
+async def _sets_for_env(
+    session: AsyncSession, env: Environment, space_id: uuid.UUID
+) -> list[tuple[VariableSet, str]]:
+    """Variable sets applicable to `env`, ordered weakest→strongest (SPECS §3.4 steps 1-3)."""
+    ordered: list[tuple[VariableSet, str]] = []
+
+    # 1. auto_attach sets of the space (no attachment row → order by name for determinism)
+    auto = (
+        (
+            await session.execute(
+                select(VariableSet)
+                .where(VariableSet.space_id == space_id, VariableSet.auto_attach.is_(True))
+                .order_by(VariableSet.name)
+            )
+        )
+        .scalars()
+        .all()
+    )
+    ordered.extend((s, "auto") for s in auto)
+
+    # 2. sets attached to the stack, then 3. sets attached to the env — each by priority asc.
+    for kind, target_id in (
+        (AttachmentTarget.stack, env.stack_id),
+        (AttachmentTarget.environment, env.id),
+    ):
+        rows = (
+            await session.execute(
+                select(VariableSet, VariableSetAttachment.priority)
+                .join(
+                    VariableSetAttachment, VariableSetAttachment.variable_set_id == VariableSet.id
+                )
+                .where(
+                    VariableSetAttachment.target_kind == kind,
+                    VariableSetAttachment.target_id == target_id,
+                )
+                .order_by(VariableSetAttachment.priority, VariableSet.name)
+            )
+        ).all()
+        ordered.extend((s, "attach") for s, _ in rows)
+
+    return ordered
+
+
+async def resolve_variables(
+    session: AsyncSession, env: Environment, *, reveal_sensitive: bool = False
+) -> list[ResolvedVariable]:
+    """Resolve the effective variables for an environment.
+
+    Order (weakest→strongest, §3.4): auto_attach sets < stack-attached sets < env-attached sets
+    < stack variables < env variables. At equal (kind, name) the stronger layer wins.
+    Sensitive values are masked (None) unless `reveal_sensitive` (claim time only, §7.2).
+    """
+    stack = await session.get(Stack, env.stack_id)
+    assert stack is not None
+    merged: dict[tuple[VariableKind, str], ResolvedVariable] = {}
+
+    def apply(var: Variable, provenance: str) -> None:
+        merged[_key(var)] = ResolvedVariable(
+            name=var.name,
+            kind=var.kind,
+            sensitive=var.sensitive,
+            hcl=var.hcl,
+            provenance=provenance,
+            value=(reveal_value(var) if (reveal_sensitive or not var.sensitive) else None),
+        )
+
+    # Layers 1-3: variable sets.
+    for vset, _ in await _sets_for_env(session, env, stack.space_id):
+        set_vars = (
+            (await session.execute(select(Variable).where(Variable.variable_set_id == vset.id)))
+            .scalars()
+            .all()
+        )
+        for var in set_vars:
+            apply(var, f"set:{vset.name}")
+
+    # Layer 4: stack variables (env override slot empty).
+    stack_vars = (
+        (
+            await session.execute(
+                select(Variable).where(
+                    Variable.stack_id == stack.id, Variable.environment_id.is_(None)
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+    for var in stack_vars:
+        apply(var, "stack")
+
+    # Layer 5: env variables — always win.
+    env_vars = (
+        (await session.execute(select(Variable).where(Variable.environment_id == env.id)))
+        .scalars()
+        .all()
+    )
+    for var in env_vars:
+        apply(var, "env")
+
+    return list(merged.values())
+
+
+def provenance_snapshot(resolved: list[ResolvedVariable]) -> dict[str, str]:
+    """Frozen provenance map keyed by injected name (SPECS §3.4 / runs.variable_provenance)."""
+    return {rv.injected_name: rv.provenance for rv in resolved}

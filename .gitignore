@@ -1,0 +1,61 @@
+# ── Secrets & local environment ────────────────────────────────────────────
+.env
+.env.*
+!.env.example
+# generated dev keys, fixture repos, worker pool token (DEV §2)
+.dev/
+
+# ── Python (api, worker) ───────────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+.eggs/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+.coverage.*
+coverage.xml
+htmlcov/
+.uv-cache/
+
+# ── Node / front ───────────────────────────────────────────────────────────
+node_modules/
+front/dist/
+# Ladle static build
+front/build/
+# vitest coverage
+front/coverage/
+*.tsbuildinfo
+.vite/
+npm-debug.log*
+pnpm-debug.log*
+.pnpm-store/
+
+# ── Terraform / OpenTofu (dev runs, fixtures) ──────────────────────────────
+.terraform/
+*.tfstate
+*.tfstate.*
+*.tfplan
+crash.log
+override.tf
+override.tf.json
+
+# ── Tooling: e2e / browser screenshots ─────────────────────────────────────
+test-results/
+playwright-report/
+front/test-results/
+
+# ── Editors / IDE ──────────────────────────────────────────────────────────
+.vscode/
+.idea/
+*.swp
+*~
+
+# ── OS ─────────────────────────────────────────────────────────────────────
+.DS_Store
+Thumbs.db
+
+# ── Logs ───────────────────────────────────────────────────────────────────
+*.log

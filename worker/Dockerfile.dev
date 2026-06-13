@@ -1,0 +1,18 @@
+# Dev worker image: OpenTofu + git pre-installed, agent hot-reloaded via watchfiles (DEV §5).
+FROM python:3.13-slim
+
+COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /bin/
+
+ARG OPENTOFU_VERSION=1.12.0
+RUN apt-get update && apt-get install -y --no-install-recommends git jq curl unzip ca-certificates \
+    && curl -fsSL "https://github.com/opentofu/opentofu/releases/download/v${OPENTOFU_VERSION}/tofu_${OPENTOFU_VERSION}_linux_amd64.zip" -o /tmp/tofu.zip \
+    && unzip /tmp/tofu.zip -d /usr/local/bin tofu && rm /tmp/tofu.zip \
+    && rm -rf /var/lib/apt/lists/*
+
+ENV UV_LINK_MODE=copy UV_PROJECT_ENVIRONMENT=/opt/venv PATH=/opt/venv/bin:$PATH
+WORKDIR /app
+COPY pyproject.toml uv.lock* ./
+RUN uv sync --no-install-project
+COPY . .
+
+CMD ["uv", "run", "watchfiles", "python -m agent.main", "agent"]

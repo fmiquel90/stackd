@@ -1,0 +1,76 @@
+@import "tailwindcss";
+@import "./styles/tokens.css";
+
+/* Map the design tokens into Tailwind utilities (bg-*, text-*, border-*, rounded-*).
+   Utility names are distinct from the raw token names to avoid self-reference. */
+@theme inline {
+  --color-base: var(--color-bg-base);
+  --color-surface: var(--color-bg-surface);
+  --color-raised: var(--color-bg-raised);
+  --color-line: var(--color-border);
+  --color-primary: var(--color-text-primary);
+  --color-muted: var(--color-text-secondary);
+  --color-signal: var(--color-accent);
+
+  --color-st-queued: var(--color-state-queued);
+  --color-st-running: var(--color-state-running);
+  --color-st-unconfirmed: var(--color-state-unconfirmed);
+  --color-st-finished: var(--color-state-finished);
+  --color-st-failed: var(--color-state-failed);
+  --color-mocked: var(--color-mock);
+
+  --font-sans: "IBM Plex Sans", system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, monospace;
+
+  --radius-base: 4px;
+  --radius-badge: 2px;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  background-color: var(--color-bg-base);
+  color: var(--color-text-primary);
+  font-family: var(--font-sans);
+  font-size: 13px; /* dense UI base (DESIGN §3.3) */
+  -webkit-font-smoothing: antialiased;
+}
+
+/* "The data is mono" — tabular figures so columns don't dance while streaming (DESIGN §7). */
+.font-data {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+
+/* The only ambient animation in the app: the active phase segment (DESIGN §2.2). */
+@keyframes rail-pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.45;
+  }
+}
+.rail-pulse {
+  animation: rail-pulse 1.6s ease-in-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    transition-duration: 0.001ms !important;
+  }
+  /* reduced-motion: pulse becomes a static dimming, not a loop (DESIGN §7). */
+  .rail-pulse {
+    animation: none;
+    opacity: 0.7;
+  }
+}

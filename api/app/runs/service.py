@@ -1,0 +1,143 @@
+from __future__ import annotations
+
+from datetime import UTC, datetime
+
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.audit import record_audit
+from app.enums import (
+    AuditActorKind,
+    RunEventActor,
+    RunState,
+    RunType,
+    TriggeredBy,
+)
+from app.errors import ProblemException
+from app.models.environment import Environment
+from app.models.run import Run
+from app.models.user import User
+from app.permissions import can_apply
+from app.runs.transition import transition
+
+
+async def trigger_run(
+    session: AsyncSession,
+    env: Environment,
+    *,
+    run_type: RunType,
+    triggered_by: TriggeredBy,
+    user: User | None = None,
+    commit_sha: str | None = None,
+    group_root: bool = False,
+) -> Run:
+    """Create a run in `queued` (SPECS §4). A plan changes nothing, so any writer+ may trigger;
+    a `destroy` additionally requires can_destroy (§2.4). `group_root` starts a cascade group."""
+    if run_type == RunType.destroy and (user is None or not user.can_destroy):
+        raise ProblemException(403, "Forbidden", "destroy permission required.")
+
+    run = Run(
+        environment_id=env.id,
+        type=run_type,
+        state=RunState.queued,
+        triggered_by=triggered_by,
+        trigger_user_id=user.id if (user and triggered_by == TriggeredBy.manual) else None,
+        commit_sha=commit_sha,
+    )
+    session.add(run)
+    await session.flush()
+    if group_root:
+        run.run_group_id = run.id  # downstream cascade runs inherit this (§9.4)
+
+    action = "run.destroy_triggered" if run_type == RunType.destroy else "run.triggered"
+    await record_audit(
+        session,
+        action=action,
+        actor_kind=AuditActorKind.user if user else AuditActorKind.system,
+        actor_id=user.id if user else None,
+        actor_email=user.email if user else None,
+        target_kind="run",
+        target_id=run.id,
+        context={"environment_id": str(env.id), "type": run_type.value, "tier": env.tier.value},
+    )
+    await session.commit()
+    await session.refresh(run)
+    return run
+
+
+async def confirm_run(session: AsyncSession, run: Run, user: User) -> Run:
+    """unconfirmed → confirmed, gated by can_apply + 4-eyes + mock block (§2.4, §9.3)."""
+    if run.state != RunState.unconfirmed:
+        raise ProblemException(409, "Run not awaiting confirmation", f"State is {run.state.value}.")
+    env = await session.get(Environment, run.environment_id)
+    assert env is not None
+
+    decision = can_apply(user, env, is_destroy=run.type == RunType.destroy)
+    if not decision.allowed:
+        raise ProblemException(403, "Forbidden", decision.reason)
+
+    # Mock block (§9.3): a plan that consumed mocks validates config, it is not applied by default.
+    if run.used_mocks and not env.allow_mock_apply:
+        raise ProblemException(
+            409, "Apply disabled", "This run consumed mock outputs (allow_mock_apply is off)."
+        )
+
+    # 4-eyes (§2.4): triggerer ≠ confirmer for prod or when required, human triggers only.
+    needs_four_eyes = env.tier.value == "prod" or env.require_second_pair_of_eyes
+    if (
+        needs_four_eyes
+        and run.triggered_by == TriggeredBy.manual
+        and run.trigger_user_id is not None
+        and run.trigger_user_id == user.id
+    ):
+        raise ProblemException(403, "Forbidden", "You triggered this run (4-eyes required).")
+
+    await transition(
+        session,
+        run,
+        RunState.confirmed,
+        actor=RunEventActor.user,
+        actor_id=user.id,
+        actor_email=user.email,
+        fields={"confirmed_by_user_id": user.id, "confirmed_at": datetime.now(UTC)},
+        audit_action="run.confirmed",
+        audit_context={"environment_id": str(env.id), "commit": run.commit_sha},
+    )
+    await session.commit()
+    await session.refresh(run)
+    return run
+
+
+async def discard_run(session: AsyncSession, run: Run, user: User) -> Run:
+    await transition(
+        session,
+        run,
+        RunState.discarded,
+        actor=RunEventActor.user,
+        actor_id=user.id,
+        actor_email=user.email,
+        audit_action="run.discarded",
+    )
+    await session.commit()
+    await session.refresh(run)
+    return run
+
+
+async def cancel_run(session: AsyncSession, run: Run, user: User) -> Run:
+    # MVP: cancel queued/unconfirmed directly. Cancelling an in-flight run via the heartbeat
+    # command channel (SIGINT) is a follow-up (§7.1).
+    if run.state not in (RunState.queued, RunState.unconfirmed):
+        raise ProblemException(
+            409, "Cannot cancel", f"Cancelling a {run.state.value} run needs worker signalling."
+        )
+    await transition(
+        session,
+        run,
+        RunState.canceled,
+        actor=RunEventActor.user,
+        actor_id=user.id,
+        actor_email=user.email,
+        audit_action="run.canceled",
+    )
+    await session.commit()
+    await session.refresh(run)
+    return run

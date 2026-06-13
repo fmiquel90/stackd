@@ -1,0 +1,55 @@
+# Pre-commit hooks for Stackd. Install once: `uvx pre-commit install` (or `pip install pre-commit`).
+# Run on demand: `uvx pre-commit run --all-files`.
+#
+# Ruff runs through each project's own `uv` env (api/ and worker/) so the version used here is
+# exactly the one pinned in uv.lock — no drift between local hooks and CI (CLAUDE §5: uv for
+# everything, ruff is the formatter+linter). Heavier checks (mypy, pytest, the front) live in CI.
+minimum_pre_commit_version: "3.5.0"
+
+repos:
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v6.0.0
+    hooks:
+      - id: trailing-whitespace
+        args: [--markdown-linebreak-ext=md] # keep markdown hard line breaks
+      - id: end-of-file-fixer
+      - id: check-merge-conflict
+      - id: check-case-conflict
+      - id: check-added-large-files
+        args: [--maxkb=1024]
+      - id: mixed-line-ending
+        args: [--fix=lf]
+      - id: check-yaml
+      - id: check-toml
+      - id: detect-private-key # secrets are never committed (SPECS §13)
+
+  - repo: local
+    hooks:
+      - id: ruff-api
+        name: ruff (api)
+        entry: uv run --project api ruff check --fix --force-exclude
+        language: system
+        types_or: [python, pyi]
+        files: ^api/
+        require_serial: true
+      - id: ruff-format-api
+        name: ruff-format (api)
+        entry: uv run --project api ruff format --force-exclude
+        language: system
+        types_or: [python, pyi]
+        files: ^api/
+        require_serial: true
+      - id: ruff-worker
+        name: ruff (worker)
+        entry: uv run --project worker ruff check --fix --force-exclude
+        language: system
+        types_or: [python, pyi]
+        files: ^worker/
+        require_serial: true
+      - id: ruff-format-worker
+        name: ruff-format (worker)
+        entry: uv run --project worker ruff format --force-exclude
+        language: system
+        types_or: [python, pyi]
+        files: ^worker/
+        require_serial: true
