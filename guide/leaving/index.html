@@ -11,10 +11,10 @@
       
       
       
-        <link rel="prev" href="../runs-and-approvals/">
+        <link rel="prev" href="../importing-existing-state/">
       
       
-        <link rel="next" href="../hooks/">
+        <link rel="next" href="../cloud-credentials/">
       
       
         
@@ -25,7 +25,7 @@
     
     
       
-        <title>Running commands - Stackd</title>
+        <title>Exit & data portability - Stackd</title>
       
     
     
@@ -76,7 +76,7 @@
     <div data-md-component="skip">
       
         
-        <a href="#running-commands-import-state-surgery" class="md-skip">
+        <a href="#exit-data-portability" class="md-skip">
           Skip to content
         </a>
       
@@ -112,7 +112,7 @@
         <div class="md-header__topic" data-md-component="header-topic">
           <span class="md-ellipsis">
             
-              Running commands
+              Exit & data portability
             
           </span>
         </div>
@@ -450,37 +450,10 @@
                 
   
   
-    
   
   
-  
-    <li class="md-nav__item md-nav__item--active">
-      
-      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
-      
-      
-        
-      
-      
-        <label class="md-nav__link md-nav__link--active" for="__toc">
-          
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    Running commands
-  
-
-    
-  </span>
-  
-  
-
-          <span class="md-nav__icon md-icon"></span>
-        </label>
-      
-      <a href="./" class="md-nav__link md-nav__link--active">
+    <li class="md-nav__item">
+      <a href="../commands/" class="md-nav__link">
         
   
   
@@ -496,70 +469,6 @@
   
 
       </a>
-      
-        
-
-<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
-  
-  
-  
-    
-  
-  
-    <label class="md-nav__title" for="__toc">
-      <span class="md-nav__icon md-icon"></span>
-      Table of contents
-    </label>
-    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
-      
-        <li class="md-nav__item">
-  <a href="#allowed-commands" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Allowed commands
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#run-one" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Run one
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#what-it-runs-with" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        What it runs with
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#see-also" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        See also
-      
-    </span>
-  </a>
-  
-</li>
-      
-    </ul>
-  
-</nav>
-      
     </li>
   
 
@@ -653,10 +562,37 @@
                 
   
   
+    
   
   
-    <li class="md-nav__item">
-      <a href="../leaving/" class="md-nav__link">
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Exit & data portability
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
         
   
   
@@ -672,6 +608,142 @@
   
 
       </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#what-is-never-captive" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        What is never captive
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#what-lives-only-in-stackd-but-is-exportable" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        What lives only in Stackd (but is exportable)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#the-exit-procedure-rollback" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The exit procedure (rollback)
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="The exit procedure (rollback)">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#1-pull-managed-state-back-out" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        1. Pull managed state back out
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#2-repoint-terraform-ci-at-the-repos-directly" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2. Repoint terraform / CI at the repos directly
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#3-re-supply-variables-secrets" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3. Re-supply variables &amp; secrets
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#4-optional-archive-config-audit" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        4. (Optional) Archive config &amp; audit
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#5-decommission" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        5. Decommission
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#the-bottom-line" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The bottom line
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#see-also" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        See also
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
     </li>
   
 
@@ -1076,10 +1148,10 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#allowed-commands" class="md-nav__link">
+  <a href="#what-is-never-captive" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Allowed commands
+        What is never captive
       
     </span>
   </a>
@@ -1087,10 +1159,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#run-one" class="md-nav__link">
+  <a href="#what-lives-only-in-stackd-but-is-exportable" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Run one
+        What lives only in Stackd (but is exportable)
       
     </span>
   </a>
@@ -1098,10 +1170,82 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#what-it-runs-with" class="md-nav__link">
+  <a href="#the-exit-procedure-rollback" class="md-nav__link">
     <span class="md-ellipsis">
       
-        What it runs with
+        The exit procedure (rollback)
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="The exit procedure (rollback)">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#1-pull-managed-state-back-out" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        1. Pull managed state back out
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#2-repoint-terraform-ci-at-the-repos-directly" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2. Repoint terraform / CI at the repos directly
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#3-re-supply-variables-secrets" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3. Re-supply variables &amp; secrets
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#4-optional-archive-config-audit" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        4. (Optional) Archive config &amp; audit
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#5-decommission" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        5. Decommission
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#the-bottom-line" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The bottom line
       
     </span>
   </a>
@@ -1139,70 +1283,100 @@
   
 
 
-<h1 id="running-commands-import-state-surgery">Running commands (import, state surgery…)<a class="headerlink" href="#running-commands-import-state-surgery" title="Permanent link">&para;</a></h1>
-<p>Some operations don't fit <code>plan → apply</code>: importing an existing resource, removing something from
-state, re-tainting a resource. Stackd runs these as a <strong>command run</strong> — one allowlisted
-tofu/terraform subcommand executed on the worker, in the environment, with the same audit and the
-managed backend as any other run.</p>
-<div class="admonition note">
-<p class="admonition-title">Note</p>
-<p>This is <strong>not</strong> arbitrary shell. The worker runs <code>&lt;tool&gt; &lt;command&gt; &lt;args&gt;</code> where <code>command</code> is
-taken verbatim from an allowlist. To remove a stuck lock, use the dedicated force-unlock
-(UI <strong>State</strong> tab, or <code>DELETE /api/v1/environments/{id}/state/lock</code>) — it isn't a command.</p>
-</div>
-<h2 id="allowed-commands">Allowed commands<a class="headerlink" href="#allowed-commands" title="Permanent link">&para;</a></h2>
+<h1 id="exit-data-portability">Exit &amp; data portability<a class="headerlink" href="#exit-data-portability" title="Permanent link">&para;</a></h1>
+<p>Stackd is designed for <strong>low lock-in</strong>. It's self-hosted (no SaaS holds your data), your IaC stays
+in your Git repos, your state is plain <code>tfstate</code>, and your cloud access is standard IAM. The real
+question isn't "vendor lock-in" — it's switching cost, and it's small. This page documents exactly
+how to leave and get everything back.</p>
+<h2 id="what-is-never-captive">What is never captive<a class="headerlink" href="#what-is-never-captive" title="Permanent link">&para;</a></h2>
 <table>
 <thead>
 <tr>
-<th>Read-only (needs <code>writer</code>)</th>
-<th>Mutating (needs apply rights)</th>
+<th>Data</th>
+<th>Where it lives</th>
+<th>Getting it back</th>
 </tr>
 </thead>
 <tbody>
 <tr>
-<td><code>output</code>, <code>show</code>, <code>state list</code>, <code>state show</code>, <code>validate</code>, <code>providers</code></td>
-<td><code>import</code>, <code>state rm</code>, <code>state mv</code>, <code>taint</code>, <code>untaint</code>, <code>refresh</code></td>
+<td><strong>Your IaC code</strong></td>
+<td>your Git repos</td>
+<td>Stackd only references <code>repo_url@commit</code> — the code never moved.</td>
+</tr>
+<tr>
+<td><strong>State (<code>managed_state: false</code>)</strong></td>
+<td>your own S3/backend</td>
+<td>Stackd never touches it. Stop using Stackd; <code>tofu</code> keeps working against your backend. <strong>No migration.</strong></td>
+</tr>
+<tr>
+<td><strong>State (<code>managed_state: true</code>)</strong></td>
+<td>Stackd's S3, <strong>standard tfstate format</strong></td>
+<td>Pull it out via the HTTP backend (below). No proprietary format.</td>
+</tr>
+<tr>
+<td><strong>Cloud credentials</strong></td>
+<td>your cloud account (IAM OIDC provider + roles)</td>
+<td>Standard IAM — delete or repoint anytime.</td>
+</tr>
+<tr>
+<td><strong>Repo hooks</strong></td>
+<td>your repo (<code>.stackd.yml</code>)</td>
+<td>Versioned with your code.</td>
 </tr>
 </tbody>
 </table>
-<p><strong>Mutating commands change real state</strong>, so they're gated by <code>can_apply(user, env)</code> — the same role
-+ tier check as approving an apply (see <a href="../runs-and-approvals/">Runs &amp; approvals</a>). Read-only
-commands only need <code>writer</code>.</p>
-<h2 id="run-one">Run one<a class="headerlink" href="#run-one" title="Permanent link">&para;</a></h2>
-<p>From the UI: open an environment → the <strong>Command</strong> tab → pick a command, add arguments, run. You
-land on the run page with live logs.</p>
-<p>Over the API:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="c1"># import an existing bucket into state</span>
-<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>curl<span class="w"> </span>-s<span class="w"> </span>-X<span class="w"> </span>POST<span class="w"> </span>localhost:8000/api/v1/environments/<span class="nv">$ENV_ID</span>/commands<span class="w"> </span>-H<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$AUTH</span><span class="s2">&quot;</span><span class="w"> </span>-d<span class="w"> </span><span class="s1">&#39;{</span>
-<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a><span class="s1">  &quot;command&quot;: &quot;import&quot;,</span>
-<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a><span class="s1">  &quot;args&quot;: [&quot;aws_s3_bucket.logs&quot;, &quot;my-existing-bucket&quot;]</span>
-<a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a><span class="s1">}&#39;</span>
-<a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a>
-<a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a><span class="c1"># remove a resource from state</span>
-<a id="__codelineno-0-8" name="__codelineno-0-8" href="#__codelineno-0-8"></a>curl<span class="w"> </span>-s<span class="w"> </span>-X<span class="w"> </span>POST<span class="w"> </span>localhost:8000/api/v1/environments/<span class="nv">$ENV_ID</span>/commands<span class="w"> </span>-H<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$AUTH</span><span class="s2">&quot;</span><span class="w"> </span>-d<span class="w"> </span><span class="s1">&#39;{</span>
-<a id="__codelineno-0-9" name="__codelineno-0-9" href="#__codelineno-0-9"></a><span class="s1">  &quot;command&quot;: &quot;state rm&quot;, &quot;args&quot;: [&quot;aws_instance.old&quot;]</span>
-<a id="__codelineno-0-10" name="__codelineno-0-10" href="#__codelineno-0-10"></a><span class="s1">}&#39;</span>
-</code></pre></div>
-<p>The response is a normal run (<code>type: command</code>). It flows <code>queued → preparing → running →
-finished/failed</code>, holds the <strong>one-active-run-per-env</strong> lock (no command races a plan/apply), streams
-logs, and uses the managed state backend.</p>
-<h2 id="what-it-runs-with">What it runs with<a class="headerlink" href="#what-it-runs-with" title="Permanent link">&para;</a></h2>
+<h2 id="what-lives-only-in-stackd-but-is-exportable">What lives only in Stackd (but is exportable)<a class="headerlink" href="#what-lives-only-in-stackd-but-is-exportable" title="Permanent link">&para;</a></h2>
 <ul>
-<li>The worker clones the repo at the pinned commit, <code>init</code>s with the env's backend, then runs the
-  subcommand — so config-aware commands like <code>import</code> work.</li>
-<li><strong>Credentials</strong>: a mutating command gets the env's <strong>apply</strong> OIDC role; a read-only command gets
-  the <strong>plan</strong> (read-only) role. See <a href="../cloud-credentials/">Cloud credentials</a>.</li>
-<li><strong>Audited</strong>: <code>run.command_triggered</code> on trigger and <code>run.command_executed</code> on success.</li>
+<li><strong>Orchestration config</strong> — stacks, environments, tiers, dependencies, variable sets. Exportable
+  via the API (<code>GET /stacks</code>, <code>/environments/{id}</code>, <code>/dependencies/graph</code>,
+  <code>/environments/{id}/resolved-variables</code>). Re-creatable; it isn't infrastructure.</li>
+<li><strong>History</strong> — runs, logs, audit. The audit trail exports to CSV (<code>GET /api/v1/audit/export</code>).</li>
+<li><strong>Sensitive variable values</strong> — write-only by design (AES-GCM, never returned in clear). Keep
+  your own source of truth for secrets — you should anyway. Non-sensitive values come back via
+  <code>/resolved-variables</code>.</li>
 </ul>
-<div class="admonition warning">
-<p class="admonition-title">Warning</p>
-<p><code>import</code> needs to <em>read</em> the real resource, so the assumed role must have access to it. For an
-existing stack you're adopting, pair this with <a href="../importing-existing-state/">Importing an existing stack</a>.</p>
+<div class="admonition tip">
+<p class="admonition-title">Want zero state exit cost?</p>
+<p>Stay on <code>managed_state: false</code>. You get the full orchestration (plan → approval → apply, audit,
+OIDC, cascade) while your state stays entirely in your own backend — nothing to migrate if you
+ever leave.</p>
 </div>
+<h2 id="the-exit-procedure-rollback">The exit procedure (rollback)<a class="headerlink" href="#the-exit-procedure-rollback" title="Permanent link">&para;</a></h2>
+<p>This is the exact reverse of <a href="../importing-existing-state/">importing an existing stack</a>.</p>
+<h3 id="1-pull-managed-state-back-out">1. Pull managed state back out<a class="headerlink" href="#1-pull-managed-state-back-out" title="Permanent link">&para;</a></h3>
+<p>Only for environments with <code>managed_state: true</code>. Mint a session (it returns a scoped <code>rw</code> token +
+the HTTP backend config), then migrate to your own backend with a standard command:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="c1"># get a scoped token + backend address</span>
+<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>curl<span class="w"> </span>-s<span class="w"> </span>-X<span class="w"> </span>POST<span class="w"> </span>localhost:8000/api/v1/environments/<span class="nv">$ENV_ID</span>/state/import-session<span class="w"> </span>-H<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$AUTH</span><span class="s2">&quot;</span>
+<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>
+<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a><span class="c1"># option A — pull the raw tfstate (it&#39;s standard) and push it anywhere</span>
+<a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a>tofu<span class="w"> </span>state<span class="w"> </span>pull<span class="w"> </span>&gt;<span class="w"> </span>terraform.tfstate
+<a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a>
+<a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a><span class="c1"># option B — migrate the backend in place: switch the repo&#39;s backend block from</span>
+<a id="__codelineno-0-8" name="__codelineno-0-8" href="#__codelineno-0-8"></a><span class="c1"># `http` to `s3` (or local), then:</span>
+<a id="__codelineno-0-9" name="__codelineno-0-9" href="#__codelineno-0-9"></a>tofu<span class="w"> </span>init<span class="w"> </span>-migrate-state
+</code></pre></div>
+<h3 id="2-repoint-terraform-ci-at-the-repos-directly">2. Repoint terraform / CI at the repos directly<a class="headerlink" href="#2-repoint-terraform-ci-at-the-repos-directly" title="Permanent link">&para;</a></h3>
+<p>Your code never moved — point your existing CI or local <code>tofu</code> at the repos and backends and you're
+running on your own again.</p>
+<h3 id="3-re-supply-variables-secrets">3. Re-supply variables &amp; secrets<a class="headerlink" href="#3-re-supply-variables-secrets" title="Permanent link">&para;</a></h3>
+<p>Export the non-sensitive resolved variables; re-provide sensitive ones from your own secret store
+(Stackd can't hand them back in clear — by design).</p>
+<h3 id="4-optional-archive-config-audit">4. (Optional) Archive config &amp; audit<a class="headerlink" href="#4-optional-archive-config-audit" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>curl<span class="w"> </span>-s<span class="w"> </span>localhost:8000/api/v1/audit/export<span class="w"> </span>-H<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$AUTH</span><span class="s2">&quot;</span><span class="w"> </span>&gt;<span class="w"> </span>audit.csv
+<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a>curl<span class="w"> </span>-s<span class="w"> </span>localhost:8000/api/v1/stacks<span class="w"> </span>-H<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$AUTH</span><span class="s2">&quot;</span><span class="w"> </span>&gt;<span class="w"> </span>stacks.json
+</code></pre></div>
+<h3 id="5-decommission">5. Decommission<a class="headerlink" href="#5-decommission" title="Permanent link">&para;</a></h3>
+<p>Delete the IAM OIDC provider + roles in your cloud account if you no longer want them, then stop
+Stackd.</p>
+<h2 id="the-bottom-line">The bottom line<a class="headerlink" href="#the-bottom-line" title="Permanent link">&para;</a></h2>
+<p>At any moment, <strong><code>tofu</code> alone against your state is enough to take back control</strong>. The only real
+exit work is migrating managed state (one standard <code>tofu init -migrate-state</code>, fully reversible) and
+re-creating the orchestration config elsewhere — neither touches your infrastructure.</p>
 <h2 id="see-also">See also<a class="headerlink" href="#see-also" title="Permanent link">&para;</a></h2>
 <ul>
-<li><a href="../runs-and-approvals/">Runs &amp; approvals</a> · <a href="../importing-existing-state/">Importing an existing stack</a></li>
-<li><a href="../../SPECS/">SPECS §4.3</a></li>
+<li><a href="../importing-existing-state/">Importing an existing stack</a> · <a href="../commands/">Running commands</a></li>
+<li><a href="../../SPECS/">SPECS §11</a></li>
 </ul>
 
 
