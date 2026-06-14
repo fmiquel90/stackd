@@ -1,0 +1,13 @@
+# Root project: documentation tooling only (the user-facing docs site).
+# The actual services live in api/ and worker/ (their own pyproject + uv.lock); this file exists
+# solely so `uv` manages MkDocs reproducibly for `task docs` and the docs CI workflow.
+[project]
+name = "stackd-docs"
+version = "0"
+requires-python = ">=3.13"
+dependencies = [
+    "mkdocs-material>=9.6",
+]
+
+[tool.uv]
+package = false

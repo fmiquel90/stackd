@@ -16,6 +16,8 @@ short-lived cloud credentials minted per run. 🔐
 ![PostgreSQL](https://img.shields.io/badge/PostgreSQL-18-4169E1?logo=postgresql&logoColor=white)
 ![OpenTofu](https://img.shields.io/badge/OpenTofu-first-FFDA18?logo=opentofu&logoColor=black)
 
+📖 **[Read the documentation →](https://fmiquel90.github.io/stackd/)**
+
 </div>
 
 > **No static cloud secrets. No shared state. No one running `apply` from their laptop.**
@@ -330,6 +332,10 @@ diagnostics over the heartbeat command channel (no inbound to workers).
 </details>
 
 ## 📚 Documentation
+
+📖 **User docs (a real site): <https://fmiquel90.github.io/stackd/>** — a task-oriented guide built
+from `docs/` with MkDocs Material (`task docs` to preview locally, deployed by `.github/workflows/docs.yml`).
+The source markdown also reads fine on GitHub:
 
 | Doc | What's in it |
 |---|---|

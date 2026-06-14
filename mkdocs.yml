@@ -1,0 +1,75 @@
+site_name: Stackd
+site_description: Self-hostable Terraform/OpenTofu orchestration — plan → human approval → apply.
+repo_url: https://github.com/fmiquel90/stackd
+repo_name: fmiquel90/stackd
+edit_uri: edit/main/docs/
+
+theme:
+  name: material
+  palette:
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: amber
+      accent: amber
+      toggle:
+        icon: material/weather-sunny
+        name: Switch to light mode
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      primary: amber
+      accent: amber
+      toggle:
+        icon: material/weather-night
+        name: Switch to dark mode
+  features:
+    - navigation.sections
+    - navigation.top
+    - navigation.instant
+    - navigation.tracking
+    - toc.follow
+    - search.suggest
+    - search.highlight
+    - content.code.copy
+    - content.tabs.link
+
+markdown_extensions:
+  - admonition
+  - attr_list
+  - tables
+  - toc:
+      permalink: true
+  - pymdownx.details
+  - pymdownx.highlight:
+      anchor_linenums: true
+  - pymdownx.inlinehilite
+  - pymdownx.snippets
+  - pymdownx.tabbed:
+      alternate_style: true
+  - pymdownx.superfences:
+      custom_fences:
+        - name: mermaid
+          class: mermaid
+          format: !!python/name:pymdownx.superfences.fence_code_format
+
+nav:
+  - Home: index.md
+  - Guide:
+      - Getting started: guide/getting-started.md
+      - Stacks & environments: guide/stacks-and-environments.md
+      - Variables & secrets: guide/variables.md
+      - Runs & approvals: guide/runs-and-approvals.md
+      - Hooks & .stackd.yml: guide/hooks.md
+      - Dependencies & mocks: guide/dependencies-and-mocks.md
+      - Importing an existing stack: guide/importing-existing-state.md
+      - Cloud credentials (OIDC): guide/cloud-credentials.md
+      - Workers & scaling: guide/workers-and-scaling.md
+      - Notifications: guide/notifications.md
+      - Observability: guide/observability.md
+  - Concepts: CONCEPTS.md
+  - API: api.md
+  - Reference:
+      - Specification: SPECS.md
+      - Plan & scope: PLAN.md
+      - Design: DESIGN.md
+      - Dev environment: DEV.md
+      - Testing: TESTING.md

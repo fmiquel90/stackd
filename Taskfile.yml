@@ -81,6 +81,14 @@ tasks:
     desc: Postgres shell
     cmds: ["{{.COMPOSE}} exec postgres psql -U stackd stackd"]
 
+  docs:
+    desc: Serve the user documentation locally (http://localhost:8001)
+    cmds: ["uv run mkdocs serve -a localhost:8001"]
+
+  docs-build:
+    desc: Build the static documentation site into ./site
+    cmds: ["uv run mkdocs build"]
+
   lint:
     desc: ruff + mypy
     cmds:

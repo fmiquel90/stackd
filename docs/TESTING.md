@@ -29,7 +29,7 @@
 
 ## 2. Running the tests
 
-All commands go through the [Taskfile](../Taskfile.yml):
+All commands go through the [Taskfile](https://github.com/fmiquel90/stackd/blob/main/Taskfile.yml):
 
 ```bash
 task test     # unit + integration (testcontainers) + front vitest
