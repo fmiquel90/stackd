@@ -174,13 +174,16 @@ async def build_job_payload(session: AsyncSession, run: Run) -> dict:
 
     cloud_credentials = await _cloud_credentials(session, env, stack, run, cred_phase)  # §10
 
-    # Literal secret values the agent masks in ALL log output (§5.1) — sensitive variables plus the
-    # short-lived state-backend and OIDC tokens (so they never surface in streamed logs).
+    # Literal secret values the agent masks in ALL log output (§5.1) — sensitive variables, the
+    # short-lived state-backend and OIDC tokens, and the repo auth token (it rides inside the clone
+    # URL, so a failed `git clone` could otherwise echo it to logs).
     mask_values = [rv.value for rv in resolved if rv.sensitive and rv.value]
     if backend:
         mask_values.append(backend["password"])
     if cloud_credentials and cloud_credentials.get("oidc_token"):
         mask_values.append(cloud_credentials["oidc_token"])
+    if repo_credentials.get("token"):
+        mask_values.append(repo_credentials["token"])
 
     return {
         "job_id": str(run.id),

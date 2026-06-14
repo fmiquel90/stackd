@@ -81,7 +81,9 @@ def _stream_proc(
         rc = proc.wait()
     finally:
         timer.cancel()
-    if killed["v"]:
+    # Only report a timeout if the watchdog actually killed a still-running process (negative rc);
+    # a process that exited a hair before the timer fired keeps its real exit code.
+    if killed["v"] and rc < 0:
         streamer.emit(
             phase, [f"[stackd] timed out after {timeout}s — process killed"], section=section
         )

@@ -167,3 +167,27 @@ async def test_mock_block(client: httpx.AsyncClient) -> None:
 
     blocked = await client.post(f"/api/v1/runs/{run_id}/confirm", headers=admin)
     assert blocked.status_code == 409
+
+
+async def test_repo_token_is_masked_in_claim(client: httpx.AsyncClient) -> None:
+    """The repo auth token rides inside the clone URL — it must be in the worker's mask list (§5.1)."""
+    from app.crypto import encrypt
+    from app.db import SessionLocal
+    from app.enums import RepoAuthKind
+    from app.models.stack import Stack
+
+    admin = await login(client, "admin")
+    wh = await register_worker(client, admin, "masktok-pool")
+    stack = await make_stack(client, admin, "masktok-stack")
+    env_id = await make_env(client, admin, stack, "dev", "dev")
+
+    async with SessionLocal() as s:
+        st = await s.get(Stack, uuid.UUID(stack))
+        st.repo_auth_kind = RepoAuthKind.token
+        st.repo_secret_encrypted = encrypt("ghp_supersecrettoken")
+        await s.commit()
+
+    await client.post(f"/api/v1/environments/{env_id}/runs", headers=admin, json={})
+    payload = (await client.post("/worker/v1/jobs/claim", headers=wh)).json()
+    assert payload["repo_credentials"]["token"] == "ghp_supersecrettoken"
+    assert "ghp_supersecrettoken" in payload["mask_values"]  # so the agent redacts it in logs

@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useMutation } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
 import { runs } from "@/api/resources";
@@ -14,6 +14,10 @@ export function PromotePanel({
 }) {
   const navigate = useNavigate();
   const [from, setFrom] = useState(siblings[0]?.id ?? "");
+  // If siblings arrive/refresh after mount, default the picker to the first one.
+  useEffect(() => {
+    if (!from && siblings.length > 0) setFrom(siblings[0].id);
+  }, [siblings, from]);
 
   const promote = useMutation({
     mutationFn: () => runs.promote(envId, from),
@@ -23,8 +27,12 @@ export function PromotePanel({
   if (siblings.length === 0) {
     return (
       <Card>
-        <div className="text-[12px]" style={{ color: "var(--color-text-secondary)" }}>
-          No sibling environment to promote from — add another environment to this stack.
+        <div
+          className="text-[12px]"
+          style={{ color: "var(--color-text-secondary)" }}
+        >
+          No sibling environment to promote from — add another environment to
+          this stack.
         </div>
       </Card>
     );
@@ -32,10 +40,16 @@ export function PromotePanel({
 
   return (
     <Card>
-      <div className="mb-1 text-[13px] font-medium">Promote to this environment</div>
-      <div className="mb-2 text-[12px]" style={{ color: "var(--color-text-secondary)" }}>
-        Re-deploy the exact commit currently applied on another environment of this stack here. The
-        apply is gated as usual (tier + four-eyes) at confirmation.
+      <div className="mb-1 text-[13px] font-medium">
+        Promote to this environment
+      </div>
+      <div
+        className="mb-2 text-[12px]"
+        style={{ color: "var(--color-text-secondary)" }}
+      >
+        Re-deploy the exact commit currently applied on another environment of
+        this stack here. The apply is gated as usual (tier + four-eyes) at
+        confirmation.
       </div>
       <form
         className="flex items-end gap-2"
@@ -58,7 +72,10 @@ export function PromotePanel({
         </Button>
       </form>
       {promote.isError && (
-        <div className="mt-2 font-data text-[12px]" style={{ color: "var(--color-state-failed)" }}>
+        <div
+          className="mt-2 font-data text-[12px]"
+          style={{ color: "var(--color-state-failed)" }}
+        >
           {(promote.error as Error).message}
         </div>
       )}

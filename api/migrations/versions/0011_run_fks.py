@@ -23,8 +23,18 @@ depends_on: str | Sequence[str] | None = None
 
 
 def upgrade() -> None:
+    # Null out any pre-existing dangling references first, so ADD CONSTRAINT can't fail on a
+    # database that already had runs deleted (the SET NULL we now enforce, applied to history).
+    op.execute(
+        "UPDATE env_outputs SET run_id = NULL "
+        "WHERE run_id IS NOT NULL AND run_id NOT IN (SELECT id FROM runs)"
+    )
     op.create_foreign_key(
         "fk_env_outputs_run_id", "env_outputs", "runs", ["run_id"], ["id"], ondelete="SET NULL"
+    )
+    op.execute(
+        "UPDATE state_versions SET created_by_run_id = NULL "
+        "WHERE created_by_run_id IS NOT NULL AND created_by_run_id NOT IN (SELECT id FROM runs)"
     )
     op.create_foreign_key(
         "fk_state_versions_created_by_run_id",

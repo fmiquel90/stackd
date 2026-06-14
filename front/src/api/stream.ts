@@ -28,22 +28,30 @@ export function useEntityStreams(subs: string[], keys: QueryKey[]): void {
     let stopped = false;
     let ws: WebSocket | null = null;
     let retry: ReturnType<typeof setTimeout> | undefined;
+    let attempts = 0;
 
     const connect = () => {
       const token = getAccessToken(); // fresh token on every (re)connect → survives expiry
       if (stopped || !token) return;
       const proto = window.location.protocol === "https:" ? "wss" : "ws";
-      ws = new WebSocket(`${proto}://${window.location.host}/api/v1/ws?token=${token}`);
+      ws = new WebSocket(
+        `${proto}://${window.location.host}/api/v1/ws?token=${token}`,
+      );
       ws.onopen = () => {
+        attempts = 0; // healthy connection resets the backoff
         for (const sub of subs) ws?.send(JSON.stringify({ sub }));
       };
       ws.onmessage = () => {
         for (const key of keys) qc.invalidateQueries({ queryKey: key });
       };
-      // Dropped socket (e.g. token expiry): reconnect after a short delay. The query poll is the
+      // Dropped socket (e.g. token expiry): reconnect with exponential backoff (capped at 30s) so a
+      // server that keeps rejecting can't cause a tight reconnect loop. The query poll is the
       // fallback in the meantime.
       ws.onclose = () => {
-        if (!stopped) retry = setTimeout(connect, 3000);
+        if (stopped) return;
+        attempts += 1;
+        const delay = Math.min(30_000, 1_000 * 2 ** Math.min(attempts, 5));
+        retry = setTimeout(connect, delay);
       };
     };
     connect();
