@@ -15,6 +15,7 @@ class Workspace:
     def __init__(self, root: str, job_id: str) -> None:
         self.path = Path(root) / job_id
         self.path.mkdir(parents=True, exist_ok=True)
+        self.path.chmod(0o700)  # workspace holds secrets/tfvars — not world-readable
 
     def git_clone(self, repo_url: str, commit_sha: str | None, project_root: str) -> Path:
         # A source repo may be owned by another uid (e.g. CI bind mounts); the worker image trusts
@@ -36,9 +37,19 @@ class Workspace:
                 cwd=self.path / "repo",
                 capture_output=True,
             )
-            subprocess.run(
-                ["git", "checkout", commit_sha], cwd=self.path / "repo", capture_output=True
+            # Checkout MUST succeed: silently staying on the default-branch HEAD would plan/apply
+            # the wrong commit. Fail loudly with git's stderr.
+            checkout = subprocess.run(
+                ["git", "checkout", commit_sha],
+                cwd=self.path / "repo",
+                capture_output=True,
+                text=True,
             )
+            if checkout.returncode != 0:
+                raise RuntimeError(
+                    f"git checkout {commit_sha} failed: "
+                    f"{checkout.stderr.strip() or checkout.stdout.strip()}"
+                )
         return (self.path / "repo" / project_root).resolve()
 
     def write_tfvars(self, cwd: Path, tfvars: dict) -> None:
@@ -50,9 +61,11 @@ class Workspace:
         (cwd / "zzz_stackd_backend.tf").write_text('terraform {\n  backend "http" {}\n}\n')
 
     def write_secret(self, name: str, content: str) -> str:
+        # Create with 0600 atomically — no world-readable window between write and chmod.
         path = self.path / name
-        path.write_text(content)
-        path.chmod(0o600)
+        fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+        with os.fdopen(fd, "w") as f:
+            f.write(content)
         return str(path)
 
     def load_stackd_yml(self, cwd: Path) -> dict[str, list[dict]]:

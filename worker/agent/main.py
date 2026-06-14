@@ -15,6 +15,14 @@ from agent.workspace import Workspace
 log = get_logger()
 
 
+def _safe_json(raw: str) -> dict:
+    """Parse JSON from a tofu subcommand; tolerate empty/garbled output instead of crashing."""
+    try:
+        return json.loads(raw) if raw.strip() else {}
+    except json.JSONDecodeError:
+        return {}
+
+
 def _merge_hooks(platform: dict, repo: dict) -> dict[str, list[dict]]:
     """Platform hooks first (non-bypassable), then repo hooks, per stage (§8.1)."""
     merged: dict[str, list[dict]] = {}
@@ -156,9 +164,10 @@ def handle_plan(client: ApiClient, job: dict, settings: Settings) -> None:
             capture_output=True,
             text=True,
         )
-        plan_json = json.loads(show.stdout) if show.returncode == 0 and show.stdout else {}
+        plan_json = _safe_json(show.stdout) if show.returncode == 0 else {}
         (cwd / "plan.json").write_text(json.dumps(plan_json))
-        client.upload_artifact(job_id, "plan.json", show.stdout.encode())
+        # Mask the artifact too: plan.json can echo sensitive variable values (§8.3 leak note).
+        client.upload_artifact(job_id, "plan.json", masker.mask(show.stdout).encode())
 
         if job.get("hooks", {}).get("after_plan") or ws.load_stackd_yml(cwd).get("after_plan"):
             client.event(job_id, "phase_started", phase="checking")
@@ -249,8 +258,8 @@ def handle_apply(client: ApiClient, job: dict, settings: Settings) -> None:
         out = subprocess.run(
             [tool, "output", "-json"], cwd=cwd, env=platform_env, capture_output=True, text=True
         )
-        client.upload_artifact(job_id, "outputs.json", out.stdout.encode())
-        outputs = json.loads(out.stdout) if out.returncode == 0 and out.stdout.strip() else {}
+        client.upload_artifact(job_id, "outputs.json", masker.mask(out.stdout).encode())
+        outputs = _safe_json(out.stdout) if out.returncode == 0 else {}
         run_hooks(
             hooks.get("after_apply", []),
             cwd,
@@ -304,7 +313,7 @@ def handle_command_run(client: ApiClient, job: dict, settings: Settings) -> None
         ):
             return client.event(job_id, "job_failed", phase="init", result={"error": "init failed"})
 
-        argv = [tool, *str(cmd.get("name", "")).split(), *cmd.get("args", [])]
+        argv = [tool, *str(cmd.get("name", "")).split(), *(cmd.get("args") or [])]
         if (
             run_command(argv, cwd, platform_env, phase="running", section=None, streamer=streamer)
             != 0
@@ -375,10 +384,10 @@ def run() -> None:
                 handle_command_run(client, job, settings)
             log.info("job done", extra={"event": "agent.done", "run_id": job["job_id"]})
         except Exception as exc:  # noqa: BLE001 — report and keep polling
-            log.exception("job failed", extra={"event": "agent.failed", "run_id": job["job_id"]})
-            client.event(
-                job["job_id"], "job_failed", phase=job["phase"], result={"error": str(exc)}
-            )
+            jid, jphase = job.get("job_id"), job.get("phase")
+            log.exception("job failed", extra={"event": "agent.failed", "run_id": jid})
+            if jid:
+                client.event(jid, "job_failed", phase=jphase, result={"error": str(exc)})
 
 
 if __name__ == "__main__":

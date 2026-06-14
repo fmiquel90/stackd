@@ -7,7 +7,7 @@ class ApiClient:
     """Thin client for the worker protocol (SPECS §7). All calls are pull/outbound."""
 
     def __init__(self, base_url: str) -> None:
-        self._http = httpx.Client(base_url=base_url, timeout=40)
+        self._http = httpx.Client(base_url=base_url, timeout=120)
         self._worker_token: str | None = None
 
     def register(self, pool_token: str, name: str, labels: dict | None = None) -> str:

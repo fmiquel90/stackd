@@ -1,11 +1,16 @@
 from __future__ import annotations
 
 import subprocess
+import threading
 import time
 from pathlib import Path
 
 from agent.client import ApiClient
 from agent.masking import Masker
+
+# Upper bound on any single subprocess so a hung tofu/hook can't pin a worker forever (the apply
+# phase is the longest legitimate one). Exit 124 mirrors coreutils `timeout`.
+_DEFAULT_TIMEOUT_SECONDS = 2 * 60 * 60
 
 
 class LogStreamer:
@@ -36,8 +41,10 @@ def run_command(
     phase: str,
     section: str | None,
     streamer: LogStreamer,
+    timeout: int = _DEFAULT_TIMEOUT_SECONDS,
 ) -> int:
-    """Run a command, streaming masked stdout/stderr to the API. Returns the exit code."""
+    """Run a command, streaming masked stdout/stderr to the API. Returns the exit code (124 if it
+    exceeds `timeout` and is killed)."""
     proc = subprocess.Popen(
         cmd,
         cwd=cwd,
@@ -47,15 +54,34 @@ def run_command(
         text=True,
         bufsize=1,
     )
-    buffer: list[str] = []
-    assert proc.stdout is not None
-    for line in proc.stdout:
-        buffer.append(line.rstrip("\n"))
-        if len(buffer) >= 20:
-            streamer.emit(phase, buffer, section=section)
-            buffer = []
-    streamer.emit(phase, buffer, section=section)
-    return proc.wait()
+    # Watchdog: kill the process if it runs past the timeout, so a hang can't pin the worker.
+    killed = {"v": False}
+
+    def _kill() -> None:
+        killed["v"] = True
+        proc.kill()
+
+    timer = threading.Timer(timeout, _kill)
+    timer.start()
+    try:
+        if proc.stdout is None:
+            raise RuntimeError("subprocess stdout pipe missing")
+        buffer: list[str] = []
+        for line in proc.stdout:
+            buffer.append(line.rstrip("\n"))
+            if len(buffer) >= 20:
+                streamer.emit(phase, buffer, section=section)
+                buffer = []
+        streamer.emit(phase, buffer, section=section)
+        rc = proc.wait()
+    finally:
+        timer.cancel()
+    if killed["v"]:
+        streamer.emit(
+            phase, [f"[stackd] timed out after {timeout}s — process killed"], section=section
+        )
+        return 124
+    return rc
 
 
 def run_hooks(
