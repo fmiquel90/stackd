@@ -32,9 +32,9 @@ function DiagnosticsPanel({ workerId, onClose }: { workerId: string; onClose: ()
     queryFn: () => workers.diagnostics(workerId),
     refetchInterval: (q) => (q.state.data?.status === "done" || q.state.data?.status === "failed" ? false : 1500),
   });
-  // Fire a fresh request when the panel opens.
+  // Fire a fresh request when the panel opens (guard against rapid re-fires queueing requests).
   useEffect(() => {
-    request.mutate();
+    if (!request.isPending) request.mutate();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [workerId]);
 
@@ -109,7 +109,7 @@ function LogsPanel({ workerId, setWorkerId }: { workerId: string; setWorkerId: (
         style={{ backgroundColor: "var(--color-bg-base)", borderRadius: 4, lineHeight: 1.5 }}
       >
         {(data?.items ?? []).map((e: LogEntry, i) => (
-          <div key={i} className="whitespace-pre-wrap">
+          <div key={`${e.ts}-${e.logger}-${i}`} className="whitespace-pre-wrap">
             <span style={{ color: "var(--color-text-secondary)" }}>{e.ts.slice(11, 19)} </span>
             <span style={{ color: LEVEL_COLOR[e.level] ?? "var(--color-text-secondary)" }}>{e.level.padEnd(5)} </span>
             <span style={{ color: "var(--color-text-secondary)" }}>{e.logger} </span>

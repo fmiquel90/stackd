@@ -20,18 +20,39 @@ export function useEntityStream(sub: string, keys: QueryKey[]): void {
 export function useEntityStreams(subs: string[], keys: QueryKey[]): void {
   const qc = useQueryClient();
   const subsKey = [...subs].sort().join(",");
+  // Serialize `keys` into the dep so a caller that changes its invalidation keys (without changing
+  // subs) re-subscribes instead of running a stale closure.
+  const keysKey = JSON.stringify(keys);
   useEffect(() => {
-    const token = getAccessToken();
-    if (!token || subs.length === 0) return;
-    const proto = window.location.protocol === "https:" ? "wss" : "ws";
-    const ws = new WebSocket(`${proto}://${window.location.host}/api/v1/ws?token=${token}`);
-    ws.onopen = () => {
-      for (const sub of subs) ws.send(JSON.stringify({ sub }));
+    if (subs.length === 0 || !getAccessToken()) return;
+    let stopped = false;
+    let ws: WebSocket | null = null;
+    let retry: ReturnType<typeof setTimeout> | undefined;
+
+    const connect = () => {
+      const token = getAccessToken(); // fresh token on every (re)connect → survives expiry
+      if (stopped || !token) return;
+      const proto = window.location.protocol === "https:" ? "wss" : "ws";
+      ws = new WebSocket(`${proto}://${window.location.host}/api/v1/ws?token=${token}`);
+      ws.onopen = () => {
+        for (const sub of subs) ws?.send(JSON.stringify({ sub }));
+      };
+      ws.onmessage = () => {
+        for (const key of keys) qc.invalidateQueries({ queryKey: key });
+      };
+      // Dropped socket (e.g. token expiry): reconnect after a short delay. The query poll is the
+      // fallback in the meantime.
+      ws.onclose = () => {
+        if (!stopped) retry = setTimeout(connect, 3000);
+      };
     };
-    ws.onmessage = () => {
-      for (const key of keys) qc.invalidateQueries({ queryKey: key });
+    connect();
+
+    return () => {
+      stopped = true;
+      if (retry) clearTimeout(retry);
+      ws?.close();
     };
-    return () => ws.close();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [subsKey]);
+  }, [subsKey, keysKey]);
 }

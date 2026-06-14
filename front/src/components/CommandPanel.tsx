@@ -4,6 +4,33 @@ import { useNavigate } from "react-router-dom";
 import { COMMANDS_MUTATING, COMMANDS_READONLY, runs } from "@/api/resources";
 import { Button, Card, Field, Select, TextInput } from "@/components/ui";
 
+// Split an argument string respecting single/double quotes, so addresses with spaces
+// (e.g. `'aws_s3_bucket.b["my key"]'`) survive as one argument.
+function parseArgs(input: string): string[] {
+  const args: string[] = [];
+  let cur = "";
+  let quote: '"' | "'" | null = null;
+  let has = false;
+  for (const ch of input) {
+    if (quote) {
+      if (ch === quote) quote = null;
+      else cur += ch;
+    } else if (ch === '"' || ch === "'") {
+      quote = ch;
+      has = true;
+    } else if (/\s/.test(ch)) {
+      if (has) args.push(cur);
+      cur = "";
+      has = false;
+    } else {
+      cur += ch;
+      has = true;
+    }
+  }
+  if (has) args.push(cur);
+  return args;
+}
+
 // A one-off allowlisted tofu/terraform subcommand, run as a `command` run on the worker.
 export function CommandPanel({ envId }: { envId: string }) {
   const navigate = useNavigate();
@@ -12,12 +39,7 @@ export function CommandPanel({ envId }: { envId: string }) {
 
   const mutating = COMMANDS_MUTATING.includes(command);
   const run = useMutation({
-    mutationFn: () =>
-      runs.command(
-        envId,
-        command,
-        args.trim() ? args.trim().split(/\s+/) : [],
-      ),
+    mutationFn: () => runs.command(envId, command, parseArgs(args)),
     onSuccess: (r) => navigate(`/runs/${r.id}`),
   });
 
