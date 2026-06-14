@@ -1,9 +1,10 @@
 from __future__ import annotations
 
+import uuid
 from datetime import datetime
 
 import httpx
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import get_settings
@@ -90,10 +91,13 @@ async def _deliver(target: NotificationTarget, body: dict) -> bool:
     return True
 
 
-async def dispatch_pending(session: AsyncSession, _now: datetime, *, limit: int = 20) -> int:
-    """Drain the notification outbox: resolve matching targets and POST. Runs under the scheduler's
-    advisory lock (one replica at a time); FOR UPDATE SKIP LOCKED is a second guard so two replicas
-    never deliver the same row. Returns the number of outbox rows processed."""
+async def dispatch_pending(session: AsyncSession, now: datetime, *, limit: int = 20) -> int:
+    """Drain the notification outbox without holding a DB transaction across external HTTP I/O.
+
+    Phase 1 (locked, brief): claim a batch with FOR UPDATE SKIP LOCKED, bump `attempts`, commit —
+    this releases the row locks immediately. Phase 2 (no DB txn held): POST to matching targets.
+    Phase 3: mark the delivered rows `sent_at`. A crash between phases leaves `attempts` bumped
+    and `sent_at` null → retried later (at-least-once); the advisory lock keeps it single."""
     rows = (
         (
             await session.execute(
@@ -113,51 +117,58 @@ async def dispatch_pending(session: AsyncSession, _now: datetime, *, limit: int 
     if not rows:
         return 0
 
-    processed = 0
-    for row in rows:
-        row.attempts += 1
-        run = await session.get(Run, row.run_id)
-        if run is None:
-            row.sent_at = _now  # run gone — nothing to notify, mark done
-            continue
-        env = await session.get(Environment, run.environment_id)
-        stack = await session.get(Stack, env.stack_id) if env else None
-        if env is None or stack is None:
-            row.sent_at = _now
-            continue
+    # Phase 1: snapshot what we need, bump attempts, release the locks.
+    batch = [(r.id, r.run_id, r.to_state, r.attempts + 1) for r in rows]
+    for r in rows:
+        r.attempts += 1
+    await session.commit()
 
-        targets = await _matching_targets(session, stack, env, row.to_state)
+    # Phase 2: deliver with no DB transaction open.
+    delivered: list[uuid.UUID] = []
+    for row_id, run_id, to_state, attempt in batch:
+        run = await session.get(Run, run_id)
+        env = await session.get(Environment, run.environment_id) if run else None
+        stack = await session.get(Stack, env.stack_id) if env else None
+        if run is None or env is None or stack is None:
+            delivered.append(row_id)  # nothing to notify — mark done
+            continue
+        targets = await _matching_targets(session, stack, env, to_state)
         ok = True
         for target in targets:
             try:
-                await _deliver(target, _render(target, row.to_state, run, stack, env))
-            except Exception as exc:
+                await _deliver(target, _render(target, to_state, run, stack, env))
+            except Exception as exc:  # external endpoint — never crash the loop
                 ok = False
                 _log.warning(
                     "notification delivery failed",
                     extra={
                         "event": "notification.failed",
                         "target_id": str(target.id),
-                        "run_id": str(run.id),
-                        "state": row.to_state,
-                        "attempt": row.attempts,
+                        "run_id": str(run_id),
+                        "state": to_state,
+                        "attempt": attempt,
                         "error": str(exc),
                     },
                 )
-        # No matching target → nothing to retry. All delivered → done. Any failure → retry later.
         if ok:
-            row.sent_at = _now
+            delivered.append(row_id)
             if targets:
                 _log.info(
                     "notifications delivered",
                     extra={
                         "event": "notification.delivered",
-                        "run_id": str(run.id),
-                        "state": row.to_state,
+                        "run_id": str(run_id),
+                        "state": to_state,
                         "targets": len(targets),
                     },
                 )
-        processed += 1
 
-    await session.commit()
-    return processed
+    # Phase 3: mark the delivered rows done.
+    if delivered:
+        await session.execute(
+            update(NotificationOutbox)
+            .where(NotificationOutbox.id.in_(delivered))
+            .values(sent_at=now)
+        )
+        await session.commit()
+    return len(batch)

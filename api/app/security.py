@@ -34,7 +34,12 @@ def create_access_token(user: User) -> str:
 
 def decode_access_token(token: str) -> dict:
     settings = get_settings()
-    claims = jwt.decode(token, settings.stackd_jwt_secret, algorithms=[ALGO])
+    claims = jwt.decode(
+        token,
+        settings.stackd_jwt_secret,
+        algorithms=[ALGO],
+        options={"require": ["exp", "typ"]},
+    )
     if claims.get("typ") != "access":
         raise jwt.InvalidTokenError("not an access token")
     return claims
@@ -60,7 +65,12 @@ def issue_refresh_token(*, jti: uuid.UUID, family_id: uuid.UUID, user_id: uuid.U
 
 def decode_refresh_token(token: str) -> dict:
     settings = get_settings()
-    claims = jwt.decode(token, settings.stackd_jwt_secret, algorithms=[ALGO])
+    claims = jwt.decode(
+        token,
+        settings.stackd_jwt_secret,
+        algorithms=[ALGO],
+        options={"require": ["exp", "typ"]},
+    )
     if claims.get("typ") != "refresh":
         raise jwt.InvalidTokenError("not a refresh token")
     return claims

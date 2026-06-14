@@ -87,12 +87,16 @@ async def post_state(
     doc = json.loads(body)
     new_serial = int(doc.get("serial", 0))
     latest = await _latest(session, env_id)
+    # Only a *regressive* serial is refused — Terraform legitimately re-POSTs the same serial, so
+    # there is intentionally NO unique (environment_id, serial) constraint. The state lock (one
+    # holder per env) is what serializes writers.
     if latest is not None and new_serial < latest.serial:
         raise ProblemException(409, "Serial conflict", "Refusing a regressive state serial.")
 
     version_id = uuid7()
     key = state_key(str(env_id), str(version_id))
-    await put_object(key, body)
+    # Insert the DB row first (flush, not commit), then upload: if S3 fails the row rolls back, so
+    # we never leave a state_version pointing at a missing object.
     session.add(
         StateVersion(
             id=version_id,
@@ -104,6 +108,8 @@ async def post_state(
             created_by_run_id=uuid.UUID(claims["run_id"]) if claims.get("run_id") else None,
         )
     )
+    await session.flush()
+    await put_object(key, body)
     await session.commit()
     return Response(status_code=200)
 
@@ -129,6 +135,7 @@ async def lock_state(env_id: uuid.UUID, request: Request, session: DbSession) ->
 async def unlock_state(env_id: uuid.UUID, request: Request, session: DbSession) -> Response:
     claims = _token_claims(request)
     _require_env(claims, env_id)
+    _require_rw(claims)  # a read-only token (proposed runs) never locks, so it must not unlock
     info = json.loads(await request.body() or b"{}")
     existing = await session.get(StateLock, env_id)
     if existing is None:

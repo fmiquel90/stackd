@@ -195,6 +195,7 @@ variable_set_attachments (
   variable_set_id FK,
   target_kind enum('stack','environment'),
   target_id uuid,                   -- stack → all its envs; environment → this env only
+                                    -- polymorphic (stack OR env) → no DB FK; integrity is app-enforced
   priority int default 0,           -- orders the sets among themselves at resolution
   UNIQUE (variable_set_id, target_kind, target_id)
 )
@@ -858,7 +859,7 @@ S3 for the bytes, HTTP for the interface: per-run scoped tokens without distribu
 | `GET` | `/state/v1/{env_id}` | 200 + latest state, 404 otherwise |
 | `POST` | `/state/v1/{env_id}?ID=<lock_id>` | verifies lock, refuses regressive serial (409), upload S3, `state_version` linked to the run, audit |
 | `LOCK` | `/state/v1/{env_id}/lock` | 200 or **423** + holder |
-| `UNLOCK` | `/state/v1/{env_id}/lock` | verifies lock_id |
+| `UNLOCK` | `/state/v1/{env_id}/lock` | requires `rw` scope (a `ro` proposed-run token never locks); verifies lock_id |
 | `DELETE` | `/state/v1/{env_id}` | admin, soft-delete, audited |
 
 Auth: Basic, password = JWT scoped `{env_id, run_id, scope, exp}`. Scope `ro` for proposed runs.

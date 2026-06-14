@@ -188,7 +188,7 @@ async def _decide_after_plan(session: AsyncSession, worker: Worker, run: Run, re
         )
 
     if not result.get("has_changes", False) or run.type == RunType.proposed:
-        # Empty diff, or a proposed (PR) run → plan-only, terminal.
+        # Empty diff, or a proposed (PR) run → plan-only, terminal. Terminal → audited (§4.2).
         await transition(
             session,
             run,
@@ -196,6 +196,8 @@ async def _decide_after_plan(session: AsyncSession, worker: Worker, run: Run, re
             actor=RunEventActor.worker,
             actor_id=worker.id,
             fields=fields,
+            audit_action="run.plan_finished",
+            audit_context={"has_changes": result.get("has_changes", False)},
         )
         return
 

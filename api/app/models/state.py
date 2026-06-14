@@ -24,7 +24,9 @@ class StateVersion(Base):
     lineage: Mapped[str | None] = mapped_column(String, default=None)
     size_bytes: Mapped[int] = mapped_column(Integer, default=0)
     s3_key: Mapped[str] = mapped_column(String)
-    created_by_run_id: Mapped[uuid.UUID | None] = mapped_column(PGUUID(as_uuid=True), default=None)
+    created_by_run_id: Mapped[uuid.UUID | None] = mapped_column(
+        PGUUID(as_uuid=True), ForeignKey("runs.id", ondelete="SET NULL"), default=None
+    )
     deleted_at: Mapped[datetime | None] = mapped_column(default=None)  # soft-delete (§11.2)
     created_at: Mapped[datetime] = created_at_col()
 

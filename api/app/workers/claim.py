@@ -9,6 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.crypto import decrypt
 from app.enums import (
+    ACTIVE_STATES,
     AuditActorKind,
     JobPhase,
     RepoAuthKind,
@@ -27,17 +28,21 @@ from app.runs.transition import transition
 from app.variables.resolution import provenance_snapshot, resolve_variables
 from app.workers.hooks import platform_hooks
 
+# Derived from ACTIVE_STATES so the claim guard can never drift from the one_active_run_per_env
+# index / the enum (a past bug: `running` was added to both but not here).
+_ACTIVE_SQL = ", ".join(f"'{s.value}'" for s in ACTIVE_STATES)
+
 # Candidate selection (SPECS §7.2). FOR UPDATE OF e SKIP LOCKED serializes claims per environment;
 # the one_active_run_per_env unique index (caught as 23505 below) is the real correctness guard.
 _SELECT_CANDIDATE = text(
-    """
+    f"""
     SELECT r.id AS run_id, r.state AS run_state
     FROM runs r
     JOIN environments e ON e.id = r.environment_id
     WHERE r.state IN ('queued', 'confirmed')
       AND e.locked = false
       -- NULLIF guards against JSONB 'null' (SQLAlchemy writes Python None as JSON null by default).
-      AND COALESCE(NULLIF(e.labels, 'null'::jsonb), '{}'::jsonb) <@ CAST(:labels AS jsonb)
+      AND COALESCE(NULLIF(e.labels, 'null'::jsonb), '{{}}'::jsonb) <@ CAST(:labels AS jsonb)
       AND (
         r.state = 'queued'
         OR r.worker_id = :wid
@@ -46,7 +51,7 @@ _SELECT_CANDIDATE = text(
       AND NOT EXISTS (
         SELECT 1 FROM runs o
         WHERE o.environment_id = r.environment_id AND o.id <> r.id
-          AND o.state IN ('preparing','planning','checking','unconfirmed','confirmed','applying')
+          AND o.state IN ({_ACTIVE_SQL})
       )
     ORDER BY (r.state = 'confirmed' AND r.worker_id = :wid) DESC, r.created_at
     FOR UPDATE OF e SKIP LOCKED
@@ -167,6 +172,16 @@ async def build_job_payload(session: AsyncSession, run: Run) -> dict:
             "password": token,
         }
 
+    cloud_credentials = await _cloud_credentials(session, env, stack, run, cred_phase)  # §10
+
+    # Literal secret values the agent masks in ALL log output (§5.1) — sensitive variables plus the
+    # short-lived state-backend and OIDC tokens (so they never surface in streamed logs).
+    mask_values = [rv.value for rv in resolved if rv.sensitive and rv.value]
+    if backend:
+        mask_values.append(backend["password"])
+    if cloud_credentials and cloud_credentials.get("oidc_token"):
+        mask_values.append(cloud_credentials["oidc_token"])
+
     return {
         "job_id": str(run.id),
         "phase": phase.value,
@@ -186,11 +201,10 @@ async def build_job_payload(session: AsyncSession, run: Run) -> dict:
         "env": env_vars,
         "sensitive_env": sensitive_env,
         "tfvars_json": tfvars_json,
-        # Literal secret values the agent masks in ALL log output before sending (§5.1).
-        "mask_values": [rv.value for rv in resolved if rv.sensitive and rv.value],
+        "mask_values": mask_values,
         "hooks": await platform_hooks(session, stack_id=stack.id, env_id=env.id),
         "backend": backend,  # §11
-        "cloud_credentials": await _cloud_credentials(session, env, stack, run, cred_phase),  # §10
+        "cloud_credentials": cloud_credentials,
         "resolved_inputs": {f"TF_VAR_{k}": v for k, v in dep.resolved_inputs.items()},
         "mock_inputs": {f"TF_VAR_{k}": v for k, v in dep.mock_inputs.items()},
     }

@@ -62,7 +62,9 @@ class EnvOutput(Base):
     environment_id: Mapped[uuid.UUID] = mapped_column(
         PGUUID(as_uuid=True), ForeignKey("environments.id", ondelete="CASCADE")
     )
-    run_id: Mapped[uuid.UUID | None] = mapped_column(PGUUID(as_uuid=True), default=None)
+    run_id: Mapped[uuid.UUID | None] = mapped_column(
+        PGUUID(as_uuid=True), ForeignKey("runs.id", ondelete="SET NULL"), default=None
+    )
     name: Mapped[str] = mapped_column(String)
     value: Mapped[dict | list | str | int | float | bool | None] = mapped_column(
         JSONB(none_as_null=True), default=None

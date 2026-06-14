@@ -26,7 +26,7 @@ async def test_state_lock_post_get_unlock(client: httpx.AsyncClient) -> None:
     stack = await make_stack(client, admin, "state-stack")
     env_id = await make_env(client, admin, stack, "dev", "dev")
     rw = mint_state_token(
-        environment_id=uuid.UUID(env_id), run_id=uuid.uuid4(), scope="rw", ttl_seconds=3600
+        environment_id=uuid.UUID(env_id), run_id=None, scope="rw", ttl_seconds=3600
     )
 
     with mock_aws():
@@ -70,7 +70,7 @@ async def test_readonly_token_cannot_write(client: httpx.AsyncClient) -> None:
     stack = await make_stack(client, admin, "state-ro-stack")
     env_id = await make_env(client, admin, stack, "dev", "dev")
     ro = mint_state_token(
-        environment_id=uuid.UUID(env_id), run_id=uuid.uuid4(), scope="ro", ttl_seconds=3600
+        environment_id=uuid.UUID(env_id), run_id=None, scope="ro", ttl_seconds=3600
     )
     with mock_aws():
         post = await client.post(f"/state/v1/{env_id}", headers=_basic(ro), content=_state_doc(1))
@@ -83,9 +83,7 @@ async def test_state_token_scoped_to_env(client: httpx.AsyncClient) -> None:
     admin = await login(client, "admin")
     stack = await make_stack(client, admin, "state-scope-stack")
     env_id = await make_env(client, admin, stack, "dev", "dev")
-    other = mint_state_token(
-        environment_id=uuid.uuid4(), run_id=uuid.uuid4(), scope="rw", ttl_seconds=3600
-    )
+    other = mint_state_token(environment_id=uuid.uuid4(), run_id=None, scope="rw", ttl_seconds=3600)
     got = await client.get(f"/state/v1/{env_id}", headers=_basic(other))
     assert got.status_code == 403
 
@@ -144,6 +142,26 @@ async def test_import_session_adopts_existing_state(client: httpx.AsyncClient) -
     assert len(versions) == 1
     assert versions[0]["serial"] == 7
     assert versions[0]["created_by_run_id"] is None  # imported out of any run
+
+
+async def test_readonly_token_cannot_unlock(client: httpx.AsyncClient) -> None:
+    from app.statebackend.tokens import mint_state_token
+
+    admin = await login(client, "admin")
+    stack = await make_stack(client, admin, "state-unlock-rbac")
+    env_id = await make_env(client, admin, stack, "dev", "dev")
+    rw = mint_state_token(environment_id=uuid.UUID(env_id), scope="rw", ttl_seconds=3600)
+    ro = mint_state_token(environment_id=uuid.UUID(env_id), scope="ro", ttl_seconds=3600)
+    body = json.dumps({"ID": "lk-1"})
+
+    assert (
+        await client.request("LOCK", f"/state/v1/{env_id}/lock", headers=_basic(rw), content=body)
+    ).status_code == 200
+    # A read-only token never locks, so it must not be able to unlock either.
+    denied = await client.request(
+        "UNLOCK", f"/state/v1/{env_id}/lock", headers=_basic(ro), content=body
+    )
+    assert denied.status_code == 403
 
 
 async def test_import_session_requires_admin(client: httpx.AsyncClient) -> None:
