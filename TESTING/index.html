@@ -1100,10 +1100,10 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
-  <a href="#api-unit-integration-apitests-61-tests" class="md-nav__link">
+  <a href="#api-unit-integration-apitests-62-tests" class="md-nav__link">
     <span class="md-ellipsis">
       
-        API — unit &amp; integration (api/tests/, 61 tests)
+        API — unit &amp; integration (api/tests/, 62 tests)
       
     </span>
   </a>
@@ -1325,10 +1325,10 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
-  <a href="#api-unit-integration-apitests-61-tests" class="md-nav__link">
+  <a href="#api-unit-integration-apitests-62-tests" class="md-nav__link">
     <span class="md-ellipsis">
       
-        API — unit &amp; integration (api/tests/, 61 tests)
+        API — unit &amp; integration (api/tests/, 62 tests)
       
     </span>
   </a>
@@ -1572,7 +1572,7 @@ throwaway one). <code>task e2e</code> points pytest at <code>e2e</code> explicit
 no DB, no network.</p>
 <hr />
 <h2 id="4-test-map-what-each-test-asserts">4. Test map (what each test asserts)<a class="headerlink" href="#4-test-map-what-each-test-asserts" title="Permanent link">&para;</a></h2>
-<h3 id="api-unit-integration-apitests-61-tests">API — unit &amp; integration (<code>api/tests/</code>, 61 tests)<a class="headerlink" href="#api-unit-integration-apitests-61-tests" title="Permanent link">&para;</a></h3>
+<h3 id="api-unit-integration-apitests-62-tests">API — unit &amp; integration (<code>api/tests/</code>, 62 tests)<a class="headerlink" href="#api-unit-integration-apitests-62-tests" title="Permanent link">&para;</a></h3>
 <p><strong><code>test_auth.py</code> (5)</strong> — auth flow &amp; session security
 - <code>test_dev_login_personas</code> — persona login returns the user (role/tier) + a usable access token.
 - <code>test_refresh_requires_csrf</code> — <code>/refresh</code> rejects a request missing the <code>X-CSRF-Token</code> (double-submit).
@@ -1610,10 +1610,11 @@ no DB, no network.</p>
 <p><strong><code>test_hooks.py</code> (2)</strong> — platform hooks
 - <code>test_platform_hook_crud_and_appears_in_claim</code> — a created hook shows up in the claim payload tagged platform; PATCH/DELETE work.
 - <code>test_hooks_require_writer</code> — writer may manage hooks (reader is gated by the permission model).</p>
-<p><strong><code>test_state_backend.py</code> (6)</strong> — Terraform HTTP state backend + import (moto S3)
+<p><strong><code>test_state_backend.py</code> (7)</strong> — Terraform HTTP state backend + import (moto S3)
 - <code>test_state_lock_post_get_unlock</code> — LOCK→409-on-second→POST→serial-regression-409→GET→UNLOCK.
 - <code>test_readonly_token_cannot_write</code> — a <code>ro</code> state token (proposed runs) can't POST state → 403.
 - <code>test_state_token_scoped_to_env</code> — a token scoped to env X can't touch env Y → 403.
+- <code>test_readonly_token_cannot_unlock</code> — a <code>ro</code> token is refused on UNLOCK → 403 (it never locks).
 - <code>test_import_session_adopts_existing_state</code> — an admin import session mints a backend config; the LOCK/POST/UNLOCK migration stores a <code>state_version</code> with no originating run (§11.4).
 - <code>test_import_session_requires_admin</code> — a non-admin can't mint an import session → 403.
 - <code>test_import_session_requires_managed_state</code> — importing into a <code>managed_state=false</code> env → 409.</p>
@@ -1698,7 +1699,7 @@ identity components are instead pinned by <strong>Ladle stories</strong> (the DE
 <tr>
 <td><code>api/tests</code></td>
 <td>18</td>
-<td>61</td>
+<td>62</td>
 </tr>
 <tr>
 <td><code>api/e2e</code></td>
@@ -1713,7 +1714,7 @@ identity components are instead pinned by <strong>Ladle stories</strong> (the DE
 <tr>
 <td><strong>Total</strong></td>
 <td><strong>21</strong></td>
-<td><strong>67</strong></td>
+<td><strong>68</strong></td>
 </tr>
 </tbody>
 </table>

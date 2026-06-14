@@ -2793,9 +2793,10 @@
 <a id="__codelineno-7-11" name="__codelineno-7-11" href="#__codelineno-7-11"></a><span class="w">  </span><span class="n">variable_set_id</span><span class="w"> </span><span class="n">FK</span><span class="p">,</span>
 <a id="__codelineno-7-12" name="__codelineno-7-12" href="#__codelineno-7-12"></a><span class="w">  </span><span class="n">target_kind</span><span class="w"> </span><span class="n">enum</span><span class="p">(</span><span class="s1">&#39;stack&#39;</span><span class="p">,</span><span class="s1">&#39;environment&#39;</span><span class="p">),</span>
 <a id="__codelineno-7-13" name="__codelineno-7-13" href="#__codelineno-7-13"></a><span class="w">  </span><span class="n">target_id</span><span class="w"> </span><span class="n">uuid</span><span class="p">,</span><span class="w">                   </span><span class="c1">-- stack → all its envs; environment → this env only</span>
-<a id="__codelineno-7-14" name="__codelineno-7-14" href="#__codelineno-7-14"></a><span class="w">  </span><span class="n">priority</span><span class="w"> </span><span class="nb">int</span><span class="w"> </span><span class="k">default</span><span class="w"> </span><span class="mi">0</span><span class="p">,</span><span class="w">           </span><span class="c1">-- orders the sets among themselves at resolution</span>
-<a id="__codelineno-7-15" name="__codelineno-7-15" href="#__codelineno-7-15"></a><span class="w">  </span><span class="k">UNIQUE</span><span class="w"> </span><span class="p">(</span><span class="n">variable_set_id</span><span class="p">,</span><span class="w"> </span><span class="n">target_kind</span><span class="p">,</span><span class="w"> </span><span class="n">target_id</span><span class="p">)</span>
-<a id="__codelineno-7-16" name="__codelineno-7-16" href="#__codelineno-7-16"></a><span class="p">)</span>
+<a id="__codelineno-7-14" name="__codelineno-7-14" href="#__codelineno-7-14"></a><span class="w">                                    </span><span class="c1">-- polymorphic (stack OR env) → no DB FK; integrity is app-enforced</span>
+<a id="__codelineno-7-15" name="__codelineno-7-15" href="#__codelineno-7-15"></a><span class="w">  </span><span class="n">priority</span><span class="w"> </span><span class="nb">int</span><span class="w"> </span><span class="k">default</span><span class="w"> </span><span class="mi">0</span><span class="p">,</span><span class="w">           </span><span class="c1">-- orders the sets among themselves at resolution</span>
+<a id="__codelineno-7-16" name="__codelineno-7-16" href="#__codelineno-7-16"></a><span class="w">  </span><span class="k">UNIQUE</span><span class="w"> </span><span class="p">(</span><span class="n">variable_set_id</span><span class="p">,</span><span class="w"> </span><span class="n">target_kind</span><span class="p">,</span><span class="w"> </span><span class="n">target_id</span><span class="p">)</span>
+<a id="__codelineno-7-17" name="__codelineno-7-17" href="#__codelineno-7-17"></a><span class="p">)</span>
 </code></pre></div>
 <p><strong>Final resolution of a variable at claim time</strong> (from weakest to strongest):</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a>1. variable sets auto_attach            (by increasing priority)
@@ -3434,7 +3435,7 @@
 <tr>
 <td><code>UNLOCK</code></td>
 <td><code>/state/v1/{env_id}/lock</code></td>
-<td>verifies lock_id</td>
+<td>requires <code>rw</code> scope (a <code>ro</code> proposed-run token never locks); verifies lock_id</td>
 </tr>
 <tr>
 <td><code>DELETE</code></td>
