@@ -449,6 +449,34 @@
   
   
     <li class="md-nav__item">
+      <a href="../guide/commands/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Running commands
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../guide/hooks/" class="md-nav__link">
         
   
@@ -1044,10 +1072,10 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
-  <a href="#api-unit-integration-apitests-57-tests" class="md-nav__link">
+  <a href="#api-unit-integration-apitests-61-tests" class="md-nav__link">
     <span class="md-ellipsis">
       
-        API — unit &amp; integration (api/tests/, 57 tests)
+        API — unit &amp; integration (api/tests/, 61 tests)
       
     </span>
   </a>
@@ -1269,10 +1297,10 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
-  <a href="#api-unit-integration-apitests-57-tests" class="md-nav__link">
+  <a href="#api-unit-integration-apitests-61-tests" class="md-nav__link">
     <span class="md-ellipsis">
       
-        API — unit &amp; integration (api/tests/, 57 tests)
+        API — unit &amp; integration (api/tests/, 61 tests)
       
     </span>
   </a>
@@ -1516,7 +1544,7 @@ throwaway one). <code>task e2e</code> points pytest at <code>e2e</code> explicit
 no DB, no network.</p>
 <hr />
 <h2 id="4-test-map-what-each-test-asserts">4. Test map (what each test asserts)<a class="headerlink" href="#4-test-map-what-each-test-asserts" title="Permanent link">&para;</a></h2>
-<h3 id="api-unit-integration-apitests-57-tests">API — unit &amp; integration (<code>api/tests/</code>, 57 tests)<a class="headerlink" href="#api-unit-integration-apitests-57-tests" title="Permanent link">&para;</a></h3>
+<h3 id="api-unit-integration-apitests-61-tests">API — unit &amp; integration (<code>api/tests/</code>, 61 tests)<a class="headerlink" href="#api-unit-integration-apitests-61-tests" title="Permanent link">&para;</a></h3>
 <p><strong><code>test_auth.py</code> (5)</strong> — auth flow &amp; session security
 - <code>test_dev_login_personas</code> — persona login returns the user (role/tier) + a usable access token.
 - <code>test_refresh_requires_csrf</code> — <code>/refresh</code> rejects a request missing the <code>X-CSRF-Token</code> (double-submit).
@@ -1540,6 +1568,11 @@ no DB, no network.</p>
 - <code>test_autodeploy_and_warn_forces_unconfirmed</code> — autodeploy auto-confirms, but a <code>warn</code> check forces <code>unconfirmed</code>.
 - <code>test_confirm_rejected_when_not_unconfirmed</code> — confirming a non-<code>unconfirmed</code> run → 409.
 - <code>test_mock_block</code> — a run with <code>used_mocks=true</code> can't be confirmed (reason mentions the mock).</p>
+<p><strong><code>test_commands.py</code> (4)</strong> — ad-hoc command runs (§4.3)
+- <code>test_command_allowlist_rejected</code> — a non-allowlisted command (e.g. <code>apply</code>) → 400.
+- <code>test_readonly_command_allowed_for_writer</code> — a writer may run a read-only command (<code>output</code>) → 201, <code>type=command</code>.
+- <code>test_mutating_command_requires_can_apply</code> — a writer is refused <code>state rm</code> (403); an admin is allowed.
+- <code>test_command_run_lifecycle</code> — claim carries <code>phase=command</code> + the subcommand; <code>running → finished</code>; audited (<code>run.command_triggered</code>/<code>run.command_executed</code>).</p>
 <p><strong><code>test_dependencies.py</code> (5)</strong> — cross-env outputs, mocks, cascade
 - <code>test_mock_used_and_blocks_apply</code> — no real upstream output → the mock is injected, <code>used_mocks=true</code>, apply blocked.
 - <code>test_real_value_beats_mock</code> — a real output overrides the mock.
@@ -1636,8 +1669,8 @@ identity components are instead pinned by <strong>Ladle stories</strong> (the DE
 <tbody>
 <tr>
 <td><code>api/tests</code></td>
-<td>17</td>
-<td>57</td>
+<td>18</td>
+<td>61</td>
 </tr>
 <tr>
 <td><code>api/e2e</code></td>
@@ -1651,8 +1684,8 @@ identity components are instead pinned by <strong>Ladle stories</strong> (the DE
 </tr>
 <tr>
 <td><strong>Total</strong></td>
-<td><strong>20</strong></td>
-<td><strong>63</strong></td>
+<td><strong>21</strong></td>
+<td><strong>67</strong></td>
 </tr>
 </tbody>
 </table>

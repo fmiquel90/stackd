@@ -451,6 +451,34 @@
   
   
     <li class="md-nav__item">
+      <a href="../guide/commands/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Running commands
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../guide/hooks/" class="md-nav__link">
         
   
@@ -1081,6 +1109,17 @@
     <span class="md-ellipsis">
       
         4.2 Transition rules
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#43-command-runs" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        4.3 Command runs
       
     </span>
   </a>
@@ -2005,6 +2044,17 @@
   
 </li>
         
+          <li class="md-nav__item">
+  <a href="#43-command-runs" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        4.3 Command runs
+      
+    </span>
+  </a>
+  
+</li>
+        
       </ul>
     </nav>
   
@@ -2910,6 +2960,8 @@
 </tbody>
 </table>
 <p>Single function <code>transition(run, to_state, actor, payload)</code>: legality, atomic update guarded on <code>from_state</code>, <code>run_event</code>, audit event if the action is human or terminal, WS publication, scheduler hooks. The guarded UPDATE uses <code>RETURNING</code> (PG18: old + new tuple) to produce the <code>from→to</code> <code>run_event</code> without a re-read, in the same transaction.</p>
+<h3 id="43-command-runs">4.3 Command runs<a class="headerlink" href="#43-command-runs" title="Permanent link">&para;</a></h3>
+<p>A <code>RunType.command</code> run executes <strong>one allowlisted tofu/terraform subcommand</strong> (<code>import</code>, <code>state list/show/rm/mv</code>, <code>taint</code>, <code>untaint</code>, <code>output</code>, <code>show</code>, <code>validate</code>, <code>providers</code>, <code>refresh</code>) instead of the plan→apply flow — for state surgery and adoption that <code>plan</code>/<code>apply</code> can't express. It is <strong>not</strong> arbitrary shell: the worker runs <code>&lt;tool&gt; &lt;command&gt; &lt;args&gt;</code> with the command taken verbatim from the allowlist. Lifecycle: <code>queued → preparing → running → finished | failed</code>. The subcommand + args live in <code>runs.command</code> (<code>{name, args}</code>). Endpoint: <code>POST /api/v1/environments/{env_id}/commands</code>. Permissions: read-only commands need <code>writer</code>; <strong>mutating</strong> commands (import, state rm/mv, taint, untaint, refresh) require <code>can_apply(user, env)</code> — the same gate as an apply. The worker receives the <strong>apply</strong> OIDC role for mutating commands and the (read-only) <strong>plan</strong> role otherwise; the trigger is audited (<code>run.command_triggered</code>) and so is completion (<code>run.command_executed</code>). <code>force-unlock</code> is <strong>not</strong> a command — it has its own endpoint (<code>DELETE …/state/lock</code>, §11.2).</p>
 <hr />
 <h2 id="5-job-logging-system">5. Job logging system<a class="headerlink" href="#5-job-logging-system" title="Permanent link">&para;</a></h2>
 <h3 id="51-ingestion-worker-api">5.1 Ingestion (worker → API)<a class="headerlink" href="#51-ingestion-worker-api" title="Permanent link">&para;</a></h3>

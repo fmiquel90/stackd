@@ -11,10 +11,10 @@
       
       
       
-        <link rel="prev" href="../getting-started/">
+        <link rel="prev" href="../runs-and-approvals/">
       
       
-        <link rel="next" href="../variables/">
+        <link rel="next" href="../hooks/">
       
       
         
@@ -25,7 +25,7 @@
     
     
       
-        <title>Stacks & environments - Stackd</title>
+        <title>Running commands - Stackd</title>
       
     
     
@@ -76,7 +76,7 @@
     <div data-md-component="skip">
       
         
-        <a href="#stacks-environments" class="md-skip">
+        <a href="#running-commands-import-state-surgery" class="md-skip">
           Skip to content
         </a>
       
@@ -112,7 +112,7 @@
         <div class="md-header__topic" data-md-component="header-topic">
           <span class="md-ellipsis">
             
-              Stacks & environments
+              Running commands
             
           </span>
         </div>
@@ -366,37 +366,10 @@
                 
   
   
-    
   
   
-  
-    <li class="md-nav__item md-nav__item--active">
-      
-      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
-      
-      
-        
-      
-      
-        <label class="md-nav__link md-nav__link--active" for="__toc">
-          
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    Stacks & environments
-  
-
-    
-  </span>
-  
-  
-
-          <span class="md-nav__icon md-icon"></span>
-        </label>
-      
-      <a href="./" class="md-nav__link md-nav__link--active">
+    <li class="md-nav__item">
+      <a href="../stacks-and-environments/" class="md-nav__link">
         
   
   
@@ -412,115 +385,6 @@
   
 
       </a>
-      
-        
-
-<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
-  
-  
-  
-    
-  
-  
-    <label class="md-nav__title" for="__toc">
-      <span class="md-nav__icon md-icon"></span>
-      Table of contents
-    </label>
-    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
-      
-        <li class="md-nav__item">
-  <a href="#the-mental-model-template-vs-instance" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        The mental model: template vs instance
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#defining-a-stack" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Defining a stack
-      
-    </span>
-  </a>
-  
-    <nav class="md-nav" aria-label="Defining a stack">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#validating-the-repo" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Validating the repo
-      
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#defining-environments" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Defining environments
-      
-    </span>
-  </a>
-  
-    <nav class="md-nav" aria-label="Defining environments">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#fields-that-matter" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Fields that matter
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#refreshing-the-tracked-head" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Refreshing the tracked head
-      
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#see-also" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        See also
-      
-    </span>
-  </a>
-  
-</li>
-      
-    </ul>
-  
-</nav>
-      
     </li>
   
 
@@ -586,10 +450,37 @@
                 
   
   
+    
   
   
-    <li class="md-nav__item">
-      <a href="../commands/" class="md-nav__link">
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Running commands
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
         
   
   
@@ -605,6 +496,70 @@
   
 
       </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#allowed-commands" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Allowed commands
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#run-one" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Run one
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#what-it-runs-with" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        What it runs with
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#see-also" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        See also
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
     </li>
   
 
@@ -1093,10 +1048,10 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#the-mental-model-template-vs-instance" class="md-nav__link">
+  <a href="#allowed-commands" class="md-nav__link">
     <span class="md-ellipsis">
       
-        The mental model: template vs instance
+        Allowed commands
       
     </span>
   </a>
@@ -1104,69 +1059,24 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#defining-a-stack" class="md-nav__link">
+  <a href="#run-one" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Defining a stack
+        Run one
       
     </span>
   </a>
-  
-    <nav class="md-nav" aria-label="Defining a stack">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#validating-the-repo" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Validating the repo
-      
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
   
 </li>
       
         <li class="md-nav__item">
-  <a href="#defining-environments" class="md-nav__link">
+  <a href="#what-it-runs-with" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Defining environments
+        What it runs with
       
     </span>
   </a>
-  
-    <nav class="md-nav" aria-label="Defining environments">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#fields-that-matter" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Fields that matter
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#refreshing-the-tracked-head" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Refreshing the tracked head
-      
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
   
 </li>
       
@@ -1201,91 +1111,70 @@
   
 
 
-<h1 id="stacks-environments">Stacks &amp; environments<a class="headerlink" href="#stacks-environments" title="Permanent link">&para;</a></h1>
-<p>A <strong>stack</strong> is a template (a Git repo + a folder + a tool); an <strong>environment</strong> is an executable instance of that template with its own state, variables and protections. This page shows how to define both via the API.</p>
-<h2 id="the-mental-model-template-vs-instance">The mental model: template vs instance<a class="headerlink" href="#the-mental-model-template-vs-instance" title="Permanent link">&para;</a></h2>
+<h1 id="running-commands-import-state-surgery">Running commands (import, state surgery…)<a class="headerlink" href="#running-commands-import-state-surgery" title="Permanent link">&para;</a></h1>
+<p>Some operations don't fit <code>plan → apply</code>: importing an existing resource, removing something from
+state, re-tainting a resource. Stackd runs these as a <strong>command run</strong> — one allowlisted
+tofu/terraform subcommand executed on the worker, in the environment, with the same audit and the
+managed backend as any other run.</p>
+<div class="admonition note">
+<p class="admonition-title">Note</p>
+<p>This is <strong>not</strong> arbitrary shell. The worker runs <code>&lt;tool&gt; &lt;command&gt; &lt;args&gt;</code> where <code>command</code> is
+taken verbatim from an allowlist. To remove a stuck lock, use the dedicated force-unlock
+(UI <strong>State</strong> tab, or <code>DELETE /api/v1/environments/{id}/state/lock</code>) — it isn't a command.</p>
+</div>
+<h2 id="allowed-commands">Allowed commands<a class="headerlink" href="#allowed-commands" title="Permanent link">&para;</a></h2>
 <table>
 <thead>
 <tr>
-<th></th>
-<th><strong>Stack</strong></th>
-<th><strong>Environment</strong></th>
+<th>Read-only (needs <code>writer</code>)</th>
+<th>Mutating (needs apply rights)</th>
 </tr>
 </thead>
 <tbody>
 <tr>
-<td>Is</td>
-<td>the template (code)</td>
-<td>an instance (a deployable target)</td>
-</tr>
-<tr>
-<td>Holds</td>
-<td><code>repo_url</code>, <code>project_root</code>, <code>tool</code>, <code>tool_version</code>, repo auth</td>
-<td><code>tier</code>, <code>branch</code>, state, variables, protections, labels</td>
-</tr>
-<tr>
-<td>Runs?</td>
-<td>never</td>
-<td>a run always belongs to an environment</td>
+<td><code>output</code>, <code>show</code>, <code>state list</code>, <code>state show</code>, <code>validate</code>, <code>providers</code></td>
+<td><code>import</code>, <code>state rm</code>, <code>state mv</code>, <code>taint</code>, <code>untaint</code>, <code>refresh</code></td>
 </tr>
 </tbody>
 </table>
-<p>A stack carries <strong>no branch, no state, no autodeploy</strong> — all of that lives on the environment. See <a href="../../CONCEPTS/">Concepts §2</a>.</p>
-<h2 id="defining-a-stack">Defining a stack<a class="headerlink" href="#defining-a-stack" title="Permanent link">&para;</a></h2>
-<p>A stack points at a Git repo, a subfolder within it (<code>project_root</code>, default <code>.</code>), and the IaC tool. Repo auth is one of <code>none</code>, <code>token</code>, or <code>deploy_key</code>.</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="nv">STACK</span><span class="o">=</span><span class="k">$(</span>curl<span class="w"> </span>-s<span class="w"> </span>-X<span class="w"> </span>POST<span class="w"> </span>localhost:8000/api/v1/stacks<span class="w"> </span><span class="se">\</span>
-<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="w">  </span>-H<span class="w"> </span><span class="s2">&quot;Authorization: Bearer </span><span class="nv">$TOKEN</span><span class="s2">&quot;</span><span class="w"> </span>-H<span class="w"> </span><span class="s1">&#39;content-type: application/json&#39;</span><span class="w"> </span><span class="se">\</span>
-<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a><span class="w">  </span>-d<span class="w"> </span><span class="s1">&#39;{&quot;name&quot;:&quot;core-network&quot;,&quot;repo_url&quot;:&quot;https://github.com/acme/infra.git&quot;,</span>
-<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a><span class="s1">       &quot;project_root&quot;:&quot;network&quot;,&quot;tool&quot;:&quot;opentofu&quot;,&quot;tool_version&quot;:&quot;1.12.0&quot;}&#39;</span><span class="w"> </span><span class="p">|</span><span class="w"> </span>jq<span class="w"> </span>-r<span class="w"> </span>.id<span class="k">)</span>
+<p><strong>Mutating commands change real state</strong>, so they're gated by <code>can_apply(user, env)</code> — the same role
++ tier check as approving an apply (see <a href="../runs-and-approvals/">Runs &amp; approvals</a>). Read-only
+commands only need <code>writer</code>.</p>
+<h2 id="run-one">Run one<a class="headerlink" href="#run-one" title="Permanent link">&para;</a></h2>
+<p>From the UI: open an environment → the <strong>Command</strong> tab → pick a command, add arguments, run. You
+land on the run page with live logs.</p>
+<p>Over the API:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="c1"># import an existing bucket into state</span>
+<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>curl<span class="w"> </span>-s<span class="w"> </span>-X<span class="w"> </span>POST<span class="w"> </span>localhost:8000/api/v1/environments/<span class="nv">$ENV_ID</span>/commands<span class="w"> </span>-H<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$AUTH</span><span class="s2">&quot;</span><span class="w"> </span>-d<span class="w"> </span><span class="s1">&#39;{</span>
+<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a><span class="s1">  &quot;command&quot;: &quot;import&quot;,</span>
+<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a><span class="s1">  &quot;args&quot;: [&quot;aws_s3_bucket.logs&quot;, &quot;my-existing-bucket&quot;]</span>
+<a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a><span class="s1">}&#39;</span>
+<a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a>
+<a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a><span class="c1"># remove a resource from state</span>
+<a id="__codelineno-0-8" name="__codelineno-0-8" href="#__codelineno-0-8"></a>curl<span class="w"> </span>-s<span class="w"> </span>-X<span class="w"> </span>POST<span class="w"> </span>localhost:8000/api/v1/environments/<span class="nv">$ENV_ID</span>/commands<span class="w"> </span>-H<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$AUTH</span><span class="s2">&quot;</span><span class="w"> </span>-d<span class="w"> </span><span class="s1">&#39;{</span>
+<a id="__codelineno-0-9" name="__codelineno-0-9" href="#__codelineno-0-9"></a><span class="s1">  &quot;command&quot;: &quot;state rm&quot;, &quot;args&quot;: [&quot;aws_instance.old&quot;]</span>
+<a id="__codelineno-0-10" name="__codelineno-0-10" href="#__codelineno-0-10"></a><span class="s1">}&#39;</span>
 </code></pre></div>
-<div class="admonition tip">
-<p class="admonition-title">One repo, several stacks</p>
-<p>A single repo can host many stacks by giving each a distinct <code>project_root</code> (e.g. <code>network</code>, <code>db</code>, <code>app</code>). The push webhook is configured <strong>per repo</strong> with one shared secret; on receipt the API resolves matching stacks and filters environments by branch and <code>project_root</code>. See <a href="../../SPECS/">SPECS §3.1</a>.</p>
-</div>
-<h3 id="validating-the-repo">Validating the repo<a class="headerlink" href="#validating-the-repo" title="Permanent link">&para;</a></h3>
-<p>Before creating environments, check that Stackd can reach the repo with the configured auth:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>curl<span class="w"> </span>-s<span class="w"> </span>-X<span class="w"> </span>POST<span class="w"> </span>localhost:8000/api/v1/stacks/<span class="nv">$STACK</span>/check-repo<span class="w"> </span><span class="se">\</span>
-<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="w">  </span>-H<span class="w"> </span><span class="s2">&quot;Authorization: Bearer </span><span class="nv">$TOKEN</span><span class="s2">&quot;</span>
-</code></pre></div>
-<h2 id="defining-environments">Defining environments<a class="headerlink" href="#defining-environments" title="Permanent link">&para;</a></h2>
-<p>Each environment is an instance of the stack. The same code runs against physically separate state and variables.</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="c1"># dev — permissive</span>
-<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a>curl<span class="w"> </span>-s<span class="w"> </span>-X<span class="w"> </span>POST<span class="w"> </span>localhost:8000/api/v1/stacks/<span class="nv">$STACK</span>/environments<span class="w"> </span><span class="se">\</span>
-<a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a><span class="w">  </span>-H<span class="w"> </span><span class="s2">&quot;Authorization: Bearer </span><span class="nv">$TOKEN</span><span class="s2">&quot;</span><span class="w"> </span>-H<span class="w"> </span><span class="s1">&#39;content-type: application/json&#39;</span><span class="w"> </span><span class="se">\</span>
-<a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a><span class="w">  </span>-d<span class="w"> </span><span class="s1">&#39;{&quot;name&quot;:&quot;dev&quot;,&quot;tier&quot;:&quot;dev&quot;,&quot;branch&quot;:&quot;main&quot;}&#39;</span>
-<a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a>
-<a id="__codelineno-2-6" name="__codelineno-2-6" href="#__codelineno-2-6"></a><span class="c1"># prod — protected, second pair of eyes</span>
-<a id="__codelineno-2-7" name="__codelineno-2-7" href="#__codelineno-2-7"></a>curl<span class="w"> </span>-s<span class="w"> </span>-X<span class="w"> </span>POST<span class="w"> </span>localhost:8000/api/v1/stacks/<span class="nv">$STACK</span>/environments<span class="w"> </span><span class="se">\</span>
-<a id="__codelineno-2-8" name="__codelineno-2-8" href="#__codelineno-2-8"></a><span class="w">  </span>-H<span class="w"> </span><span class="s2">&quot;Authorization: Bearer </span><span class="nv">$TOKEN</span><span class="s2">&quot;</span><span class="w"> </span>-H<span class="w"> </span><span class="s1">&#39;content-type: application/json&#39;</span><span class="w"> </span><span class="se">\</span>
-<a id="__codelineno-2-9" name="__codelineno-2-9" href="#__codelineno-2-9"></a><span class="w">  </span>-d<span class="w"> </span><span class="s1">&#39;{&quot;name&quot;:&quot;prod&quot;,&quot;tier&quot;:&quot;prod&quot;,&quot;branch&quot;:&quot;main&quot;,</span>
-<a id="__codelineno-2-10" name="__codelineno-2-10" href="#__codelineno-2-10"></a><span class="s1">       &quot;protected&quot;:true,&quot;require_second_pair_of_eyes&quot;:true}&#39;</span>
-</code></pre></div>
-<h3 id="fields-that-matter">Fields that matter<a class="headerlink" href="#fields-that-matter" title="Permanent link">&para;</a></h3>
+<p>The response is a normal run (<code>type: command</code>). It flows <code>queued → preparing → running →
+finished/failed</code>, holds the <strong>one-active-run-per-env</strong> lock (no command races a plan/apply), streams
+logs, and uses the managed state backend.</p>
+<h2 id="what-it-runs-with">What it runs with<a class="headerlink" href="#what-it-runs-with" title="Permanent link">&para;</a></h2>
 <ul>
-<li><strong><code>tier</code></strong> (<code>dev &lt; staging &lt; prod</code>) — carries apply/destroy permissions: <code>can_apply</code> requires <code>max_apply_tier &gt;= env.tier</code>. See <a href="../runs-and-approvals/">Runs &amp; approvals</a>.</li>
-<li><strong><code>branch</code></strong> — the branch this environment tracks for staleness and webhook-driven runs.</li>
-<li><strong><code>protected</code></strong> — forces confirmation and 4-eyes; it is <strong>not</strong> the access control (that is <code>tier</code>).</li>
-<li><strong><code>require_second_pair_of_eyes</code></strong> — the triggerer cannot confirm (already implied for <code>tier=prod</code>; useful on staging).</li>
-<li><strong><code>managed_state</code></strong> — when true, Terraform talks to Stackd's HTTP backend (state bytes in S3). Set <code>false</code> to keep your own <code>backend "s3"</code>. See <a href="../../CONCEPTS/">Concepts §7</a>.</li>
-<li><strong><code>allow_mock_apply</code></strong> — allow applying a run that consumed mock outputs (default <code>false</code>). See <a href="../variables/">Variables</a>.</li>
-<li><strong><code>labels</code></strong> — JSON tags used to target a worker pool.</li>
+<li>The worker clones the repo at the pinned commit, <code>init</code>s with the env's backend, then runs the
+  subcommand — so config-aware commands like <code>import</code> work.</li>
+<li><strong>Credentials</strong>: a mutating command gets the env's <strong>apply</strong> OIDC role; a read-only command gets
+  the <strong>plan</strong> (read-only) role. See <a href="../cloud-credentials/">Cloud credentials</a>.</li>
+<li><strong>Audited</strong>: <code>run.command_triggered</code> on trigger and <code>run.command_executed</code> on success.</li>
 </ul>
 <div class="admonition warning">
-<p class="admonition-title">Why not Terraform workspaces</p>
-<p>Workspaces share code, backend and credentials and only suffix the state key — easy to target the wrong one. A Stackd environment is <strong>physically isolated</strong>: its own state, variables, protections and worker pool.</p>
+<p class="admonition-title">Warning</p>
+<p><code>import</code> needs to <em>read</em> the real resource, so the assumed role must have access to it. For an
+existing stack you're adopting, pair this with <a href="../importing-existing-state/">Importing an existing stack</a>.</p>
 </div>
-<h3 id="refreshing-the-tracked-head">Refreshing the tracked head<a class="headerlink" href="#refreshing-the-tracked-head" title="Permanent link">&para;</a></h3>
-<p>Staleness compares the last applied commit to the branch head. <code>head_sha</code> updates via push webhook or 15-min polling; force it manually:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a>curl<span class="w"> </span>-s<span class="w"> </span>-X<span class="w"> </span>POST<span class="w"> </span>localhost:8000/api/v1/environments/<span class="nv">$ENV</span>/refresh-head<span class="w"> </span><span class="se">\</span>
-<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a><span class="w">  </span>-H<span class="w"> </span><span class="s2">&quot;Authorization: Bearer </span><span class="nv">$TOKEN</span><span class="s2">&quot;</span>
-</code></pre></div>
-<p><code>GET /api/v1/environments/{id}</code> then exposes <code>head_sha</code>, <code>commits_ahead</code>, <code>affects_project_root</code> and <code>stale</code>. See <a href="../../SPECS/">SPECS §9.6</a>.</p>
 <h2 id="see-also">See also<a class="headerlink" href="#see-also" title="Permanent link">&para;</a></h2>
 <ul>
-<li><a href="../variables/">Variables</a> — variable sets, resolution and sensitive values</li>
-<li><a href="../runs-and-approvals/">Runs &amp; approvals</a> — triggering plans and confirming applies</li>
-<li><a href="../../CONCEPTS/">Concepts</a> — the full mental model</li>
-<li><a href="../../SPECS/">SPECS</a> — data model and API reference</li>
+<li><a href="../runs-and-approvals/">Runs &amp; approvals</a> · <a href="../importing-existing-state/">Importing an existing stack</a></li>
+<li><a href="../../SPECS/">SPECS §4.3</a></li>
 </ul>
 
 
