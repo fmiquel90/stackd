@@ -83,5 +83,6 @@ then UNLOCKs. Future runs use the managed backend automatically.
 
 ## See also
 
+- [Exit & data portability](leaving.md) — the reverse: getting your state back out.
 - [Stacks & environments](stacks-and-environments.md) · [Cloud credentials (OIDC)](cloud-credentials.md)
 - [SPECS §11](../SPECS.md)

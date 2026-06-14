@@ -62,6 +62,7 @@ nav:
       - Hooks & .stackd.yml: guide/hooks.md
       - Dependencies & mocks: guide/dependencies-and-mocks.md
       - Importing an existing stack: guide/importing-existing-state.md
+      - Exit & data portability: guide/leaving.md
       - Cloud credentials (OIDC): guide/cloud-credentials.md
       - Workers & scaling: guide/workers-and-scaling.md
       - Notifications: guide/notifications.md
