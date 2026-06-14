@@ -1,0 +1,1878 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="Self-hostable Terraform/OpenTofu orchestration — plan → human approval → apply.">
+      
+      
+      
+      
+        <link rel="prev" href="../PLAN/">
+      
+      
+        <link rel="next" href="../DEV/">
+      
+      
+        
+      
+      
+      <link rel="icon" href="../assets/images/favicon.png">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.6">
+    
+    
+      
+        <title>Design - Stackd</title>
+      
+    
+    
+      <link rel="stylesheet" href="../assets/stylesheets/main.484c7ddc.min.css">
+      
+        
+        <link rel="stylesheet" href="../assets/stylesheets/palette.ab4e12ef.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Roboto:300,300i,400,400i,700,700i%7CRoboto+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Roboto";--md-code-font:"Roboto Mono"}</style>
+      
+    
+    
+    <script>__md_scope=new URL("..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  </head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="slate" data-md-color-primary="amber" data-md-color-accent="amber">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#designmd-front-end-design-decisions" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+    
+      
+
+  
+
+<header class="md-header md-header--shadow" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href=".." title="Stackd" class="md-header__button md-logo" aria-label="Stackd" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            Stackd
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              Design
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: dark)" data-md-color-scheme="slate" data-md-color-primary="amber" data-md-color-accent="amber"  aria-label="Switch to light mode"  type="radio" name="__palette" id="__palette_0">
+    
+      <label class="md-header__button md-icon" title="Switch to light mode" for="__palette_1" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 7a5 5 0 0 1 5 5 5 5 0 0 1-5 5 5 5 0 0 1-5-5 5 5 0 0 1 5-5m0 2a3 3 0 0 0-3 3 3 3 0 0 0 3 3 3 3 0 0 0 3-3 3 3 0 0 0-3-3m0-7 2.39 3.42C13.65 5.15 12.84 5 12 5s-1.65.15-2.39.42zM3.34 7l4.16-.35A7.2 7.2 0 0 0 5.94 8.5c-.44.74-.69 1.5-.83 2.29zm.02 10 1.76-3.77a7.131 7.131 0 0 0 2.38 4.14zM20.65 7l-1.77 3.79a7.02 7.02 0 0 0-2.38-4.15zm-.01 10-4.14.36c.59-.51 1.12-1.14 1.54-1.86.42-.73.69-1.5.83-2.29zM12 22l-2.41-3.44c.74.27 1.55.44 2.41.44.82 0 1.63-.17 2.37-.44z"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: light)" data-md-color-scheme="default" data-md-color-primary="amber" data-md-color-accent="amber"  aria-label="Switch to dark mode"  type="radio" name="__palette" id="__palette_1">
+    
+      <label class="md-header__button md-icon" title="Switch to dark mode" for="__palette_0" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="m17.75 4.09-2.53 1.94.91 3.06-2.63-1.81-2.63 1.81.91-3.06-2.53-1.94L12.44 4l1.06-3 1.06 3zm3.5 6.91-1.64 1.25.59 1.98-1.7-1.17-1.7 1.17.59-1.98L15.75 11l2.06-.05L18.5 9l.69 1.95zm-2.28 4.95c.83-.08 1.72 1.1 1.19 1.85-.32.45-.66.87-1.08 1.27C15.17 23 8.84 23 4.94 19.07c-3.91-3.9-3.91-10.24 0-14.14.4-.4.82-.76 1.27-1.08.75-.53 1.93.36 1.85 1.19-.27 2.86.69 5.83 2.89 8.02a9.96 9.96 0 0 0 8.02 2.89m-1.64 2.02a12.08 12.08 0 0 1-7.8-3.47c-2.17-2.19-3.33-5-3.49-7.82-2.81 3.14-2.7 7.96.31 10.98 3.02 3.01 7.84 3.12 10.98.31"/></svg>
+      </label>
+    
+  
+</form>
+      
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+        <div class="md-search__suggest" data-md-component="search-suggest"></div>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+      <div class="md-header__source">
+        <a href="https://github.com/fmiquel90/stackd" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    fmiquel90/stackd
+  </div>
+</a>
+      </div>
+    
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+
+<nav class="md-nav md-nav--primary" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href=".." title="Stackd" class="md-nav__button md-logo" aria-label="Stackd" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    Stackd
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/fmiquel90/stackd" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    fmiquel90/stackd
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href=".." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Home
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_2" >
+        
+          
+          <label class="md-nav__link" for="__nav_2" id="__nav_2_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Guide
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_2_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_2">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Guide
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../guide/getting-started/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Getting started
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../guide/stacks-and-environments/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Stacks & environments
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../guide/variables/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Variables & secrets
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../guide/runs-and-approvals/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Runs & approvals
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../guide/hooks/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Hooks & .stackd.yml
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../guide/dependencies-and-mocks/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Dependencies & mocks
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../guide/importing-existing-state/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Importing an existing stack
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../guide/cloud-credentials/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Cloud credentials (OIDC)
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../guide/workers-and-scaling/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Workers & scaling
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../guide/notifications/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Notifications
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../guide/observability/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Observability
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../CONCEPTS/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Concepts
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../api/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    API
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5" checked>
+        
+          
+          <label class="md-nav__link" for="__nav_5" id="__nav_5_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Reference
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_5_label" aria-expanded="true">
+          <label class="md-nav__title" for="__nav_5">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Reference
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../SPECS/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Specification
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../PLAN/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Plan & scope
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Design
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Design
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#1-subject-audience-intent" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        1. Subject, audience, intent
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#2-visual-direction" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2. Visual direction
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="2. Visual direction">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#21-concept-operational-blueprint" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2.1 Concept: "operational blueprint"
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#22-signature-element-the-phase-rail" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2.2 Signature element: the phase rail
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#3-design-tokens" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3. Design tokens
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="3. Design tokens">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#31-palette-dark-theme-reference" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3.1 Palette (dark theme, reference)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#32-state-colors-the-semantic-language-identical-in-both-themes" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3.2 State colors (the semantic language, identical in both themes)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#33-typography" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3.3 Typography
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#34-spacing-radius-elevation" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3.4 Spacing, radius, elevation
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#4-navigation-architecture" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        4. Navigation architecture
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#5-key-screens-decisions" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        5. Key screens — decisions
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="5. Key screens — decisions">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#51-stacks-the-overview-home" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        5.1 /stacks — the overview (home)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#52-runsid-the-most-important-screen" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        5.2 /runs/{id} — the most important screen
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#53-log-viewer-in-the-run-page" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        5.3 Log viewer (in the run page)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#54-graph-and-run-groups" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        5.4 /graph and run groups
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#55-queue-the-execution-queue" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        5.5 /queue — the execution queue
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#56-audit" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        5.6 /audit
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#57-forms-stack-wizard-variables-hooks" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        5.7 Forms (stack wizard, variables, hooks)
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#6-real-time-patterns" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        6. Real-time patterns
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#7-accessibility-states-quality" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        7. Accessibility, states, quality
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#8-implementation" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        8. Implementation
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#9-what-we-forbid-ourselves-reminder" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        9. What we forbid ourselves (reminder)
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../DEV/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Dev environment
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../TESTING/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Testing
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#1-subject-audience-intent" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        1. Subject, audience, intent
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#2-visual-direction" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2. Visual direction
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="2. Visual direction">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#21-concept-operational-blueprint" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2.1 Concept: "operational blueprint"
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#22-signature-element-the-phase-rail" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2.2 Signature element: the phase rail
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#3-design-tokens" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3. Design tokens
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="3. Design tokens">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#31-palette-dark-theme-reference" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3.1 Palette (dark theme, reference)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#32-state-colors-the-semantic-language-identical-in-both-themes" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3.2 State colors (the semantic language, identical in both themes)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#33-typography" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3.3 Typography
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#34-spacing-radius-elevation" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3.4 Spacing, radius, elevation
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#4-navigation-architecture" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        4. Navigation architecture
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#5-key-screens-decisions" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        5. Key screens — decisions
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="5. Key screens — decisions">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#51-stacks-the-overview-home" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        5.1 /stacks — the overview (home)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#52-runsid-the-most-important-screen" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        5.2 /runs/{id} — the most important screen
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#53-log-viewer-in-the-run-page" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        5.3 Log viewer (in the run page)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#54-graph-and-run-groups" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        5.4 /graph and run groups
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#55-queue-the-execution-queue" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        5.5 /queue — the execution queue
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#56-audit" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        5.6 /audit
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#57-forms-stack-wizard-variables-hooks" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        5.7 Forms (stack wizard, variables, hooks)
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#6-real-time-patterns" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        6. Real-time patterns
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#7-accessibility-states-quality" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        7. Accessibility, states, quality
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#8-implementation" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        8. Implementation
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#9-what-we-forbid-ourselves-reminder" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        9. What we forbid ourselves (reminder)
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+  
+  
+
+
+<h1 id="designmd-front-end-design-decisions">DESIGN.md — Front-end design decisions<a class="headerlink" href="#designmd-front-end-design-decisions" title="Permanent link">&para;</a></h1>
+<blockquote>
+<p>Companion to PLAN.md and SPECS.md. This document locks in the design decisions for the interface: visual direction, tokens, navigation, patterns for the key screens. Goal: that every screen built (by a human or by Claude Code) is consistent without re-litigating the choices.</p>
+</blockquote>
+<hr />
+<h2 id="1-subject-audience-intent">1. Subject, audience, intent<a class="headerlink" href="#1-subject-audience-intent" title="Permanent link">&para;</a></h2>
+<ul>
+<li><strong>Subject</strong>: a control room for infrastructure. You come here to quickly answer three questions: <em>what is running?</em>, <em>what is waiting on a human decision?</em>, <em>who did what?</em></li>
+<li><strong>Audience</strong>: cloud/DevOps/SRE engineers. Expert, daily users, on the keyboard, often on a large screen, sometimes on call on whatever screen is at hand. Zero need for marketing seduction in the app.</li>
+<li><strong>Emotional intent</strong>: <strong>operational confidence</strong>. The interface of a tool that applies destructive changes to production must be calm, dense, legible, unambiguous. No gamification, no decoration, no gratuitous animation.</li>
+<li><strong>Anti-references</strong>: the "generic SaaS dashboard" look (floating rounded cards, gradients, 3D illustrations) and the "hacker terminal" look (pure black + acid green). Both are defaults, not choices.</li>
+</ul>
+<hr />
+<h2 id="2-visual-direction">2. Visual direction<a class="headerlink" href="#2-visual-direction" title="Permanent link">&para;</a></h2>
+<h3 id="21-concept-operational-blueprint">2.1 Concept: "operational blueprint"<a class="headerlink" href="#21-concept-operational-blueprint" title="Permanent link">&para;</a></h3>
+<p>The aesthetic draws on <strong>technical drawings and engineering schematics</strong>: deep slate-blue backgrounds, fine strokes, monospace labels, hierarchy carried by typography and rules rather than by shadowed boxes. It is the natural universe of the subject (you draw infrastructure) and it ages well.</p>
+<ul>
+<li><strong>Dark-first</strong>: the dark theme is the reference theme (logs, on-call duty, the habits of the trade). A light theme exists from the start (same token system, never "added later").</li>
+<li><strong>Deliberately high density</strong>: compact tables, tight line-height on data, generous margins only around decision areas. Density is a service rendered to an expert, not a defect.</li>
+<li><strong>Flat and delimited by rules</strong>: separations via 1px borders and subtle background variations. No drop shadows, no glassmorphism. Low radius (4 px) — the tool is angular like a schematic.</li>
+</ul>
+<h3 id="22-signature-element-the-phase-rail">2.2 Signature element: the <strong>phase rail</strong><a class="headerlink" href="#22-signature-element-the-phase-rail" title="Permanent link">&para;</a></h3>
+<p>THE memorable thing about the interface: a <strong>vertical rail</strong> present on every run page, which materializes the state machine (queued → preparing → planning → checking → unconfirmed → applying → finished; <code>checking</code> only appears if checks exist, <code>confirmed</code> is transient and is displayed as the start of the applying segment). Each segment:</p>
+<ul>
+<li>semantic color code (cf. §3.2), the active segment animated with a discreet pulse (the only ambient animation in the app);</li>
+<li>clickable: navigates directly to the log section for that phase;</li>
+<li>carries its metadata in mono (duration, exit code, number of checks);</li>
+<li>reused as a <strong>horizontal</strong> miniature everywhere a run is listed (stacks table, audit, run groups) — a visual signature you learn once and re-read everywhere.</li>
+</ul>
+<p>The rail IS the product's pedagogy: it makes the state machine visible instead of explaining it.</p>
+<hr />
+<h2 id="3-design-tokens">3. Design tokens<a class="headerlink" href="#3-design-tokens" title="Permanent link">&para;</a></h2>
+<h3 id="31-palette-dark-theme-reference">3.1 Palette (dark theme, reference)<a class="headerlink" href="#31-palette-dark-theme-reference" title="Permanent link">&para;</a></h3>
+<table>
+<thead>
+<tr>
+<th>Token</th>
+<th>Hex</th>
+<th>Usage</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>bg-base</code></td>
+<td><code>#0D1117</code> → adjusted <code>#0E141B</code></td>
+<td>app background (bluish slate, never pure black)</td>
+</tr>
+<tr>
+<td><code>bg-surface</code></td>
+<td><code>#151C24</code></td>
+<td>panels, tables</td>
+</tr>
+<tr>
+<td><code>bg-raised</code></td>
+<td><code>#1C2530</code></td>
+<td>interactive elements, hover, sticky headers</td>
+</tr>
+<tr>
+<td><code>border</code></td>
+<td><code>#2A3441</code></td>
+<td>1px rules (the main structural material)</td>
+</tr>
+<tr>
+<td><code>text-primary</code></td>
+<td><code>#E6EDF3</code></td>
+<td>body text</td>
+</tr>
+<tr>
+<td><code>text-secondary</code></td>
+<td><code>#8B98A5</code></td>
+<td>labels, meta</td>
+</tr>
+<tr>
+<td><code>accent</code></td>
+<td><code>#D9A23B</code> (signal amber)</td>
+<td>human-decision actions: Confirm, focus, active links</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Amber</strong> as the single accent is a deliberate choice: it is the color of decision (confirming an apply), it stands out from the blue background without shouting, and it leaves the entire green/red spectrum available for state semantics. The most important button in the app (Confirm on prod) is amber — not green, because green would say "all is well" whereas it says "your judgment is needed".</p>
+<p>Light theme: same tokens inverted (<code>bg-base #F7F9FB</code>, slate for text, darkened amber <code>#A87A1F</code> for AA contrast).</p>
+<h3 id="32-state-colors-the-semantic-language-identical-in-both-themes">3.2 State colors (the semantic language, identical in both themes)<a class="headerlink" href="#32-state-colors-the-semantic-language-identical-in-both-themes" title="Permanent link">&para;</a></h3>
+<table>
+<thead>
+<tr>
+<th>State</th>
+<th>Color</th>
+<th>Hex (dark)</th>
+<th>Where</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>queued</code> / neutral</td>
+<td>gray</td>
+<td><code>#6E7B8B</code></td>
+<td>badges, rail, graph nodes</td>
+</tr>
+<tr>
+<td><code>running</code> (preparing/planning/checking/applying)</td>
+<td>blue</td>
+<td><code>#4C8DFF</code></td>
+<td>+ pulse on the active element</td>
+</tr>
+<tr>
+<td><code>unconfirmed</code> (waiting on a human)</td>
+<td>amber</td>
+<td><code>#D9A23B</code></td>
+<td>the same color as the accent: <em>waiting on a human IS the action</em></td>
+</tr>
+<tr>
+<td><code>finished</code></td>
+<td>green</td>
+<td><code>#3FB950</code></td>
+<td></td>
+</tr>
+<tr>
+<td><code>failed</code></td>
+<td>red</td>
+<td><code>#F85149</code></td>
+<td></td>
+</tr>
+<tr>
+<td><code>discarded</code> / <code>canceled</code></td>
+<td>struck-through gray</td>
+<td><code>#6E7B8B</code></td>
+<td></td>
+</tr>
+</tbody>
+</table>
+<p><code>mocked</code> is not a state but a <strong>modifier</strong> that overlays the current state (a mocked run is also <code>unconfirmed</code>, <code>planning</code>...) — rendered by a distinct purple badge <code>#A371F7</code>, deliberately outside the operational spectrum ("this is not real"): MOCKED badge, mocked values.</p>
+<p>Absolute rule: these colors serve <strong>only</strong> state semantics. Never decorative blue, never green on a button unrelated to a success. This is what makes the app legible at a glance at 3 a.m.</p>
+<h3 id="33-typography">3.3 Typography<a class="headerlink" href="#33-typography" title="Permanent link">&para;</a></h3>
+<table>
+<thead>
+<tr>
+<th>Role</th>
+<th>Font</th>
+<th>Usage</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>UI / body</td>
+<td><strong>IBM Plex Sans</strong></td>
+<td>navigation, forms, prose</td>
+</tr>
+<tr>
+<td>Data / structure</td>
+<td><strong>JetBrains Mono</strong></td>
+<td>⭐ everything that is <em>data</em>: IDs, SHAs, resource names, variable values, durations, eyebrow labels, column headers, logs</td>
+</tr>
+<tr>
+<td>Display</td>
+<td>IBM Plex Sans SemiBold, tracking -1%</td>
+<td>page titles, login, empty states</td>
+</tr>
+</tbody>
+</table>
+<p><strong>"Data is mono" rule</strong>: this is the second identity marker after the rail. A <code>commit abc1234</code>, a <code>vpc-0f3a...</code>, a <code>+3 ~1 −0</code> are always in mono — the eye instantly distinguishes what comes from the system from what comes from the interface. Scale: 13 px base UI (density), 12 px tables and logs, 16/20/24 px titles. No weight beyond SemiBold.</p>
+<h3 id="34-spacing-radius-elevation">3.4 Spacing, radius, elevation<a class="headerlink" href="#34-spacing-radius-elevation" title="Permanent link">&para;</a></h3>
+<ul>
+<li>4 px grid. Table cell padding: 6×10 px (dense), forms: 12 px.</li>
+<li>Radius: 4 px everywhere, 2 px on badges. No pills except state badges.</li>
+<li>Elevation: no shadows; hierarchy = background (<code>base &lt; surface &lt; raised</code>) + rules.</li>
+<li>Iconography: Lucide, 16 px, stroke 1.5, always accompanied by a label (never an icon alone on a destructive action).</li>
+</ul>
+<hr />
+<h2 id="4-navigation-architecture">4. Navigation architecture<a class="headerlink" href="#4-navigation-architecture" title="Permanent link">&para;</a></h2>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>┌──────────┬─────────────────────────────────────────┐
+<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>│ Stackd   │ topbar : breadcrumb · health · user      │
+<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>│──────────├─────────────────────────────────────────┤
+<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a>│ ▣ Stacks │                                          │
+<a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a>│ ⎇ Graph  │              content                     │
+<a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a>│ ▤ Audit  │   (max width 1440px, tables full-width)  │
+<a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a>│ ▥ Workers│                                          │
+<a id="__codelineno-0-8" name="__codelineno-0-8" href="#__codelineno-0-8"></a>│ ⚙ Sets   │                                          │
+<a id="__codelineno-0-9" name="__codelineno-0-9" href="#__codelineno-0-9"></a>└──────────┴─────────────────────────────────────────┘
+</code></pre></div>
+<ul>
+<li><strong>Labeled side nav (≈ 208 px, icon + text label)</strong>: Stacks, Graph, Audit, Workers, Variable Sets, Settings, with the <code>Stackd</code> wordmark at the top. Active item = amber text + <code>raised</code> background. The product has few sections: no mega-menu.</li>
+<li><strong>Decision (revised): labels are always visible, not only on hover.</strong> An icons-only nav forces <em>recall</em> (guessing what an icon means); a labeled nav plays on <em>recognition</em> — faster, less ambiguous, and better for accessibility (the label is not carried by the <code>aria-label</code> alone). For an expert tool used daily, clarity wins over the 150 px gained. The earlier "56 px icons + tooltip, expandable on hover" track is abandoned: the tooltip hides information behind an interaction.</li>
+<li><strong>Structural breadcrumb</strong>: <code>space / stack / environment / run #142</code> — always present, each segment clickable. It is the backbone of orientation, given the 4-level hierarchy.</li>
+<li><strong>⌘K command palette</strong> from v1: go to a stack/env, trigger a run, copy an ID. For an expert audience, this is the real primary navigation; the visual nav is the fallback.</li>
+<li>Routing: clean, shareable URLs (<code>/stacks/core-network/prod/runs/142?phase=plan&amp;line=87</code>) — a link pasted in Slack during an incident must land exactly at the right place.</li>
+</ul>
+<hr />
+<h2 id="5-key-screens-decisions">5. Key screens — decisions<a class="headerlink" href="#5-key-screens-decisions" title="Permanent link">&para;</a></h2>
+<h3 id="51-stacks-the-overview-home">5.1 <code>/stacks</code> — the overview (home)<a class="headerlink" href="#51-stacks-the-overview-home" title="Permanent link">&para;</a></h3>
+<ul>
+<li><strong>Dense table</strong>, no cards. One row = one stack; columns = environments (dev, staging, prod, in <code>position</code> order).</li>
+<li>Each env cell = horizontal mini-rail of the last run + relative timestamp + <strong>Git lag chip <code>↑3</code></strong> (mono, neutral blue-gray — this is information, not a decision: amber stays reserved) when the branch has advanced since the last apply; an attenuated version if the commits do not touch the <code>project_root</code>. Tooltip = list of commits, click = trigger a run. Clickable cell → the env.</li>
+<li>Sticky header row, sorting, filter by text and by state ("show me everything that is failed or unconfirmed").</li>
+<li><strong>"Attention required" zone pinned at the top</strong>: all <code>unconfirmed</code> and <code>failed</code> runs of the space, across all environments. This is the answer to "what is waiting on a decision?" without searching.</li>
+</ul>
+<h3 id="52-runsid-the-most-important-screen">5.2 <code>/runs/{id}</code> — the most important screen<a class="headerlink" href="#52-runsid-the-most-important-screen" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>┌──────────────────────────────────────────────────────────┐
+<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a>│ core-network / prod / run #142        [Confirm] [Discard]│ ← sticky bar
+<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a>│ abc1234 &quot;add NAT gateway&quot; · J.Dupont · via cascade       │
+<a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a>├────────┬─────────────────────────────────────────────────┤
+<a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a>│ RAIL   │  [Plan ±]  [Checks 2✓ 1⚠]  [Logs]  [Inputs]     │
+<a id="__codelineno-1-6" name="__codelineno-1-6" href="#__codelineno-1-6"></a>│ of     │ ┌─────────────────────────────────────────────┐ │
+<a id="__codelineno-1-7" name="__codelineno-1-7" href="#__codelineno-1-7"></a>│ phases │ │                 tab content                 │ │
+<a id="__codelineno-1-8" name="__codelineno-1-8" href="#__codelineno-1-8"></a>│ (§2.2) │ │                                             │ │
+<a id="__codelineno-1-9" name="__codelineno-1-9" href="#__codelineno-1-9"></a>└────────┴─┴─────────────────────────────────────────────┴─┘
+</code></pre></div>
+<ul>
+<li><strong>Sticky action bar</strong> at the top, not at the bottom: the decision is always visible, with the context (who triggered, env tier). Confirm button <strong>amber</strong>, disabled with the reason spelled out ("prod tier required — your cap is staging", "approver role required", "destroy permission required", "mocked run — apply disabled", "you triggered this prod run"). The triggerer and the confirmer are shown with their tier.</li>
+<li><strong>Friction proportional to risk.</strong> An authorized non-prod apply = one click. But confirming an apply on <strong><code>tier=prod</code></strong> or <strong>any <code>destroy</code> run</strong> requires an <strong>explicit confirmation</strong> in a popover anchored to the button: typing the <strong>name of the environment</strong> (GitHub pattern, consistent with deletions §5.7) + a <code>+a ~c −d</code> summary of the plan, destructions highlighted. Consistent with the principle: deleting a stack already requires typing its name — applying a destruction on prod cannot be less demanding than editing config. The popover bypasses no access rule (<code>can_apply</code> is still evaluated on the API side): it is a misclick safeguard, not a permission check.</li>
+<li><strong>Staleness banner</strong>: if the tracked branch advances while a plan awaits confirmation, a banner above the content — "Plan computed on <code>abc1234</code> · the branch has advanced by 2 commits" — with a <em>Re-plan</em> action. Confirming remains possible (applying a precise commit is legitimate), but never unknowingly.</li>
+<li>Header: triggerer AND confirmer shown (Google avatars) — audit is in the interface, not hidden in a page.</li>
+<li><strong>Plan</strong> tab: <code>+3 ~1 −0</code> summary in giant mono, then a list of resources grouped by action (create/update/delete), each resource expandable into an attribute-by-attribute diff (added green / modified amber / deleted red, values in mono). <strong>Destructions are always expanded by default</strong> — a delete is never hidden.</li>
+<li><strong>Checks</strong> tab: one block per after_plan hook (name, status, duration, output), warn = amber with the note "manual confirmation required".</li>
+<li><strong>Inputs</strong> tab: resolved variables with their <strong>provenance as a mono badge</strong> (<code>set:common-aws</code>, <code>stack</code>, <code>env</code>, <code>dependency</code>, <code>MOCK</code> in purple). Sensitive values: <code>•••</code> with no "reveal" button.</li>
+</ul>
+<h3 id="53-log-viewer-in-the-run-page">5.3 Log viewer (in the run page)<a class="headerlink" href="#53-log-viewer-in-the-run-page" title="Permanent link">&para;</a></h3>
+<ul>
+<li>Full screen available (<code>f</code>), <code>bg-base</code> background, JetBrains Mono 12 px, line-height 1.5.</li>
+<li>Sections collapsible by phase <strong>and by hook</strong> (chevron + duration + exit code in the section header).</li>
+<li>Line numbers in the gutter, click = shareable anchor, highlight of the targeted line on arrival.</li>
+<li>Follow-tail active by default on a run in progress; the slightest scroll up suspends it (floating "↓ Resume following" button with a counter of new lines).</li>
+<li>Full ANSI rendering (palette mapped onto our tokens, not raw terminal colors). Internal <code>⌘F</code> search with an occurrence counter. Timestamps toggle. Mandatory virtualization (react-virtuoso).</li>
+</ul>
+<h3 id="54-graph-and-run-groups">5.4 <code>/graph</code> and run groups<a class="headerlink" href="#54-graph-and-run-groups" title="Permanent link">&para;</a></h3>
+<ul>
+<li>react-flow, dagre layout left→right, <strong>filter by environment name at the top</strong> (see the "prod" graph without the dev noise).</li>
+<li>Node = minimal card: stack/env + mini-rail of the last run. Edge labeled with the number of output references; dashed purple edge if mocks are involved.</li>
+<li>Run group view: same graph, the nodes color in real time during the cascade. No confetti at the end — a green <code>finished</code> state is enough.</li>
+<li><strong>Mandatory accessible alternative</strong>: a react-flow graph is not navigable by screen reader nor by keyboard alone. A systematic <strong>"list view"</strong> toggle = an adjacency table (<code>upstream env → downstream env · N references · MOCK?</code>) that is sortable, focusable, with the same filter. The graph is the default display; the list is the complete functional equivalent, not a stopgap. The graph nodes remain reachable via <code>Tab</code> (topological order) with an <code>aria-label</code> announcement of the last run's state.</li>
+</ul>
+<h3 id="55-queue-the-execution-queue">5.5 <code>/queue</code> — the execution queue<a class="headerlink" href="#55-queue-the-execution-queue" title="Permanent link">&para;</a></h3>
+<p>The visual answer to "why isn't my run starting?".</p>
+<ul>
+<li>Two groups: <strong>In progress</strong> (claimed runs, with worker, active phase and duration) and <strong>Waiting</strong> (<code>queued</code> + <code>confirmed</code> not claimed), sorted by age.</li>
+<li>Each waiting run displays its <strong>blocking reason computed by the API</strong>, spelled out and in mono: <code>run #141 active on this environment</code>, <code>environment locked</code>, <code>no worker compatible with {pool: prod}</code>, <code>apply affinity reservation (worker-aws-1, 38s remaining)</code>.</li>
+<li>Filter by stack/env/pool; direct link to the blocking run and to <code>/workers</code>.</li>
+<li>A queue counter in the side nav (badge on the icon) when runs have been waiting for &gt; 2 min — a discreet signal, no toast.</li>
+</ul>
+<h3 id="56-audit">5.6 <code>/audit</code><a class="headerlink" href="#56-audit" title="Permanent link">&para;</a></h3>
+<ul>
+<li>Dense chronological table: mono timestamp, avatar + email, action as a badge, target as a clickable breadcrumb, summarized context.</li>
+<li>The ⭐ actions (<code>run.confirmed</code>, <code>run.applied</code>) have a slightly contrasted row.</li>
+<li>Combinable filters in a top bar (actor, action, stack, env, period) reflected in the URL → an investigation is shared by link. Discreet CSV export on the right.</li>
+</ul>
+<h3 id="57-forms-stack-wizard-variables-hooks">5.7 Forms (stack wizard, variables, hooks)<a class="headerlink" href="#57-forms-stack-wizard-variables-hooks" title="Permanent link">&para;</a></h3>
+<ul>
+<li>One column, max 560 px, labels above, help in <code>text-secondary</code> under the field.</li>
+<li>Every technical name typed (stack, env, variable) is displayed in mono from the first keystroke.</li>
+<li>Destructive actions require typing the name of the target (GitHub pattern) — not a plain "Are you sure?" modal.</li>
+<li>Wizard: numbered steps because it is a real sequence; each step independently validatable (the repo check runs at step 1, not at the end).</li>
+</ul>
+<hr />
+<h2 id="6-real-time-patterns">6. Real-time patterns<a class="headerlink" href="#6-real-time-patterns" title="Permanent link">&para;</a></h2>
+<ul>
+<li>A single multiplexed WebSocket; TanStack Query remains the source of truth (WS events <strong>invalidate</strong> queries, they do not patch the cache by hand — except logs, which are streamed directly).</li>
+<li>A run's state change is visible everywhere it appears (rail, badges) without a refresh, via subscription to the topics of the displayed entities.</li>
+<li>Discreet connection indicator in the topbar; on a disconnect: a thin "Reconnecting…" banner + <code>after_seq</code> catch-up, never a blocking modal.</li>
+<li>No toast for background events (a run that finishes is seen on its rail). Toasts are reserved for feedback on the current user's actions.</li>
+</ul>
+<hr />
+<h2 id="7-accessibility-states-quality">7. Accessibility, states, quality<a class="headerlink" href="#7-accessibility-states-quality" title="Permanent link">&para;</a></h2>
+<ul>
+<li>Minimum AA contrast on both themes (verified on the state colors over their actual backgrounds).</li>
+<li><strong>Color is never the sole carrier of state</strong>: each badge has its text label, the rail has icons per segment (✓ ✕ ⏸ ▶). Color blindness = the nominal case in this trade.</li>
+<li>Full keyboard navigation: <code>j/k</code> in tables, <code>f</code> full-screen logs, <code>⌘K</code> palette, visible amber 2 px focus. <code>prefers-reduced-motion</code>: the rail's pulse becomes a static opacity change.</li>
+<li><strong>Skip-link</strong> "Go to content" as the first focusable element (side nav + breadcrumb = many tab stops before the content on a dense app).</li>
+<li><strong>Polite live regions, never focus stealing</strong>: real-time state changes (rail, badges, "Reconnecting…" banner) are announced via <code>aria-live="polite"</code> and never move the user's focus (they may be reading logs or filling out a form). Action toasts use <code>aria-live</code> and do not capture focus.</li>
+<li><strong>Tabular figures</strong>: <code>font-variant-numeric: tabular-nums</code> on any data aligned in a column (durations, <code>+a ~c −d</code>, counters, timestamps) — JetBrains Mono is already monospaced, but we force tabular-nums so the columns do not dance during streaming.</li>
+<li><strong>Async action buttons</strong>: <code>Confirm</code>/<code>Discard</code>/<code>Trigger</code>/<code>Re-plan</code> go into a <code>loading</code> state (spinner + disabled) during the call, to avoid double submission — distinct from the "missing permission" <code>disabled</code> which, for its part, carries the reason.</li>
+<li><strong>On-call mobile journey</strong>: on the two mobile-polished screens (read a run/logs, confirm/discard), touch targets respect a <strong>44 px</strong> minimum; elsewhere desktop density prevails.</li>
+<li>Empty states = invitations to act, in the product's vocabulary: "No stack. Connect a repo to get started." + button. No decorative illustrations.</li>
+<li>Errors: factual, in clear technical English, with the way out ("The webhook was rejected: invalid HMAC signature. Check the secret in Settings → Webhooks."). Never apologies, never vague.</li>
+<li>Skeletons faithful to the final shape for tables; spinners reserved for one-off actions.</li>
+<li>Responsive: optimized for desktop (the trade), but polished mobile consultation for two precise journeys — <strong>reading a run/its logs and confirming/discarding</strong> (on-call). The rest may degrade.</li>
+</ul>
+<hr />
+<h2 id="8-implementation">8. Implementation<a class="headerlink" href="#8-implementation" title="Permanent link">&para;</a></h2>
+<ul>
+<li><strong>Tailwind v4 + CSS custom-property tokens</strong> (<code>--color-bg-base</code>, <code>--color-state-running</code>, ...): the two themes = two sets of variables, components use only the tokens. No hardcoded color in a component.</li>
+<li><strong>shadcn/ui as the mechanical base</strong> (Dialog, Popover, Command, DropdownMenu) <strong>fully re-skinned</strong> onto our tokens: we keep Radix's accessibility, we replace the default aesthetic (which is precisely the generic look we refuse).</li>
+<li>In-house components (the identity core): <code>&lt;PhaseRail&gt;</code> (+ <code>mini</code> variant), <code>&lt;StateBadge&gt;</code>, <code>&lt;LogViewer&gt;</code>, <code>&lt;PlanDiff&gt;</code>, <code>&lt;ProvenanceBadge&gt;</code>, <code>&lt;RunActionBar&gt;</code>, <code>&lt;EnvCell&gt;</code>.</li>
+<li>Storybook (or Ladle) from Phase 0 for these components: it is the visual contract that Claude Code must respect when building the pages.</li>
+<li>Self-hosted fonts (IBM Plex Sans, JetBrains Mono) — the app can run on a private network without an external CDN. <code>font-display: swap</code>, preload of only the critical weights (Sans 400/600, Mono 400), fallback metrics (<code>size-adjust</code>/<code>ascent-override</code>) to avoid CLS on load.</li>
+<li><strong>Theme preference without browser storage</strong> (product invariant: neither localStorage nor sessionStorage). Consequence: the theme follows <code>prefers-color-scheme</code> by default; a manual override lives <strong>in memory</strong> (lost on reload) and, if per-user persistence is desired, it is <strong>stored server-side</strong> on the profile (<code>GET /me</code>), never in the browser. To be settled when building the topbar (theme toggle).</li>
+<li>Graphs: react-flow + dagre. Logs: react-virtuoso + anser (ANSI). Dates: native <code>Intl</code>, relative format &lt; 24 h then absolute local ISO.</li>
+</ul>
+<hr />
+<h2 id="9-what-we-forbid-ourselves-reminder">9. What we forbid ourselves (reminder)<a class="headerlink" href="#9-what-we-forbid-ourselves-reminder" title="Permanent link">&para;</a></h2>
+<ul>
+<li>Drop shadows, gradients, glassmorphism, decorative illustrations, emojis in the UI.</li>
+<li>State colors used for anything other than state; amber accent used for anything other than decision/focus.</li>
+<li>An icon alone on a destructive action; confirmation without typing the name for deletions <strong>and for any <code>tier=prod</code> or <code>destroy</code> apply</strong> (§5.2).</li>
+<li>Toasts for background events; unsolicited animations beyond the rail's pulse.</li>
+<li>Hiding or collapsing a resource destruction in a plan.</li>
+<li>Any system text (ID, SHA, value, duration) in the UI font: data is mono, always.</li>
+</ul>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+  <script>var tabs=__md_get("__tabs");if(Array.isArray(tabs))e:for(var set of document.querySelectorAll(".tabbed-set")){var labels=set.querySelector(".tabbed-labels");for(var tab of tabs)for(var label of labels.getElementsByTagName("label"))if(label.innerText.trim()===tab){var input=document.getElementById(label.htmlFor);input.checked=!0;continue e}}</script>
+
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+          <button type="button" class="md-top md-icon" data-md-component="top" hidden>
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M13 20h-2V8l-5.5 5.5-1.42-1.42L12 4.16l7.92 7.92-1.42 1.42L13 8z"/></svg>
+  Back to top
+</button>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": "..", "features": ["navigation.sections", "navigation.top", "navigation.instant", "navigation.tracking", "toc.follow", "search.suggest", "search.highlight", "content.code.copy", "content.tabs.link"], "search": "../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
+    
+    
+      <script src="../assets/javascripts/bundle.79ae519e.min.js"></script>
+      
+    
+  </body>
+</html>

@@ -1,0 +1,2217 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="Self-hostable Terraform/OpenTofu orchestration — plan → human approval → apply.">
+      
+      
+      
+      
+        <link rel="prev" href="../SPECS/">
+      
+      
+        <link rel="next" href="../DESIGN/">
+      
+      
+        
+      
+      
+      <link rel="icon" href="../assets/images/favicon.png">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.6">
+    
+    
+      
+        <title>Plan & scope - Stackd</title>
+      
+    
+    
+      <link rel="stylesheet" href="../assets/stylesheets/main.484c7ddc.min.css">
+      
+        
+        <link rel="stylesheet" href="../assets/stylesheets/palette.ab4e12ef.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Roboto:300,300i,400,400i,700,700i%7CRoboto+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Roboto";--md-code-font:"Roboto Mono"}</style>
+      
+    
+    
+    <script>__md_scope=new URL("..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  </head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="slate" data-md-color-primary="amber" data-md-color-accent="amber">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#planmd-terraform-orchestration-platform-spacelift-like-simplified-version" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+    
+      
+
+  
+
+<header class="md-header md-header--shadow" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href=".." title="Stackd" class="md-header__button md-logo" aria-label="Stackd" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            Stackd
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              Plan & scope
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: dark)" data-md-color-scheme="slate" data-md-color-primary="amber" data-md-color-accent="amber"  aria-label="Switch to light mode"  type="radio" name="__palette" id="__palette_0">
+    
+      <label class="md-header__button md-icon" title="Switch to light mode" for="__palette_1" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 7a5 5 0 0 1 5 5 5 5 0 0 1-5 5 5 5 0 0 1-5-5 5 5 0 0 1 5-5m0 2a3 3 0 0 0-3 3 3 3 0 0 0 3 3 3 3 0 0 0 3-3 3 3 0 0 0-3-3m0-7 2.39 3.42C13.65 5.15 12.84 5 12 5s-1.65.15-2.39.42zM3.34 7l4.16-.35A7.2 7.2 0 0 0 5.94 8.5c-.44.74-.69 1.5-.83 2.29zm.02 10 1.76-3.77a7.131 7.131 0 0 0 2.38 4.14zM20.65 7l-1.77 3.79a7.02 7.02 0 0 0-2.38-4.15zm-.01 10-4.14.36c.59-.51 1.12-1.14 1.54-1.86.42-.73.69-1.5.83-2.29zM12 22l-2.41-3.44c.74.27 1.55.44 2.41.44.82 0 1.63-.17 2.37-.44z"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: light)" data-md-color-scheme="default" data-md-color-primary="amber" data-md-color-accent="amber"  aria-label="Switch to dark mode"  type="radio" name="__palette" id="__palette_1">
+    
+      <label class="md-header__button md-icon" title="Switch to dark mode" for="__palette_0" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="m17.75 4.09-2.53 1.94.91 3.06-2.63-1.81-2.63 1.81.91-3.06-2.53-1.94L12.44 4l1.06-3 1.06 3zm3.5 6.91-1.64 1.25.59 1.98-1.7-1.17-1.7 1.17.59-1.98L15.75 11l2.06-.05L18.5 9l.69 1.95zm-2.28 4.95c.83-.08 1.72 1.1 1.19 1.85-.32.45-.66.87-1.08 1.27C15.17 23 8.84 23 4.94 19.07c-3.91-3.9-3.91-10.24 0-14.14.4-.4.82-.76 1.27-1.08.75-.53 1.93.36 1.85 1.19-.27 2.86.69 5.83 2.89 8.02a9.96 9.96 0 0 0 8.02 2.89m-1.64 2.02a12.08 12.08 0 0 1-7.8-3.47c-2.17-2.19-3.33-5-3.49-7.82-2.81 3.14-2.7 7.96.31 10.98 3.02 3.01 7.84 3.12 10.98.31"/></svg>
+      </label>
+    
+  
+</form>
+      
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+        <div class="md-search__suggest" data-md-component="search-suggest"></div>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+      <div class="md-header__source">
+        <a href="https://github.com/fmiquel90/stackd" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    fmiquel90/stackd
+  </div>
+</a>
+      </div>
+    
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+
+<nav class="md-nav md-nav--primary" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href=".." title="Stackd" class="md-nav__button md-logo" aria-label="Stackd" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    Stackd
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/fmiquel90/stackd" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    fmiquel90/stackd
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href=".." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Home
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_2" >
+        
+          
+          <label class="md-nav__link" for="__nav_2" id="__nav_2_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Guide
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_2_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_2">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Guide
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../guide/getting-started/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Getting started
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../guide/stacks-and-environments/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Stacks & environments
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../guide/variables/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Variables & secrets
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../guide/runs-and-approvals/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Runs & approvals
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../guide/hooks/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Hooks & .stackd.yml
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../guide/dependencies-and-mocks/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Dependencies & mocks
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../guide/importing-existing-state/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Importing an existing stack
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../guide/cloud-credentials/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Cloud credentials (OIDC)
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../guide/workers-and-scaling/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Workers & scaling
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../guide/notifications/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Notifications
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../guide/observability/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Observability
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../CONCEPTS/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Concepts
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../api/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    API
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5" checked>
+        
+          
+          <label class="md-nav__link" for="__nav_5" id="__nav_5_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Reference
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_5_label" aria-expanded="true">
+          <label class="md-nav__title" for="__nav_5">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Reference
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../SPECS/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Specification
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Plan & scope
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Plan & scope
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#1-vision-and-scope" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        1. Vision and scope
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="1. Vision and scope">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#11-what-we-are-building-mvp" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        1.1 What we are building (MVP)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#12-what-we-are-not-building-in-the-mvp-anti-scope" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        1.2 What we are NOT building in the MVP (anti-scope)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#13-guiding-principles" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        1.3 Guiding principles
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#2-target-architecture-overview" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2. Target architecture (overview)
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="2. Target architecture (overview)">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#21-components" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2.1 Components
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#22-decision-states-in-s3-exposed-via-http-backend" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2.2 Decision: states in S3, exposed via HTTP backend
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#23-decision-dynamic-cloud-credentials-oidc-workload-identity" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2.3 Decision: dynamic cloud credentials (OIDC workload identity)
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#3-implementation-phases" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3. Implementation phases
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="3. Implementation phases">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#phase-0-foundations-google-auth-15-weeks" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Phase 0 — Foundations + Google Auth (1.5 weeks)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#phase-1-stacks-environments-variable-sets-3-weeks" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Phase 1 — Stacks + Environments + Variable sets (3 weeks)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#phase-2-runs-workers-logs-hooks-35-weeks-critical-phase" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Phase 2 — Runs + Workers + Logs + Hooks (3.5 weeks) ⭐ critical phase
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Phase 2 — Runs + Workers + Logs + Hooks (3.5 weeks) ⭐ critical phase">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#2a-run-state-machine" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2a. Run state machine
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#2b-worker-api-pull-protocol" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2b. Worker API (pull protocol)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#2c-the-worker-agent" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2c. The worker agent
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#2d-hooks-checks-custom-flows-see-specs-8" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2d. Hooks &amp; checks (custom flows, see SPECS §8)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#2e-terraform-job-logs" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2e. Terraform job logs
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#2f-runs-front" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2f. Runs front
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#phase-3-s3-states-via-http-backend-audit-trail-ui-2-weeks" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Phase 3 — S3 states via HTTP backend + Audit trail UI (2 weeks)
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Phase 3 — S3 states via HTTP backend + Audit trail UI (2 weeks)">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#3a-managed-state" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3a. Managed state
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#3b-audit-who-applied-what" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3b. Audit: "who applied what"
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#phase-4-dependencies-outputs-mock-outputs-25-weeks-the-differentiator" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Phase 4 — Dependencies + outputs + mock outputs (2.5 weeks) ⭐ the differentiator
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#phase-5-git-webhooks-proposed-runs-2-weeks" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Phase 5 — Git webhooks + proposed runs (2 weeks)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#phase-6-dynamic-cloud-credentials-oidc-15-weeks" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Phase 6 — Dynamic cloud credentials OIDC (1.5 weeks)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#phase-7-production-ready-ongoing" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Phase 7 — Production-ready (ongoing)
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#4-overall-estimate" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        4. Overall estimate
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#5-risks-and-open-decisions" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        5. Risks and open decisions
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#6-technical-foundation-reference-versions-and-unlocked-improvements" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        6. Technical foundation — reference versions and unlocked improvements
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../DESIGN/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Design
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../DEV/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Dev environment
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../TESTING/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Testing
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#1-vision-and-scope" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        1. Vision and scope
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="1. Vision and scope">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#11-what-we-are-building-mvp" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        1.1 What we are building (MVP)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#12-what-we-are-not-building-in-the-mvp-anti-scope" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        1.2 What we are NOT building in the MVP (anti-scope)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#13-guiding-principles" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        1.3 Guiding principles
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#2-target-architecture-overview" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2. Target architecture (overview)
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="2. Target architecture (overview)">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#21-components" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2.1 Components
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#22-decision-states-in-s3-exposed-via-http-backend" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2.2 Decision: states in S3, exposed via HTTP backend
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#23-decision-dynamic-cloud-credentials-oidc-workload-identity" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2.3 Decision: dynamic cloud credentials (OIDC workload identity)
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#3-implementation-phases" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3. Implementation phases
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="3. Implementation phases">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#phase-0-foundations-google-auth-15-weeks" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Phase 0 — Foundations + Google Auth (1.5 weeks)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#phase-1-stacks-environments-variable-sets-3-weeks" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Phase 1 — Stacks + Environments + Variable sets (3 weeks)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#phase-2-runs-workers-logs-hooks-35-weeks-critical-phase" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Phase 2 — Runs + Workers + Logs + Hooks (3.5 weeks) ⭐ critical phase
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Phase 2 — Runs + Workers + Logs + Hooks (3.5 weeks) ⭐ critical phase">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#2a-run-state-machine" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2a. Run state machine
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#2b-worker-api-pull-protocol" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2b. Worker API (pull protocol)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#2c-the-worker-agent" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2c. The worker agent
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#2d-hooks-checks-custom-flows-see-specs-8" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2d. Hooks &amp; checks (custom flows, see SPECS §8)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#2e-terraform-job-logs" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2e. Terraform job logs
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#2f-runs-front" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2f. Runs front
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#phase-3-s3-states-via-http-backend-audit-trail-ui-2-weeks" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Phase 3 — S3 states via HTTP backend + Audit trail UI (2 weeks)
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Phase 3 — S3 states via HTTP backend + Audit trail UI (2 weeks)">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#3a-managed-state" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3a. Managed state
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#3b-audit-who-applied-what" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3b. Audit: "who applied what"
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#phase-4-dependencies-outputs-mock-outputs-25-weeks-the-differentiator" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Phase 4 — Dependencies + outputs + mock outputs (2.5 weeks) ⭐ the differentiator
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#phase-5-git-webhooks-proposed-runs-2-weeks" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Phase 5 — Git webhooks + proposed runs (2 weeks)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#phase-6-dynamic-cloud-credentials-oidc-15-weeks" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Phase 6 — Dynamic cloud credentials OIDC (1.5 weeks)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#phase-7-production-ready-ongoing" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Phase 7 — Production-ready (ongoing)
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#4-overall-estimate" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        4. Overall estimate
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#5-risks-and-open-decisions" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        5. Risks and open decisions
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#6-technical-foundation-reference-versions-and-unlocked-improvements" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        6. Technical foundation — reference versions and unlocked improvements
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+  
+  
+
+
+<h1 id="planmd-terraform-orchestration-platform-spacelift-like-simplified-version">PLAN.md — Terraform orchestration platform (Spacelift-like, simplified version)<a class="headerlink" href="#planmd-terraform-orchestration-platform-spacelift-like-simplified-version" title="Permanent link">&para;</a></h1>
+<blockquote>
+<p>Project code name: <strong>Stackd</strong> (placeholder, to be renamed)
+Goal: a self-hostable Terraform orchestration platform with multi-environment stacks, variable sets, runs, workers, hooks, dynamic cloud credentials (OIDC), full audit, and inter-stack dependencies.</p>
+</blockquote>
+<hr />
+<h2 id="1-vision-and-scope">1. Vision and scope<a class="headerlink" href="#1-vision-and-scope" title="Permanent link">&para;</a></h2>
+<h3 id="11-what-we-are-building-mvp">1.1 What we are building (MVP)<a class="headerlink" href="#11-what-we-are-building-mvp" title="Permanent link">&para;</a></h3>
+<p>A platform that allows you to:</p>
+<ol>
+<li>Declare <strong>stacks</strong>: a Git repo + a subfolder = a unit of infrastructure, broken down into <strong>environments</strong> (dev, staging, prod), each with their own Terraform state and variables.</li>
+<li>Factor out configuration via <strong>variable sets</strong>: reusable sets of variables attachable to N stacks/environments (inspired by Spacelift Contexts / HCP Variable Sets).</li>
+<li>Trigger <strong>runs</strong> (plan / apply) per environment, manually or via Git webhook.</li>
+<li>Execute these runs on remote <strong>workers</strong> (self-hosted agents, pull model) with <strong>live-streamed logs</strong> in the UI.</li>
+<li>Customize the lifecycle via <strong>hooks</strong> (commands before/after init/plan/apply, declared in YAML) with blocking or soft-fail checks.</li>
+<li>Provide <strong>dynamic cloud credentials via OIDC</strong>: the platform signs an identity token per run, exchanged for an IAM role — zero static credentials, neither on the platform side nor on the worker side.</li>
+<li><strong>Audit</strong>: who triggered, confirmed, applied what, when, on which environment — an immutable and queryable trail.</li>
+<li>Manage <strong>states in S3</strong>, exposed to Terraform via the platform's <strong>HTTP backend</strong> (locking + scoped tokens), with a "bring your own S3 backend" mode.</li>
+<li>Manage a <strong>dependency graph</strong> between environments with output propagation and <strong>mock outputs</strong> for bootstrapping (inspired by Terragrunt).</li>
+<li>Authenticate with a <strong>Google account</strong> (OIDC), restricted to the organization's domain.</li>
+</ol>
+<h3 id="12-what-we-are-not-building-in-the-mvp-anti-scope">1.2 What we are NOT building in the MVP (anti-scope)<a class="headerlink" href="#12-what-we-are-not-building-in-the-mvp-anti-scope" title="Permanent link">&para;</a></h3>
+<table>
+<thead>
+<tr>
+<th>Out of MVP scope</th>
+<th>Reason</th>
+<th>Future phase</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>OPA/Rego policies</td>
+<td>Hooks + checks cover 80% of v1 governance needs</td>
+<td>Phase 7+</td>
+</tr>
+<tr>
+<td>HTTP run tasks (blocking external webhooks like Infracost SaaS)</td>
+<td>Command hooks are sufficient (Infracost CLI runs as a hook)</td>
+<td>Phase 7</td>
+</tr>
+<tr>
+<td>Scheduled drift detection</td>
+<td>Requires a robust scheduler</td>
+<td>Phase 7+</td>
+</tr>
+<tr>
+<td>Multi-IaC (Pulumi, CloudFormation)</td>
+<td>Terraform/OpenTofu only</td>
+<td>Maybe never</td>
+</tr>
+<tr>
+<td>SAML SSO / IdPs other than Google</td>
+<td>Google OIDC is sufficient</td>
+<td>Phase 7</td>
+</tr>
+<tr>
+<td>Public/shared worker pool</td>
+<td>Private workers only</td>
+<td>Never (self-hosted positioning)</td>
+</tr>
+<tr>
+<td>OIDC to GCP/Azure</td>
+<td>AWS first (target audience), generic interface planned</td>
+<td>Phase 7</td>
+</tr>
+<tr>
+<td>Private module registry, no-code provisioning</td>
+<td>Large undertaking, low value without users</td>
+<td>—</td>
+</tr>
+<tr>
+<td>SIEM export of the audit</td>
+<td>DB audit + UI are sufficient</td>
+<td>Phase 7</td>
+</tr>
+</tbody>
+</table>
+<h3 id="13-guiding-principles">1.3 Guiding principles<a class="headerlink" href="#13-guiding-principles" title="Permanent link">&para;</a></h3>
+<ul>
+<li><strong>Pull, not push</strong>: workers pull jobs from the API.</li>
+<li><strong>The API is the single source of truth</strong>: stateless and disposable workers.</li>
+<li><strong>Explicit state machine</strong> for runs: each transition is a persisted event → the foundation of the audit system.</li>
+<li><strong>Auditability by construction</strong>: every mutating action writes an immutable audit event.</li>
+<li><strong>Environment = execution unit</strong>: stack = template (repo + code), environment = instance (state + variables + protections). A run belongs to an environment.</li>
+<li><strong>Zero static credentials as a goal</strong>: OIDC for humans (Google), OIDC for workloads (per-run IAM roles). Static secrets remain possible (sensitive variable sets) but are the fallback, not the norm.</li>
+<li><strong>Layered configuration</strong>: variable set → stack → environment, each layer able to override the previous one. Same logic for hooks.</li>
+<li><strong>Minimal blast radius</strong>: one environment = one state = one scope. Dependencies via explicit outputs only.</li>
+</ul>
+<hr />
+<h2 id="2-target-architecture-overview">2. Target architecture (overview)<a class="headerlink" href="#2-target-architecture-overview" title="Permanent link">&para;</a></h2>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>┌─────────────┐         ┌───────────────────────────────────┐
+<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>│   Front     │  HTTPS  │               API                 │
+<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>│  React/Vite │────────▶│             FastAPI               │
+<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a>│  (SPA)      │  + WS   │                                   │
+<a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a>└─────────────┘         │  ┌────────┐  ┌─────────────────┐  │
+<a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a>       ▲                │  │ REST   │  │ Scheduler       │  │
+<a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a>       │ OIDC           │  │ /api   │  │ (DAG, queue)    │  │
+<a id="__codelineno-0-8" name="__codelineno-0-8" href="#__codelineno-0-8"></a>┌──────┴──────┐         │  └────────┘  └─────────────────┘  │
+<a id="__codelineno-0-9" name="__codelineno-0-9" href="#__codelineno-0-9"></a>│   Google    │  tokens │  ┌────────┐  ┌─────────────────┐  │
+<a id="__codelineno-0-10" name="__codelineno-0-10" href="#__codelineno-0-10"></a>│  Identity   │────────▶│  │ Worker │  │ State HTTP      │  │
+<a id="__codelineno-0-11" name="__codelineno-0-11" href="#__codelineno-0-11"></a>└─────────────┘         │  │ API    │  │ backend (S3)    │  │
+<a id="__codelineno-0-12" name="__codelineno-0-12" href="#__codelineno-0-12"></a>                        │  └────────┘  └─────────────────┘  │
+<a id="__codelineno-0-13" name="__codelineno-0-13" href="#__codelineno-0-13"></a>┌─────────────┐ webhook │  ┌────────┐  ┌─────────────────┐  │
+<a id="__codelineno-0-14" name="__codelineno-0-14" href="#__codelineno-0-14"></a>│ GitHub /    │────────▶│  │ Audit  │  │ OIDC issuer     │  │
+<a id="__codelineno-0-15" name="__codelineno-0-15" href="#__codelineno-0-15"></a>│ GitLab      │         │  └────────┘  │ (JWKS, tokens   │  │
+<a id="__codelineno-0-16" name="__codelineno-0-16" href="#__codelineno-0-16"></a>└─────────────┘         │              │ workload / run) │  │
+<a id="__codelineno-0-17" name="__codelineno-0-17" href="#__codelineno-0-17"></a>                        │              └─────────────────┘  │
+<a id="__codelineno-0-18" name="__codelineno-0-18" href="#__codelineno-0-18"></a>┌─────────────┐  poll   └───────┬──────────────┬────────────┘
+<a id="__codelineno-0-19" name="__codelineno-0-19" href="#__codelineno-0-19"></a>│  Worker 1   │────────▶ ┌──────▼─────┐ ┌──────▼─────┐
+<a id="__codelineno-0-20" name="__codelineno-0-20" href="#__codelineno-0-20"></a>│  (agent)    │          │ PostgreSQL │ │     S3     │
+<a id="__codelineno-0-21" name="__codelineno-0-21" href="#__codelineno-0-21"></a>├─────────────┤          │ (app state,│ │ (tfstate,  │
+<a id="__codelineno-0-22" name="__codelineno-0-22" href="#__codelineno-0-22"></a>│  Worker 2   │──┐       │  audit)    │ │  logs,     │
+<a id="__codelineno-0-23" name="__codelineno-0-23" href="#__codelineno-0-23"></a>└─────────────┘  │       └────────────┘ │  artifacts)│
+<a id="__codelineno-0-24" name="__codelineno-0-24" href="#__codelineno-0-24"></a>                 │                      └────────────┘
+<a id="__codelineno-0-25" name="__codelineno-0-25" href="#__codelineno-0-25"></a>                 │ AssumeRoleWithWebIdentity
+<a id="__codelineno-0-26" name="__codelineno-0-26" href="#__codelineno-0-26"></a>                 │ (workload token signed by the API)
+<a id="__codelineno-0-27" name="__codelineno-0-27" href="#__codelineno-0-27"></a>                 ▼
+<a id="__codelineno-0-28" name="__codelineno-0-28" href="#__codelineno-0-28"></a>          ┌────────────┐
+<a id="__codelineno-0-29" name="__codelineno-0-29" href="#__codelineno-0-29"></a>          │  AWS STS   │──▶ temporary credentials scoped to the run
+<a id="__codelineno-0-30" name="__codelineno-0-30" href="#__codelineno-0-30"></a>          └────────────┘
+</code></pre></div>
+<h3 id="21-components">2.1 Components<a class="headerlink" href="#21-components" title="Permanent link">&para;</a></h3>
+<table>
+<thead>
+<tr>
+<th>Component</th>
+<th>Technology</th>
+<th>Role</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>Front</strong></td>
+<td>React 19 + Vite 7 + TypeScript, TanStack Query, Tailwind v4</td>
+<td>SPA — design specified in <strong>DESIGN.md</strong></td>
+</tr>
+<tr>
+<td><strong>API</strong></td>
+<td>FastAPI (Python 3.13+), Pydantic v2, SQLAlchemy 2 async</td>
+<td>REST + WS, Google auth, webhooks, worker API, state backend, audit, <strong>workload OIDC issuer</strong></td>
+</tr>
+<tr>
+<td><strong>Scheduler</strong></td>
+<td>Internal API module</td>
+<td>DAG, queue, output propagation</td>
+</tr>
+<tr>
+<td><strong>Workers</strong></td>
+<td>Python agent (entire MVP); Go rewrite = post-MVP track, outside phases 0–6</td>
+<td>Poll, clone, hooks, terraform, OIDC→STS exchange, log streaming</td>
+</tr>
+<tr>
+<td><strong>DB</strong></td>
+<td>PostgreSQL 18</td>
+<td>All application state + queue (<code>SKIP LOCKED</code>)</td>
+</tr>
+<tr>
+<td><strong>Object storage</strong></td>
+<td>S3 (Garage in dev)</td>
+<td>Versioned tfstate, archived logs, artifacts</td>
+</tr>
+</tbody>
+</table>
+<h3 id="22-decision-states-in-s3-exposed-via-http-backend">2.2 Decision: states in S3, exposed via HTTP backend<a class="headerlink" href="#22-decision-states-in-s3-exposed-via-http-backend" title="Permanent link">&para;</a></h3>
+<ul>
+<li><strong>Physical storage: S3</strong> (durability, versioning, lifecycle, SSE-KMS).</li>
+<li><strong>Terraform interface: the platform's HTTP backend</strong>, which writes/reads in S3:</li>
+<li><strong>Credentials</strong>: per-run scoped tokens (RO for PRs), no IAM rights on the states bucket distributed to workers.</li>
+<li><strong>Locking</strong> in Postgres, visible in the UI, one-click force-unlock (audited).</li>
+<li><strong>Audit &amp; versions</strong>: each write linked to the run that produced it.</li>
+<li><strong>Control</strong>: rejection of regressive serial, managed retention.</li>
+<li><strong>Compatibility mode</strong>: <code>managed_state: false</code> for existing S3 backends.</li>
+</ul>
+<h3 id="23-decision-dynamic-cloud-credentials-oidc-workload-identity">2.3 Decision: dynamic cloud credentials (OIDC workload identity)<a class="headerlink" href="#23-decision-dynamic-cloud-credentials-oidc-workload-identity" title="Permanent link">&para;</a></h3>
+<p>The platform becomes an <strong>OIDC issuer</strong> (the same mechanism as GitHub Actions OIDC):</p>
+<ul>
+<li>The API exposes <code>/.well-known/openid-configuration</code> + public JWKS.</li>
+<li>On each job claim, the API signs a <strong>workload token</strong> with rich claims: <code>sub=run:{env}:{stack}:{phase}</code>, <code>environment</code>, <code>stack</code>, <code>run_id</code>, <code>phase</code> (plan/apply), short TTL.</li>
+<li>On the AWS side: an OIDC Identity Provider + IAM roles whose trust policy filters on these claims. Example: the prod apply role is only assumable if <code>sub</code> matches <code>run:prod:*:apply</code>.</li>
+<li>The worker writes the token to a file and exports <code>AWS_WEB_IDENTITY_TOKEN_FILE</code> + <code>AWS_ROLE_ARN</code>: the AWS providers consume it natively, <strong>zero specific code in the users' Terraform code</strong>.</li>
+<li>Consequences: plan and apply can assume different roles (plan = ReadOnly + s3 modules, apply = write rights), a PR plan physically cannot modify the infrastructure, and credential rotation disappears from the model.</li>
+</ul>
+<hr />
+<h2 id="3-implementation-phases">3. Implementation phases<a class="headerlink" href="#3-implementation-phases" title="Permanent link">&para;</a></h2>
+<h3 id="phase-0-foundations-google-auth-15-weeks">Phase 0 — Foundations + Google Auth (1.5 weeks)<a class="headerlink" href="#phase-0-foundations-google-auth-15-weeks" title="Permanent link">&para;</a></h3>
+<ul>
+<li>[ ] Monorepo: <code>api/</code>, <code>worker/</code>, <code>front/</code>, <code>deploy/</code>, <code>docs/</code></li>
+<li>[ ] <code>docker-compose.yml</code> dev: Postgres, Garage (local S3), hot-reload API, Vite front — <strong>full dev mode specified in DEV.md</strong> (dev login 3 personas, <code>file://</code> fixture repos, seed + e2e scenario, shortened timings)</li>
+<li>[ ] FastAPI: healthcheck, settings, modules (<code>auth/</code>, <code>stacks/</code>, <code>environments/</code>, <code>variable_sets/</code>, <code>runs/</code>, <code>workers/</code>, <code>audit/</code>, <code>oidc/</code>, ...)</li>
+<li>[ ] <strong>Google OIDC auth</strong> (Authorization Code + PKCE): full flow, upsert on <code>google_sub</code>, <code>hd</code> restriction to the domain, JWT sessions + rotating refresh (table <code>refresh_tokens</code>, reuse detection → family revocation, SPECS §2.5), CSRF on <code>/auth/refresh</code>, first-admin bootstrap</li>
+<li>[ ] Alembic migrations, <code>User</code>, <code>RefreshToken</code> models, <strong><code>Space</code> (<code>default</code> space created at bootstrap, SPECS §3.0)</strong> — all <code>space_id</code> FKs depend on it starting in Phase 1</li>
+<li>[ ] Front: scaffold + <strong>setup of the DESIGN.md design system</strong> (tokens, theme, base components) + <strong>Storybook/Ladle</strong> of the identity components (PhaseRail, StateBadge, ProvenanceBadge...) — the visual contract required by DESIGN.md §8, login page</li>
+<li>[ ] GitHub Actions CI, root <code>CLAUDE.md</code></li>
+</ul>
+<p><strong>Deliverable: <code>docker compose up</code> → Sign in with Google → app shell with the final design.</strong></p>
+<hr />
+<h3 id="phase-1-stacks-environments-variable-sets-3-weeks">Phase 1 — Stacks + Environments + Variable sets (3 weeks)<a class="headerlink" href="#phase-1-stacks-environments-variable-sets-3-weeks" title="Permanent link">&para;</a></h3>
+<p><strong>Goal: the complete layered configuration model.</strong></p>
+<ul>
+<li>[ ] <code>Stack</code> model (template: repo, project_root, tool, version)</li>
+<li>[ ] <code>Environment</code> model (instance: <strong>tier dev/staging/prod</strong>, branch, autodeploy, protected, 4-eyes, managed_state, labels, position)</li>
+<li>[ ] <strong>Per-tier apply permissions</strong> (see SPECS §2.4): <code>users.max_apply_tier</code> + <code>users.can_destroy</code>; <code>can_apply(user, env)</code> helper called in the <code>unconfirmed → confirmed</code> transition; <code>protected</code> refocused on its own effects (forced confirmation + 4-eyes), with access control moving to the tier; admin Users page (role, tier, destroy) + audit of changes</li>
+<li>[ ] <strong>Variable sets</strong> (see SPECS §3.4):</li>
+<li>named sets of variables (terraform + environment), at the space level</li>
+<li>attachable to stacks (→ all their envs) or to specific environments</li>
+<li><code>auto_attach: true</code> = attached to all stacks in the space (e.g. <code>common-aws</code>)</li>
+<li>attachment priority to order the sets relative to each other</li>
+<li>final resolution: <strong>variable sets (by priority) &lt; stack &lt; environment</strong></li>
+<li>UI: provenance badge on each resolved variable ("inherited from <code>common-aws</code>", "overridden here")</li>
+<li>[ ] Stack variables + env overrides (existing model, integrated into the resolution)</li>
+<li>[ ] Git integration via token/deploy key (encrypted), check-repo endpoint</li>
+<li>[ ] AES-256-GCM encryption of sensitive values (write-only)</li>
+<li>[ ] Front: list of stacks × envs, creation wizard, stack page, <strong>Variable Sets page</strong> (CRUD + list of attachments + "where is this set used")</li>
+<li>[ ] Audit: CRUD stacks/envs/variables/variable sets + attachments</li>
+</ul>
+<p><strong>Deliverable: a <code>common-aws</code> set (region, default tags, Datadog token) attached to 3 stacks, occasionally overridden by an env.</strong></p>
+<hr />
+<h3 id="phase-2-runs-workers-logs-hooks-35-weeks-critical-phase">Phase 2 — Runs + Workers + Logs + Hooks (3.5 weeks) ⭐ critical phase<a class="headerlink" href="#phase-2-runs-workers-logs-hooks-35-weeks-critical-phase" title="Permanent link">&para;</a></h3>
+<h4 id="2a-run-state-machine">2a. Run state machine<a class="headerlink" href="#2a-run-state-machine" title="Permanent link">&para;</a></h4>
+<ul>
+<li>[ ] <code>Run</code> model (per environment) + <code>RunEvent</code></li>
+<li>[ ] States: <code>queued → preparing → planning → [checking] → unconfirmed → confirmed → applying → finished</code> (+ <code>failed</code>, <code>discarded</code>, <code>canceled</code>)</li>
+<li>[ ] Manual trigger, confirm/discard (guarded by <code>can_apply</code>: tier + role, see §2.4; automatic 4-eyes on prod tier)</li>
+<li>[ ] Concurrency: 1 active run per environment</li>
+</ul>
+<h4 id="2b-worker-api-pull-protocol">2b. Worker API (pull protocol)<a class="headerlink" href="#2b-worker-api-pull-protocol" title="Permanent link">&para;</a></h4>
+<ul>
+<li>[ ] Register/heartbeat/claim (<code>SKIP LOCKED</code>), events, chunked logs, artifacts</li>
+<li>[ ] Dead worker detection → <code>worker_lost</code></li>
+</ul>
+<h4 id="2c-the-worker-agent">2c. The worker agent<a class="headerlink" href="#2c-the-worker-agent" title="Permanent link">&para;</a></h4>
+<ul>
+<li>[ ] Loop claim → clone → tool setup → <strong>hooks</strong> → init → plan → upload → confirmation → <strong>hooks</strong> → apply → report</li>
+<li>[ ] Ephemeral workspace, Docker runner, secret masking in the logs</li>
+</ul>
+<h4 id="2d-hooks-checks-custom-flows-see-specs-8">2d. Hooks &amp; checks (custom flows, see SPECS §8)<a class="headerlink" href="#2d-hooks-checks-custom-flows-see-specs-8" title="Permanent link">&para;</a></h4>
+<ul>
+<li>[ ] <strong>YAML</strong> declaration in two places, merged: <code>.stackd.yml</code> file in the repo (versioned with the code) + hooks defined at the stack/environment level in the UI (governance imposed by the platform, not bypassable by a PR)</li>
+<li>[ ] Anchor points: <code>before_init</code>, <code>after_init</code>, <code>before_plan</code>, <code>after_plan</code>, <code>before_apply</code>, <code>after_apply</code></li>
+<li>[ ] Each hook = a command executed in the workspace, with read access to <code>plan.json</code> (for post-plan checks: tfsec, checkov, infracost, in-house scripts)</li>
+<li>[ ] Failure modes: <code>fail</code> (run → failed), <code>warn</code> (continue, visible warning, manual confirmation forced even if autodeploy)</li>
+<li>[ ] Hook logs integrated into the viewer (dedicated sections)</li>
+</ul>
+<h4 id="2e-terraform-job-logs">2e. Terraform job logs<a class="headerlink" href="#2e-terraform-job-logs" title="Permanent link">&para;</a></h4>
+<ul>
+<li>[ ] Live: multiplexed WebSocket, line-by-line tracking per phase</li>
+<li>[ ] Viewer: virtualized, ANSI, search, shareable anchors, follow-tail</li>
+<li>[ ] Two-tier storage (hot DB 7 d → S3 gz 1 year), download, configurable retention</li>
+</ul>
+<h4 id="2f-runs-front">2f. Runs front<a class="headerlink" href="#2f-runs-front" title="Permanent link">&para;</a></h4>
+<ul>
+<li>[ ] Run page: phase timeline (hooks included), viewer, plan summary, action bar</li>
+<li>[ ] <strong>/queue</strong> page: in-progress and pending runs with <strong>blocking reason</strong> computed by the API (active run on the env, locked env, no compatible worker, apply affinity reservation) — see DESIGN.md §5.5</li>
+</ul>
+<p><strong>Deliverable: a run with an <code>after_plan: infracost breakdown</code> hook in warn mode, live logs, confirmed apply.</strong></p>
+<hr />
+<h3 id="phase-3-s3-states-via-http-backend-audit-trail-ui-2-weeks">Phase 3 — S3 states via HTTP backend + Audit trail UI (2 weeks)<a class="headerlink" href="#phase-3-s3-states-via-http-backend-audit-trail-ui-2-weeks" title="Permanent link">&para;</a></h3>
+<h4 id="3a-managed-state">3a. Managed state<a class="headerlink" href="#3a-managed-state" title="Permanent link">&para;</a></h4>
+<ul>
+<li>[ ] Complete HTTP backend protocol (GET/POST/LOCK/UNLOCK/423), S3 SSE-KMS storage</li>
+<li>[ ] Application versioning linked to runs, Postgres locking visible in UI, audited force-unlock</li>
+<li>[ ] Per-run scoped tokens (RO for proposed), automatic <code>-backend-config</code> injection</li>
+<li>[ ] "Bring your own S3 backend" mode</li>
+<li>[ ] Front: State tab per env (versions, lock, admin download)</li>
+</ul>
+<h4 id="3b-audit-who-applied-what">3b. Audit: "who applied what"<a class="headerlink" href="#3b-audit-who-applied-what" title="Permanent link">&para;</a></h4>
+<ul>
+<li>[ ] <code>audit_events</code> completed: trigger, confirm (Google identity), discard, apply, force-unlock, rotations, roles</li>
+<li>[ ] Filterable /audit page + CSV export, Activity tab per env, per-user view</li>
+<li>[ ] Immutability, 2-year retention</li>
+</ul>
+<p><strong>Deliverable: "who applied what to prod last week, with which plan?" in 10 seconds.</strong></p>
+<hr />
+<h3 id="phase-4-dependencies-outputs-mock-outputs-25-weeks-the-differentiator">Phase 4 — Dependencies + outputs + mock outputs (2.5 weeks) ⭐ the differentiator<a class="headerlink" href="#phase-4-dependencies-outputs-mock-outputs-25-weeks-the-differentiator" title="Permanent link">&para;</a></h3>
+<ul>
+<li>[ ] Dependencies between <strong>environments</strong> + "link homonyms" helper</li>
+<li>[ ] <code>OutputReference</code> (upstream output → downstream variable mapping), anti-cycle</li>
+<li>[ ] Output capture after apply, hash, never the sensitive ones</li>
+<li>[ ] <strong>Mock outputs</strong> (inspired by Terragrunt, see SPECS §9.3):</li>
+<li>each <code>output_reference</code> can carry a <code>mock_value</code></li>
+<li>used when the upstream has <strong>never produced</strong> the output (bootstrapping a new cascade) or on <strong>proposed runs</strong> if the upstream is not applied</li>
+<li>a run that has consumed at least one mock is marked <code>used_mocks: true</code>: visible badge, <strong>apply forbidden</strong> (validation plan-only) unless explicit opt-in per env</li>
+<li>solves the chicken-and-egg problem: write <code>app/dev</code> and plan its config before <code>network/dev</code> has run</li>
+<li>[ ] Propagation scheduler: topological cascade, policies, multi-parents, stop on failure</li>
+<li>[ ] Run groups + graph view; the cascade never bypasses the protections</li>
+</ul>
+<p><strong>Deliverable: plan <code>app/dev</code> with <code>vpc_id = "vpc-mock00000"</code> before the first apply of <code>network/dev</code>, then a real cascade.</strong></p>
+<hr />
+<h3 id="phase-5-git-webhooks-proposed-runs-2-weeks">Phase 5 — Git webhooks + proposed runs (2 weeks)<a class="headerlink" href="#phase-5-git-webhooks-proposed-runs-2-weeks" title="Permanent link">&para;</a></h3>
+<ul>
+<li>[ ] GitHub/GitLab webhook: HMAC, branch → environments mapping, filtering by <code>project_root</code></li>
+<li>[ ] <strong>Git staleness</strong>: tracking of <code>head_sha</code> per env (webhook + ls-remote polling 15 min + manual refresh), <code>↑N</code> chip on lagging envs, "stale plan" banner + re-plan on stale unconfirmed runs — see SPECS §9.6 / DESIGN §5.1-5.2</li>
+<li>[ ] Push → tracked runs; PR → <strong>proposed runs</strong> plan-only (RO state, secrets not injected by default, mocks allowed)</li>
+<li>[ ] (Optional) PR comment: plan summary + check results (warn/fail hooks)</li>
+</ul>
+<p><strong>Deliverable: <code>git push</code> → automatic plans + checks visible in the PR.</strong></p>
+<hr />
+<h3 id="phase-6-dynamic-cloud-credentials-oidc-15-weeks">Phase 6 — Dynamic cloud credentials OIDC (1.5 weeks)<a class="headerlink" href="#phase-6-dynamic-cloud-credentials-oidc-15-weeks" title="Permanent link">&para;</a></h3>
+<ul>
+<li>[ ] <strong>OIDC issuer</strong>: <code>/.well-known/openid-configuration</code>, JWKS (RS256 keys, rotation), signing of workload tokens at claim time</li>
+<li>[ ] <code>CloudIntegration</code> model per environment: provider <code>aws</code>, <code>plan_role_arn</code>, <code>apply_role_arn</code> (see SPECS §10)</li>
+<li>[ ] Agent: token writing, export of <code>AWS_WEB_IDENTITY_TOKEN_FILE</code>/<code>AWS_ROLE_ARN</code> (or explicit AssumeRoleWithWebIdentity + export of the 3 variables if compatibility is needed)</li>
+<li>[ ] Documentation + provided Terraform module: create the AWS Identity Provider + example roles with trust policies filtered on the claims</li>
+<li>[ ] UI: integration config per env, "dynamic credentials" vs "static variables" indicator, AssumeRole test</li>
+<li>[ ] Audit: <code>cloud_integration.created/updated</code>, assumed role traced in the run context</li>
+</ul>
+<p><strong>Deliverable: a prod env with no AWS secret stored anywhere — the plan assumes a ReadOnly role, the apply a write role, backed by a trust policy.</strong></p>
+<hr />
+<h3 id="phase-7-production-ready-ongoing">Phase 7 — Production-ready (ongoing)<a class="headerlink" href="#phase-7-production-ready-ongoing" title="Permanent link">&para;</a></h3>
+<ul>
+<li>[ ] RBAC per space, Google group mapping — extends per-tier permissions (§2.4) toward per-space/team scopes, and enables the "sensitive but not prod" env that the linear tier does not cover</li>
+<li>[ ] <strong>Environment matrix</strong> (track, not specified): declare <code>{eu-west-1, us-east-1} × {dev, prod}</code> on a stack and generate/synchronize the corresponding environments — multi-region is done by naming convention + variable sets in the MVP</li>
+<li>[ ] HTTP run tasks (blocking external webhooks), advanced policies (OPA) if there is a real need</li>
+<li>[ ] OIDC to GCP/Azure (the <code>CloudIntegration</code> interface is already generic)</li>
+<li>[ ] Scheduled drift detection</li>
+<li>[ ] Audit export, automated retention/purge</li>
+<li>[ ] Platform observability (Prometheus, OTel, Datadog dashboard)</li>
+<li>[ ] Helm chart / Terraform deployment module (dogfooding)</li>
+<li>[ ] <strong>Go rewrite of the worker</strong> (single binary, easier distribution) — the MVP Python agent remains the functional reference; the Go port does not change the protocol (§7)</li>
+</ul>
+<hr />
+<h2 id="4-overall-estimate">4. Overall estimate<a class="headerlink" href="#4-overall-estimate" title="Permanent link">&para;</a></h2>
+<table>
+<thead>
+<tr>
+<th>Phase</th>
+<th>Duration (1 dev, realistic part-time)</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>0 — Foundations + Google OIDC</td>
+<td>1.5 weeks</td>
+</tr>
+<tr>
+<td>1 — Stacks + Envs + Variable sets</td>
+<td>3 weeks</td>
+</tr>
+<tr>
+<td>2 — Runs + Workers + Logs + Hooks</td>
+<td>3.5 weeks</td>
+</tr>
+<tr>
+<td>3 — S3/HTTP State + Audit UI</td>
+<td>2 weeks</td>
+</tr>
+<tr>
+<td>4 — Dependencies + outputs + mocks</td>
+<td>2.5 weeks</td>
+</tr>
+<tr>
+<td>5 — Webhooks + proposed runs</td>
+<td>2 weeks</td>
+</tr>
+<tr>
+<td>6 — OIDC workload credentials</td>
+<td>1.5 weeks</td>
+</tr>
+<tr>
+<td><strong>Total demonstrable MVP</strong></td>
+<td><strong>~16 weeks</strong></td>
+</tr>
+</tbody>
+</table>
+<blockquote>
+<p>Intermediate milestone: end of Phase 2 (≈ 8 weeks) = product usable solo with live logs and hooks. Phases 3–6 = the differentiators (audit, cascade+mocks, zero credential).</p>
+</blockquote>
+<hr />
+<h2 id="5-risks-and-open-decisions">5. Risks and open decisions<a class="headerlink" href="#5-risks-and-open-decisions" title="Permanent link">&para;</a></h2>
+<table>
+<thead>
+<tr>
+<th>Risk / decision</th>
+<th>Impact</th>
+<th>Mitigation / current position</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Execution security (providers/provisioners = arbitrary code)</td>
+<td>High</td>
+<td>Self-hosted workers, Docker per run, no multi-tenant. Platform hooks (non-bypassable) are the governance safeguard</td>
+</tr>
+<tr>
+<td>Repo hooks (<code>.stackd.yml</code>) modifiable by PR</td>
+<td>Medium</td>
+<td>The <strong>platform</strong> hooks (stack/env) always run and are not bypassable; critical security checks go there, not in the repo</td>
+</tr>
+<tr>
+<td>OIDC issuer: compromise of the signing key = access to all roles</td>
+<td>High</td>
+<td>Keys in KMS (<code>kms:Sign</code> signing, key never in memory) or encrypted volume, rotation with overlap, JWKS with kid, token TTL ≤ run duration, precise claims in the trust policies (<code>sub</code> wildcard tolerated only on the stack segment, never tier/phase)</td>
+</tr>
+<tr>
+<td>OIDC issuer and state backend in the same API process</td>
+<td>Medium</td>
+<td>In the MVP, all surfaces (human API, worker API, state backend, OIDC issuer, webhooks) share one process → a flaw in any one of them approaches the signing key. Strong mitigation = KMS (the private key never resides in the process). Isolating the signer in a dedicated service = Phase 7 track if the threat model requires it</td>
+</tr>
+<tr>
+<td>Mock outputs applied by mistake</td>
+<td>Medium</td>
+<td><code>used_mocks</code> → apply forbidden by default, very visible UI badge, opt-in per env only</td>
+</tr>
+<tr>
+<td>Dependency on Google for auth</td>
+<td>Medium</td>
+<td>Abstract <code>AuthProvider</code> interface, other IdPs in Phase 7</td>
+</tr>
+<tr>
+<td>Explosion of per-env dependency edges</td>
+<td>Low</td>
+<td>Homonyms helper + naming conventions</td>
+</tr>
+<tr>
+<td>Postgres as a queue at large scale</td>
+<td>Low (MVP)</td>
+<td>Abstract <code>JobQueue</code> interface</td>
+</tr>
+<tr>
+<td>Terraform license (BUSL)</td>
+<td>Medium</td>
+<td><strong>OpenTofu first</strong>, Terraform as a user option</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="6-technical-foundation-reference-versions-and-unlocked-improvements">6. Technical foundation — reference versions and unlocked improvements<a class="headerlink" href="#6-technical-foundation-reference-versions-and-unlocked-improvements" title="Permanent link">&para;</a></h2>
+<p>Target versions (June 2026). Same technology choices as originally, current version. The table links each bump to what it <strong>concretely unlocks</strong> in Stackd.</p>
+<table>
+<thead>
+<tr>
+<th>Component</th>
+<th>Initial</th>
+<th>Target</th>
+<th>What it unlocks (and where)</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>PostgreSQL</strong></td>
+<td>16</td>
+<td><strong>18</strong> (GA 2025-09-25)</td>
+<td>Native <code>uuidv7()</code> → <code>DEFAULT</code> on the DB side, end of application-side ID generation (SPECS §1). Asynchronous I/O (seq scans / vacuum 2-3×) → faster audit and <code>run_logs</code> scans (set <code>io_method=worker</code>/<code>io_uring</code>). <code>RETURNING</code> old+new tuple → <code>transition()</code> emits the <code>from→to</code> <code>run_event</code> in a single query (SPECS §4.2). OAUTHBEARER and virtual generated columns: not required in the MVP</td>
+</tr>
+<tr>
+<td><strong>Python</strong></td>
+<td>3.12</td>
+<td><strong>3.13</strong> (3.14 adoptable)</td>
+<td>better error messages, refined typing, REPL. Free-threading (<code>python3.14t</code>, official in 3.14) <strong>not relevant</strong> for an async I/O-bound API — to be considered only if the worker becomes CPU-bound (unlikely: it delegates to terraform)</td>
+</tr>
+<tr>
+<td><strong>React</strong></td>
+<td>18</td>
+<td><strong>19</strong> (GA early 2025)</td>
+<td>Actions + <code>useActionState</code> → native pending/error handling of forms, directly serves the <code>loading</code> state of actions (DESIGN §7) and the wizards (DESIGN §5.7). <code>ref</code> as a prop → less <code>forwardRef</code> in the 7 identity components. Document metadata → shareable <code>title</code> per run. <strong>To avoid: <code>useOptimistic</code> on the runs state</strong> — the invariant is that WS events <em>invalidate</em> the queries, they do not patch the cache (DESIGN §6). <strong>React Compiler</strong>: opt-in to evaluate (auto-memoization useful on the heavily-refreshed rail/logs), not a prerequisite</td>
+</tr>
+<tr>
+<td><strong>Vite</strong></td>
+<td>(not fixed)</td>
+<td><strong>7.x</strong></td>
+<td>Node 20.19+/22.12+. Tailwind v4 via the <strong><code>@tailwindcss/vite</code></strong> plugin (not PostCSS — avoids the known conflict)</td>
+</tr>
+<tr>
+<td><strong>Tailwind</strong></td>
+<td>v4</td>
+<td><strong>v4.1.x</strong></td>
+<td>already the right major; <code>@tailwindcss/vite</code> integration. No contract change (CSS tokens, DESIGN §8)</td>
+</tr>
+<tr>
+<td><strong>OpenTofu</strong> (dev image)</td>
+<td>(not fixed)</td>
+<td><strong>1.12.x</strong></td>
+<td>the dev image pre-installs a recent version; <code>tool_version</code> remains driven <strong>per stack</strong> (SPECS §3.1, user choice). 1.10 introduced <strong>OCI distribution</strong> of modules/providers — a track if we host private modules (otherwise out of scope)</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Unchanged (already at the right major)</strong>: FastAPI, Pydantic v2, SQLAlchemy 2 async, Alembic, uv, TanStack Query v5, react-flow + dagre, react-virtuoso, anser, pnpm.</p>
+<p><strong>Update rule</strong>: these targets are <strong>floors</strong> at startup, not a continuous-tracking policy. No major bump mid-phase without reason (a vulnerability, a required feature); minors/patches follow the committed <code>uv.lock</code> / <code>pnpm-lock.yaml</code>. The only bump with a structural effect on the already-specified code is <strong>PG16→18</strong> (native IDs + <code>RETURNING</code>), reflected in SPECS §1 and §4.2.</p>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+  <script>var tabs=__md_get("__tabs");if(Array.isArray(tabs))e:for(var set of document.querySelectorAll(".tabbed-set")){var labels=set.querySelector(".tabbed-labels");for(var tab of tabs)for(var label of labels.getElementsByTagName("label"))if(label.innerText.trim()===tab){var input=document.getElementById(label.htmlFor);input.checked=!0;continue e}}</script>
+
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+          <button type="button" class="md-top md-icon" data-md-component="top" hidden>
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M13 20h-2V8l-5.5 5.5-1.42-1.42L12 4.16l7.92 7.92-1.42 1.42L13 8z"/></svg>
+  Back to top
+</button>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": "..", "features": ["navigation.sections", "navigation.top", "navigation.instant", "navigation.tracking", "toc.follow", "search.suggest", "search.highlight", "content.code.copy", "content.tabs.link"], "search": "../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
+    
+    
+      <script src="../assets/javascripts/bundle.79ae519e.min.js"></script>
+      
+    
+  </body>
+</html>

@@ -1,0 +1,3608 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="Self-hostable Terraform/OpenTofu orchestration — plan → human approval → apply.">
+      
+      
+      
+      
+        <link rel="prev" href="../api/">
+      
+      
+        <link rel="next" href="../PLAN/">
+      
+      
+        
+      
+      
+      <link rel="icon" href="../assets/images/favicon.png">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.6">
+    
+    
+      
+        <title>Specification - Stackd</title>
+      
+    
+    
+      <link rel="stylesheet" href="../assets/stylesheets/main.484c7ddc.min.css">
+      
+        
+        <link rel="stylesheet" href="../assets/stylesheets/palette.ab4e12ef.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Roboto:300,300i,400,400i,700,700i%7CRoboto+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Roboto";--md-code-font:"Roboto Mono"}</style>
+      
+    
+    
+    <script>__md_scope=new URL("..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  </head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="slate" data-md-color-primary="amber" data-md-color-accent="amber">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#specsmd-detailed-technical-specifications" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+    
+      
+
+  
+
+<header class="md-header md-header--shadow" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href=".." title="Stackd" class="md-header__button md-logo" aria-label="Stackd" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            Stackd
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              Specification
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: dark)" data-md-color-scheme="slate" data-md-color-primary="amber" data-md-color-accent="amber"  aria-label="Switch to light mode"  type="radio" name="__palette" id="__palette_0">
+    
+      <label class="md-header__button md-icon" title="Switch to light mode" for="__palette_1" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 7a5 5 0 0 1 5 5 5 5 0 0 1-5 5 5 5 0 0 1-5-5 5 5 0 0 1 5-5m0 2a3 3 0 0 0-3 3 3 3 0 0 0 3 3 3 3 0 0 0 3-3 3 3 0 0 0-3-3m0-7 2.39 3.42C13.65 5.15 12.84 5 12 5s-1.65.15-2.39.42zM3.34 7l4.16-.35A7.2 7.2 0 0 0 5.94 8.5c-.44.74-.69 1.5-.83 2.29zm.02 10 1.76-3.77a7.131 7.131 0 0 0 2.38 4.14zM20.65 7l-1.77 3.79a7.02 7.02 0 0 0-2.38-4.15zm-.01 10-4.14.36c.59-.51 1.12-1.14 1.54-1.86.42-.73.69-1.5.83-2.29zM12 22l-2.41-3.44c.74.27 1.55.44 2.41.44.82 0 1.63-.17 2.37-.44z"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: light)" data-md-color-scheme="default" data-md-color-primary="amber" data-md-color-accent="amber"  aria-label="Switch to dark mode"  type="radio" name="__palette" id="__palette_1">
+    
+      <label class="md-header__button md-icon" title="Switch to dark mode" for="__palette_0" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="m17.75 4.09-2.53 1.94.91 3.06-2.63-1.81-2.63 1.81.91-3.06-2.53-1.94L12.44 4l1.06-3 1.06 3zm3.5 6.91-1.64 1.25.59 1.98-1.7-1.17-1.7 1.17.59-1.98L15.75 11l2.06-.05L18.5 9l.69 1.95zm-2.28 4.95c.83-.08 1.72 1.1 1.19 1.85-.32.45-.66.87-1.08 1.27C15.17 23 8.84 23 4.94 19.07c-3.91-3.9-3.91-10.24 0-14.14.4-.4.82-.76 1.27-1.08.75-.53 1.93.36 1.85 1.19-.27 2.86.69 5.83 2.89 8.02a9.96 9.96 0 0 0 8.02 2.89m-1.64 2.02a12.08 12.08 0 0 1-7.8-3.47c-2.17-2.19-3.33-5-3.49-7.82-2.81 3.14-2.7 7.96.31 10.98 3.02 3.01 7.84 3.12 10.98.31"/></svg>
+      </label>
+    
+  
+</form>
+      
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+        <div class="md-search__suggest" data-md-component="search-suggest"></div>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+      <div class="md-header__source">
+        <a href="https://github.com/fmiquel90/stackd" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    fmiquel90/stackd
+  </div>
+</a>
+      </div>
+    
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+
+<nav class="md-nav md-nav--primary" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href=".." title="Stackd" class="md-nav__button md-logo" aria-label="Stackd" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    Stackd
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/fmiquel90/stackd" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    fmiquel90/stackd
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href=".." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Home
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_2" >
+        
+          
+          <label class="md-nav__link" for="__nav_2" id="__nav_2_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Guide
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_2_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_2">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Guide
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../guide/getting-started/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Getting started
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../guide/stacks-and-environments/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Stacks & environments
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../guide/variables/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Variables & secrets
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../guide/runs-and-approvals/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Runs & approvals
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../guide/hooks/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Hooks & .stackd.yml
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../guide/dependencies-and-mocks/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Dependencies & mocks
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../guide/importing-existing-state/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Importing an existing stack
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../guide/cloud-credentials/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Cloud credentials (OIDC)
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../guide/workers-and-scaling/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Workers & scaling
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../guide/notifications/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Notifications
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../guide/observability/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Observability
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../CONCEPTS/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Concepts
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../api/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    API
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5" checked>
+        
+          
+          <label class="md-nav__link" for="__nav_5" id="__nav_5_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Reference
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_5_label" aria-expanded="true">
+          <label class="md-nav__title" for="__nav_5">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Reference
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Specification
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Specification
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#1-general-conventions" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        1. General conventions
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#2-authentication-google-oidc" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2. Authentication — Google OIDC
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="2. Authentication — Google OIDC">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#21-flow" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2.1 Flow
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#22-table-users" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2.2 Table users
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#23-roles-global-capabilities" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2.3 Roles (global capabilities)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#24-per-environment-permissions-tier-destroy" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2.4 Per-environment permissions — tier &amp; destroy
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#25-table-refresh_tokens" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2.5 Table refresh_tokens
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#3-data-model" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3. Data model
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="3. Data model">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#30-spaces-the-root-container" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3.0 spaces — the root container
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#31-stacks-the-template-repo-code" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3.1 stacks — the template (repo + code)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#32-environments-the-executable-instance" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3.2 environments — the executable instance
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#33-variables-stack-and-environment-level" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3.3 variables — stack and environment level
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#34-variable_sets-factored-configuration" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3.4 variable_sets — factored configuration
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#35-runs" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3.5 runs
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#36-run_events" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3.6 run_events
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#37-workers-and-worker_pools" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3.7 workers and worker_pools
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#38-dependencies-outputs-and-mocks" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3.8 Dependencies, outputs and mocks
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#39-managed-state-and-hooks" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3.9 Managed state and hooks
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#310-cloud_integrations-oidc-workload-10" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3.10 cloud_integrations (OIDC workload, §10)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#311-oidc_signing_keys-issuer-workload-10" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3.11 oidc_signing_keys (issuer workload, §10)
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#4-run-state-machine" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        4. Run state machine
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="4. Run state machine">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#41-diagram" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        4.1 Diagram
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#42-transition-rules" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        4.2 Transition rules
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#5-job-logging-system" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        5. Job logging system
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="5. Job logging system">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#51-ingestion-worker-api" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        5.1 Ingestion (worker → API)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#52-two-tier-storage" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        5.2 Two-tier storage
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#53-live-distribution" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        5.3 Live distribution
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#54-viewer-front" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        5.4 Viewer (front)
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#6-audit-who-applied-what" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        6. Audit — "who applied what"
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="6. Audit — &#34;who applied what&#34;">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#61-table-audit_events-append-only" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        6.1 Table audit_events (append-only)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#62-taxonomy-mvp" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        6.2 Taxonomy (MVP)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#63-assumed-double-write" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        6.3 Assumed double write
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#64-api-and-ui" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        6.4 API and UI
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#7-worker-protocol" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        7. Worker protocol
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="7. Worker protocol">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#71-registration-and-heartbeat" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        7.1 Registration and heartbeat
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#72-claim-long-poll" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        7.2 Claim (long-poll)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#73-events-and-artifacts" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        7.3 Events and artifacts
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#74-course-of-a-job-on-the-agent-side-pseudo-code" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        7.4 Course of a job on the agent side (pseudo-code)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#75-periodic-tasks-internal-scheduler-multi-replica" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        7.5 Periodic tasks (internal scheduler, multi-replica)
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#8-hooks-checks-custom-flows" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        8. Hooks &amp; checks (custom flows)
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="8. Hooks &amp; checks (custom flows)">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#81-two-sources-one-merge" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        8.1 Two sources, one merge
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#82-stackdyml-format" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        8.2 .stackd.yml format
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#83-execution-semantics" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        8.3 Execution semantics
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#9-dependencies-output-propagation-and-mocks" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        9. Dependencies, output propagation and mocks
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="9. Dependencies, output propagation and mocks">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#91-capture" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        9.1 Capture
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#92-cascade-hook-on_finishedrun" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        9.2 Cascade — hook on_finished(run)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#93-mock-outputs-bootstrap-inspired-by-terragrunt" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        9.3 Mock outputs (bootstrap, inspired by Terragrunt)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#94-run-groups" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        9.4 Run groups
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#95-multi-region-patterns-reference-recipes" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        9.5 Multi-region patterns (reference recipes)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#96-git-staleness-applied-branch-head" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        9.6 Git staleness — "applied ≠ branch head"
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#10-dynamic-cloud-credentials-oidc-workload-identity" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        10. Dynamic cloud credentials — OIDC workload identity
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="10. Dynamic cloud credentials — OIDC workload identity">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#101-the-platform-as-oidc-issuer" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        10.1 The platform as OIDC issuer
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#102-workload-token-signed-at-claim-per-phase" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        10.2 Workload token (signed at claim, per phase)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#103-aws-side-provided-example-terraform-module" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        10.3 AWS side (provided: example Terraform module)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#104-worker-side" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        10.4 Worker side
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#105-priority-and-coexistence" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        10.5 Priority and coexistence
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#11-managed-state-s3-behind-the-http-backend" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        11. Managed state — S3 behind the HTTP backend
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="11. Managed state — S3 behind the HTTP backend">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#111-architecture" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        11.1 Architecture
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#112-endpoints" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        11.2 Endpoints
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#113-s3-layout" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        11.3 S3 layout
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#114-importing-an-existing-stack" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        11.4 Importing an existing stack
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#12-rest-api-main-surface" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        12. REST API (main surface)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#13-security-summary" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        13. Security — summary
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#14-tests-minimal-strategy" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        14. Tests — minimal strategy
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../PLAN/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Plan & scope
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../DESIGN/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Design
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../DEV/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Dev environment
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../TESTING/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Testing
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#1-general-conventions" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        1. General conventions
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#2-authentication-google-oidc" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2. Authentication — Google OIDC
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="2. Authentication — Google OIDC">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#21-flow" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2.1 Flow
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#22-table-users" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2.2 Table users
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#23-roles-global-capabilities" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2.3 Roles (global capabilities)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#24-per-environment-permissions-tier-destroy" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2.4 Per-environment permissions — tier &amp; destroy
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#25-table-refresh_tokens" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2.5 Table refresh_tokens
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#3-data-model" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3. Data model
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="3. Data model">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#30-spaces-the-root-container" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3.0 spaces — the root container
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#31-stacks-the-template-repo-code" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3.1 stacks — the template (repo + code)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#32-environments-the-executable-instance" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3.2 environments — the executable instance
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#33-variables-stack-and-environment-level" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3.3 variables — stack and environment level
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#34-variable_sets-factored-configuration" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3.4 variable_sets — factored configuration
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#35-runs" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3.5 runs
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#36-run_events" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3.6 run_events
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#37-workers-and-worker_pools" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3.7 workers and worker_pools
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#38-dependencies-outputs-and-mocks" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3.8 Dependencies, outputs and mocks
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#39-managed-state-and-hooks" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3.9 Managed state and hooks
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#310-cloud_integrations-oidc-workload-10" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3.10 cloud_integrations (OIDC workload, §10)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#311-oidc_signing_keys-issuer-workload-10" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3.11 oidc_signing_keys (issuer workload, §10)
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#4-run-state-machine" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        4. Run state machine
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="4. Run state machine">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#41-diagram" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        4.1 Diagram
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#42-transition-rules" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        4.2 Transition rules
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#5-job-logging-system" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        5. Job logging system
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="5. Job logging system">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#51-ingestion-worker-api" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        5.1 Ingestion (worker → API)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#52-two-tier-storage" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        5.2 Two-tier storage
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#53-live-distribution" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        5.3 Live distribution
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#54-viewer-front" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        5.4 Viewer (front)
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#6-audit-who-applied-what" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        6. Audit — "who applied what"
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="6. Audit — &#34;who applied what&#34;">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#61-table-audit_events-append-only" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        6.1 Table audit_events (append-only)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#62-taxonomy-mvp" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        6.2 Taxonomy (MVP)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#63-assumed-double-write" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        6.3 Assumed double write
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#64-api-and-ui" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        6.4 API and UI
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#7-worker-protocol" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        7. Worker protocol
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="7. Worker protocol">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#71-registration-and-heartbeat" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        7.1 Registration and heartbeat
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#72-claim-long-poll" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        7.2 Claim (long-poll)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#73-events-and-artifacts" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        7.3 Events and artifacts
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#74-course-of-a-job-on-the-agent-side-pseudo-code" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        7.4 Course of a job on the agent side (pseudo-code)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#75-periodic-tasks-internal-scheduler-multi-replica" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        7.5 Periodic tasks (internal scheduler, multi-replica)
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#8-hooks-checks-custom-flows" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        8. Hooks &amp; checks (custom flows)
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="8. Hooks &amp; checks (custom flows)">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#81-two-sources-one-merge" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        8.1 Two sources, one merge
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#82-stackdyml-format" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        8.2 .stackd.yml format
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#83-execution-semantics" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        8.3 Execution semantics
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#9-dependencies-output-propagation-and-mocks" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        9. Dependencies, output propagation and mocks
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="9. Dependencies, output propagation and mocks">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#91-capture" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        9.1 Capture
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#92-cascade-hook-on_finishedrun" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        9.2 Cascade — hook on_finished(run)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#93-mock-outputs-bootstrap-inspired-by-terragrunt" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        9.3 Mock outputs (bootstrap, inspired by Terragrunt)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#94-run-groups" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        9.4 Run groups
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#95-multi-region-patterns-reference-recipes" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        9.5 Multi-region patterns (reference recipes)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#96-git-staleness-applied-branch-head" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        9.6 Git staleness — "applied ≠ branch head"
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#10-dynamic-cloud-credentials-oidc-workload-identity" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        10. Dynamic cloud credentials — OIDC workload identity
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="10. Dynamic cloud credentials — OIDC workload identity">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#101-the-platform-as-oidc-issuer" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        10.1 The platform as OIDC issuer
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#102-workload-token-signed-at-claim-per-phase" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        10.2 Workload token (signed at claim, per phase)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#103-aws-side-provided-example-terraform-module" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        10.3 AWS side (provided: example Terraform module)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#104-worker-side" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        10.4 Worker side
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#105-priority-and-coexistence" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        10.5 Priority and coexistence
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#11-managed-state-s3-behind-the-http-backend" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        11. Managed state — S3 behind the HTTP backend
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="11. Managed state — S3 behind the HTTP backend">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#111-architecture" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        11.1 Architecture
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#112-endpoints" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        11.2 Endpoints
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#113-s3-layout" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        11.3 S3 layout
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#114-importing-an-existing-stack" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        11.4 Importing an existing stack
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#12-rest-api-main-surface" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        12. REST API (main surface)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#13-security-summary" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        13. Security — summary
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#14-tests-minimal-strategy" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        14. Tests — minimal strategy
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+  
+  
+
+
+<h1 id="specsmd-detailed-technical-specifications">SPECS.md — Detailed technical specifications<a class="headerlink" href="#specsmd-detailed-technical-specifications" title="Permanent link">&para;</a></h1>
+<blockquote>
+<p>Companion to PLAN.md. Specifies: <strong>Google OIDC auth</strong>, <strong>data model (stacks → environments, variable sets)</strong>, <strong>state machine</strong>, <strong>logs</strong>, <strong>audit</strong>, <strong>hooks</strong>, <strong>worker protocol</strong>, <strong>S3 state via HTTP backend</strong>, <strong>dependencies + mock outputs</strong>, <strong>dynamic cloud credentials via OIDC</strong>.</p>
+</blockquote>
+<hr />
+<h2 id="1-general-conventions">1. General conventions<a class="headerlink" href="#1-general-conventions" title="Permanent link">&para;</a></h2>
+<ul>
+<li>IDs: UUIDv7. <strong>PostgreSQL 18</strong> provides a native <code>uuidv7()</code> → <code>DEFAULT uuidv7()</code> on the DB side (temporal ordering of indexes preserved); application-side generation remains possible to fix the ID before insert, never <code>gen_random_uuid()</code> (UUIDv4 is non-monotonic).</li>
+<li>Timestamps: <code>timestamptz</code> UTC, <code>_at</code> suffix.</li>
+<li>REST API: JSON, <code>/api/v1</code> (humans), <code>/worker/v1</code> (agents). Errors per RFC 9457.</li>
+<li>Secrets at rest: AES-256-GCM, master key <code>STACKD_ENCRYPTION_KEY</code>. <strong>Random 96-bit nonce per encryption</strong>, stored with the ciphertext (<code>nonce || ciphertext || tag</code>) — never reuse a nonce with the same key (loss of GCM confidentiality).</li>
+<li>Terraform/OpenTofu: invoked exclusively via CLI by the worker.</li>
+</ul>
+<hr />
+<h2 id="2-authentication-google-oidc">2. Authentication — Google OIDC<a class="headerlink" href="#2-authentication-google-oidc" title="Permanent link">&para;</a></h2>
+<h3 id="21-flow">2.1 Flow<a class="headerlink" href="#21-flow" title="Permanent link">&para;</a></h3>
+<p>Authorization Code + PKCE, the API is the confidential client:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>1. Front  → GET /api/v1/auth/google/start  (state + nonce + verifier in signed session)
+<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>2. Front  → redirect to accounts.google.com (scopes: openid email profile)
+<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>3. Google → /api/v1/auth/google/callback?code&amp;state
+<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a>4. API    → exchange code+verifier, validate the id_token (JWKS, iss, aud, exp, nonce)
+<a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a>5. API    → admission: email_verified == true, hd ∈ STACKD_ALLOWED_DOMAINS → otherwise 403
+<a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a>6. API    → upsert User on google_sub (stable, unlike the email)
+<a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a>7. API    → session: access JWT 15 min (front memory, never in browser storage)
+<a id="__codelineno-0-8" name="__codelineno-0-8" href="#__codelineno-0-8"></a>            + refresh httpOnly 14 d, persisted in `refresh_tokens` (§2.5) with
+<a id="__codelineno-0-9" name="__codelineno-0-9" href="#__codelineno-0-9"></a>            rotation and reuse detection → family revocation
+<a id="__codelineno-0-10" name="__codelineno-0-10" href="#__codelineno-0-10"></a>8. Front  → GET /api/v1/me
+</code></pre></div>
+<p><strong>CSRF</strong>: the access token travels in the <code>Authorization: Bearer</code> header (no CSRF risk on API calls). The refresh relies on an httpOnly cookie → <code>/auth/refresh</code> and <code>/auth/logout</code> require <code>SameSite=Strict</code> <strong>and</strong> a double-submit CSRF token (the only pair of cookie-bound endpoints). <code>Secure</code> cookie, <code>Path=/api/v1/auth</code>.</p>
+<p>Bootstrap: the first user of an allowed domain = <code>admin</code>, subsequent ones = <code>reader</code>. No local auth; internal <code>AuthProvider</code> interface for other IdPs later. Login/logout/denial → <code>audit_events</code>.</p>
+<h3 id="22-table-users">2.2 Table <code>users</code><a class="headerlink" href="#22-table-users" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>id uuid PK, google_sub text unique, email text, display_name, avatar_url,
+<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a>role enum(admin|approver|writer|reader),    -- global capabilities (§2.3)
+<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a>max_apply_tier enum(dev|staging|prod) nullable,  -- max tier where the user can confirm an apply (§2.4)
+<a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a>can_destroy bool default false,             -- right to trigger/confirm a destroy run (§2.4)
+<a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a>disabled bool, last_login_at, created_at
+</code></pre></div>
+<h3 id="23-roles-global-capabilities">2.3 Roles (global capabilities)<a class="headerlink" href="#23-roles-global-capabilities" title="Permanent link">&para;</a></h3>
+<p>The <code>role</code> carries what a user can do <strong>in nature</strong> (read, manage config, administer). <em>Which environments</em> they can apply to comes from the tier (§2.4), not the role.</p>
+<table>
+<thead>
+<tr>
+<th>Action</th>
+<th>reader</th>
+<th>writer</th>
+<th>approver</th>
+<th>admin</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>View stacks/runs/logs/audit</td>
+<td>✅</td>
+<td>✅</td>
+<td>✅</td>
+<td>✅</td>
+</tr>
+<tr>
+<td>Trigger a plan (any env)</td>
+<td></td>
+<td>✅</td>
+<td>✅</td>
+<td>✅</td>
+</tr>
+<tr>
+<td>Confirm an apply</td>
+<td></td>
+<td></td>
+<td>✅</td>
+<td>✅</td>
+</tr>
+<tr>
+<td>Manage stacks/envs/variables/variable sets/hooks</td>
+<td></td>
+<td>✅</td>
+<td>✅</td>
+<td>✅</td>
+</tr>
+<tr>
+<td>Workers, force-unlock, roles, cloud integrations, settings</td>
+<td></td>
+<td></td>
+<td></td>
+<td>✅</td>
+</tr>
+</tbody>
+</table>
+<p>Triggering a plan ≠ confirming: any writer+ can <strong>prepare</strong> a plan on any env (a plan changes nothing), prod included. Only the <strong>confirmation</strong> of the apply is guarded by the tier — which lets a writer build a prod plan that an authorized approver will confirm.</p>
+<h3 id="24-per-environment-permissions-tier-destroy">2.4 Per-environment permissions — tier &amp; destroy<a class="headerlink" href="#24-per-environment-permissions-tier-destroy" title="Permanent link">&para;</a></h3>
+<p>The "apply everywhere except prod" need depends on the targeted environment, not just on the user. We express it through a <strong>tier</strong> on the environment and a <strong>cap</strong> on the user, rather than through a full policy system (sufficient for the vast majority of orgs; per-space RBAC remains Phase 7).</p>
+<ul>
+<li><code>environments.tier</code> enum(<code>dev</code>|<code>staging</code>|<code>prod</code>) — implicit ordering <code>dev &lt; staging &lt; prod</code>.</li>
+<li><code>users.max_apply_tier</code> — maximum tier where the user can <strong>confirm an apply</strong>. NULL = none (can read and plan, never apply).</li>
+<li>Apply rule: <code>confirm</code> allowed iff <code>role ∈ {approver, admin}</code> <strong>AND</strong> <code>max_apply_tier &gt;= env.tier</code>. Example: Bob <code>max_apply_tier=staging</code> confirms in dev/staging, denied in prod; Alice <code>prod</code> confirms everywhere.</li>
+<li><code>users.can_destroy</code> — a run <code>type=destroy</code> (trigger AND confirm) requires <code>can_destroy=true</code> <strong>in addition</strong> to the tier rule. A destruction is more dangerous than an apply: a distinct, explicit right.</li>
+</ul>
+<p><strong>Relationship with <code>protected</code></strong>: we <strong>decouple</strong> sensitivity and access right, which were mixed until now. <code>environments.protected</code> now carries only its own effects — forcing confirmation (no autodeploy) and enabling 4-eyes; <em>who</em> can confirm now comes from the tier. Consequence: an env can be <code>tier=prod</code> without being <code>protected</code> (restricted apply but autodeploy possible for the authorized) and vice versa.</p>
+<p><strong>4-eyes / tier consistency</strong>: for <code>tier=prod</code> environments, self-confirmation is forbidden by default (the triggerer ≠ the confirmer), whether <code>require_second_pair_of_eyes</code> is checked or not — the rule follows from the tier instead of being a flag to maintain everywhere.</p>
+<p><strong>Scope of 4-eyes</strong>: the "triggerer ≠ confirmer" rule only bites on runs with a <strong>human</strong> triggerer (<code>triggered_by=manual</code>, <code>trigger_user_id</code> set). A run with no human at its origin (<code>webhook</code>, <code>dependency</code>) has no <code>trigger_user_id</code>: any confirmer authorized at the tier can confirm it (there is no one to oppose). This is not a bypass — the access guard remains the tier (<code>can_apply</code>); 4-eyes only prevents <em>the same person</em> from triggering <strong>and</strong> confirming.</p>
+<p><strong>Double-lock boundary</strong>: when workload OIDC is active (§10), the prod apply restriction must <strong>also</strong> live in the AWS trust policy (<code>sub</code> claim filtered on <code>run:prod:*:apply</code>), not only in Stackd — otherwise bypassing the API bypasses the control. Both layers express the same rule; the <code>tier</code> feeds the token's <code>sub</code> (§10.2).</p>
+<p><strong>Assumed limitation</strong>: the tier is linear (nested rights: whoever can prod can do anything). An env "sensitive but not prod" (customer sandbox, compliance) is not expressed cleanly and would then justify explicit per-env permissions — out of MVP scope.</p>
+<p>Per-env option <code>require_second_pair_of_eyes</code>: the triggerer cannot confirm (redundant with the prod tier rule, useful for staging).</p>
+<h3 id="25-table-refresh_tokens">2.5 Table <code>refresh_tokens</code><a class="headerlink" href="#25-table-refresh_tokens" title="Permanent link">&para;</a></h3>
+<p>Rotation with reuse detection (§2.1, step 7) requires persisting refresh tokens by <strong>family</strong>:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="n">refresh_tokens</span><span class="w"> </span><span class="p">(</span>
+<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="w">  </span><span class="n">id</span><span class="w"> </span><span class="n">uuid</span><span class="w"> </span><span class="n">PK</span><span class="p">,</span><span class="w">                          </span><span class="c1">-- = jti of the refresh JWT</span>
+<a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a><span class="w">  </span><span class="n">user_id</span><span class="w"> </span><span class="n">FK</span><span class="p">,</span>
+<a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a><span class="w">  </span><span class="n">family_id</span><span class="w"> </span><span class="n">uuid</span><span class="p">,</span><span class="w">                      </span><span class="c1">-- one family per login; revoked as a block on reuse</span>
+<a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a><span class="w">  </span><span class="n">parent_id</span><span class="w"> </span><span class="n">uuid</span><span class="w"> </span><span class="k">nullable</span><span class="p">,</span><span class="w">             </span><span class="c1">-- token this one is derived from (rotation chain)</span>
+<a id="__codelineno-2-6" name="__codelineno-2-6" href="#__codelineno-2-6"></a><span class="w">  </span><span class="n">token_hash</span><span class="w"> </span><span class="nb">text</span><span class="p">,</span><span class="w">                     </span><span class="c1">-- SHA-256 of the token (never the token in clear)</span>
+<a id="__codelineno-2-7" name="__codelineno-2-7" href="#__codelineno-2-7"></a><span class="w">  </span><span class="n">used_at</span><span class="w"> </span><span class="n">timestamptz</span><span class="w"> </span><span class="k">nullable</span><span class="p">,</span><span class="w">        </span><span class="c1">-- set on rotation; a 2nd use = reuse detected</span>
+<a id="__codelineno-2-8" name="__codelineno-2-8" href="#__codelineno-2-8"></a><span class="w">  </span><span class="n">revoked_at</span><span class="w"> </span><span class="n">timestamptz</span><span class="w"> </span><span class="k">nullable</span><span class="p">,</span>
+<a id="__codelineno-2-9" name="__codelineno-2-9" href="#__codelineno-2-9"></a><span class="w">  </span><span class="n">expires_at</span><span class="p">,</span><span class="w"> </span><span class="n">created_at</span><span class="p">,</span>
+<a id="__codelineno-2-10" name="__codelineno-2-10" href="#__codelineno-2-10"></a><span class="w">  </span><span class="k">UNIQUE</span><span class="w"> </span><span class="p">(</span><span class="n">token_hash</span><span class="p">)</span>
+<a id="__codelineno-2-11" name="__codelineno-2-11" href="#__codelineno-2-11"></a><span class="p">)</span>
+</code></pre></div>
+<p>On each <code>/auth/refresh</code>: the presented token must exist, not be revoked, not be expired, <code>used_at IS NULL</code>. We mark it <code>used_at</code>, issue a new token (same <code>family_id</code>, <code>parent_id = id</code>). If a token already <code>used_at</code> is presented again → <strong>reuse</strong>: revocation of the whole family + <code>audit auth.refresh_reuse_detected</code>. Purge of expired families as a periodic task (§7.5).</p>
+<hr />
+<h2 id="3-data-model">3. Data model<a class="headerlink" href="#3-data-model" title="Permanent link">&para;</a></h2>
+<h3 id="30-spaces-the-root-container">3.0 <code>spaces</code> — the root container<a class="headerlink" href="#30-spaces-the-root-container" title="Permanent link">&para;</a></h3>
+<p>First level of the hierarchy (breadcrumb <code>space / stack / env / run</code>, DESIGN §4) and parent of <code>stacks</code>, <code>variable_sets</code>, <code>worker_pools</code>. <strong>Per-space RBAC</strong> is pushed to Phase 7; in the MVP the table exists and the bootstrap creates a <code>default</code> space to which everything is attached. No <strong>exposed multi-space CRUD</strong> nor Google group mapping before RBAC (seed/dev may insert other spaces directly — e.g. <code>demo</code> in DEV §7 — this is not the public API). All <code>space_id</code> FKs point to a space from Phase 1 — the entity is not optional, only its CRUD is.</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="n">spaces</span><span class="w"> </span><span class="p">(</span>
+<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a><span class="w">  </span><span class="n">id</span><span class="w"> </span><span class="n">uuid</span><span class="w"> </span><span class="n">PK</span><span class="p">,</span>
+<a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a><span class="w">  </span><span class="n">name</span><span class="w"> </span><span class="nb">text</span><span class="w"> </span><span class="k">unique</span><span class="p">,</span><span class="w">                 </span><span class="c1">-- &#39;default&#39; at MVP</span>
+<a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a><span class="w">  </span><span class="n">description</span><span class="w"> </span><span class="nb">text</span><span class="p">,</span>
+<a id="__codelineno-3-5" name="__codelineno-3-5" href="#__codelineno-3-5"></a><span class="w">  </span><span class="n">created_at</span><span class="p">,</span><span class="w"> </span><span class="n">updated_at</span>
+<a id="__codelineno-3-6" name="__codelineno-3-6" href="#__codelineno-3-6"></a><span class="p">)</span>
+</code></pre></div>
+<h3 id="31-stacks-the-template-repo-code">3.1 <code>stacks</code> — the template (repo + code)<a class="headerlink" href="#31-stacks-the-template-repo-code" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a>id uuid PK, space_id FK, name text unique(space), description,
+<a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a>repo_url, repo_auth_kind enum(none|token|deploy_key), repo_secret_encrypted,
+<a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a>webhook_secret_encrypted bytea nullable,   -- §5/§9.6: HMAC secret of the incoming webhook
+<a id="__codelineno-4-4" name="__codelineno-4-4" href="#__codelineno-4-4"></a>project_root text default &#39;.&#39;,
+<a id="__codelineno-4-5" name="__codelineno-4-5" href="#__codelineno-4-5"></a>tool enum(opentofu|terraform), tool_version text,
+<a id="__codelineno-4-6" name="__codelineno-4-6" href="#__codelineno-4-6"></a>created_at, updated_at
+</code></pre></div>
+<blockquote>
+<p>Neither branch, nor state, nor autodeploy: everything goes down into the environment.</p>
+<p><strong>Incoming webhook &amp; shared repo</strong>: one repo can serve several stacks (distinct <code>project_root</code>). Since the GitHub/GitLab webhook is configured <strong>per repo</strong> with a unique secret, <code>webhook_secret_encrypted</code> is shared across these stacks (same value). On receipt (<code>POST /api/v1/webhooks/github</code>, §12), the API resolves the stacks whose <code>repo_url</code> matches the payload, verifies the HMAC against their common secret, then filters environments by branch and <code>project_root</code> (§9.6).</p>
+</blockquote>
+<h3 id="32-environments-the-executable-instance">3.2 <code>environments</code> — the executable instance<a class="headerlink" href="#32-environments-the-executable-instance" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a>id uuid PK, stack_id FK, name text unique(stack),       -- dev, staging, prod
+<a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a>tier enum(dev|staging|prod),       -- §2.4: carries the apply/destroy permissions
+<a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a>branch text,                       -- branch tracked by THIS env
+<a id="__codelineno-5-4" name="__codelineno-5-4" href="#__codelineno-5-4"></a>autodeploy bool,                   -- forced false if protected
+<a id="__codelineno-5-5" name="__codelineno-5-5" href="#__codelineno-5-5"></a>protected bool,                    -- §2.4: forces confirmation + 4-eyes (NOT the access control → tier)
+<a id="__codelineno-5-6" name="__codelineno-5-6" href="#__codelineno-5-6"></a>require_second_pair_of_eyes bool,
+<a id="__codelineno-5-7" name="__codelineno-5-7" href="#__codelineno-5-7"></a>managed_state bool,
+<a id="__codelineno-5-8" name="__codelineno-5-8" href="#__codelineno-5-8"></a>allow_mock_apply bool default false,  -- §9.3: allow the apply of a run having consumed mocks
+<a id="__codelineno-5-9" name="__codelineno-5-9" href="#__codelineno-5-9"></a>head_sha text nullable,               -- §9.6: known head of the tracked branch
+<a id="__codelineno-5-10" name="__codelineno-5-10" href="#__codelineno-5-10"></a>head_updated_at timestamptz nullable,
+<a id="__codelineno-5-11" name="__codelineno-5-11" href="#__codelineno-5-11"></a>commits_ahead int nullable,           -- nb of commits between last apply and head
+<a id="__codelineno-5-12" name="__codelineno-5-12" href="#__codelineno-5-12"></a>affects_project_root bool nullable,   -- do the commits ahead touch this project_root?
+<a id="__codelineno-5-13" name="__codelineno-5-13" href="#__codelineno-5-13"></a>locked bool, labels jsonb, position int,
+<a id="__codelineno-5-14" name="__codelineno-5-14" href="#__codelineno-5-14"></a>created_at, updated_at
+</code></pre></div>
+<p>Why not Terraform workspaces: weak isolation (shared code/backend/credentials, state suffix), easy targeting mistakes. A Stackd environment = physically separate state, variables, protections and its own worker pool.</p>
+<h3 id="33-variables-stack-and-environment-level">3.3 <code>variables</code> — stack and environment level<a class="headerlink" href="#33-variables-stack-and-environment-level" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a>id uuid PK,
+<a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a>stack_id FK nullable,              -- set for stack/env vars
+<a id="__codelineno-6-3" name="__codelineno-6-3" href="#__codelineno-6-3"></a>environment_id FK nullable,        -- NULL = common to the stack; set = env override
+<a id="__codelineno-6-4" name="__codelineno-6-4" href="#__codelineno-6-4"></a>variable_set_id FK nullable,       -- set for the vars of a set (§3.4)
+<a id="__codelineno-6-5" name="__codelineno-6-5" href="#__codelineno-6-5"></a>kind enum(terraform|environment),  -- terraform → TF_VAR_/tfvars; environment → env var
+<a id="__codelineno-6-6" name="__codelineno-6-6" href="#__codelineno-6-6"></a>name text, value text nullable, value_encrypted bytea nullable,
+<a id="__codelineno-6-7" name="__codelineno-6-7" href="#__codelineno-6-7"></a>sensitive bool, hcl bool
+<a id="__codelineno-6-8" name="__codelineno-6-8" href="#__codelineno-6-8"></a>-- CHECK: exactly one parent (variable_set_id XOR stack_id)
+<a id="__codelineno-6-9" name="__codelineno-6-9" href="#__codelineno-6-9"></a>-- CHECK: environment_id IS NULL if variable_set_id is set
+<a id="__codelineno-6-10" name="__codelineno-6-10" href="#__codelineno-6-10"></a>--         (a set variable is never scoped to an env: it is
+<a id="__codelineno-6-11" name="__codelineno-6-11" href="#__codelineno-6-11"></a>--          the ATTACHMENT of the set that carries the targeting, §3.4)
+<a id="__codelineno-6-12" name="__codelineno-6-12" href="#__codelineno-6-12"></a>-- Uniqueness: &quot;parent&quot; is not a column (stack_id OR variable_set_id) →
+<a id="__codelineno-6-13" name="__codelineno-6-13" href="#__codelineno-6-13"></a>--   two partial unique indexes, not a single UNIQUE constraint:
+<a id="__codelineno-6-14" name="__codelineno-6-14" href="#__codelineno-6-14"></a>--     UNIQUE (stack_id, COALESCE(environment_id,&#39;00..0&#39;::uuid), kind, name)
+<a id="__codelineno-6-15" name="__codelineno-6-15" href="#__codelineno-6-15"></a>--       WHERE stack_id IS NOT NULL
+<a id="__codelineno-6-16" name="__codelineno-6-16" href="#__codelineno-6-16"></a>--     UNIQUE (variable_set_id, kind, name)
+<a id="__codelineno-6-17" name="__codelineno-6-17" href="#__codelineno-6-17"></a>--       WHERE variable_set_id IS NOT NULL
+<a id="__codelineno-6-18" name="__codelineno-6-18" href="#__codelineno-6-18"></a>--   (COALESCE because NULL ≠ NULL in SQL: without it, two stack vars of the same name
+<a id="__codelineno-6-19" name="__codelineno-6-19" href="#__codelineno-6-19"></a>--    with environment_id NULL would not trigger the intended conflict)
+</code></pre></div>
+<h3 id="34-variable_sets-factored-configuration">3.4 <code>variable_sets</code> — factored configuration<a class="headerlink" href="#34-variable_sets-factored-configuration" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a><span class="n">variable_sets</span><span class="w"> </span><span class="p">(</span>
+<a id="__codelineno-7-2" name="__codelineno-7-2" href="#__codelineno-7-2"></a><span class="w">  </span><span class="n">id</span><span class="w"> </span><span class="n">uuid</span><span class="w"> </span><span class="n">PK</span><span class="p">,</span><span class="w"> </span><span class="n">space_id</span><span class="w"> </span><span class="n">FK</span><span class="p">,</span>
+<a id="__codelineno-7-3" name="__codelineno-7-3" href="#__codelineno-7-3"></a><span class="w">  </span><span class="n">name</span><span class="w"> </span><span class="nb">text</span><span class="w"> </span><span class="k">unique</span><span class="p">(</span><span class="k">space</span><span class="p">),</span><span class="w">          </span><span class="c1">-- e.g. common-aws, datadog, prod-credentials</span>
+<a id="__codelineno-7-4" name="__codelineno-7-4" href="#__codelineno-7-4"></a><span class="w">  </span><span class="n">description</span><span class="w"> </span><span class="nb">text</span><span class="p">,</span>
+<a id="__codelineno-7-5" name="__codelineno-7-5" href="#__codelineno-7-5"></a><span class="w">  </span><span class="n">auto_attach</span><span class="w"> </span><span class="n">bool</span><span class="w"> </span><span class="k">default</span><span class="w"> </span><span class="k">false</span><span class="p">,</span><span class="w">   </span><span class="c1">-- true = attached to all stacks of the space</span>
+<a id="__codelineno-7-6" name="__codelineno-7-6" href="#__codelineno-7-6"></a><span class="w">  </span><span class="n">created_at</span><span class="p">,</span><span class="w"> </span><span class="n">updated_at</span>
+<a id="__codelineno-7-7" name="__codelineno-7-7" href="#__codelineno-7-7"></a><span class="p">)</span>
+<a id="__codelineno-7-8" name="__codelineno-7-8" href="#__codelineno-7-8"></a>
+<a id="__codelineno-7-9" name="__codelineno-7-9" href="#__codelineno-7-9"></a><span class="n">variable_set_attachments</span><span class="w"> </span><span class="p">(</span>
+<a id="__codelineno-7-10" name="__codelineno-7-10" href="#__codelineno-7-10"></a><span class="w">  </span><span class="n">id</span><span class="w"> </span><span class="n">uuid</span><span class="w"> </span><span class="n">PK</span><span class="p">,</span>
+<a id="__codelineno-7-11" name="__codelineno-7-11" href="#__codelineno-7-11"></a><span class="w">  </span><span class="n">variable_set_id</span><span class="w"> </span><span class="n">FK</span><span class="p">,</span>
+<a id="__codelineno-7-12" name="__codelineno-7-12" href="#__codelineno-7-12"></a><span class="w">  </span><span class="n">target_kind</span><span class="w"> </span><span class="n">enum</span><span class="p">(</span><span class="s1">&#39;stack&#39;</span><span class="p">,</span><span class="s1">&#39;environment&#39;</span><span class="p">),</span>
+<a id="__codelineno-7-13" name="__codelineno-7-13" href="#__codelineno-7-13"></a><span class="w">  </span><span class="n">target_id</span><span class="w"> </span><span class="n">uuid</span><span class="p">,</span><span class="w">                   </span><span class="c1">-- stack → all its envs; environment → this env only</span>
+<a id="__codelineno-7-14" name="__codelineno-7-14" href="#__codelineno-7-14"></a><span class="w">  </span><span class="n">priority</span><span class="w"> </span><span class="nb">int</span><span class="w"> </span><span class="k">default</span><span class="w"> </span><span class="mi">0</span><span class="p">,</span><span class="w">           </span><span class="c1">-- orders the sets among themselves at resolution</span>
+<a id="__codelineno-7-15" name="__codelineno-7-15" href="#__codelineno-7-15"></a><span class="w">  </span><span class="k">UNIQUE</span><span class="w"> </span><span class="p">(</span><span class="n">variable_set_id</span><span class="p">,</span><span class="w"> </span><span class="n">target_kind</span><span class="p">,</span><span class="w"> </span><span class="n">target_id</span><span class="p">)</span>
+<a id="__codelineno-7-16" name="__codelineno-7-16" href="#__codelineno-7-16"></a><span class="p">)</span>
+</code></pre></div>
+<p><strong>Final resolution of a variable at claim time</strong> (from weakest to strongest):</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a>1. variable sets auto_attach            (by increasing priority)
+<a id="__codelineno-8-2" name="__codelineno-8-2" href="#__codelineno-8-2"></a>2. variable sets attached to the stack  (by increasing priority)
+<a id="__codelineno-8-3" name="__codelineno-8-3" href="#__codelineno-8-3"></a>3. variable sets attached to the env    (by increasing priority)
+<a id="__codelineno-8-4" name="__codelineno-8-4" href="#__codelineno-8-4"></a>4. stack variables (environment_id NULL)
+<a id="__codelineno-8-5" name="__codelineno-8-5" href="#__codelineno-8-5"></a>5. environment variables                ← always wins
+</code></pre></div>
+<p>At equal name and kind, the upper layer overrides. Two sources outside resolution are added at claim time: upstream outputs (<code>dependency:</code>) and mocks (<code>mock</code>) — see §9. The snapshot of <strong>provenances</strong> (<code>{"TF_VAR_region": "set:common-aws", "TF_VAR_cidr": "env", "TF_VAR_vpc_id": "dependency:network/prod", "TF_VAR_nlb_dns": "mock"}</code>) is frozen in <code>runs.variable_provenance</code> for audit and the UI badge (DESIGN.md §5.2: "inherited from…", "overridden here", <code>MOCK</code>). Deleting an attached set → 409 with the list of attachments (explicit detachment required).</p>
+<h3 id="35-runs">3.5 <code>runs</code><a class="headerlink" href="#35-runs" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a>id uuid PK, environment_id FK,
+<a id="__codelineno-9-2" name="__codelineno-9-2" href="#__codelineno-9-2"></a>type enum(tracked|proposed|destroy), state enum (§4),
+<a id="__codelineno-9-3" name="__codelineno-9-3" href="#__codelineno-9-3"></a>commit_sha, commit_message, commit_author,
+<a id="__codelineno-9-4" name="__codelineno-9-4" href="#__codelineno-9-4"></a>triggered_by enum(manual|webhook|dependency|api), trigger_user_id nullable,  -- &#39;api&#39; reserved: no
+<a id="__codelineno-9-5" name="__codelineno-9-5" href="#__codelineno-9-5"></a>                                     -- application tokens/PAT at MVP (auth = human Google + worker),
+<a id="__codelineno-9-6" name="__codelineno-9-6" href="#__codelineno-9-6"></a>                                     -- the value is set when programmatic triggering arrives (Phase 7)
+<a id="__codelineno-9-7" name="__codelineno-9-7" href="#__codelineno-9-7"></a>confirmed_by_user_id nullable,       -- who approved the apply (core of the audit)
+<a id="__codelineno-9-8" name="__codelineno-9-8" href="#__codelineno-9-8"></a>parent_run_id nullable, run_group_id nullable, worker_id nullable,
+<a id="__codelineno-9-9" name="__codelineno-9-9" href="#__codelineno-9-9"></a>plan_summary jsonb,                  -- {add, change, destroy, resources}
+<a id="__codelineno-9-10" name="__codelineno-9-10" href="#__codelineno-9-10"></a>check_results jsonb,                 -- results of the after_plan hooks (§8)
+<a id="__codelineno-9-11" name="__codelineno-9-11" href="#__codelineno-9-11"></a>resolved_inputs jsonb,               -- injected upstream outputs (non-sensitive)
+<a id="__codelineno-9-12" name="__codelineno-9-12" href="#__codelineno-9-12"></a>used_mocks bool default false,       -- §9.3: at least one mock consumed
+<a id="__codelineno-9-13" name="__codelineno-9-13" href="#__codelineno-9-13"></a>variable_provenance jsonb,           -- §3.4: provenance of each resolved variable
+<a id="__codelineno-9-14" name="__codelineno-9-14" href="#__codelineno-9-14"></a>claimed_at, confirmed_at, finished_at, error nullable, created_at
+</code></pre></div>
+<p>Concurrency — 1 active run per environment:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-10-1" name="__codelineno-10-1" href="#__codelineno-10-1"></a><span class="k">CREATE</span><span class="w"> </span><span class="k">UNIQUE</span><span class="w"> </span><span class="k">INDEX</span><span class="w"> </span><span class="n">one_active_run_per_env</span><span class="w"> </span><span class="k">ON</span><span class="w"> </span><span class="n">runs</span><span class="w"> </span><span class="p">(</span><span class="n">environment_id</span><span class="p">)</span>
+<a id="__codelineno-10-2" name="__codelineno-10-2" href="#__codelineno-10-2"></a><span class="k">WHERE</span><span class="w"> </span><span class="k">state</span><span class="w"> </span><span class="k">IN</span><span class="w"> </span><span class="p">(</span><span class="s1">&#39;preparing&#39;</span><span class="p">,</span><span class="s1">&#39;planning&#39;</span><span class="p">,</span><span class="s1">&#39;checking&#39;</span><span class="p">,</span><span class="s1">&#39;unconfirmed&#39;</span><span class="p">,</span><span class="s1">&#39;confirmed&#39;</span><span class="p">,</span><span class="s1">&#39;applying&#39;</span><span class="p">);</span>
+</code></pre></div>
+<h3 id="36-run_events">3.6 <code>run_events</code><a class="headerlink" href="#36-run_events" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-11-1" name="__codelineno-11-1" href="#__codelineno-11-1"></a>id, run_id FK, from_state, to_state,
+<a id="__codelineno-11-2" name="__codelineno-11-2" href="#__codelineno-11-2"></a>actor enum(system|user|worker), actor_id nullable, payload jsonb, created_at
+</code></pre></div>
+<h3 id="37-workers-and-worker_pools">3.7 <code>workers</code> and <code>worker_pools</code><a class="headerlink" href="#37-workers-and-worker_pools" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-12-1" name="__codelineno-12-1" href="#__codelineno-12-1"></a>worker_pools: id, space_id, name, labels jsonb, token_hash, created_at
+<a id="__codelineno-12-2" name="__codelineno-12-2" href="#__codelineno-12-2"></a>workers: id, pool_id, name, status(idle|busy|offline), labels jsonb,
+<a id="__codelineno-12-3" name="__codelineno-12-3" href="#__codelineno-12-3"></a>         version, last_heartbeat_at, registered_at
+</code></pre></div>
+<p><code>offline</code> if heartbeat &gt; 60 s; run in progress on an offline worker → <code>failed (worker_lost)</code> after 120 s. Targeting by labels (dedicated prod pool recommended).</p>
+<h3 id="38-dependencies-outputs-and-mocks">3.8 Dependencies, outputs and mocks<a class="headerlink" href="#38-dependencies-outputs-and-mocks" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-13-1" name="__codelineno-13-1" href="#__codelineno-13-1"></a><span class="n">env_dependencies</span><span class="w"> </span><span class="p">(</span>
+<a id="__codelineno-13-2" name="__codelineno-13-2" href="#__codelineno-13-2"></a><span class="w">  </span><span class="n">id</span><span class="w"> </span><span class="n">uuid</span><span class="w"> </span><span class="n">PK</span><span class="p">,</span>
+<a id="__codelineno-13-3" name="__codelineno-13-3" href="#__codelineno-13-3"></a><span class="w">  </span><span class="n">upstream_env_id</span><span class="w"> </span><span class="n">FK</span><span class="p">,</span><span class="w"> </span><span class="n">downstream_env_id</span><span class="w"> </span><span class="n">FK</span><span class="p">,</span>
+<a id="__codelineno-13-4" name="__codelineno-13-4" href="#__codelineno-13-4"></a><span class="w">  </span><span class="n">trigger_policy</span><span class="w"> </span><span class="n">enum</span><span class="p">(</span><span class="s1">&#39;on_output_change&#39;</span><span class="p">,</span><span class="s1">&#39;always&#39;</span><span class="p">,</span><span class="s1">&#39;never&#39;</span><span class="p">),</span>
+<a id="__codelineno-13-5" name="__codelineno-13-5" href="#__codelineno-13-5"></a><span class="w">  </span><span class="k">UNIQUE</span><span class="w"> </span><span class="p">(</span><span class="n">upstream_env_id</span><span class="p">,</span><span class="w"> </span><span class="n">downstream_env_id</span><span class="p">),</span>
+<a id="__codelineno-13-6" name="__codelineno-13-6" href="#__codelineno-13-6"></a><span class="w">  </span><span class="k">CHECK</span><span class="w"> </span><span class="p">(</span><span class="n">upstream_env_id</span><span class="w"> </span><span class="o">&lt;&gt;</span><span class="w"> </span><span class="n">downstream_env_id</span><span class="p">)</span>
+<a id="__codelineno-13-7" name="__codelineno-13-7" href="#__codelineno-13-7"></a><span class="p">)</span>
+<a id="__codelineno-13-8" name="__codelineno-13-8" href="#__codelineno-13-8"></a>
+<a id="__codelineno-13-9" name="__codelineno-13-9" href="#__codelineno-13-9"></a><span class="n">output_references</span><span class="w"> </span><span class="p">(</span>
+<a id="__codelineno-13-10" name="__codelineno-13-10" href="#__codelineno-13-10"></a><span class="w">  </span><span class="n">id</span><span class="w"> </span><span class="n">uuid</span><span class="w"> </span><span class="n">PK</span><span class="p">,</span><span class="w"> </span><span class="n">dependency_id</span><span class="w"> </span><span class="n">FK</span><span class="p">,</span>
+<a id="__codelineno-13-11" name="__codelineno-13-11" href="#__codelineno-13-11"></a><span class="w">  </span><span class="n">output_name</span><span class="w"> </span><span class="nb">text</span><span class="p">,</span><span class="w">                 </span><span class="c1">-- upstream Terraform output</span>
+<a id="__codelineno-13-12" name="__codelineno-13-12" href="#__codelineno-13-12"></a><span class="w">  </span><span class="n">input_name</span><span class="w"> </span><span class="nb">text</span><span class="p">,</span><span class="w">                  </span><span class="c1">-- downstream variable (without TF_VAR_)</span>
+<a id="__codelineno-13-13" name="__codelineno-13-13" href="#__codelineno-13-13"></a><span class="w">  </span><span class="n">mock_value</span><span class="w"> </span><span class="n">jsonb</span><span class="w"> </span><span class="k">nullable</span><span class="p">,</span><span class="w">        </span><span class="c1">-- §9.3: mock value for bootstrap</span>
+<a id="__codelineno-13-14" name="__codelineno-13-14" href="#__codelineno-13-14"></a><span class="w">  </span><span class="k">UNIQUE</span><span class="w"> </span><span class="p">(</span><span class="n">dependency_id</span><span class="p">,</span><span class="w"> </span><span class="n">input_name</span><span class="p">)</span>
+<a id="__codelineno-13-15" name="__codelineno-13-15" href="#__codelineno-13-15"></a><span class="p">)</span>
+<a id="__codelineno-13-16" name="__codelineno-13-16" href="#__codelineno-13-16"></a>
+<a id="__codelineno-13-17" name="__codelineno-13-17" href="#__codelineno-13-17"></a><span class="n">env_outputs</span><span class="w"> </span><span class="p">(</span>
+<a id="__codelineno-13-18" name="__codelineno-13-18" href="#__codelineno-13-18"></a><span class="w">  </span><span class="n">id</span><span class="w"> </span><span class="n">uuid</span><span class="w"> </span><span class="n">PK</span><span class="p">,</span><span class="w"> </span><span class="n">environment_id</span><span class="w"> </span><span class="n">FK</span><span class="p">,</span><span class="w"> </span><span class="n">run_id</span><span class="w"> </span><span class="n">FK</span><span class="p">,</span>
+<a id="__codelineno-13-19" name="__codelineno-13-19" href="#__codelineno-13-19"></a><span class="w">  </span><span class="n">name</span><span class="w"> </span><span class="nb">text</span><span class="p">,</span><span class="w"> </span><span class="n">value</span><span class="w"> </span><span class="n">jsonb</span><span class="p">,</span><span class="w">           </span><span class="c1">-- NULL if sensitive</span>
+<a id="__codelineno-13-20" name="__codelineno-13-20" href="#__codelineno-13-20"></a><span class="w">  </span><span class="n">value_hash</span><span class="w"> </span><span class="nb">text</span><span class="p">,</span><span class="w"> </span><span class="k">sensitive</span><span class="w"> </span><span class="n">bool</span><span class="p">,</span>
+<a id="__codelineno-13-21" name="__codelineno-13-21" href="#__codelineno-13-21"></a><span class="w">  </span><span class="k">UNIQUE</span><span class="w"> </span><span class="p">(</span><span class="n">environment_id</span><span class="p">,</span><span class="w"> </span><span class="n">name</span><span class="p">)</span>
+<a id="__codelineno-13-22" name="__codelineno-13-22" href="#__codelineno-13-22"></a><span class="p">)</span>
+</code></pre></div>
+<p>Anti-cycle: DFS on creation → 422. Helper <code>POST /stacks/{id}/dependencies/link-by-name</code>: bulk edges between environments of the same name across two stacks.</p>
+<h3 id="39-managed-state-and-hooks">3.9 Managed state and hooks<a class="headerlink" href="#39-managed-state-and-hooks" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-14-1" name="__codelineno-14-1" href="#__codelineno-14-1"></a>state_versions: id, environment_id FK, serial, lineage, size_bytes,
+<a id="__codelineno-14-2" name="__codelineno-14-2" href="#__codelineno-14-2"></a>                s3_key, created_by_run_id nullable, created_at
+<a id="__codelineno-14-3" name="__codelineno-14-3" href="#__codelineno-14-3"></a>state_locks:    environment_id PK, lock_id, info jsonb, locked_at
+<a id="__codelineno-14-4" name="__codelineno-14-4" href="#__codelineno-14-4"></a>
+<a id="__codelineno-14-5" name="__codelineno-14-5" href="#__codelineno-14-5"></a>hooks (platform, §8): id, target_kind enum(&#39;stack&#39;,&#39;environment&#39;), target_id,
+<a id="__codelineno-14-6" name="__codelineno-14-6" href="#__codelineno-14-6"></a>       stage enum(before_init|after_init|before_plan|after_plan|before_apply|after_apply),
+<a id="__codelineno-14-7" name="__codelineno-14-7" href="#__codelineno-14-7"></a>       name text, command text, on_failure enum(&#39;fail&#39;,&#39;warn&#39;),
+<a id="__codelineno-14-8" name="__codelineno-14-8" href="#__codelineno-14-8"></a>       position int, created_at, updated_at
+<a id="__codelineno-14-9" name="__codelineno-14-9" href="#__codelineno-14-9"></a>
+<a id="__codelineno-14-10" name="__codelineno-14-10" href="#__codelineno-14-10"></a>run_logs (hot tier, §5.2): run_id FK, phase text, section text nullable,
+<a id="__codelineno-14-11" name="__codelineno-14-11" href="#__codelineno-14-11"></a>       seq int, lines jsonb, created_at — PK (run_id, phase, seq)
+</code></pre></div>
+<h3 id="310-cloud_integrations-oidc-workload-10">3.10 <code>cloud_integrations</code> (OIDC workload, §10)<a class="headerlink" href="#310-cloud_integrations-oidc-workload-10" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-15-1" name="__codelineno-15-1" href="#__codelineno-15-1"></a>id uuid PK, environment_id FK unique,
+<a id="__codelineno-15-2" name="__codelineno-15-2" href="#__codelineno-15-2"></a>provider enum(&#39;aws&#39;),                -- gcp/azure in Phase 7
+<a id="__codelineno-15-3" name="__codelineno-15-3" href="#__codelineno-15-3"></a>plan_role_arn text, apply_role_arn text,
+<a id="__codelineno-15-4" name="__codelineno-15-4" href="#__codelineno-15-4"></a>region text nullable, session_duration int default 3600,
+<a id="__codelineno-15-5" name="__codelineno-15-5" href="#__codelineno-15-5"></a>created_at, updated_at
+</code></pre></div>
+<h3 id="311-oidc_signing_keys-issuer-workload-10">3.11 <code>oidc_signing_keys</code> (issuer workload, §10)<a class="headerlink" href="#311-oidc_signing_keys-issuer-workload-10" title="Permanent link">&para;</a></h3>
+<p>JWKS rotation with overlap (§10.1) requires persisting keys with their <code>kid</code>: the old one stays published as long as in-flight tokens use it.</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-16-1" name="__codelineno-16-1" href="#__codelineno-16-1"></a><span class="n">oidc_signing_keys</span><span class="w"> </span><span class="p">(</span>
+<a id="__codelineno-16-2" name="__codelineno-16-2" href="#__codelineno-16-2"></a><span class="w">  </span><span class="n">id</span><span class="w"> </span><span class="n">uuid</span><span class="w"> </span><span class="n">PK</span><span class="p">,</span>
+<a id="__codelineno-16-3" name="__codelineno-16-3" href="#__codelineno-16-3"></a><span class="w">  </span><span class="n">kid</span><span class="w"> </span><span class="nb">text</span><span class="w"> </span><span class="k">unique</span><span class="p">,</span><span class="w">                   </span><span class="c1">-- exposed in the JWKS and the JWT header</span>
+<a id="__codelineno-16-4" name="__codelineno-16-4" href="#__codelineno-16-4"></a><span class="w">  </span><span class="n">algorithm</span><span class="w"> </span><span class="nb">text</span><span class="w"> </span><span class="k">default</span><span class="w"> </span><span class="s1">&#39;RS256&#39;</span><span class="p">,</span>
+<a id="__codelineno-16-5" name="__codelineno-16-5" href="#__codelineno-16-5"></a><span class="w">  </span><span class="n">public_jwk</span><span class="w"> </span><span class="n">jsonb</span><span class="p">,</span><span class="w">                  </span><span class="c1">-- published on /oidc/jwks</span>
+<a id="__codelineno-16-6" name="__codelineno-16-6" href="#__codelineno-16-6"></a><span class="w">  </span><span class="n">private_key_encrypted</span><span class="w"> </span><span class="n">bytea</span><span class="p">,</span><span class="w">       </span><span class="c1">-- AES-256-GCM (§1) OR KMS reference (key never in clear at rest)</span>
+<a id="__codelineno-16-7" name="__codelineno-16-7" href="#__codelineno-16-7"></a><span class="w">  </span><span class="n">status</span><span class="w"> </span><span class="n">enum</span><span class="p">(</span><span class="s1">&#39;active&#39;</span><span class="p">,</span><span class="s1">&#39;retiring&#39;</span><span class="p">,</span><span class="s1">&#39;retired&#39;</span><span class="p">),</span><span class="w">  </span><span class="c1">-- only 1 &#39;active&#39; at a time (signs); &#39;retiring&#39; still in the JWKS</span>
+<a id="__codelineno-16-8" name="__codelineno-16-8" href="#__codelineno-16-8"></a><span class="w">  </span><span class="n">created_at</span><span class="p">,</span><span class="w"> </span><span class="n">retired_at</span><span class="w"> </span><span class="k">nullable</span>
+<a id="__codelineno-16-9" name="__codelineno-16-9" href="#__codelineno-16-9"></a><span class="p">)</span>
+</code></pre></div>
+<p>Rotation: a new <code>active</code> key, the old one moves to <code>retiring</code> (still in the JWKS, no longer signs), then <code>retired</code> (out of the JWKS) once the max TTL of a token has elapsed. KMS option: <code>private_key_encrypted</code> becomes an ARN reference, signing goes through <code>kms:Sign</code> (the private key never leaves KMS) — recommended in prod (see risk §13 / PLAN §5).</p>
+<hr />
+<h2 id="4-run-state-machine">4. Run state machine<a class="headerlink" href="#4-run-state-machine" title="Permanent link">&para;</a></h2>
+<h3 id="41-diagram">4.1 Diagram<a class="headerlink" href="#41-diagram" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-17-1" name="__codelineno-17-1" href="#__codelineno-17-1"></a>                  ┌──────────┐
+<a id="__codelineno-17-2" name="__codelineno-17-2" href="#__codelineno-17-2"></a>   trigger ──────▶│  queued  │── env locked / active run: waits
+<a id="__codelineno-17-3" name="__codelineno-17-3" href="#__codelineno-17-3"></a>                  └────┬─────┘
+<a id="__codelineno-17-4" name="__codelineno-17-4" href="#__codelineno-17-4"></a>                  ┌────▼─────┐
+<a id="__codelineno-17-5" name="__codelineno-17-5" href="#__codelineno-17-5"></a>                  │preparing │ claim, clone, setup tool, hooks before/after_init, init
+<a id="__codelineno-17-6" name="__codelineno-17-6" href="#__codelineno-17-6"></a>                  └────┬─────┘
+<a id="__codelineno-17-7" name="__codelineno-17-7" href="#__codelineno-17-7"></a>                  ┌────▼─────┐
+<a id="__codelineno-17-8" name="__codelineno-17-8" href="#__codelineno-17-8"></a>                  │ planning │ hooks before_plan, plan -out + show -json
+<a id="__codelineno-17-9" name="__codelineno-17-9" href="#__codelineno-17-9"></a>                  └────┬─────┘
+<a id="__codelineno-17-10" name="__codelineno-17-10" href="#__codelineno-17-10"></a>                  ┌────▼─────┐
+<a id="__codelineno-17-11" name="__codelineno-17-11" href="#__codelineno-17-11"></a>                  │ checking │ hooks after_plan (tfsec, infracost, scripts)
+<a id="__codelineno-17-12" name="__codelineno-17-12" href="#__codelineno-17-12"></a>                  └────┬─────┘   fail → failed; warn → forced confirmation
+<a id="__codelineno-17-13" name="__codelineno-17-13" href="#__codelineno-17-13"></a>         ┌────────────┼────────────────────┐
+<a id="__codelineno-17-14" name="__codelineno-17-14" href="#__codelineno-17-14"></a>  empty  │            │ changes             │ type=proposed
+<a id="__codelineno-17-15" name="__codelineno-17-15" href="#__codelineno-17-15"></a>  plan   │            ▼                     ▼
+<a id="__codelineno-17-16" name="__codelineno-17-16" href="#__codelineno-17-16"></a>         │     ┌─────────────┐       ┌──────────┐
+<a id="__codelineno-17-17" name="__codelineno-17-17" href="#__codelineno-17-17"></a>         │     │ unconfirmed │       │ finished │ (plan-only)
+<a id="__codelineno-17-18" name="__codelineno-17-18" href="#__codelineno-17-18"></a>         │     └────┬───┬────┘       └──────────┘
+<a id="__codelineno-17-19" name="__codelineno-17-19" href="#__codelineno-17-19"></a>         │  confirm │   │ discard ──▶ discarded
+<a id="__codelineno-17-20" name="__codelineno-17-20" href="#__codelineno-17-20"></a>         │ (can_app-│
+<a id="__codelineno-17-21" name="__codelineno-17-21" href="#__codelineno-17-21"></a>         │  ly: tier│
+<a id="__codelineno-17-22" name="__codelineno-17-22" href="#__codelineno-17-22"></a>         │  + role) │
+<a id="__codelineno-17-23" name="__codelineno-17-23" href="#__codelineno-17-23"></a>         │     ┌────▼─────┐
+<a id="__codelineno-17-24" name="__codelineno-17-24" href="#__codelineno-17-24"></a>         │     │confirmed │ (resumed by the same worker if possible)
+<a id="__codelineno-17-25" name="__codelineno-17-25" href="#__codelineno-17-25"></a>         │     └────┬─────┘
+<a id="__codelineno-17-26" name="__codelineno-17-26" href="#__codelineno-17-26"></a>         │     ┌────▼─────┐
+<a id="__codelineno-17-27" name="__codelineno-17-27" href="#__codelineno-17-27"></a>         │     │ applying │ hooks before_apply, apply, output -json, hooks after_apply
+<a id="__codelineno-17-28" name="__codelineno-17-28" href="#__codelineno-17-28"></a>         │     └────┬─────┘
+<a id="__codelineno-17-29" name="__codelineno-17-29" href="#__codelineno-17-29"></a>         ▼          ▼
+<a id="__codelineno-17-30" name="__codelineno-17-30" href="#__codelineno-17-30"></a>      ┌──────────────────┐
+<a id="__codelineno-17-31" name="__codelineno-17-31" href="#__codelineno-17-31"></a>      │     finished     │──▶ scheduler hooks: capture outputs, cascade, audit
+<a id="__codelineno-17-32" name="__codelineno-17-32" href="#__codelineno-17-32"></a>      └──────────────────┘
+</code></pre></div>
+<p>Terminal: <code>finished</code>, <code>failed</code>, <code>discarded</code>, <code>canceled</code>. <code>canceled</code>: user on <code>queued</code>/<code>unconfirmed</code>, or signal to the worker via heartbeat → SIGINT.</p>
+<h3 id="42-transition-rules">4.2 Transition rules<a class="headerlink" href="#42-transition-rules" title="Permanent link">&para;</a></h3>
+<table>
+<thead>
+<tr>
+<th>Transition</th>
+<th>Actor</th>
+<th>Conditions</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>queued → preparing</code></td>
+<td>worker (claim)</td>
+<td>no active run on the env, env not locked, compatible labels</td>
+</tr>
+<tr>
+<td><code>planning → checking</code></td>
+<td>worker</td>
+<td>plan OK <strong>and ≥ 1 after_plan hook</strong>. Without an after_plan hook, <code>checking</code> is skipped: the transitions <code>planning → unconfirmed / confirmed / finished</code> exist, with exactly the same conditions as their equivalents from <code>checking</code></td>
+</tr>
+<tr>
+<td><code>checking → unconfirmed</code></td>
+<td>worker</td>
+<td>checks OK or warn; non-empty diff. A warn <strong>forces</strong> confirmation even if autodeploy</td>
+</tr>
+<tr>
+<td><code>checking → confirmed</code></td>
+<td>system</td>
+<td>all checks OK, non-empty diff, <code>autodeploy=true</code>, env not protected, <code>used_mocks=false</code></td>
+</tr>
+<tr>
+<td><code>planning/checking → finished</code></td>
+<td>worker</td>
+<td>empty diff (outputs captured after refresh)</td>
+</tr>
+<tr>
+<td><code>unconfirmed → confirmed</code></td>
+<td>user</td>
+<td><code>can_apply(user, env)</code> = role∈{approver,admin} AND <code>max_apply_tier &gt;= env.tier</code> (§2.4); ≠ triggerer if tier=prod or 4-eyes; for a <code>destroy</code> run: <code>can_destroy</code> required; <strong>blocked if <code>used_mocks</code> and <code>allow_mock_apply=false</code></strong></td>
+</tr>
+<tr>
+<td><code>confirmed → applying</code></td>
+<td>worker</td>
+<td>resume of the workspace (TTL 24 h), otherwise re-plan</td>
+</tr>
+<tr>
+<td><code>applying → finished</code></td>
+<td>worker</td>
+<td>apply exit 0 + outputs uploaded</td>
+</tr>
+<tr>
+<td><code>* → failed</code></td>
+<td>worker/system</td>
+<td>exit ≠ 0, hook <code>fail</code>, timeouts (prepare 10 / plan 30 / apply 60 min)</td>
+</tr>
+</tbody>
+</table>
+<p>Single function <code>transition(run, to_state, actor, payload)</code>: legality, atomic update guarded on <code>from_state</code>, <code>run_event</code>, audit event if the action is human or terminal, WS publication, scheduler hooks. The guarded UPDATE uses <code>RETURNING</code> (PG18: old + new tuple) to produce the <code>from→to</code> <code>run_event</code> without a re-read, in the same transaction.</p>
+<hr />
+<h2 id="5-job-logging-system">5. Job logging system<a class="headerlink" href="#5-job-logging-system" title="Permanent link">&para;</a></h2>
+<h3 id="51-ingestion-worker-api">5.1 Ingestion (worker → API)<a class="headerlink" href="#51-ingestion-worker-api" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-18-1" name="__codelineno-18-1" href="#__codelineno-18-1"></a>POST /worker/v1/jobs/{id}/logs
+<a id="__codelineno-18-2" name="__codelineno-18-2" href="#__codelineno-18-2"></a>  { &quot;phase&quot;: &quot;planning&quot;, &quot;section&quot;: &quot;hook:infracost&quot; | null,
+<a id="__codelineno-18-3" name="__codelineno-18-3" href="#__codelineno-18-3"></a>    &quot;seq&quot;: 42, &quot;lines&quot;: [ {&quot;t&quot;: &quot;...&quot;, &quot;msg&quot;: &quot;...&quot;} ] }
+</code></pre></div>
+<ul>
+<li><code>seq</code> strictly increasing per phase → idempotency of retries.</li>
+<li><code>section</code> distinguishes hooks from the terraform stream (dedicated sections in the viewer).</li>
+<li>Agent buffer: 1 s / 32 KB. <strong>Masking before sending of ALL the run's sensitive values</strong> — <code>sensitive_env</code> <em>and</em> the <code>tfvars</code> marked <code>sensitive</code> (§3.3) — replaced with <code>***</code>. The agent builds the masking table from the claim payload, not only from <code>sensitive_env</code>.</li>
+<li><strong>Residual leak via <code>plan.json</code></strong>: an <code>after_plan</code> hook (infracost, jq, script) reads <code>plan.json</code>, which contains the variable values. Terraform marks <code>sensitive</code> the values it knows as such, but a hook that dumps the raw JSON can re-print a sensitive value to its stdout (and thus to the logs). Mitigations: (a) the value-based masking above also applies to hook stdout; (b) a short or transformed secret (base64, substring) escapes value-based masking — a <strong>documented</strong> limit, do not put exploitable secrets in non-sensitive <code>tfvars</code>. The check tools (tfsec/checkov/infracost) do not print values by default.</li>
+<li>ANSI sequences preserved (color rendering on the front side).</li>
+</ul>
+<h3 id="52-two-tier-storage">5.2 Two-tier storage<a class="headerlink" href="#52-two-tier-storage" title="Permanent link">&para;</a></h3>
+<table>
+<thead>
+<tr>
+<th>Tier</th>
+<th>Where</th>
+<th>When</th>
+<th>Usage</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Hot</td>
+<td>table <code>run_logs</code></td>
+<td>during the run + 7 d</td>
+<td>live + recent</td>
+</tr>
+<tr>
+<td>Cold</td>
+<td>S3 <code>logs/{run_id}/{phase}.log.gz</code></td>
+<td>async archiving at end of run</td>
+<td>history (1 year then lifecycle)</td>
+</tr>
+</tbody>
+</table>
+<p><code>GET /runs/{id}/logs?phase=&amp;after_seq=</code> serves one or the other transparently. <code>GET /runs/{id}/logs/download?phase=all</code>.</p>
+<h3 id="53-live-distribution">5.3 Live distribution<a class="headerlink" href="#53-live-distribution" title="Permanent link">&para;</a></h3>
+<p>Single multiplexed WebSocket: <code>{"sub": "run:&lt;id&gt;"}</code> → <code>log_chunk {phase, section, seq, lines}</code> + <code>run_event</code>. Reconnection → REST GET <code>after_seq</code> to fill the gap, then the stream.</p>
+<p><strong>Multi-replica fan-out (without a broker).</strong> A WS client is connected to <strong>one</strong> API replica; the event (transition or log chunk) may be produced on <strong>another</strong> replica. The bridge is <strong>Postgres <code>LISTEN/NOTIFY</code></strong>:</p>
+<ul>
+<li><code>transition()</code> (§4.2) and log ingestion (§5.1) emit a <code>NOTIFY</code> on a per-entity channel (<code>run_&lt;id&gt;</code>, <code>env_&lt;id&gt;</code>) <strong>in the same transaction</strong> as the write.</li>
+<li>The <code>NOTIFY</code> payload carries only a <strong>lightweight signal</strong> — <code>{kind, run_id, phase, max_seq}</code>, never the content (8 KB <code>NOTIFY</code> cap, and log lines can be large).</li>
+<li>On receipt, each replica re-reads the source (<code>run_logs</code> after <code>after_seq</code>, or the run state) and pushes to the locally subscribed WS clients. The front sees the same sequence as on REST reconnection — a single read path, idempotent by <code>seq</code>.</li>
+</ul>
+<p>In the single-replica MVP, <code>LISTEN/NOTIFY</code> remains the mechanism (no "in-process" branch to maintain); it scales as-is up to several replicas before requiring a real bus (abstract <code>EventBus</code> interface, like <code>JobQueue</code>).</p>
+<h3 id="54-viewer-front">5.4 Viewer (front)<a class="headerlink" href="#54-viewer-front" title="Permanent link">&para;</a></h3>
+<p>Specified in <strong>DESIGN.md §5.3</strong>: virtualization, collapsible sections per phase and per hook, follow-tail, search, <code>#L1234</code> anchors, ANSI rendering, timestamps toggle, download.</p>
+<hr />
+<h2 id="6-audit-who-applied-what">6. Audit — "who applied what"<a class="headerlink" href="#6-audit-who-applied-what" title="Permanent link">&para;</a></h2>
+<h3 id="61-table-audit_events-append-only">6.1 Table <code>audit_events</code> (append-only)<a class="headerlink" href="#61-table-audit_events-append-only" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-19-1" name="__codelineno-19-1" href="#__codelineno-19-1"></a>id uuid PK (v7), actor_kind enum(user|worker|system|webhook), actor_id nullable,
+<a id="__codelineno-19-2" name="__codelineno-19-2" href="#__codelineno-19-2"></a>actor_email text nullable,          -- denormalized: readable even if user deleted
+<a id="__codelineno-19-3" name="__codelineno-19-3" href="#__codelineno-19-3"></a>action text,                        -- taxonomy §6.2
+<a id="__codelineno-19-4" name="__codelineno-19-4" href="#__codelineno-19-4"></a>target_kind text, target_id uuid,
+<a id="__codelineno-19-5" name="__codelineno-19-5" href="#__codelineno-19-5"></a>context jsonb,                      -- stack_name, env_name, run_id, commit, plan_summary...
+<a id="__codelineno-19-6" name="__codelineno-19-6" href="#__codelineno-19-6"></a>ip, user_agent nullable, created_at
+</code></pre></div>
+<p><strong>Real immutability, not just "no API"</strong>: the absence of an update/delete endpoint does not protect against a bug or an application compromise. The application DB role only has <code>INSERT</code> and <code>SELECT</code> on <code>audit_events</code> (<code>REVOKE UPDATE, DELETE</code>), a <code>BEFORE UPDATE OR DELETE</code> trigger raises an exception, and retention purging goes through a distinct role, separate from the application role and itself audited. 2-year retention, explicit admin purge (audited). Indexes: <code>(created_at)</code>, <code>(actor_id, created_at)</code>, <code>(target_kind, target_id, created_at)</code>, <code>(action, created_at)</code>.</p>
+<h3 id="62-taxonomy-mvp">6.2 Taxonomy (MVP)<a class="headerlink" href="#62-taxonomy-mvp" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-20-1" name="__codelineno-20-1" href="#__codelineno-20-1"></a>auth.login / auth.logout / auth.domain_denied / auth.refresh_reuse_detected
+<a id="__codelineno-20-2" name="__codelineno-20-2" href="#__codelineno-20-2"></a>stack.* / environment.* (created|updated|deleted)
+<a id="__codelineno-20-3" name="__codelineno-20-3" href="#__codelineno-20-3"></a>variable.* (created|updated|deleted)          # context: name, sensitive — NEVER the value
+<a id="__codelineno-20-4" name="__codelineno-20-4" href="#__codelineno-20-4"></a>variable_set.* (created|updated|deleted|attached|detached)
+<a id="__codelineno-20-5" name="__codelineno-20-5" href="#__codelineno-20-5"></a>hook.* (created|updated|deleted)
+<a id="__codelineno-20-6" name="__codelineno-20-6" href="#__codelineno-20-6"></a>run.triggered / run.confirmed ⭐ / run.discarded / run.canceled
+<a id="__codelineno-20-7" name="__codelineno-20-7" href="#__codelineno-20-7"></a>run.applied ⭐ / run.apply_failed / run.destroy_triggered
+<a id="__codelineno-20-8" name="__codelineno-20-8" href="#__codelineno-20-8"></a>run.check_failed / run.check_warned           # results of the after_plan hooks
+<a id="__codelineno-20-9" name="__codelineno-20-9" href="#__codelineno-20-9"></a>state.force_unlocked / state.version_downloaded / state.deleted
+<a id="__codelineno-20-10" name="__codelineno-20-10" href="#__codelineno-20-10"></a>dependency.created / dependency.deleted / dependency.mock_consumed
+<a id="__codelineno-20-11" name="__codelineno-20-11" href="#__codelineno-20-11"></a>cloud_integration.created / cloud_integration.updated / cloud_integration.deleted
+<a id="__codelineno-20-12" name="__codelineno-20-12" href="#__codelineno-20-12"></a>worker_pool.created / worker_pool.token_rotated / worker_pool.deleted
+<a id="__codelineno-20-13" name="__codelineno-20-13" href="#__codelineno-20-13"></a>worker.diagnostics_requested                  # read-only debug bundle (cf. §observability)
+<a id="__codelineno-20-14" name="__codelineno-20-14" href="#__codelineno-20-14"></a>hook.* (created|updated|deleted)
+<a id="__codelineno-20-15" name="__codelineno-20-15" href="#__codelineno-20-15"></a>user.role_changed / user.apply_tier_changed / user.destroy_permission_changed / user.disabled
+</code></pre></div>
+<p><code>run.confirmed</code> + <code>run.applied</code> = the answer to "who applied what": Google identity of the confirmer, env, commit, plan summary, assumed IAM role (if OIDC), link to the logs.</p>
+<h3 id="63-assumed-double-write">6.3 Assumed double write<a class="headerlink" href="#63-assumed-double-write" title="Permanent link">&para;</a></h3>
+<p><code>run_events</code> = the fine-grained mechanics of the state machine. <code>audit_events</code> = the denormalized business journal. The audit event is written <strong>in the same DB transaction</strong> as the action — no bus, no loss.</p>
+<h3 id="64-api-and-ui">6.4 API and UI<a class="headerlink" href="#64-api-and-ui" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-21-1" name="__codelineno-21-1" href="#__codelineno-21-1"></a>GET /api/v1/audit?actor=&amp;action=&amp;target_kind=&amp;target_id=&amp;stack=&amp;environment=&amp;from=&amp;to=
+<a id="__codelineno-21-2" name="__codelineno-21-2" href="#__codelineno-21-2"></a>GET /api/v1/audit/export?format=csv          (admin)
+</code></pre></div>
+<p>/audit page (filterable global journal), Activity tab per env (recent applies: who/when/commit/summary/logs), per-user view.</p>
+<hr />
+<h2 id="7-worker-protocol">7. Worker protocol<a class="headerlink" href="#7-worker-protocol" title="Permanent link">&para;</a></h2>
+<h3 id="71-registration-and-heartbeat">7.1 Registration and heartbeat<a class="headerlink" href="#71-registration-and-heartbeat" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-22-1" name="__codelineno-22-1" href="#__codelineno-22-1"></a>POST /worker/v1/register   (Bearer pool_token) → worker_id + worker_token
+<a id="__codelineno-22-2" name="__codelineno-22-2" href="#__codelineno-22-2"></a>POST /worker/v1/heartbeat  (20 s) → { &quot;commands&quot;: [{&quot;type&quot;:&quot;cancel_job&quot;, ...}] }
+</code></pre></div>
+<p>Heartbeat = downstream command channel. No incoming connection.</p>
+<h3 id="72-claim-long-poll">7.2 Claim (long-poll)<a class="headerlink" href="#72-claim-long-poll" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-23-1" name="__codelineno-23-1" href="#__codelineno-23-1"></a>POST /worker/v1/jobs/claim?wait=25
+<a id="__codelineno-23-2" name="__codelineno-23-2" href="#__codelineno-23-2"></a>→ 204 if nothing
+<a id="__codelineno-23-3" name="__codelineno-23-3" href="#__codelineno-23-3"></a>→ 200 {
+<a id="__codelineno-23-4" name="__codelineno-23-4" href="#__codelineno-23-4"></a>    &quot;job_id&quot;: &quot;...&quot;,
+<a id="__codelineno-23-5" name="__codelineno-23-5" href="#__codelineno-23-5"></a>    &quot;phase&quot;: &quot;plan&quot; | &quot;apply&quot;,   # job execution type — do not confuse with the
+<a id="__codelineno-23-6" name="__codelineno-23-6" href="#__codelineno-23-6"></a>                                 # fine-grained phases of the run (§4) or of the logs (§5): a
+<a id="__codelineno-23-7" name="__codelineno-23-7" href="#__codelineno-23-7"></a>                                 # &quot;plan&quot; job covers preparing+planning+checking
+<a id="__codelineno-23-8" name="__codelineno-23-8" href="#__codelineno-23-8"></a>    &quot;environment&quot;: { &quot;id&quot;, &quot;name&quot;: &quot;prod&quot;, &quot;stack_name&quot;: &quot;core-network&quot;,
+<a id="__codelineno-23-9" name="__codelineno-23-9" href="#__codelineno-23-9"></a>      &quot;repo_url&quot;, &quot;commit_sha&quot;, &quot;project_root&quot;, &quot;tool&quot;, &quot;tool_version&quot; },
+<a id="__codelineno-23-10" name="__codelineno-23-10" href="#__codelineno-23-10"></a>    &quot;repo_credentials&quot;: { &quot;kind&quot;: &quot;token&quot;, &quot;token&quot;: &quot;&lt;decrypted, memory TTL&gt;&quot; },
+<a id="__codelineno-23-11" name="__codelineno-23-11" href="#__codelineno-23-11"></a>    &quot;env&quot;: { ... },                        # resolution sets→stack→env (§3.4)
+<a id="__codelineno-23-12" name="__codelineno-23-12" href="#__codelineno-23-12"></a>    &quot;sensitive_env&quot;: { ... },              # never logged
+<a id="__codelineno-23-13" name="__codelineno-23-13" href="#__codelineno-23-13"></a>    &quot;tfvars_json&quot;: { ... },
+<a id="__codelineno-23-14" name="__codelineno-23-14" href="#__codelineno-23-14"></a>    &quot;hooks&quot;: {                             # §8: merge platform + .stackd.yml
+<a id="__codelineno-23-15" name="__codelineno-23-15" href="#__codelineno-23-15"></a>      &quot;after_plan&quot;: [ {&quot;name&quot;: &quot;infracost&quot;, &quot;command&quot;: &quot;...&quot;, &quot;on_failure&quot;: &quot;warn&quot;,
+<a id="__codelineno-23-16" name="__codelineno-23-16" href="#__codelineno-23-16"></a>                       &quot;source&quot;: &quot;platform&quot;} ]
+<a id="__codelineno-23-17" name="__codelineno-23-17" href="#__codelineno-23-17"></a>    },
+<a id="__codelineno-23-18" name="__codelineno-23-18" href="#__codelineno-23-18"></a>    &quot;backend&quot;: { &quot;type&quot;: &quot;http&quot;, &quot;address&quot;: &quot;.../state/v1/&lt;env_id&gt;&quot;,
+<a id="__codelineno-23-19" name="__codelineno-23-19" href="#__codelineno-23-19"></a>                 &quot;lock_address&quot;, &quot;unlock_address&quot;,
+<a id="__codelineno-23-20" name="__codelineno-23-20" href="#__codelineno-23-20"></a>                 &quot;username&quot;: &quot;env&quot;, &quot;password&quot;: &quot;&lt;state_token scoped+TTL&gt;&quot; },
+<a id="__codelineno-23-21" name="__codelineno-23-21" href="#__codelineno-23-21"></a>    &quot;cloud_credentials&quot;: {                 # §10, if cloud_integration configured
+<a id="__codelineno-23-22" name="__codelineno-23-22" href="#__codelineno-23-22"></a>      &quot;provider&quot;: &quot;aws&quot;,
+<a id="__codelineno-23-23" name="__codelineno-23-23" href="#__codelineno-23-23"></a>      &quot;oidc_token&quot;: &quot;&lt;signed workload JWT&gt;&quot;,
+<a id="__codelineno-23-24" name="__codelineno-23-24" href="#__codelineno-23-24"></a>      &quot;role_arn&quot;: &quot;arn:aws:iam::123:role/stackd-prod-plan&quot;,   # role of THE phase
+<a id="__codelineno-23-25" name="__codelineno-23-25" href="#__codelineno-23-25"></a>      &quot;region&quot;: &quot;eu-west-1&quot;
+<a id="__codelineno-23-26" name="__codelineno-23-26" href="#__codelineno-23-26"></a>    },
+<a id="__codelineno-23-27" name="__codelineno-23-27" href="#__codelineno-23-27"></a>    &quot;resolved_inputs&quot;: { &quot;TF_VAR_vpc_id&quot;: &quot;vpc-0abc...&quot; },
+<a id="__codelineno-23-28" name="__codelineno-23-28" href="#__codelineno-23-28"></a>    &quot;mock_inputs&quot;: { &quot;TF_VAR_nlb_dns&quot;: &quot;mock.example.internal&quot; }   # §9.3
+<a id="__codelineno-23-29" name="__codelineno-23-29" href="#__codelineno-23-29"></a>  }
+</code></pre></div>
+<p>Atomic claim:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-24-1" name="__codelineno-24-1" href="#__codelineno-24-1"></a><span class="k">WITH</span><span class="w"> </span><span class="k">next</span><span class="w"> </span><span class="k">AS</span><span class="w"> </span><span class="p">(</span>
+<a id="__codelineno-24-2" name="__codelineno-24-2" href="#__codelineno-24-2"></a><span class="w">  </span><span class="k">SELECT</span><span class="w"> </span><span class="n">r</span><span class="p">.</span><span class="n">id</span><span class="w"> </span><span class="k">FROM</span><span class="w"> </span><span class="n">runs</span><span class="w"> </span><span class="n">r</span>
+<a id="__codelineno-24-3" name="__codelineno-24-3" href="#__codelineno-24-3"></a><span class="w">  </span><span class="k">JOIN</span><span class="w"> </span><span class="n">environments</span><span class="w"> </span><span class="n">e</span><span class="w"> </span><span class="k">ON</span><span class="w"> </span><span class="n">e</span><span class="p">.</span><span class="n">id</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">r</span><span class="p">.</span><span class="n">environment_id</span>
+<a id="__codelineno-24-4" name="__codelineno-24-4" href="#__codelineno-24-4"></a><span class="w">  </span><span class="k">WHERE</span><span class="w"> </span><span class="n">r</span><span class="p">.</span><span class="k">state</span><span class="w"> </span><span class="k">IN</span><span class="w"> </span><span class="p">(</span><span class="s1">&#39;queued&#39;</span><span class="p">,</span><span class="s1">&#39;confirmed&#39;</span><span class="p">)</span>
+<a id="__codelineno-24-5" name="__codelineno-24-5" href="#__codelineno-24-5"></a><span class="w">    </span><span class="k">AND</span><span class="w"> </span><span class="n">e</span><span class="p">.</span><span class="n">labels</span><span class="w"> </span><span class="o">&lt;@</span><span class="w"> </span><span class="p">:</span><span class="n">worker_labels</span>
+<a id="__codelineno-24-6" name="__codelineno-24-6" href="#__codelineno-24-6"></a><span class="w">    </span><span class="k">AND</span><span class="w"> </span><span class="k">NOT</span><span class="w"> </span><span class="k">EXISTS</span><span class="w"> </span><span class="p">(...)</span><span class="w">            </span><span class="c1">-- no other active run on the env</span>
+<a id="__codelineno-24-7" name="__codelineno-24-7" href="#__codelineno-24-7"></a><span class="w">  </span><span class="k">ORDER</span><span class="w"> </span><span class="k">BY</span><span class="w"> </span><span class="p">(</span><span class="n">r</span><span class="p">.</span><span class="k">state</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s1">&#39;confirmed&#39;</span><span class="w"> </span><span class="k">AND</span><span class="w"> </span><span class="n">r</span><span class="p">.</span><span class="n">worker_id</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">:</span><span class="n">wid</span><span class="p">)</span><span class="w"> </span><span class="k">DESC</span><span class="p">,</span><span class="w">   </span><span class="c1">-- affinity:</span>
+<a id="__codelineno-24-8" name="__codelineno-24-8" href="#__codelineno-24-8"></a><span class="w">           </span><span class="n">r</span><span class="p">.</span><span class="n">created_at</span><span class="w">                                            </span><span class="c1">-- the apply prefers</span>
+<a id="__codelineno-24-9" name="__codelineno-24-9" href="#__codelineno-24-9"></a><span class="w">  </span><span class="k">FOR</span><span class="w"> </span><span class="k">UPDATE</span><span class="w"> </span><span class="n">SKIP</span><span class="w"> </span><span class="n">LOCKED</span><span class="w"> </span><span class="k">LIMIT</span><span class="w"> </span><span class="mi">1</span><span class="w">                                   </span><span class="c1">-- the worker of the plan</span>
+<a id="__codelineno-24-10" name="__codelineno-24-10" href="#__codelineno-24-10"></a><span class="p">)</span>
+<a id="__codelineno-24-11" name="__codelineno-24-11" href="#__codelineno-24-11"></a><span class="k">UPDATE</span><span class="w"> </span><span class="n">runs</span><span class="w"> </span><span class="k">SET</span><span class="w"> </span><span class="k">state</span><span class="o">=</span><span class="p">...,</span><span class="w"> </span><span class="n">worker_id</span><span class="o">=</span><span class="p">:</span><span class="n">wid</span><span class="p">,</span><span class="w"> </span><span class="n">claimed_at</span><span class="o">=</span><span class="n">now</span><span class="p">()</span>
+<a id="__codelineno-24-12" name="__codelineno-24-12" href="#__codelineno-24-12"></a><span class="k">FROM</span><span class="w"> </span><span class="k">next</span><span class="w"> </span><span class="k">WHERE</span><span class="w"> </span><span class="n">runs</span><span class="p">.</span><span class="n">id</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="k">next</span><span class="p">.</span><span class="n">id</span><span class="w"> </span><span class="n">RETURNING</span><span class="w"> </span><span class="n">runs</span><span class="p">.</span><span class="o">*</span><span class="p">;</span>
+</code></pre></div>
+<p><strong>The real concurrency guard is the unique index <code>one_active_run_per_env</code> (§3.5), not <code>SKIP LOCKED</code>.</strong> Two workers claiming two <strong>distinct</strong> <code>queued</code> runs of the same env select different rows: <code>SKIP LOCKED</code> does not serialize them against each other, and the <code>NOT EXISTS (active run)</code> is true for both (none active yet). Both <code>UPDATE → preparing</code> go ahead; the second violates the partial unique index. Two protections, <strong>both</strong> to be applied:</p>
+<ol>
+<li><strong>Serialize per env</strong>: the <code>SELECT ... FOR UPDATE</code> also locks the corresponding <code>environments</code> row (<code>JOIN environments e ... FOR UPDATE OF e SKIP LOCKED</code>), so that only one claim per env progresses at a time; the others skip the locked env and take another run.</li>
+<li><strong>Safety net</strong>: the violation of <code>one_active_run_per_env</code> is <strong>caught</strong> (SQLSTATE <code>23505</code>) and treated as "nothing to claim" → <code>204</code>, the worker re-polls. This is the correctness guarantee; the lock above is only an optimization to avoid discarded work.</li>
+</ol>
+<p>Apply affinity: a <code>confirmed</code> run is reserved for its originating worker for <strong>60 s</strong> (<code>AND (r.worker_id = :wid OR r.confirmed_at &lt; now() - interval '60 seconds')</code> on confirmed runs). Past that delay (dead or saturated worker), any compatible worker takes it and does an <strong>automatic re-plan</strong> before the apply (workspace absent → §4.2).</p>
+<h3 id="73-events-and-artifacts">7.3 Events and artifacts<a class="headerlink" href="#73-events-and-artifacts" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-25-1" name="__codelineno-25-1" href="#__codelineno-25-1"></a>POST /worker/v1/jobs/{id}/events
+<a id="__codelineno-25-2" name="__codelineno-25-2" href="#__codelineno-25-2"></a>  { &quot;event&quot;: &quot;phase_started&quot;|&quot;phase_finished&quot;|&quot;job_failed&quot;,
+<a id="__codelineno-25-3" name="__codelineno-25-3" href="#__codelineno-25-3"></a>    &quot;phase&quot;: &quot;...&quot;, &quot;exit_code&quot;: 0,
+<a id="__codelineno-25-4" name="__codelineno-25-4" href="#__codelineno-25-4"></a>    &quot;result&quot;: { &quot;has_changes&quot;: true, &quot;summary&quot;: {...},
+<a id="__codelineno-25-5" name="__codelineno-25-5" href="#__codelineno-25-5"></a>                &quot;checks&quot;: [{&quot;name&quot;:&quot;infracost&quot;,&quot;status&quot;:&quot;warn&quot;,&quot;detail&quot;:&quot;...&quot;}] } }
+<a id="__codelineno-25-6" name="__codelineno-25-6" href="#__codelineno-25-6"></a>
+<a id="__codelineno-25-7" name="__codelineno-25-7" href="#__codelineno-25-7"></a>PUT /worker/v1/jobs/{id}/artifacts/plan.tfplan | plan.json | outputs.json
+</code></pre></div>
+<h3 id="74-course-of-a-job-on-the-agent-side-pseudo-code">7.4 Course of a job on the agent side (pseudo-code)<a class="headerlink" href="#74-course-of-a-job-on-the-agent-side-pseudo-code" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-26-1" name="__codelineno-26-1" href="#__codelineno-26-1"></a><span class="n">job</span> <span class="o">=</span> <span class="n">claim</span><span class="p">()</span>
+<a id="__codelineno-26-2" name="__codelineno-26-2" href="#__codelineno-26-2"></a><span class="n">ws</span> <span class="o">=</span> <span class="n">Workspace</span><span class="p">(</span><span class="n">job</span><span class="o">.</span><span class="n">job_id</span><span class="p">)</span>
+<a id="__codelineno-26-3" name="__codelineno-26-3" href="#__codelineno-26-3"></a><span class="n">ws</span><span class="o">.</span><span class="n">git_clone</span><span class="p">(</span><span class="n">job</span><span class="o">.</span><span class="n">environment</span><span class="o">.</span><span class="n">repo_url</span><span class="p">,</span> <span class="n">job</span><span class="o">.</span><span class="n">environment</span><span class="o">.</span><span class="n">commit_sha</span><span class="p">,</span> <span class="n">depth</span><span class="o">=</span><span class="mi">1</span><span class="p">)</span>
+<a id="__codelineno-26-4" name="__codelineno-26-4" href="#__codelineno-26-4"></a><span class="n">tf</span> <span class="o">=</span> <span class="n">ensure_tool</span><span class="p">(</span><span class="n">job</span><span class="o">.</span><span class="n">environment</span><span class="o">.</span><span class="n">tool</span><span class="p">,</span> <span class="n">job</span><span class="o">.</span><span class="n">environment</span><span class="o">.</span><span class="n">tool_version</span><span class="p">)</span>  <span class="c1"># verifies the checksum</span>
+<a id="__codelineno-26-5" name="__codelineno-26-5" href="#__codelineno-26-5"></a>                                       <span class="c1"># SHA-256 (and the cosign/GPG signature if available) of the</span>
+<a id="__codelineno-26-6" name="__codelineno-26-6" href="#__codelineno-26-6"></a>                                       <span class="c1"># downloaded binary against a pinned list — refuse otherwise (supply-chain)</span>
+<a id="__codelineno-26-7" name="__codelineno-26-7" href="#__codelineno-26-7"></a>
+<a id="__codelineno-26-8" name="__codelineno-26-8" href="#__codelineno-26-8"></a><span class="k">if</span> <span class="n">job</span><span class="o">.</span><span class="n">cloud_credentials</span><span class="p">:</span>                    <span class="c1"># §10 OIDC workload</span>
+<a id="__codelineno-26-9" name="__codelineno-26-9" href="#__codelineno-26-9"></a>    <span class="n">token_file</span> <span class="o">=</span> <span class="n">ws</span><span class="o">.</span><span class="n">write_secret</span><span class="p">(</span><span class="s2">&quot;oidc_token&quot;</span><span class="p">,</span> <span class="n">job</span><span class="o">.</span><span class="n">cloud_credentials</span><span class="o">.</span><span class="n">oidc_token</span><span class="p">)</span>
+<a id="__codelineno-26-10" name="__codelineno-26-10" href="#__codelineno-26-10"></a>    <span class="n">extra_env</span> <span class="o">=</span> <span class="p">{</span> <span class="s2">&quot;AWS_WEB_IDENTITY_TOKEN_FILE&quot;</span><span class="p">:</span> <span class="n">token_file</span><span class="p">,</span>
+<a id="__codelineno-26-11" name="__codelineno-26-11" href="#__codelineno-26-11"></a>                  <span class="s2">&quot;AWS_ROLE_ARN&quot;</span><span class="p">:</span> <span class="n">job</span><span class="o">.</span><span class="n">cloud_credentials</span><span class="o">.</span><span class="n">role_arn</span><span class="p">,</span>
+<a id="__codelineno-26-12" name="__codelineno-26-12" href="#__codelineno-26-12"></a>                  <span class="s2">&quot;AWS_ROLE_SESSION_NAME&quot;</span><span class="p">:</span> <span class="sa">f</span><span class="s2">&quot;stackd-</span><span class="si">{</span><span class="n">job</span><span class="o">.</span><span class="n">job_id</span><span class="si">}</span><span class="s2">&quot;</span> <span class="p">}</span>
+<a id="__codelineno-26-13" name="__codelineno-26-13" href="#__codelineno-26-13"></a>
+<a id="__codelineno-26-14" name="__codelineno-26-14" href="#__codelineno-26-14"></a><span class="n">hooks</span> <span class="o">=</span> <span class="n">merge_hooks</span><span class="p">(</span><span class="n">job</span><span class="o">.</span><span class="n">hooks</span><span class="p">,</span> <span class="n">ws</span><span class="o">.</span><span class="n">load_stackd_yml</span><span class="p">())</span>   <span class="c1"># platform first, §8</span>
+<a id="__codelineno-26-15" name="__codelineno-26-15" href="#__codelineno-26-15"></a>
+<a id="__codelineno-26-16" name="__codelineno-26-16" href="#__codelineno-26-16"></a><span class="k">if</span> <span class="n">job</span><span class="o">.</span><span class="n">phase</span> <span class="o">==</span> <span class="s2">&quot;plan&quot;</span><span class="p">:</span>
+<a id="__codelineno-26-17" name="__codelineno-26-17" href="#__codelineno-26-17"></a>    <span class="n">write_backend_override</span><span class="p">(</span><span class="n">ws</span><span class="p">,</span> <span class="n">job</span><span class="o">.</span><span class="n">backend</span><span class="p">)</span>
+<a id="__codelineno-26-18" name="__codelineno-26-18" href="#__codelineno-26-18"></a>    <span class="n">write_tfvars</span><span class="p">(</span><span class="n">ws</span><span class="p">,</span> <span class="n">job</span><span class="o">.</span><span class="n">tfvars_json</span><span class="p">,</span> <span class="n">job</span><span class="o">.</span><span class="n">mock_inputs</span><span class="p">)</span>
+<a id="__codelineno-26-19" name="__codelineno-26-19" href="#__codelineno-26-19"></a>    <span class="n">run_hooks</span><span class="p">(</span><span class="n">hooks</span><span class="o">.</span><span class="n">before_init</span><span class="p">);</span> <span class="n">run</span><span class="p">(</span><span class="n">tf</span><span class="p">,</span> <span class="s2">&quot;init&quot;</span><span class="p">,</span> <span class="s2">&quot;-input=false&quot;</span><span class="p">);</span> <span class="n">run_hooks</span><span class="p">(</span><span class="n">hooks</span><span class="o">.</span><span class="n">after_init</span><span class="p">)</span>
+<a id="__codelineno-26-20" name="__codelineno-26-20" href="#__codelineno-26-20"></a>    <span class="n">run_hooks</span><span class="p">(</span><span class="n">hooks</span><span class="o">.</span><span class="n">before_plan</span><span class="p">)</span>
+<a id="__codelineno-26-21" name="__codelineno-26-21" href="#__codelineno-26-21"></a>    <span class="n">code</span> <span class="o">=</span> <span class="n">run</span><span class="p">(</span><span class="n">tf</span><span class="p">,</span> <span class="s2">&quot;plan&quot;</span><span class="p">,</span> <span class="s2">&quot;-out=plan.tfplan&quot;</span><span class="p">,</span> <span class="s2">&quot;-detailed-exitcode&quot;</span><span class="p">)</span>
+<a id="__codelineno-26-22" name="__codelineno-26-22" href="#__codelineno-26-22"></a>    <span class="c1"># 0 = no changes, 2 = changes, 1 = error</span>
+<a id="__codelineno-26-23" name="__codelineno-26-23" href="#__codelineno-26-23"></a>    <span class="n">plan_json</span> <span class="o">=</span> <span class="n">run</span><span class="p">(</span><span class="n">tf</span><span class="p">,</span> <span class="s2">&quot;show&quot;</span><span class="p">,</span> <span class="s2">&quot;-json&quot;</span><span class="p">,</span> <span class="s2">&quot;plan.tfplan&quot;</span><span class="p">)</span>
+<a id="__codelineno-26-24" name="__codelineno-26-24" href="#__codelineno-26-24"></a>    <span class="n">upload_artifacts</span><span class="p">(</span><span class="n">plan_json</span><span class="p">,</span> <span class="s2">&quot;plan.tfplan&quot;</span><span class="p">)</span>
+<a id="__codelineno-26-25" name="__codelineno-26-25" href="#__codelineno-26-25"></a>    <span class="n">checks</span> <span class="o">=</span> <span class="n">run_hooks</span><span class="p">(</span><span class="n">hooks</span><span class="o">.</span><span class="n">after_plan</span><span class="p">,</span> <span class="n">expose</span><span class="o">=</span><span class="s2">&quot;plan.json&quot;</span><span class="p">)</span>   <span class="c1"># checking phase</span>
+<a id="__codelineno-26-26" name="__codelineno-26-26" href="#__codelineno-26-26"></a>    <span class="n">report</span><span class="p">(</span><span class="n">phase_finished</span><span class="p">,</span> <span class="n">has_changes</span><span class="o">=</span><span class="p">(</span><span class="n">code</span> <span class="o">==</span> <span class="mi">2</span><span class="p">),</span> <span class="n">summary</span><span class="o">=...</span><span class="p">,</span> <span class="n">checks</span><span class="o">=</span><span class="n">checks</span><span class="p">)</span>
+<a id="__codelineno-26-27" name="__codelineno-26-27" href="#__codelineno-26-27"></a>    <span class="k">if</span> <span class="n">code</span> <span class="o">==</span> <span class="mi">2</span><span class="p">:</span> <span class="n">keep_workspace</span><span class="p">(</span><span class="n">ttl</span><span class="o">=</span><span class="s2">&quot;24h&quot;</span><span class="p">)</span>   <span class="c1"># the apply (auto-confirmed OR confirmed</span>
+<a id="__codelineno-26-28" name="__codelineno-26-28" href="#__codelineno-26-28"></a>                                              <span class="c1"># manually) reuses this workspace</span>
+<a id="__codelineno-26-29" name="__codelineno-26-29" href="#__codelineno-26-29"></a>
+<a id="__codelineno-26-30" name="__codelineno-26-30" href="#__codelineno-26-30"></a><span class="k">elif</span> <span class="n">job</span><span class="o">.</span><span class="n">phase</span> <span class="o">==</span> <span class="s2">&quot;apply&quot;</span><span class="p">:</span>
+<a id="__codelineno-26-31" name="__codelineno-26-31" href="#__codelineno-26-31"></a>    <span class="n">ws</span> <span class="o">=</span> <span class="n">restore_workspace</span><span class="p">(</span><span class="n">job</span><span class="o">.</span><span class="n">job_id</span><span class="p">)</span>       <span class="c1"># or re-plan if absent</span>
+<a id="__codelineno-26-32" name="__codelineno-26-32" href="#__codelineno-26-32"></a>    <span class="n">run_hooks</span><span class="p">(</span><span class="n">hooks</span><span class="o">.</span><span class="n">before_apply</span><span class="p">)</span>
+<a id="__codelineno-26-33" name="__codelineno-26-33" href="#__codelineno-26-33"></a>    <span class="n">run</span><span class="p">(</span><span class="n">tf</span><span class="p">,</span> <span class="s2">&quot;apply&quot;</span><span class="p">,</span> <span class="s2">&quot;-input=false&quot;</span><span class="p">,</span> <span class="s2">&quot;plan.tfplan&quot;</span><span class="p">)</span>
+<a id="__codelineno-26-34" name="__codelineno-26-34" href="#__codelineno-26-34"></a>    <span class="n">outputs</span> <span class="o">=</span> <span class="n">run</span><span class="p">(</span><span class="n">tf</span><span class="p">,</span> <span class="s2">&quot;output&quot;</span><span class="p">,</span> <span class="s2">&quot;-json&quot;</span><span class="p">)</span>
+<a id="__codelineno-26-35" name="__codelineno-26-35" href="#__codelineno-26-35"></a>    <span class="n">upload_artifacts</span><span class="p">(</span><span class="n">outputs</span><span class="p">,</span> <span class="s2">&quot;outputs.json&quot;</span><span class="p">)</span>
+<a id="__codelineno-26-36" name="__codelineno-26-36" href="#__codelineno-26-36"></a>    <span class="n">run_hooks</span><span class="p">(</span><span class="n">hooks</span><span class="o">.</span><span class="n">after_apply</span><span class="p">)</span>
+<a id="__codelineno-26-37" name="__codelineno-26-37" href="#__codelineno-26-37"></a>    <span class="n">report</span><span class="p">(</span><span class="n">phase_finished</span><span class="p">)</span>
+<a id="__codelineno-26-38" name="__codelineno-26-38" href="#__codelineno-26-38"></a>
+<a id="__codelineno-26-39" name="__codelineno-26-39" href="#__codelineno-26-39"></a><span class="n">ws</span><span class="o">.</span><span class="n">cleanup</span><span class="p">()</span>
+</code></pre></div>
+<p><code>docker</code> runner: each command (terraform AND hooks) runs in <code>stackd/runner:&lt;tool&gt;-&lt;version&gt;</code> (image including the common check tools: tfsec, checkov, infracost, jq).</p>
+<h3 id="75-periodic-tasks-internal-scheduler-multi-replica">7.5 Periodic tasks (internal scheduler, multi-replica)<a class="headerlink" href="#75-periodic-tasks-internal-scheduler-multi-replica" title="Permanent link">&para;</a></h3>
+<p>The scheduler module (PLAN §2.1) carries background tasks that must run <strong>exactly once</strong> even with several API replicas:</p>
+<table>
+<thead>
+<tr>
+<th>Task</th>
+<th>Frequency</th>
+<th>Effect</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>worker_lost</code> detection</td>
+<td>30 s</td>
+<td>heartbeat &gt; 60 s → <code>offline</code>; active run on a worker offline for &gt; 120 s → <code>failed (worker_lost)</code> (§3.7)</td>
+</tr>
+<tr>
+<td>Git staleness polling</td>
+<td>15 min</td>
+<td><code>git ls-remote</code> per (repo, branch), dedup by repo → update <code>head_sha</code> (§9.6)</td>
+</tr>
+<tr>
+<td>Cold log archiving</td>
+<td>end of run</td>
+<td><code>run_logs</code> → S3 gz, purge hot &gt; 7 d (§5.2)</td>
+</tr>
+<tr>
+<td>Refresh token / audit purge</td>
+<td>daily</td>
+<td>expired families (§2.5), audit &gt; 2 years (§6.1, audited purge)</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Single-execution guarantee</strong>: each task takes a dedicated <strong>PG advisory lock</strong> (<code>pg_try_advisory_lock(&lt;task_key&gt;)</code>) before running; a replica that does not obtain the lock skips its tick. No permanently elected leader (no external dependency), no double execution. The tasks are <strong>idempotent</strong> anyway (re-running a staleness computation or an archive breaks nothing) — the advisory lock mainly avoids redundant work and races on the <code>worker_lost</code> transitions.</p>
+<hr />
+<h2 id="8-hooks-checks-custom-flows">8. Hooks &amp; checks (custom flows)<a class="headerlink" href="#8-hooks-checks-custom-flows" title="Permanent link">&para;</a></h2>
+<h3 id="81-two-sources-one-merge">8.1 Two sources, one merge<a class="headerlink" href="#81-two-sources-one-merge" title="Permanent link">&para;</a></h3>
+<table>
+<thead>
+<tr>
+<th>Source</th>
+<th>Declaration</th>
+<th>Modifiable by</th>
+<th>Usage</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>Platform</strong></td>
+<td>UI/API, stack or environment level (table <code>hooks</code>)</td>
+<td>writer+ (audited)</td>
+<td>imposed governance: <strong>not bypassable by a PR</strong></td>
+</tr>
+<tr>
+<td><strong>Repo</strong></td>
+<td><code>.stackd.yml</code> file at the root of the <code>project_root</code>, versioned</td>
+<td>anyone who pushes code</td>
+<td>project-specific logic (file generation, terragrunt, etc.)</td>
+</tr>
+</tbody>
+</table>
+<p>Execution order at each stage: platform stack hooks → platform env hooks → repo hooks. Critical security checks go on the platform side.</p>
+<h3 id="82-stackdyml-format">8.2 <code>.stackd.yml</code> format<a class="headerlink" href="#82-stackdyml-format" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-27-1" name="__codelineno-27-1" href="#__codelineno-27-1"></a><span class="nt">version</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">1</span>
+<a id="__codelineno-27-2" name="__codelineno-27-2" href="#__codelineno-27-2"></a><span class="nt">hooks</span><span class="p">:</span>
+<a id="__codelineno-27-3" name="__codelineno-27-3" href="#__codelineno-27-3"></a><span class="w">  </span><span class="nt">before_plan</span><span class="p">:</span>
+<a id="__codelineno-27-4" name="__codelineno-27-4" href="#__codelineno-27-4"></a><span class="w">    </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">generate-locals</span>
+<a id="__codelineno-27-5" name="__codelineno-27-5" href="#__codelineno-27-5"></a><span class="w">      </span><span class="nt">command</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">./scripts/gen-locals.sh</span>
+<a id="__codelineno-27-6" name="__codelineno-27-6" href="#__codelineno-27-6"></a><span class="w">  </span><span class="nt">after_plan</span><span class="p">:</span>
+<a id="__codelineno-27-7" name="__codelineno-27-7" href="#__codelineno-27-7"></a><span class="w">    </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">infracost</span>
+<a id="__codelineno-27-8" name="__codelineno-27-8" href="#__codelineno-27-8"></a><span class="w">      </span><span class="nt">command</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">infracost breakdown --path plan.json --format table</span>
+<a id="__codelineno-27-9" name="__codelineno-27-9" href="#__codelineno-27-9"></a><span class="w">      </span><span class="nt">on_failure</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">warn</span><span class="w">          </span><span class="c1"># fail | warn (default: fail)</span>
+<a id="__codelineno-27-10" name="__codelineno-27-10" href="#__codelineno-27-10"></a><span class="w">    </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">no-destroy-prod</span>
+<a id="__codelineno-27-11" name="__codelineno-27-11" href="#__codelineno-27-11"></a><span class="w">      </span><span class="nt">command</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">jq -e &#39;[.resource_changes[] | select(.change.actions | index(&quot;delete&quot;))] | length == 0&#39; plan.json</span>
+<a id="__codelineno-27-12" name="__codelineno-27-12" href="#__codelineno-27-12"></a><span class="w">      </span><span class="nt">on_failure</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">fail</span>
+</code></pre></div>
+<h3 id="83-execution-semantics">8.3 Execution semantics<a class="headerlink" href="#83-execution-semantics" title="Permanent link">&para;</a></h3>
+<ul>
+<li>Each hook: one shell command in the workspace (cwd = project_root), the run's env vars injected (except <code>sensitive_env</code> for <strong>repo</strong> hooks — opt-in per env, same logic as proposed runs).</li>
+<li><strong>Cloud credentials (§10) not exported to repo hooks.</strong> The <code>AWS_WEB_IDENTITY_TOKEN_FILE</code> / <code>AWS_ROLE_ARN</code> variables are injected only into the environment of <strong>terraform</strong> invocations, never into that of <strong>repo</strong> hooks by default (same reasons as <code>sensitive_env</code>: a <code>.stackd.yml</code> pushed via PR must not be able to assume the prod apply role and exfiltrate). Opt-in per env if a hook legitimately needs the cloud. <strong>Platform</strong> hooks (non-bypassable) have access to it.</li>
+<li><strong>Repo hooks at the <code>*_apply</code> stages on tier=prod</strong>: forbidden by default. On a <code>tier=prod</code> env, only <strong>platform</strong> hooks execute at <code>before_apply</code>/<code>after_apply</code>; a repo hook at these stages is ignored with a visible warning (it would run with the prod write role). The <code>*_init</code>/<code>*_plan</code> repo stages remain allowed (plan role = ReadOnly).</li>
+<li><code>plan.json</code> available for reading at the <code>after_plan</code> stage and beyond.</li>
+<li>Timeout per hook: 10 min (configurable). Logs in a dedicated section of the viewer.</li>
+<li><strong><code>on_failure: fail</code></strong> → run <code>failed</code>, audit <code>run.check_failed</code>.</li>
+<li><strong><code>on_failure: warn</code></strong> → the run continues but mandatorily goes through <code>unconfirmed</code> (even with autodeploy), warning badge + detail on the run page, audit <code>run.check_warned</code>. A human takes responsibility.</li>
+<li>Results aggregated in <code>runs.check_results</code> and displayed in the checks status bar.</li>
+</ul>
+<hr />
+<h2 id="9-dependencies-output-propagation-and-mocks">9. Dependencies, output propagation and mocks<a class="headerlink" href="#9-dependencies-output-propagation-and-mocks" title="Permanent link">&para;</a></h2>
+<h3 id="91-capture">9.1 Capture<a class="headerlink" href="#91-capture" title="Permanent link">&para;</a></h3>
+<p>At <code>applying → finished</code>, parsing of <code>outputs.json</code>:
+- non-sensitive → upsert <code>env_outputs</code> + <code>value_hash = sha256(canonical_json)</code>
+- sensitive → <code>value=NULL, sensitive=true</code>. Never stored nor propagated; an <code>output_reference</code> that points to it → visible config error, no silent null.</p>
+<h3 id="92-cascade-hook-on_finishedrun">9.2 Cascade — hook <code>on_finished(run)</code><a class="headerlink" href="#92-cascade-hook-on_finishedrun" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-28-1" name="__codelineno-28-1" href="#__codelineno-28-1"></a>1. outgoing edges of run.environment
+<a id="__codelineno-28-2" name="__codelineno-28-2" href="#__codelineno-28-2"></a>2. policy: never → skip; always → trigger;
+<a id="__codelineno-28-3" name="__codelineno-28-3" href="#__codelineno-28-3"></a>   on_output_change → trigger if value_hash ≠ resolved_inputs of the last
+<a id="__codelineno-28-4" name="__codelineno-28-4" href="#__codelineno-28-4"></a>   finished run of the downstream env
+<a id="__codelineno-28-5" name="__codelineno-28-5" href="#__codelineno-28-5"></a>3. run created: type=tracked, triggered_by=dependency, parent_run_id, run_group_id
+<a id="__codelineno-28-6" name="__codelineno-28-6" href="#__codelineno-28-6"></a>4. multi-parents: downstream triggered when ALL its parents of the run group are finished
+<a id="__codelineno-28-7" name="__codelineno-28-7" href="#__codelineno-28-7"></a>5. parent failed → branch stopped, run group = partial_failure
+<a id="__codelineno-28-8" name="__codelineno-28-8" href="#__codelineno-28-8"></a>6. downstream env protected → stops at unconfirmed (never bypassed)
+</code></pre></div>
+<p>Resolution of inputs at claim time (fresh values), snapshot frozen in <code>resolved_inputs</code>.</p>
+<h3 id="93-mock-outputs-bootstrap-inspired-by-terragrunt">9.3 Mock outputs (bootstrap, inspired by Terragrunt)<a class="headerlink" href="#93-mock-outputs-bootstrap-inspired-by-terragrunt" title="Permanent link">&para;</a></h3>
+<p><strong>Problem</strong>: how to plan <code>app/dev</code> if <code>network/dev</code> has never been applied? Without a mechanism, the cascade has a chicken-and-egg problem at creation time.</p>
+<p><strong>Mechanism</strong>:</p>
+<ol>
+<li>Each <code>output_reference</code> can define a <code>mock_value</code> (JSON: string, number, list, map).</li>
+<li>When resolving inputs at claim time, for each reference:</li>
+<li>the upstream output <strong>exists</strong> in <code>env_outputs</code> → real value (the mock is ignored, even on a PR)</li>
+<li>the output <strong>does not exist</strong> AND <code>mock_value</code> is defined → mock injected, the reference is listed in <code>mock_inputs</code> of the payload</li>
+<li>the output does not exist AND no mock → run <code>failed</code> immediately with an explicit error (<code>missing_upstream_output</code>)</li>
+<li>The run is marked <code>used_mocks=true</code> + audit <code>dependency.mock_consumed</code> (which references).</li>
+<li><strong>Guardrails</strong>:</li>
+<li>highly visible "MOCKED" badge on the run page + list of mocked values</li>
+<li><code>unconfirmed → confirmed</code> <strong>refused</strong> if <code>used_mocks</code> and <code>environment.allow_mock_apply=false</code> (default): a mocked plan serves to validate the config, not to be applied</li>
+<li>never autodeploy a mocked run</li>
+<li>proposed runs (PR) use mocks freely (plan-only by nature)</li>
+</ol>
+<p><strong>Good mock values</strong>: plausible for the type expected by the provider (<code>vpc-mock00000000</code>, <code>subnet-mock...</code>) — documented, with examples per common AWS resource type.</p>
+<h3 id="94-run-groups">9.4 Run groups<a class="headerlink" href="#94-run-groups" title="Permanent link">&para;</a></h3>
+<p><code>POST /environments/{id}/runs?with_downstream=true</code>: subgraph (BFS), topological sort (Kahn), run group, root launched, subsequent levels via cascade. UI: graph colored by state (see DESIGN.md §5.4).</p>
+<h3 id="95-multi-region-patterns-reference-recipes">9.5 Multi-region patterns (reference recipes)<a class="headerlink" href="#95-multi-region-patterns-reference-recipes" title="Permanent link">&para;</a></h3>
+<p>The model has no native "region" dimension: the region is configuration, the environment is the unit. Two recipes cover the real cases:</p>
+<p><strong>A. Identical deployment in N regions</strong></p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-29-1" name="__codelineno-29-1" href="#__codelineno-29-1"></a>stack core-network (single code, main branch)
+<a id="__codelineno-29-2" name="__codelineno-29-2" href="#__codelineno-29-2"></a>├── env prod-eu-west-1   ← variable sets: [tier-prod, region-eu-west-1]
+<a id="__codelineno-29-3" name="__codelineno-29-3" href="#__codelineno-29-3"></a>├── env prod-us-east-1   ← variable sets: [tier-prod, region-us-east-1]
+<a id="__codelineno-29-4" name="__codelineno-29-4" href="#__codelineno-29-4"></a>└── env dev-eu-west-1    ← variable sets: [tier-dev,  region-eu-west-1]
+</code></pre></div>
+<ul>
+<li>Everything that differs between regions lives in the <code>region-*</code> sets (provider region, AZs, CIDRs, AMIs). Everything that differs between tiers lives in the <code>tier-*</code> sets.</li>
+<li>A push on the tracked branch triggers one run per env (multi-region iso-prod).</li>
+<li>Since the <code>cloud_integration</code> is per env, each region can assume a different IAM role (or even a different AWS account).</li>
+</ul>
+<p><strong>B. Primary region A → secondary "similar but not identical" in region B, with outputs from A</strong></p>
+<p>Choice of form, in order of preference:
+1. <strong>Same stack, difference via variables</strong>: a <code>TF_VAR_is_primary</code> flag (+ <code>count</code>/<code>for_each</code> in the code) if the difference is conditional. Maximizes reuse.
+2. <strong>Separate stack</strong> (other <code>project_root</code> of the same repo or another repo) if the difference is structural. Avoids invasive conditionals.</p>
+<p>Output flow: an ordinary <code>env_dependencies</code> edge —</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-30-1" name="__codelineno-30-1" href="#__codelineno-30-1"></a>network/prod-eu-primary ──▶ network/prod-us-secondary
+<a id="__codelineno-30-2" name="__codelineno-30-2" href="#__codelineno-30-2"></a>  output_references:
+<a id="__codelineno-30-3" name="__codelineno-30-3" href="#__codelineno-30-3"></a>    global_cluster_arn → TF_VAR_global_cluster_arn   (mock: &quot;arn:aws:rds::mock&quot;)
+<a id="__codelineno-30-4" name="__codelineno-30-4" href="#__codelineno-30-4"></a>    kms_replica_key_id → TF_VAR_kms_key_id           (mock: &quot;mrk-mock0000&quot;)
+<a id="__codelineno-30-5" name="__codelineno-30-5" href="#__codelineno-30-5"></a>  trigger_policy: on_output_change
+</code></pre></div>
+<ul>
+<li><strong>A dependency between two environments of the same stack is valid</strong>: the constraint only forbids self-reference (<code>upstream &lt;&gt; downstream</code>). The intra-stack primary/secondary pattern is therefore native.</li>
+<li>Bootstrap: mocks allow planning region B before the first apply of A (§9.3); the apply of B remains blocked as long as it consumes mocks.</li>
+<li>Env B <code>protected</code> → the cascade stops at <code>unconfirmed</code>: promoting a change from primary to the secondary region goes through a human.</li>
+<li>The <code>link-by-name</code> helper does not apply (different env names): the edges are created explicitly — a cross-region relationship must be a choice, not an automatism.</li>
+</ul>
+<h3 id="96-git-staleness-applied-branch-head">9.6 Git staleness — "applied ≠ branch head"<a class="headerlink" href="#96-git-staleness-applied-branch-head" title="Permanent link">&para;</a></h3>
+<blockquote>
+<p>To be distinguished from <strong>infrastructure drift</strong> (state vs cloud reality, Phase 7): here we compare the <strong>last applied commit</strong> to the <strong>HEAD of the tracked branch</strong>. Typical case: apply Monday 9:00 on <code>abc1234</code>, PR merged at 9:15 → the environment is one commit behind.</p>
+</blockquote>
+<p><strong>Computation</strong>:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-31-1" name="__codelineno-31-1" href="#__codelineno-31-1"></a>last_applied_sha = commit_sha of the last finished run (type tracked, with apply or no-change)
+<a id="__codelineno-31-2" name="__codelineno-31-2" href="#__codelineno-31-2"></a>env.head_sha     = known head of env.branch
+<a id="__codelineno-31-3" name="__codelineno-31-3" href="#__codelineno-31-3"></a>stale            = head_sha present AND head_sha ≠ last_applied_sha
+</code></pre></div>
+<p><strong>Updating <code>head_sha</code></strong> (from most precise to fallback):
+1. <strong>Push webhook</strong> (Phase 5): immediate update of all envs tracking the branch — even if the webhook does not trigger a run (<code>project_root</code> filtering), it always updates <code>head_sha</code>.
+2. <strong>Fallback polling</strong>: <code>git ls-remote</code> per (repo, branch) every 15 min (periodic task, deduplicated by repo) — covers absent or lost webhooks.
+3. <strong>Manual</strong>: <code>POST /api/v1/environments/{id}/refresh-head</code>.</p>
+<p><strong>Two levels of precision</strong>:
+- <em>Level 1 — branch ahead</em>: SHA comparison, always available. <code>commits_ahead</code> via the Git provider's compare API if available, otherwise binary "behind" display.
+- <em>Level 2 — concerns you</em>: <code>affects_project_root</code> = at least one commit ahead modifies files under <code>project_root</code> (GitHub/GitLab compare API). If unavailable: NULL, the UI stays at level 1.</p>
+<p><strong>Effects</strong>:
+- <code>↑N</code> chip on the env cell (DESIGN.md §5.1) and the env header; attenuated variant if <code>affects_project_root = false</code> ("the branch moved ahead, but not this folder").
+- <strong>Obsolete <code>unconfirmed</code> run</strong>: if <code>head_sha</code> advances while a plan awaits confirmation, banner on the run page — "plan computed on <code>abc1234</code>, the branch advanced by N commits" — with a <em>Re-plan</em> action (discard + new run on the head). Confirmation remains <strong>possible</strong> (applying a specific commit is legitimate) but the obsolescence is impossible to miss.
+- No automatic action: staleness is information, never a trigger (that is the role of webhooks).
+- <code>GET /api/v1/environments/{id}</code> exposes <code>head_sha</code>, <code>commits_ahead</code>, <code>affects_project_root</code>, <code>stale</code>.</p>
+<hr />
+<h2 id="10-dynamic-cloud-credentials-oidc-workload-identity">10. Dynamic cloud credentials — OIDC workload identity<a class="headerlink" href="#10-dynamic-cloud-credentials-oidc-workload-identity" title="Permanent link">&para;</a></h2>
+<h3 id="101-the-platform-as-oidc-issuer">10.1 The platform as OIDC issuer<a class="headerlink" href="#101-the-platform-as-oidc-issuer" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-32-1" name="__codelineno-32-1" href="#__codelineno-32-1"></a>GET /.well-known/openid-configuration     → issuer, jwks_uri, alg RS256
+<a id="__codelineno-32-2" name="__codelineno-32-2" href="#__codelineno-32-2"></a>GET /oidc/jwks                            → public keys (kid, rotation)
+</code></pre></div>
+<ul>
+<li>RS256 key pair, stored encrypted (or KMS), rotation with overlap (the old key stays in the JWKS for the lifetime of in-flight tokens).</li>
+<li>The issuer must be reachable over HTTPS by AWS STS (public URL or via the provided Terraform module that creates the Identity Provider with the thumbprint).</li>
+</ul>
+<h3 id="102-workload-token-signed-at-claim-per-phase">10.2 Workload token (signed at claim, per phase)<a class="headerlink" href="#102-workload-token-signed-at-claim-per-phase" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-33-1" name="__codelineno-33-1" href="#__codelineno-33-1"></a><span class="p">{</span>
+<a id="__codelineno-33-2" name="__codelineno-33-2" href="#__codelineno-33-2"></a><span class="w">  </span><span class="nt">&quot;iss&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;https://stackd.example.com&quot;</span><span class="p">,</span>
+<a id="__codelineno-33-3" name="__codelineno-33-3" href="#__codelineno-33-3"></a><span class="w">  </span><span class="nt">&quot;sub&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;run:prod:core-network:apply&quot;</span><span class="p">,</span><span class="w">       </span><span class="c1">// tier:stack:phase — basis of the trust policies</span>
+<a id="__codelineno-33-4" name="__codelineno-33-4" href="#__codelineno-33-4"></a><span class="w">  </span><span class="nt">&quot;aud&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;sts.amazonaws.com&quot;</span><span class="p">,</span>
+<a id="__codelineno-33-5" name="__codelineno-33-5" href="#__codelineno-33-5"></a><span class="w">  </span><span class="nt">&quot;environment&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;prod&quot;</span><span class="p">,</span><span class="w"> </span><span class="nt">&quot;tier&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;prod&quot;</span><span class="p">,</span><span class="w"> </span><span class="nt">&quot;stack&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;core-network&quot;</span><span class="p">,</span>
+<a id="__codelineno-33-6" name="__codelineno-33-6" href="#__codelineno-33-6"></a><span class="w">  </span><span class="nt">&quot;environment_id&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;...&quot;</span><span class="p">,</span><span class="w"> </span><span class="nt">&quot;run_id&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;...&quot;</span><span class="p">,</span><span class="w"> </span><span class="nt">&quot;phase&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;apply&quot;</span><span class="p">,</span>
+<a id="__codelineno-33-7" name="__codelineno-33-7" href="#__codelineno-33-7"></a><span class="w">  </span><span class="nt">&quot;triggered_by&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;dependency&quot;</span><span class="p">,</span>
+<a id="__codelineno-33-8" name="__codelineno-33-8" href="#__codelineno-33-8"></a><span class="w">  </span><span class="nt">&quot;exp&quot;</span><span class="p">:</span><span class="w"> </span><span class="err">&lt;</span><span class="kc">n</span><span class="err">ow</span><span class="w"> </span><span class="err">+</span><span class="w"> </span><span class="err">mi</span><span class="kc">n</span><span class="err">(sessio</span><span class="kc">n</span><span class="err">_dura</span><span class="kc">t</span><span class="err">io</span><span class="kc">n</span><span class="p">,</span><span class="w"> </span><span class="err">max</span><span class="w"> </span><span class="err">dura</span><span class="kc">t</span><span class="err">io</span><span class="kc">n</span><span class="w"> </span><span class="err">o</span><span class="kc">f</span><span class="w"> </span><span class="kc">t</span><span class="err">he</span><span class="w"> </span><span class="err">phase)&gt;</span>
+<a id="__codelineno-33-9" name="__codelineno-33-9" href="#__codelineno-33-9"></a><span class="p">}</span>
+</code></pre></div>
+<blockquote>
+<p>The tier segment in the <code>sub</code> (<code>run:&lt;tier&gt;:...</code>) is what materializes the <strong>double lock</strong> of §2.4: Stackd refuses the confirmation on the API side <em>and</em> the AWS trust policy refuses the AssumeRole if the tier does not match. A prod write role is only assumable by a prod-tier token.</p>
+</blockquote>
+<h3 id="103-aws-side-provided-example-terraform-module">10.3 AWS side (provided: example Terraform module)<a class="headerlink" href="#103-aws-side-provided-example-terraform-module" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-34-1" name="__codelineno-34-1" href="#__codelineno-34-1"></a><span class="c1"># Trust policy of the prod apply role — refuses everything else</span>
+<a id="__codelineno-34-2" name="__codelineno-34-2" href="#__codelineno-34-2"></a><span class="nb">condition</span><span class="w"> </span><span class="p">{</span>
+<a id="__codelineno-34-3" name="__codelineno-34-3" href="#__codelineno-34-3"></a><span class="w">  </span><span class="na">test</span><span class="w">     </span><span class="o">=</span><span class="w"> </span><span class="s2">&quot;StringLike&quot;</span>
+<a id="__codelineno-34-4" name="__codelineno-34-4" href="#__codelineno-34-4"></a><span class="w">  </span><span class="na">variable</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">&quot;stackd.example.com:sub&quot;</span>
+<a id="__codelineno-34-5" name="__codelineno-34-5" href="#__codelineno-34-5"></a><span class="w">  </span><span class="na">values</span><span class="w">   </span><span class="o">=</span><span class="w"> </span><span class="p">[</span><span class="s2">&quot;run:prod:*:apply&quot;</span><span class="p">]</span>
+<a id="__codelineno-34-6" name="__codelineno-34-6" href="#__codelineno-34-6"></a><span class="p">}</span>
+</code></pre></div>
+<p>Recommended pattern: <code>plan_role_arn</code> = ReadOnly role (+ S3 module access), <code>apply_role_arn</code> = scoped write role. A PR plan <strong>physically</strong> cannot modify the infra.</p>
+<p><strong>The wildcard only covers the <code>stack</code> segment</strong> (<code>run:prod:*:apply</code> = "any stack, but prod tier AND apply phase"). <code>tier</code> and <code>phase</code> are always fixed in the condition: they are what materializes the double lock (§2.4). A role whose trust policy left the tier or the phase as a wildcard (<code>run:*:*:*</code>) would cancel the guard — to be banned (see §13).</p>
+<h3 id="104-worker-side">10.4 Worker side<a class="headerlink" href="#104-worker-side" title="Permanent link">&para;</a></h3>
+<p>The worker exchanges nothing itself in the simple case: it writes the token to a file and exports <code>AWS_WEB_IDENTITY_TOKEN_FILE</code> + <code>AWS_ROLE_ARN</code> + <code>AWS_ROLE_SESSION_NAME=stackd-{run_id}</code> — the AWS SDK in the providers does the AssumeRoleWithWebIdentity natively. The session name = run_id → <strong>CloudTrail traces every AWS action back to the run</strong> (and therefore back to the human who confirmed: complete audit loop).</p>
+<p>Fallback: no <code>cloud_integration</code> → classic static variables (variable set <code>aws-credentials</code>), current behavior.</p>
+<h3 id="105-priority-and-coexistence">10.5 Priority and coexistence<a class="headerlink" href="#105-priority-and-coexistence" title="Permanent link">&para;</a></h3>
+<p>If a <code>cloud_integration</code> exists AND static <code>AWS_*</code> variables are resolved → the OIDC variables win, config warning displayed (a classic source of confusion).</p>
+<hr />
+<h2 id="11-managed-state-s3-behind-the-http-backend">11. Managed state — S3 behind the HTTP backend<a class="headerlink" href="#11-managed-state-s3-behind-the-http-backend" title="Permanent link">&para;</a></h2>
+<h3 id="111-architecture">11.1 Architecture<a class="headerlink" href="#111-architecture" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-35-1" name="__codelineno-35-1" href="#__codelineno-35-1"></a>terraform ──(backend &quot;http&quot;)──▶ API Stackd ──(boto3, SSE-KMS)──▶ S3
+<a id="__codelineno-35-2" name="__codelineno-35-2" href="#__codelineno-35-2"></a>                                    └─▶ Postgres: state_versions, state_locks, audit
+</code></pre></div>
+<p>S3 for the bytes, HTTP for the interface: per-run scoped tokens without distributed AWS credentials, visible locking, audit, refusal of a regressive serial.</p>
+<h3 id="112-endpoints">11.2 Endpoints<a class="headerlink" href="#112-endpoints" title="Permanent link">&para;</a></h3>
+<table>
+<thead>
+<tr>
+<th>Method</th>
+<th>Endpoint</th>
+<th>Behavior</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>GET</code></td>
+<td><code>/state/v1/{env_id}</code></td>
+<td>200 + latest state, 404 otherwise</td>
+</tr>
+<tr>
+<td><code>POST</code></td>
+<td><code>/state/v1/{env_id}?ID=&lt;lock_id&gt;</code></td>
+<td>verifies lock, refuses regressive serial (409), upload S3, <code>state_version</code> linked to the run, audit</td>
+</tr>
+<tr>
+<td><code>LOCK</code></td>
+<td><code>/state/v1/{env_id}/lock</code></td>
+<td>200 or <strong>423</strong> + holder</td>
+</tr>
+<tr>
+<td><code>UNLOCK</code></td>
+<td><code>/state/v1/{env_id}/lock</code></td>
+<td>verifies lock_id</td>
+</tr>
+<tr>
+<td><code>DELETE</code></td>
+<td><code>/state/v1/{env_id}</code></td>
+<td>admin, soft-delete, audited</td>
+</tr>
+</tbody>
+</table>
+<p>Auth: Basic, password = JWT scoped <code>{env_id, run_id, scope, exp}</code>. Scope <code>ro</code> for proposed runs.</p>
+<h3 id="113-s3-layout">11.3 S3 layout<a class="headerlink" href="#113-s3-layout" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-36-1" name="__codelineno-36-1" href="#__codelineno-36-1"></a>s3://stackd-&lt;org&gt;/
+<a id="__codelineno-36-2" name="__codelineno-36-2" href="#__codelineno-36-2"></a>  states/{environment_id}/{version_uuid}.tfstate    # SSE-KMS, bucket versioning ON
+<a id="__codelineno-36-3" name="__codelineno-36-3" href="#__codelineno-36-3"></a>  logs/{run_id}/{phase}.log.gz
+<a id="__codelineno-36-4" name="__codelineno-36-4" href="#__codelineno-36-4"></a>  artifacts/{run_id}/plan.tfplan | plan.json | outputs.json
+</code></pre></div>
+<p><code>managed_state: false</code> → nothing injected, the repo keeps its <code>backend "s3"</code> block (existing CarCutter compat).</p>
+<h3 id="114-importing-an-existing-stack">11.4 Importing an existing stack<a class="headerlink" href="#114-importing-an-existing-stack" title="Permanent link">&para;</a></h3>
+<p>To adopt a stack that already has remote state into Stackd-managed state (<code>managed_state: true</code>):
+<code>POST /api/v1/environments/{env_id}/state/import-session</code> (admin) mints a short-lived (30 min),
+run-less <code>rw</code> state token and returns a ready-to-use <code>http</code> backend config. The operator migrates
+their current state with one standard command — <code>tofu init -migrate-state -backend-config=...</code> —
+which <code>LOCK</code>s, uploads the state via §11.2 (stored as a <code>state_version</code> with
+<code>created_by_run_id = NULL</code>), then <code>UNLOCK</code>s. Audited as <code>state.import_session_created</code>; the address
+uses the public URL (the operator runs locally). For stacks that should keep their own backend, use
+<code>managed_state: false</code> (§11.3) instead — no migration needed.</p>
+<hr />
+<h2 id="12-rest-api-main-surface">12. REST API (main surface)<a class="headerlink" href="#12-rest-api-main-surface" title="Permanent link">&para;</a></h2>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-37-1" name="__codelineno-37-1" href="#__codelineno-37-1"></a># Auth
+<a id="__codelineno-37-2" name="__codelineno-37-2" href="#__codelineno-37-2"></a>GET  /api/v1/auth/google/start | /callback ; POST /auth/refresh | /logout ; GET /me
+<a id="__codelineno-37-3" name="__codelineno-37-3" href="#__codelineno-37-3"></a>
+<a id="__codelineno-37-4" name="__codelineno-37-4" href="#__codelineno-37-4"></a># OIDC issuer (workload)
+<a id="__codelineno-37-5" name="__codelineno-37-5" href="#__codelineno-37-5"></a>GET  /.well-known/openid-configuration ; GET /oidc/jwks
+<a id="__codelineno-37-6" name="__codelineno-37-6" href="#__codelineno-37-6"></a>
+<a id="__codelineno-37-7" name="__codelineno-37-7" href="#__codelineno-37-7"></a># Stacks &amp; environments
+<a id="__codelineno-37-8" name="__codelineno-37-8" href="#__codelineno-37-8"></a>GET|POST /api/v1/stacks ; GET|PATCH|DELETE /api/v1/stacks/{id}
+<a id="__codelineno-37-9" name="__codelineno-37-9" href="#__codelineno-37-9"></a>POST /api/v1/stacks/{id}/check-repo
+<a id="__codelineno-37-10" name="__codelineno-37-10" href="#__codelineno-37-10"></a>GET|POST /api/v1/stacks/{id}/environments ; GET|PATCH|DELETE /api/v1/environments/{id}
+<a id="__codelineno-37-11" name="__codelineno-37-11" href="#__codelineno-37-11"></a>POST /api/v1/environments/{id}/refresh-head        # Git staleness, §9.6
+<a id="__codelineno-37-12" name="__codelineno-37-12" href="#__codelineno-37-12"></a>GET|POST|PATCH|DELETE /api/v1/stacks/{id}/variables[...]
+<a id="__codelineno-37-13" name="__codelineno-37-13" href="#__codelineno-37-13"></a>GET|POST|PATCH|DELETE /api/v1/environments/{id}/variables[...]
+<a id="__codelineno-37-14" name="__codelineno-37-14" href="#__codelineno-37-14"></a>
+<a id="__codelineno-37-15" name="__codelineno-37-15" href="#__codelineno-37-15"></a># Variable sets
+<a id="__codelineno-37-16" name="__codelineno-37-16" href="#__codelineno-37-16"></a>GET|POST /api/v1/variable-sets ; GET|PATCH|DELETE /api/v1/variable-sets/{id}
+<a id="__codelineno-37-17" name="__codelineno-37-17" href="#__codelineno-37-17"></a>GET|POST|PATCH|DELETE /api/v1/variable-sets/{id}/variables[...]
+<a id="__codelineno-37-18" name="__codelineno-37-18" href="#__codelineno-37-18"></a>GET|POST|DELETE /api/v1/variable-sets/{id}/attachments
+<a id="__codelineno-37-19" name="__codelineno-37-19" href="#__codelineno-37-19"></a>GET /api/v1/environments/{id}/resolved-variables    # merged view + provenance
+<a id="__codelineno-37-20" name="__codelineno-37-20" href="#__codelineno-37-20"></a>
+<a id="__codelineno-37-21" name="__codelineno-37-21" href="#__codelineno-37-21"></a># Hooks (platform)
+<a id="__codelineno-37-22" name="__codelineno-37-22" href="#__codelineno-37-22"></a>GET|POST|PATCH|DELETE /api/v1/stacks/{id}/hooks[...] | /api/v1/environments/{id}/hooks[...]
+<a id="__codelineno-37-23" name="__codelineno-37-23" href="#__codelineno-37-23"></a>
+<a id="__codelineno-37-24" name="__codelineno-37-24" href="#__codelineno-37-24"></a># Cloud integrations (OIDC)
+<a id="__codelineno-37-25" name="__codelineno-37-25" href="#__codelineno-37-25"></a>GET|PUT|DELETE /api/v1/environments/{id}/cloud-integration
+<a id="__codelineno-37-26" name="__codelineno-37-26" href="#__codelineno-37-26"></a>POST /api/v1/environments/{id}/cloud-integration/test    # verification AssumeRole
+<a id="__codelineno-37-27" name="__codelineno-37-27" href="#__codelineno-37-27"></a>
+<a id="__codelineno-37-28" name="__codelineno-37-28" href="#__codelineno-37-28"></a># Runs
+<a id="__codelineno-37-29" name="__codelineno-37-29" href="#__codelineno-37-29"></a>POST /api/v1/environments/{id}/runs            { type?, with_downstream? }
+<a id="__codelineno-37-30" name="__codelineno-37-30" href="#__codelineno-37-30"></a>GET  /api/v1/environments/{id}/runs ; GET /api/v1/runs/{id}
+<a id="__codelineno-37-31" name="__codelineno-37-31" href="#__codelineno-37-31"></a>POST /api/v1/runs/{id}/confirm | /discard | /cancel
+<a id="__codelineno-37-32" name="__codelineno-37-32" href="#__codelineno-37-32"></a>GET  /api/v1/runs/{id}/logs ?phase=&amp;after_seq= ; GET /runs/{id}/logs/download
+<a id="__codelineno-37-33" name="__codelineno-37-33" href="#__codelineno-37-33"></a>GET  /api/v1/runs/{id}/plan ; GET /api/v1/runs/{id}/checks
+<a id="__codelineno-37-34" name="__codelineno-37-34" href="#__codelineno-37-34"></a>WS   /api/v1/ws                                sub: run:{id}, environment:{id}
+<a id="__codelineno-37-35" name="__codelineno-37-35" href="#__codelineno-37-35"></a>
+<a id="__codelineno-37-36" name="__codelineno-37-36" href="#__codelineno-37-36"></a># Dependencies
+<a id="__codelineno-37-37" name="__codelineno-37-37" href="#__codelineno-37-37"></a>GET|POST /api/v1/environments/{id}/dependencies          # references with mock_value
+<a id="__codelineno-37-38" name="__codelineno-37-38" href="#__codelineno-37-38"></a>POST /api/v1/stacks/{id}/dependencies/link-by-name
+<a id="__codelineno-37-39" name="__codelineno-37-39" href="#__codelineno-37-39"></a>DELETE /api/v1/dependencies/{id}
+<a id="__codelineno-37-40" name="__codelineno-37-40" href="#__codelineno-37-40"></a>GET /api/v1/environments/{id}/outputs ; GET /api/v1/graph ; GET /api/v1/run-groups/{id}
+<a id="__codelineno-37-41" name="__codelineno-37-41" href="#__codelineno-37-41"></a>
+<a id="__codelineno-37-42" name="__codelineno-37-42" href="#__codelineno-37-42"></a># Audit
+<a id="__codelineno-37-43" name="__codelineno-37-43" href="#__codelineno-37-43"></a>GET /api/v1/audit ; GET /api/v1/audit/export
+<a id="__codelineno-37-44" name="__codelineno-37-44" href="#__codelineno-37-44"></a>
+<a id="__codelineno-37-45" name="__codelineno-37-45" href="#__codelineno-37-45"></a># Users &amp; permissions (admin)
+<a id="__codelineno-37-46" name="__codelineno-37-46" href="#__codelineno-37-46"></a>GET   /api/v1/users
+<a id="__codelineno-37-47" name="__codelineno-37-47" href="#__codelineno-37-47"></a>PATCH /api/v1/users/{id}     # role, max_apply_tier, can_destroy, disabled (audited)
+<a id="__codelineno-37-48" name="__codelineno-37-48" href="#__codelineno-37-48"></a>
+<a id="__codelineno-37-49" name="__codelineno-37-49" href="#__codelineno-37-49"></a># Workers &amp; execution queue
+<a id="__codelineno-37-50" name="__codelineno-37-50" href="#__codelineno-37-50"></a>GET|POST|DELETE /api/v1/worker-pools ; GET /api/v1/workers
+<a id="__codelineno-37-51" name="__codelineno-37-51" href="#__codelineno-37-51"></a>GET /api/v1/queue          # runs in progress + waiting, with computed blocking reason
+<a id="__codelineno-37-52" name="__codelineno-37-52" href="#__codelineno-37-52"></a>                           # (active_run|env_locked|no_compatible_worker|apply_affinity_hold)
+<a id="__codelineno-37-53" name="__codelineno-37-53" href="#__codelineno-37-53"></a>POST|GET /api/v1/workers/{id}/diagnostics   # admin: read-only debug bundle (via heartbeat)
+<a id="__codelineno-37-54" name="__codelineno-37-54" href="#__codelineno-37-54"></a>
+<a id="__codelineno-37-55" name="__codelineno-37-55" href="#__codelineno-37-55"></a># Observability &amp; onboarding
+<a id="__codelineno-37-56" name="__codelineno-37-56" href="#__codelineno-37-56"></a>GET /api/v1/health         # DB, workers (online + heartbeat), active/waiting runs, recent errors
+<a id="__codelineno-37-57" name="__codelineno-37-57" href="#__codelineno-37-57"></a>GET /api/v1/logs           # admin: structured JSON buffer, filters level/event/worker_id/run_id/q
+<a id="__codelineno-37-58" name="__codelineno-37-58" href="#__codelineno-37-58"></a>POST /api/v1/auth/me/onboarded              # marks the walkthrough seen (persisted server-side)
+<a id="__codelineno-37-59" name="__codelineno-37-59" href="#__codelineno-37-59"></a>
+<a id="__codelineno-37-60" name="__codelineno-37-60" href="#__codelineno-37-60"></a># State
+<a id="__codelineno-37-61" name="__codelineno-37-61" href="#__codelineno-37-61"></a>GET /api/v1/environments/{id}/state/versions[...]
+<a id="__codelineno-37-62" name="__codelineno-37-62" href="#__codelineno-37-62"></a>DELETE /api/v1/environments/{id}/state/lock              # force-unlock (admin, audited)
+<a id="__codelineno-37-63" name="__codelineno-37-63" href="#__codelineno-37-63"></a>
+<a id="__codelineno-37-64" name="__codelineno-37-64" href="#__codelineno-37-64"></a># Webhooks
+<a id="__codelineno-37-65" name="__codelineno-37-65" href="#__codelineno-37-65"></a>POST /api/v1/webhooks/github                             # HMAC
+<a id="__codelineno-37-66" name="__codelineno-37-66" href="#__codelineno-37-66"></a>
+<a id="__codelineno-37-67" name="__codelineno-37-67" href="#__codelineno-37-67"></a># Worker API (agents — detail §7)
+<a id="__codelineno-37-68" name="__codelineno-37-68" href="#__codelineno-37-68"></a>POST /worker/v1/register | /heartbeat | /jobs/claim
+<a id="__codelineno-37-69" name="__codelineno-37-69" href="#__codelineno-37-69"></a>POST /worker/v1/jobs/{id}/events | /jobs/{id}/logs
+<a id="__codelineno-37-70" name="__codelineno-37-70" href="#__codelineno-37-70"></a>PUT  /worker/v1/jobs/{id}/artifacts/{name}
+<a id="__codelineno-37-71" name="__codelineno-37-71" href="#__codelineno-37-71"></a>POST /worker/v1/commands/{id}/result        # result of a downstream command (diagnostics…)
+<a id="__codelineno-37-72" name="__codelineno-37-72" href="#__codelineno-37-72"></a>
+<a id="__codelineno-37-73" name="__codelineno-37-73" href="#__codelineno-37-73"></a># State backend HTTP (Terraform — detail §11)
+<a id="__codelineno-37-74" name="__codelineno-37-74" href="#__codelineno-37-74"></a>GET|POST|DELETE /state/v1/{env_id} ; LOCK|UNLOCK /state/v1/{env_id}/lock
+</code></pre></div>
+<hr />
+<h2 id="13-security-summary">13. Security — summary<a class="headerlink" href="#13-security-summary" title="Permanent link">&para;</a></h2>
+<table>
+<thead>
+<tr>
+<th>Surface</th>
+<th>Measure</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Human auth</td>
+<td>Google OIDC + PKCE, JWKS/nonce, <code>hd</code> restriction, rotating refresh</td>
+</tr>
+<tr>
+<td>Cloud credentials</td>
+<td><strong>OIDC workload by default</strong>: tokens signed per run/phase, trust policies on claims, session name = run_id (CloudTrail ↔ Stackd audit). Static = fallback</td>
+</tr>
+<tr>
+<td>OIDC signing key</td>
+<td>KMS or encrypted volume (<code>oidc_signing_keys</code> §3.11), rotation with overlap, short token TTL. <code>sub</code> wildcard allowed <strong>only</strong> on the stack segment; never on <code>tier</code> nor <code>phase</code> (§10.3)</td>
+</tr>
+<tr>
+<td>Static secrets</td>
+<td>AES-256-GCM, write-only, decrypted at claim, masked in the logs</td>
+</tr>
+<tr>
+<td>Hooks</td>
+<td>platform hooks not bypassable by PR; repo hooks without <code>sensitive_env</code> <strong>nor cloud credentials</strong> by default; repo hooks forbidden at the <code>*_apply</code> stages on tier=prod; masking of sensitive values in their stdout; timeout; execution in the run's container (§8.3)</td>
+</tr>
+<tr>
+<td>Mocks</td>
+<td>apply forbidden by default (<code>allow_mock_apply=false</code>), badge, audit <code>mock_consumed</code></td>
+</tr>
+<tr>
+<td>Workers</td>
+<td>revocable tokens, no incoming port, labels (isolated prod pool); tool binaries verified by checksum/signature (§7.4, supply-chain)</td>
+</tr>
+<tr>
+<td>State</td>
+<td>S3 SSE-KMS via API only; scoped tokens, RO for PR; audited locking</td>
+</tr>
+<tr>
+<td>Apply permissions</td>
+<td>tier per env × <code>max_apply_tier</code> cap per user (§2.4); distinct <code>can_destroy</code>; double lock with the OIDC trust policy on the tier</td>
+</tr>
+<tr>
+<td>Protected envs</td>
+<td>autodeploy forbidden, 4-eyes (auto if tier=prod), never bypassed (cascade included); the <em>right</em> to apply comes from the tier, not from <code>protected</code></td>
+</tr>
+<tr>
+<td>Proposed runs</td>
+<td>plan-only, state RO, secrets not injected by default, mocks allowed</td>
+</tr>
+<tr>
+<td>Webhooks</td>
+<td>HMAC SHA-256 (secret per repo, <code>stacks.webhook_secret_encrypted</code> §3.1), anti-replay 5 min</td>
+</tr>
+<tr>
+<td>Sessions</td>
+<td>access JWT 15 min in Bearer header; refresh httpOnly <code>SameSite=Strict</code> + CSRF double-submit, rotation with reuse detection → family revocation (§2.5)</td>
+</tr>
+<tr>
+<td>Encryption at rest</td>
+<td>AES-256-GCM, random 96-bit nonce per value, never reused (§1)</td>
+</tr>
+<tr>
+<td>Rate limiting</td>
+<td>login, <code>/auth/refresh</code>, <code>/webhooks/*</code>, <code>/worker/v1/register</code>, claim: quotas per IP/identity (anti-bruteforce and anti-abuse). MVP: simple middleware; hardening Phase 7</td>
+</tr>
+<tr>
+<td>Audit</td>
+<td>append-only <strong>at the DB level</strong> (INSERT-only role + anti-update/delete trigger §6.1), denormalized, transactional, 2 years</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="14-tests-minimal-strategy">14. Tests — minimal strategy<a class="headerlink" href="#14-tests-minimal-strategy" title="Permanent link">&para;</a></h2>
+<ul>
+<li><strong>API unit tests</strong>: transitions (<code>can_apply</code> per tier including apply-everywhere-except-prod, <code>can_destroy</code>, auto 4-eyes on prod tier <strong>and its human-triggerer-only scope</strong>, mock-apply blocking, warn → forced confirmation), 5-layer variable resolution + provenance, hook merging (platform→repo order, exclusion of <code>*_apply</code> repo hooks on prod), cycle detection, multi-parent cascade, mock resolution (real &gt; mock &gt; error), signature/claims of workload tokens (tier segment in the <code>sub</code>, wildcard limited to the stack segment), Google id_token validation, <strong>refresh rotation + reuse detection → family revocation</strong>.</li>
+<li><strong>Integration</strong>: Postgres testcontainers; <strong>concurrent claim → only one wins, the loser catches <code>23505</code> and re-polls</strong>; HTTP backend with real <code>tofu</code> + Garage; log idempotency; <strong>masking of sensitive values (<code>tfvars</code> + env) in a hook's stdout</strong>; <code>after_plan</code> hook that reads plan.json; <strong>WS fan-out via <code>LISTEN/NOTIFY</code></strong>; <strong>single execution of a periodic task under advisory lock with 2 replicas</strong>; AssumeRoleWithWebIdentity against a mock STS (moto).</li>
+<li><strong>E2E</strong>: ephemeral compose + fixture repo + <code>local_file</code> provider → bootstrap of a 2-stack cascade <strong>with mocks</strong> (mocked plan → upstream apply → real cascade), assertions on the final state AND the audit events (triggered → checked → confirmed → applied, mock_consumed).</li>
+<li><strong>Agent</strong>: exit codes, secret masking, workspace resume, cancellation, writing the OIDC token and exporting the env vars.</li>
+</ul>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+  <script>var tabs=__md_get("__tabs");if(Array.isArray(tabs))e:for(var set of document.querySelectorAll(".tabbed-set")){var labels=set.querySelector(".tabbed-labels");for(var tab of tabs)for(var label of labels.getElementsByTagName("label"))if(label.innerText.trim()===tab){var input=document.getElementById(label.htmlFor);input.checked=!0;continue e}}</script>
+
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+          <button type="button" class="md-top md-icon" data-md-component="top" hidden>
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M13 20h-2V8l-5.5 5.5-1.42-1.42L12 4.16l7.92 7.92-1.42 1.42L13 8z"/></svg>
+  Back to top
+</button>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": "..", "features": ["navigation.sections", "navigation.top", "navigation.instant", "navigation.tracking", "toc.follow", "search.suggest", "search.highlight", "content.code.copy", "content.tabs.link"], "search": "../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
+    
+    
+      <script src="../assets/javascripts/bundle.79ae519e.min.js"></script>
+      
+    
+  </body>
+</html>

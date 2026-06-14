@@ -1,0 +1,1463 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="Self-hostable Terraform/OpenTofu orchestration — plan → human approval → apply.">
+      
+      
+      
+      
+        <link rel="prev" href="../DESIGN/">
+      
+      
+        <link rel="next" href="../TESTING/">
+      
+      
+        
+      
+      
+      <link rel="icon" href="../assets/images/favicon.png">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.6">
+    
+    
+      
+        <title>Dev environment - Stackd</title>
+      
+    
+    
+      <link rel="stylesheet" href="../assets/stylesheets/main.484c7ddc.min.css">
+      
+        
+        <link rel="stylesheet" href="../assets/stylesheets/palette.ab4e12ef.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Roboto:300,300i,400,400i,700,700i%7CRoboto+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Roboto";--md-code-font:"Roboto Mono"}</style>
+      
+    
+    
+    <script>__md_scope=new URL("..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  </head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="slate" data-md-color-primary="amber" data-md-color-accent="amber">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#devmd-local-development-mode" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+    
+      
+
+  
+
+<header class="md-header md-header--shadow" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href=".." title="Stackd" class="md-header__button md-logo" aria-label="Stackd" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            Stackd
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              Dev environment
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: dark)" data-md-color-scheme="slate" data-md-color-primary="amber" data-md-color-accent="amber"  aria-label="Switch to light mode"  type="radio" name="__palette" id="__palette_0">
+    
+      <label class="md-header__button md-icon" title="Switch to light mode" for="__palette_1" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 7a5 5 0 0 1 5 5 5 5 0 0 1-5 5 5 5 0 0 1-5-5 5 5 0 0 1 5-5m0 2a3 3 0 0 0-3 3 3 3 0 0 0 3 3 3 3 0 0 0 3-3 3 3 0 0 0-3-3m0-7 2.39 3.42C13.65 5.15 12.84 5 12 5s-1.65.15-2.39.42zM3.34 7l4.16-.35A7.2 7.2 0 0 0 5.94 8.5c-.44.74-.69 1.5-.83 2.29zm.02 10 1.76-3.77a7.131 7.131 0 0 0 2.38 4.14zM20.65 7l-1.77 3.79a7.02 7.02 0 0 0-2.38-4.15zm-.01 10-4.14.36c.59-.51 1.12-1.14 1.54-1.86.42-.73.69-1.5.83-2.29zM12 22l-2.41-3.44c.74.27 1.55.44 2.41.44.82 0 1.63-.17 2.37-.44z"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: light)" data-md-color-scheme="default" data-md-color-primary="amber" data-md-color-accent="amber"  aria-label="Switch to dark mode"  type="radio" name="__palette" id="__palette_1">
+    
+      <label class="md-header__button md-icon" title="Switch to dark mode" for="__palette_0" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="m17.75 4.09-2.53 1.94.91 3.06-2.63-1.81-2.63 1.81.91-3.06-2.53-1.94L12.44 4l1.06-3 1.06 3zm3.5 6.91-1.64 1.25.59 1.98-1.7-1.17-1.7 1.17.59-1.98L15.75 11l2.06-.05L18.5 9l.69 1.95zm-2.28 4.95c.83-.08 1.72 1.1 1.19 1.85-.32.45-.66.87-1.08 1.27C15.17 23 8.84 23 4.94 19.07c-3.91-3.9-3.91-10.24 0-14.14.4-.4.82-.76 1.27-1.08.75-.53 1.93.36 1.85 1.19-.27 2.86.69 5.83 2.89 8.02a9.96 9.96 0 0 0 8.02 2.89m-1.64 2.02a12.08 12.08 0 0 1-7.8-3.47c-2.17-2.19-3.33-5-3.49-7.82-2.81 3.14-2.7 7.96.31 10.98 3.02 3.01 7.84 3.12 10.98.31"/></svg>
+      </label>
+    
+  
+</form>
+      
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+        <div class="md-search__suggest" data-md-component="search-suggest"></div>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+      <div class="md-header__source">
+        <a href="https://github.com/fmiquel90/stackd" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    fmiquel90/stackd
+  </div>
+</a>
+      </div>
+    
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+
+<nav class="md-nav md-nav--primary" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href=".." title="Stackd" class="md-nav__button md-logo" aria-label="Stackd" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    Stackd
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/fmiquel90/stackd" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    fmiquel90/stackd
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href=".." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Home
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_2" >
+        
+          
+          <label class="md-nav__link" for="__nav_2" id="__nav_2_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Guide
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_2_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_2">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Guide
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../guide/getting-started/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Getting started
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../guide/stacks-and-environments/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Stacks & environments
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../guide/variables/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Variables & secrets
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../guide/runs-and-approvals/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Runs & approvals
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../guide/hooks/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Hooks & .stackd.yml
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../guide/dependencies-and-mocks/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Dependencies & mocks
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../guide/importing-existing-state/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Importing an existing stack
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../guide/cloud-credentials/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Cloud credentials (OIDC)
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../guide/workers-and-scaling/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Workers & scaling
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../guide/notifications/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Notifications
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../guide/observability/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Observability
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../CONCEPTS/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Concepts
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../api/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    API
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5" checked>
+        
+          
+          <label class="md-nav__link" for="__nav_5" id="__nav_5_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Reference
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_5_label" aria-expanded="true">
+          <label class="md-nav__title" for="__nav_5">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Reference
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../SPECS/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Specification
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../PLAN/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Plan & scope
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../DESIGN/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Design
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Dev environment
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Dev environment
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#1-principle-everything-is-real-except-the-external-boundaries" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        1. Principle: everything is real, except the external boundaries
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#2-docker-compose-stack" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2. Docker compose stack
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#3-auth-in-dev-the-dev-login" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3. Auth in dev: the dev login
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#4-git-fixture-repos" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        4. Git fixture repos
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#5-worker-in-dev" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        5. Worker in dev
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#6-terraform-without-aws-and-with-if-needed" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        6. Terraform without AWS (and with, if needed)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#7-seed-and-demo-scenario" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        7. Seed and demo scenario
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#8-dev-comfort" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        8. Dev comfort
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#9-what-dev-mode-does-not-cover-assumed" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        9. What dev mode does not cover (assumed)
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../TESTING/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Testing
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#1-principle-everything-is-real-except-the-external-boundaries" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        1. Principle: everything is real, except the external boundaries
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#2-docker-compose-stack" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2. Docker compose stack
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#3-auth-in-dev-the-dev-login" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3. Auth in dev: the dev login
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#4-git-fixture-repos" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        4. Git fixture repos
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#5-worker-in-dev" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        5. Worker in dev
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#6-terraform-without-aws-and-with-if-needed" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        6. Terraform without AWS (and with, if needed)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#7-seed-and-demo-scenario" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        7. Seed and demo scenario
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#8-dev-comfort" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        8. Dev comfort
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#9-what-dev-mode-does-not-cover-assumed" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        9. What dev mode does not cover (assumed)
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+  
+  
+
+
+<h1 id="devmd-local-development-mode">DEV.md — Local development mode<a class="headerlink" href="#devmd-local-development-mode" title="Permanent link">&para;</a></h1>
+<blockquote>
+<p>Goal: <code>git clone</code> → <code>task dev</code> → test a complete <strong>plan → confirm → apply → cascade</strong> cycle in under 5 minutes, without a Google account, without AWS, without a GitHub repo.</p>
+</blockquote>
+<hr />
+<h2 id="1-principle-everything-is-real-except-the-external-boundaries">1. Principle: everything is real, except the external boundaries<a class="headerlink" href="#1-principle-everything-is-real-except-the-external-boundaries" title="Permanent link">&para;</a></h2>
+<p>Dev mode runs the <strong>real components</strong> (API, scheduler, state machine, worker, state backend, audit) and replaces only the three external dependencies:</p>
+<table>
+<thead>
+<tr>
+<th>Dependency</th>
+<th>In prod</th>
+<th>In local dev</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Google auth</td>
+<td>OIDC accounts.google.com</td>
+<td><strong>Dev login</strong> flag-gated (§3)</td>
+</tr>
+<tr>
+<td>Git repos</td>
+<td>GitHub/GitLab</td>
+<td><strong>Local fixture repos</strong> <code>file://</code> + optional Gitea (§4)</td>
+</tr>
+<tr>
+<td>AWS cloud</td>
+<td>Real STS/providers</td>
+<td><strong>Cloud-less providers</strong> (<code>local_file</code>, <code>random</code>, <code>null</code>) + optional LocalStack (§6)</td>
+</tr>
+</tbody>
+</table>
+<p>Everything else (Postgres, Garage, the worker protocol, hooks, mocks, staleness) works identically to prod. This is intentional: dev mode tests the platform, not a simulation of the platform.</p>
+<hr />
+<h2 id="2-docker-compose-stack">2. Docker compose stack<a class="headerlink" href="#2-docker-compose-stack" title="Permanent link">&para;</a></h2>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="c1"># deploy/docker-compose.dev.yml</span>
+<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="nt">services</span><span class="p">:</span>
+<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a><span class="w">  </span><span class="nt">postgres</span><span class="p">:</span><span class="w">        </span><span class="c1"># 18, port 5432, named volume</span>
+<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a><span class="w">  </span><span class="nt">garage</span><span class="p">:</span><span class="w">          </span><span class="c1"># local S3 (Garage), S3 API on :3900, admin CLI `garage` ; stackd bucket auto-created at seed</span>
+<a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a><span class="w">  </span><span class="nt">api</span><span class="p">:</span><span class="w">             </span><span class="c1"># uv run uvicorn --reload, mounts ./api, port 8000</span>
+<a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a><span class="w">  </span><span class="nt">front</span><span class="p">:</span><span class="w">           </span><span class="c1"># vite dev server, mounts ./front, port 5173, proxy /api → api</span>
+<a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a><span class="w">  </span><span class="nt">worker</span><span class="p">:</span><span class="w">          </span><span class="c1"># agent in --reload mode (watchfiles), runner=local (§5)</span>
+<a id="__codelineno-0-8" name="__codelineno-0-8" href="#__codelineno-0-8"></a><span class="w">  </span><span class="c1"># optional profiles:</span>
+<a id="__codelineno-0-9" name="__codelineno-0-9" href="#__codelineno-0-9"></a><span class="w">  </span><span class="nt">gitea</span><span class="p">:</span><span class="w">           </span><span class="c1"># profile &quot;git&quot;  : real webhooks locally (§4)</span>
+<a id="__codelineno-0-10" name="__codelineno-0-10" href="#__codelineno-0-10"></a><span class="w">  </span><span class="nt">localstack</span><span class="p">:</span><span class="w">      </span><span class="c1"># profile &quot;aws&quot;  : simulated S3/RDS/IAM (§6)</span>
+</code></pre></div>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>task<span class="w"> </span>dev<span class="w">            </span><span class="c1"># compose up (base services) + migrations + seed</span>
+<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a>task<span class="w"> </span>dev-git<span class="w">        </span><span class="c1"># + Gitea (webhook testing)</span>
+<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a>task<span class="w"> </span>dev-aws<span class="w">        </span><span class="c1"># + LocalStack</span>
+<a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a>task<span class="w"> </span>seed<span class="w">           </span><span class="c1"># (re)creates the demo data, idempotent</span>
+<a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a>task<span class="w"> </span>reset<span class="w">          </span><span class="c1"># down -v + dev : start from scratch</span>
+<a id="__codelineno-1-6" name="__codelineno-1-6" href="#__codelineno-1-6"></a>task<span class="w"> </span>logs<span class="w">           </span><span class="c1"># aggregated colored logs (api, worker)</span>
+<a id="__codelineno-1-7" name="__codelineno-1-7" href="#__codelineno-1-7"></a>task<span class="w"> </span><span class="nb">test</span><span class="w">           </span><span class="c1"># pytest + vitest</span>
+<a id="__codelineno-1-8" name="__codelineno-1-8" href="#__codelineno-1-8"></a>task<span class="w"> </span>e2e<span class="w">            </span><span class="c1"># complete automated scenario (§7)</span>
+</code></pre></div>
+<p>Orchestration via <strong><a href="https://taskfile.dev">Task</a></strong> (<code>Taskfile.yml</code> at the root) rather than Make: readable YAML syntax, cross-platform (single Go binary, no dependency on GNU Make), native <code>deps</code>/<code>status</code> for idempotence, namespaces per module, and self-documented <code>task --list</code>. Excerpt:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="c1"># Taskfile.yml</span>
+<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="nt">version</span><span class="p">:</span><span class="w"> </span><span class="s">&#39;3&#39;</span>
+<a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a><span class="nt">dotenv</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="s">&#39;.env&#39;</span><span class="p p-Indicator">]</span>
+<a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a><span class="nt">vars</span><span class="p">:</span>
+<a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a><span class="w">  </span><span class="nt">COMPOSE</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">docker compose -f deploy/docker-compose.dev.yml</span>
+<a id="__codelineno-2-6" name="__codelineno-2-6" href="#__codelineno-2-6"></a>
+<a id="__codelineno-2-7" name="__codelineno-2-7" href="#__codelineno-2-7"></a><span class="nt">tasks</span><span class="p">:</span>
+<a id="__codelineno-2-8" name="__codelineno-2-8" href="#__codelineno-2-8"></a><span class="w">  </span><span class="nt">dev</span><span class="p">:</span>
+<a id="__codelineno-2-9" name="__codelineno-2-9" href="#__codelineno-2-9"></a><span class="w">    </span><span class="nt">desc</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Complete local stack (compose + migrations + seed)</span>
+<a id="__codelineno-2-10" name="__codelineno-2-10" href="#__codelineno-2-10"></a><span class="w">    </span><span class="nt">deps</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">env</span><span class="p p-Indicator">]</span>
+<a id="__codelineno-2-11" name="__codelineno-2-11" href="#__codelineno-2-11"></a><span class="w">    </span><span class="nt">cmds</span><span class="p">:</span>
+<a id="__codelineno-2-12" name="__codelineno-2-12" href="#__codelineno-2-12"></a><span class="w">      </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="s">&quot;{{.COMPOSE}}</span><span class="nv"> </span><span class="s">up</span><span class="nv"> </span><span class="s">-d</span><span class="nv"> </span><span class="s">--wait&quot;</span>
+<a id="__codelineno-2-13" name="__codelineno-2-13" href="#__codelineno-2-13"></a><span class="w">      </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">task</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">migrate</span>
+<a id="__codelineno-2-14" name="__codelineno-2-14" href="#__codelineno-2-14"></a><span class="w">      </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">task</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">seed</span>
+<a id="__codelineno-2-15" name="__codelineno-2-15" href="#__codelineno-2-15"></a>
+<a id="__codelineno-2-16" name="__codelineno-2-16" href="#__codelineno-2-16"></a><span class="w">  </span><span class="nt">env</span><span class="p">:</span>
+<a id="__codelineno-2-17" name="__codelineno-2-17" href="#__codelineno-2-17"></a><span class="w">    </span><span class="nt">desc</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Generates .env and dev keys on first launch</span>
+<a id="__codelineno-2-18" name="__codelineno-2-18" href="#__codelineno-2-18"></a><span class="w">    </span><span class="nt">cmds</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">./scripts/bootstrap-env.sh</span><span class="p p-Indicator">]</span>
+<a id="__codelineno-2-19" name="__codelineno-2-19" href="#__codelineno-2-19"></a><span class="w">    </span><span class="nt">status</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">test -f .env</span><span class="p p-Indicator">]</span><span class="w">          </span><span class="c1"># idempotent: does nothing if .env exists</span>
+<a id="__codelineno-2-20" name="__codelineno-2-20" href="#__codelineno-2-20"></a>
+<a id="__codelineno-2-21" name="__codelineno-2-21" href="#__codelineno-2-21"></a><span class="w">  </span><span class="nt">seed</span><span class="p">:</span>
+<a id="__codelineno-2-22" name="__codelineno-2-22" href="#__codelineno-2-22"></a><span class="w">    </span><span class="nt">desc</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Demo data (idempotent)</span>
+<a id="__codelineno-2-23" name="__codelineno-2-23" href="#__codelineno-2-23"></a><span class="w">    </span><span class="nt">cmds</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="s">&quot;{{.COMPOSE}}</span><span class="nv"> </span><span class="s">exec</span><span class="nv"> </span><span class="s">api</span><span class="nv"> </span><span class="s">uv</span><span class="nv"> </span><span class="s">run</span><span class="nv"> </span><span class="s">python</span><span class="nv"> </span><span class="s">-m</span><span class="nv"> </span><span class="s">app.seed&quot;</span><span class="p p-Indicator">]</span>
+<a id="__codelineno-2-24" name="__codelineno-2-24" href="#__codelineno-2-24"></a>
+<a id="__codelineno-2-25" name="__codelineno-2-25" href="#__codelineno-2-25"></a><span class="w">  </span><span class="nt">push-change</span><span class="p">:</span>
+<a id="__codelineno-2-26" name="__codelineno-2-26" href="#__codelineno-2-26"></a><span class="w">    </span><span class="nt">desc</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Simulates a merge into demo-network (staleness test)</span>
+<a id="__codelineno-2-27" name="__codelineno-2-27" href="#__codelineno-2-27"></a><span class="w">    </span><span class="nt">dir</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">.dev/repos/demo-network</span>
+<a id="__codelineno-2-28" name="__codelineno-2-28" href="#__codelineno-2-28"></a><span class="w">    </span><span class="nt">cmds</span><span class="p">:</span>
+<a id="__codelineno-2-29" name="__codelineno-2-29" href="#__codelineno-2-29"></a><span class="w">      </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">date &gt;&gt; CHANGELOG.txt</span>
+<a id="__codelineno-2-30" name="__codelineno-2-30" href="#__codelineno-2-30"></a><span class="w">      </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">git add -A &amp;&amp; git commit -m &quot;feat</span><span class="p p-Indicator">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">simulated merge&quot;</span>
+<a id="__codelineno-2-31" name="__codelineno-2-31" href="#__codelineno-2-31"></a>
+<a id="__codelineno-2-32" name="__codelineno-2-32" href="#__codelineno-2-32"></a><span class="w">  </span><span class="nt">e2e</span><span class="p">:</span>
+<a id="__codelineno-2-33" name="__codelineno-2-33" href="#__codelineno-2-33"></a><span class="w">    </span><span class="nt">desc</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Complete §7 scenario (non-regression)</span>
+<a id="__codelineno-2-34" name="__codelineno-2-34" href="#__codelineno-2-34"></a><span class="w">    </span><span class="nt">deps</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">dev</span><span class="p p-Indicator">]</span>
+<a id="__codelineno-2-35" name="__codelineno-2-35" href="#__codelineno-2-35"></a><span class="w">    </span><span class="nt">cmds</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">pytest tests/e2e -v</span><span class="p p-Indicator">]</span>
+</code></pre></div>
+<p><code>.env.example</code> → <code>.env</code> copied automatically by <code>task dev</code>: dev keys (encryption key, JWT secret, OIDC keypair) <strong>generated on first launch</strong> and stored in <code>.dev/</code> (gitignored). No secret value committed, no manual entry.</p>
+<hr />
+<h2 id="3-auth-in-dev-the-dev-login">3. Auth in dev: the dev login<a class="headerlink" href="#3-auth-in-dev-the-dev-login" title="Permanent link">&para;</a></h2>
+<p>Running the real Google flow locally is possible (OAuth client with redirect <code>http://localhost:8000</code>) but cumbersome for quick testing. Dev mode therefore adds an <strong>explicitly gated</strong> bypass:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a>STACKD_DEV_AUTH=true        # rejected if STACKD_ENV=production (assert at startup)
+</code></pre></div>
+<ul>
+<li>The login page displays, below the Google button, a "Dev login" panel with <strong>three personas</strong> covering the permissions in §2.4: <code>admin@dev.local</code> (admin, prod tier, destroy), <code>alice@dev.local</code> (approver, prod tier), <code>bob@dev.local</code> (writer, staging tier — <strong>cannot confirm prod</strong>). One click = session.</li>
+<li>Three personas with distinct tiers: essential for testing the "apply everywhere except prod" case (bob confirms dev/staging, rejected on prod), prod 4-eyes (bob triggers, alice confirms) and audit ("who applied what" only makes sense with several people).</li>
+<li>Sessions, roles and audit events are strictly the same as with Google — only the <code>google_sub</code> is synthetic (<code>dev:admin</code>).</li>
+<li>The real Google flow remains testable in dev by setting <code>GOOGLE_CLIENT_ID/SECRET</code> (the two coexist).</li>
+</ul>
+<p>Safeguard: the prod build of the API image <strong>removes the dev_auth module</strong> (not just the flag) — a configuration oversight cannot expose the bypass.</p>
+<hr />
+<h2 id="4-git-fixture-repos">4. Git fixture repos<a class="headerlink" href="#4-git-fixture-repos" title="Permanent link">&para;</a></h2>
+<p><code>task seed</code> creates in <code>.dev/repos/</code> two <strong>local and committable</strong> Git repositories:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a>.dev/repos/demo-network/      # upstream stack
+<a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a>  main.tf                     #   random_pet + local_file, outputs: network_name, cidr
+<a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a>  outputs.tf
+<a id="__codelineno-4-4" name="__codelineno-4-4" href="#__codelineno-4-4"></a>  .stackd.yml                 #   example after_plan hook (jq on plan.json, warn mode)
+<a id="__codelineno-4-5" name="__codelineno-4-5" href="#__codelineno-4-5"></a>.dev/repos/demo-app/          # downstream stack
+<a id="__codelineno-4-6" name="__codelineno-4-6" href="#__codelineno-4-6"></a>  main.tf                     #   local_file that consumes TF_VAR_network_name
+<a id="__codelineno-4-7" name="__codelineno-4-7" href="#__codelineno-4-7"></a>  variables.tf
+</code></pre></div>
+<ul>
+<li>The seed stacks point to them with <code>repo_url: file:///repos/demo-network</code> (the volume is mounted in the API and the worker). <code>repo_auth_kind: none</code>.</li>
+<li><strong>Simulate "a PR is merged"</strong> without GitHub: <code>task push-change</code> commits a change in demo-network → staleness polling (reduced to <strong>15 s</strong> in dev via <code>STACKD_HEAD_POLL_INTERVAL</code>) makes the <code>↑1</code> chip appear. Perfect for testing the "apply at 9am, merge at 9:15am" scenario.</li>
+<li><strong>Real webhooks</strong>: <code>task dev-git</code> launches Gitea, <code>task seed-gitea</code> pushes the fixtures to it and configures the webhook to the API. Otherwise, <code>task webhook</code> sends an HMAC-signed push payload via curl — enough to develop the handler.</li>
+</ul>
+<hr />
+<h2 id="5-worker-in-dev">5. Worker in dev<a class="headerlink" href="#5-worker-in-dev" title="Permanent link">&para;</a></h2>
+<ul>
+<li>Launched by compose with <code>STACKD_RUNNER=local</code>: terraform commands run directly inside the worker container (image including OpenTofu + jq + git). <strong>No Docker-in-Docker</strong> — the complexity of the <code>docker</code> runner is tested separately (<code>task test-runner-docker</code>, requires the socket).</li>
+<li>Tool binary: OpenTofu pre-installed in the dev image (no download on first run).</li>
+<li>Agent hot reload (watchfiles): modifying <code>worker/</code> cleanly restarts the poll loop (the current job finishes).</li>
+<li>Multi-workers to test concurrency and affinity: <code>docker compose up --scale worker=3</code>.</li>
+</ul>
+<hr />
+<h2 id="6-terraform-without-aws-and-with-if-needed">6. Terraform without AWS (and with, if needed)<a class="headerlink" href="#6-terraform-without-aws-and-with-if-needed" title="Permanent link">&para;</a></h2>
+<p><strong>By default</strong>: the fixtures use only <code>random</code>, <code>null</code>, <code>local_file</code> and <code>time</code> — an apply creates files in the workspace, zero credentials, zero cost, execution in seconds. Enough to test <strong>the entire platform</strong> (the platform orchestrates terraform, it does not depend on what terraform creates).</p>
+<p><strong><code>aws</code> profile (LocalStack)</strong>: to test AWS-realistic stacks (S3, SQS, IAM...), <code>task dev-aws</code> + the seeded <code>localstack</code> variable set (endpoint overrides). Known limitations: LocalStack does not cover everything and <strong>does not validate workload OIDC</strong> (STS AssumeRoleWithWebIdentity is superficial there).</p>
+<p><strong>Workload OIDC in dev</strong>: the issuer runs (JWKS on <code>localhost:8000/oidc/jwks</code>, tokens signed per claim) — we test the <strong>generation and claims</strong> of the tokens (unit tests + <code>task show-token</code> which decodes the JWT of a run). The real STS exchange is tested against a real AWS sandbox account, not locally: documented as out of scope for dev mode.</p>
+<hr />
+<h2 id="7-seed-and-demo-scenario">7. Seed and demo scenario<a class="headerlink" href="#7-seed-and-demo-scenario" title="Permanent link">&para;</a></h2>
+<p><code>task seed</code> creates (idempotent):</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a>space &quot;demo&quot;
+<a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a>├── variable set common        (TF_VAR_org=demo, auto_attach)
+<a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a>├── variable set region-local  (TF_VAR_region=local-1)
+<a id="__codelineno-5-4" name="__codelineno-5-4" href="#__codelineno-5-4"></a>├── stack demo-network  → envs: dev (tier dev), prod (tier prod, protected, 4-eyes)
+<a id="__codelineno-5-5" name="__codelineno-5-5" href="#__codelineno-5-5"></a>├── stack demo-app      → envs: dev (tier dev), prod (tier prod, protected)
+<a id="__codelineno-5-6" name="__codelineno-5-6" href="#__codelineno-5-6"></a>├── dependencies : network/dev → app/dev, network/prod → app/prod
+<a id="__codelineno-5-7" name="__codelineno-5-7" href="#__codelineno-5-7"></a>│     output_references: network_name → TF_VAR_network_name
+<a id="__codelineno-5-8" name="__codelineno-5-8" href="#__codelineno-5-8"></a>│                        (mock: &quot;mock-network&quot;)
+<a id="__codelineno-5-9" name="__codelineno-5-9" href="#__codelineno-5-9"></a>└── worker pool &quot;local&quot; (token written to .dev/, consumed by the compose worker)
+</code></pre></div>
+<p><code>task e2e</code> replays the complete journey via API (and serves as a non-regression test):</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a> 1. login bob → trigger network/dev            → plan → unconfirmed
+<a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a> 2. bob confirms (tier dev, ok)                 → apply → finished
+<a id="__codelineno-6-3" name="__codelineno-6-3" href="#__codelineno-6-3"></a> 3. automatic cascade                           → app/dev plan (real input injected)
+<a id="__codelineno-6-4" name="__codelineno-6-4" href="#__codelineno-6-4"></a> 4. trigger app/prod BEFORE network/prod        → plan with MOCK (purple badge)
+<a id="__codelineno-6-5" name="__codelineno-6-5" href="#__codelineno-6-5"></a> 5. attempt to confirm the mocked run           → expected rejection (allow_mock_apply=false)
+<a id="__codelineno-6-6" name="__codelineno-6-6" href="#__codelineno-6-6"></a> 6. trigger network/prod (bob) → bob attempts to confirm → rejection (tier staging &lt; prod)
+<a id="__codelineno-6-7" name="__codelineno-6-7" href="#__codelineno-6-7"></a> 7. alice confirms network/prod (tier prod, 4-eyes ok) → cascade app/prod
+<a id="__codelineno-6-8" name="__codelineno-6-8" href="#__codelineno-6-8"></a> 8. task push-change                            → chip ↑1 within 15 s
+<a id="__codelineno-6-9" name="__codelineno-6-9" href="#__codelineno-6-9"></a> 9. verification of audit events                → triggered/confirmed/applied
+<a id="__codelineno-6-10" name="__codelineno-6-10" href="#__codelineno-6-10"></a>                                                   with the right actors and tiers
+</code></pre></div>
+<p>If the 9 steps pass, the core of the product works. It is also the demo script to run through in front of someone.</p>
+<hr />
+<h2 id="8-dev-comfort">8. Dev comfort<a class="headerlink" href="#8-dev-comfort" title="Permanent link">&para;</a></h2>
+<ul>
+<li><strong>API</strong>: OpenAPI/Swagger on <code>/docs</code> (disabled in prod), <strong>structured JSON logs by default</strong> (<code>STACKD_LOG_FORMAT=pretty</code> for local reading; <code>STACKD_LOG_LEVEL=DEBUG</code> to also capture reads/polls/heartbeats), errors with traceback. Buffer browsable via <code>/api/v1/logs</code> + <strong>Workers &amp; health</strong> page.</li>
+<li><strong>Shortened timings</strong> in dev: heartbeat 5 s, offline 15 s, staleness poll 15 s, apply affinity 10 s — asynchronous behaviors are tested without waiting.</li>
+<li><strong>Front</strong>: MSW (Mock Service Worker) optional to develop the UI without a backend (<code>pnpm dev:mock</code>) — the handlers replay runs/logs fixtures, including a "running" run that streams. Useful for iterating on the viewer and the rail without triggering real runs.</li>
+<li><strong>Storybook/Ladle</strong>: <code>pnpm storybook</code> — the identity components (PhaseRail, StateBadge, LogViewer with ANSI fixture) are developed in isolation.</li>
+<li><strong>DB</strong>: <code>task psql</code> (shell), <code>task db-reset</code> (drop + migrations + seed). The local S3 storage (Garage) is inspected via the <code>aws s3 --endpoint-url http://localhost:3900</code> CLI or <code>task s3-ls</code>; no web console (Garage is administered via CLI).</li>
+<li><strong>Realistic log data</strong>: the demo-network fixture includes a 10 s <code>time_sleep</code> resource — runs last long enough to see streaming, follow-tail and cancellation.</li>
+</ul>
+<hr />
+<h2 id="9-what-dev-mode-does-not-cover-assumed">9. What dev mode does not cover (assumed)<a class="headerlink" href="#9-what-dev-mode-does-not-cover-assumed" title="Permanent link">&para;</a></h2>
+<table>
+<thead>
+<tr>
+<th>Out of scope for local dev</th>
+<th>Where it is tested</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Real STS exchange (workload OIDC)</td>
+<td>AWS sandbox account + provided Terraform module</td>
+</tr>
+<tr>
+<td>Docker runner (per-container isolation)</td>
+<td><code>task test-runner-docker</code> (socket required) or CI</td>
+</tr>
+<tr>
+<td>Real GitHub/GitLab webhooks</td>
+<td>Gitea (git profile) covers 95%; the rest in staging</td>
+</tr>
+<tr>
+<td>Load (N workers × M runs)</td>
+<td>k6 scenario in CI, not locally</td>
+</tr>
+<tr>
+<td>Light theme / mobile responsive</td>
+<td>Storybook + manual review</td>
+</tr>
+</tbody>
+</table>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+  <script>var tabs=__md_get("__tabs");if(Array.isArray(tabs))e:for(var set of document.querySelectorAll(".tabbed-set")){var labels=set.querySelector(".tabbed-labels");for(var tab of tabs)for(var label of labels.getElementsByTagName("label"))if(label.innerText.trim()===tab){var input=document.getElementById(label.htmlFor);input.checked=!0;continue e}}</script>
+
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+          <button type="button" class="md-top md-icon" data-md-component="top" hidden>
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M13 20h-2V8l-5.5 5.5-1.42-1.42L12 4.16l7.92 7.92-1.42 1.42L13 8z"/></svg>
+  Back to top
+</button>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": "..", "features": ["navigation.sections", "navigation.top", "navigation.instant", "navigation.tracking", "toc.follow", "search.suggest", "search.highlight", "content.code.copy", "content.tabs.link"], "search": "../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
+    
+    
+      <script src="../assets/javascripts/bundle.79ae519e.min.js"></script>
+      
+    
+  </body>
+</html>
