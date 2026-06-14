@@ -1680,11 +1680,13 @@ implementation. Reconcile DEV.md, or add a 4th persona, to demo the tier gate.</
 <h3 id="worker-workertests-5-tests">Worker (<code>worker/tests/</code>, 5 tests)<a class="headerlink" href="#worker-workertests-5-tests" title="Permanent link">&para;</a></h3>
 <p><strong><code>test_diagnostics.py</code> (1)</strong>
 - <code>test_diagnostics_exposes_env_names_not_values</code> — the bundle lists env var <strong>names</strong> but never their values.</p>
-<p><strong><code>test_masking.py</code> (4)</strong>
+<p><strong><code>test_masking.py</code> (6)</strong> — masking + the <code>-json</code> event parsing
 - <code>test_masker_replaces_all_secrets</code> — every known secret in a string is replaced.
 - <code>test_masker_longest_first</code> — overlapping secrets are masked longest-first (no partial leaks).
 - <code>test_merge_hooks_platform_before_repo</code> — platform hooks are merged ahead of repo hooks (non-bypassable).
-- <code>test_plan_summary_counts_actions</code> — <code>plan.json</code> actions are counted into add/change/destroy.</p>
+- <code>test_summary_from_change_summary_event</code> — the plan summary comes from tofu's <code>change_summary</code> event.
+- <code>test_summary_defaults_when_no_change_summary</code> — no <code>change_summary</code> → zero counts.
+- <code>test_first_error_picks_the_diagnostic_summary</code> — the run error is the first <code>diagnostic</code> summary.</p>
 <h3 id="front-front">Front (<code>front/</code>)<a class="headerlink" href="#front-front" title="Permanent link">&para;</a></h3>
 <p><code>pnpm test --run</code> (vitest) is wired but there are currently no component test files. The
 identity components are instead pinned by <strong>Ladle stories</strong> (the DESIGN §8 visual contract):
@@ -1713,12 +1715,12 @@ identity components are instead pinned by <strong>Ladle stories</strong> (the DE
 <tr>
 <td><code>worker/tests</code></td>
 <td>2</td>
-<td>5</td>
+<td>7</td>
 </tr>
 <tr>
 <td><strong>Total</strong></td>
 <td><strong>22</strong></td>
-<td><strong>71</strong></td>
+<td><strong>73</strong></td>
 </tr>
 </tbody>
 </table>
