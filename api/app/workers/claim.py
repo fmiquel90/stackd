@@ -14,6 +14,7 @@ from app.enums import (
     RepoAuthKind,
     RunEventActor,
     RunState,
+    RunType,
     VariableKind,
 )
 from app.errors import ProblemException
@@ -21,6 +22,7 @@ from app.models.environment import Environment
 from app.models.run import Run
 from app.models.stack import Stack
 from app.models.worker import Worker
+from app.runs.commands import is_mutating
 from app.runs.transition import transition
 from app.variables.resolution import provenance_snapshot, resolve_variables
 from app.workers.hooks import platform_hooks
@@ -132,13 +134,20 @@ async def build_job_payload(session: AsyncSession, run: Run) -> dict:
     if stack.repo_auth_kind != RepoAuthKind.none and stack.repo_secret_encrypted is not None:
         repo_credentials["token"] = decrypt(stack.repo_secret_encrypted)
 
-    phase = JobPhase.plan if run.state == RunState.preparing else JobPhase.apply
+    if run.type == RunType.command:
+        phase = JobPhase.command
+        # A mutating subcommand gets the apply role; a read-only one the (read-only) plan role.
+        cred_phase = (
+            JobPhase.apply if is_mutating((run.command or {}).get("name", "")) else JobPhase.plan
+        )
+    else:
+        phase = JobPhase.plan if run.state == RunState.preparing else JobPhase.apply
+        cred_phase = phase
 
     # Managed state (§11): hand the worker a scoped HTTP backend (RO for proposed runs).
     backend = None
     if env.managed_state:
         from app.config import get_settings
-        from app.enums import RunType
         from app.statebackend.tokens import mint_state_token
 
         scope = "ro" if run.type == RunType.proposed else "rw"
@@ -161,6 +170,7 @@ async def build_job_payload(session: AsyncSession, run: Run) -> dict:
     return {
         "job_id": str(run.id),
         "phase": phase.value,
+        "command": run.command,  # set only for RunType.command jobs
         "environment": {
             "id": str(env.id),
             "name": env.name,
@@ -180,7 +190,7 @@ async def build_job_payload(session: AsyncSession, run: Run) -> dict:
         "mask_values": [rv.value for rv in resolved if rv.sensitive and rv.value],
         "hooks": await platform_hooks(session, stack_id=stack.id, env_id=env.id),
         "backend": backend,  # §11
-        "cloud_credentials": await _cloud_credentials(session, env, stack, run, phase),  # §10
+        "cloud_credentials": await _cloud_credentials(session, env, stack, run, cred_phase),  # §10
         "resolved_inputs": {f"TF_VAR_{k}": v for k, v in dep.resolved_inputs.items()},
         "mock_inputs": {f"TF_VAR_{k}": v for k, v in dep.mock_inputs.items()},
     }

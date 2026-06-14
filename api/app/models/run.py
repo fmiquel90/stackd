@@ -40,6 +40,9 @@ class Run(Base):
     run_group_id: Mapped[uuid.UUID | None] = mapped_column(PGUUID(as_uuid=True), default=None)
     worker_id: Mapped[uuid.UUID | None] = mapped_column(PGUUID(as_uuid=True), default=None)
 
+    # For RunType.command: {"name": "<subcommand>", "args": [...]} (SPECS §4.3).
+    command: Mapped[dict | None] = mapped_column(JSONB, default=None)
+
     plan_summary: Mapped[dict | None] = mapped_column(JSONB, default=None)
     check_results: Mapped[dict | None] = mapped_column(JSONB, default=None)
     resolved_inputs: Mapped[dict | None] = mapped_column(JSONB, default=None)

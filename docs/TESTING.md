@@ -110,7 +110,7 @@ no DB, no network.
 
 ## 4. Test map (what each test asserts)
 
-### API — unit & integration (`api/tests/`, 57 tests)
+### API — unit & integration (`api/tests/`, 61 tests)
 
 **`test_auth.py` (5)** — auth flow & session security
 - `test_dev_login_personas` — persona login returns the user (role/tier) + a usable access token.
@@ -138,6 +138,12 @@ no DB, no network.
 - `test_autodeploy_and_warn_forces_unconfirmed` — autodeploy auto-confirms, but a `warn` check forces `unconfirmed`.
 - `test_confirm_rejected_when_not_unconfirmed` — confirming a non-`unconfirmed` run → 409.
 - `test_mock_block` — a run with `used_mocks=true` can't be confirmed (reason mentions the mock).
+
+**`test_commands.py` (4)** — ad-hoc command runs (§4.3)
+- `test_command_allowlist_rejected` — a non-allowlisted command (e.g. `apply`) → 400.
+- `test_readonly_command_allowed_for_writer` — a writer may run a read-only command (`output`) → 201, `type=command`.
+- `test_mutating_command_requires_can_apply` — a writer is refused `state rm` (403); an admin is allowed.
+- `test_command_run_lifecycle` — claim carries `phase=command` + the subcommand; `running → finished`; audited (`run.command_triggered`/`run.command_executed`).
 
 **`test_dependencies.py` (5)** — cross-env outputs, mocks, cascade
 - `test_mock_used_and_blocks_apply` — no real upstream output → the mock is injected, `used_mocks=true`, apply blocked.
@@ -246,10 +252,10 @@ identity components are instead pinned by **Ladle stories** (the DESIGN §8 visu
 
 | Location | Files | Tests |
 |---|---|---|
-| `api/tests` | 17 | 57 |
+| `api/tests` | 18 | 61 |
 | `api/e2e` | 1 | 1 (multi-step scenario) |
 | `worker/tests` | 2 | 5 |
-| **Total** | **20** | **63** |
+| **Total** | **21** | **67** |
 
 ---
 

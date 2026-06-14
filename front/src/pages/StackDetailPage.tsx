@@ -7,6 +7,7 @@ import { StateBadge } from "@/components/StateBadge";
 import { ProvenanceBadge, parseProvenance } from "@/components/ProvenanceBadge";
 import { CloudPanel } from "@/components/CloudPanel";
 import { DependenciesPanel } from "@/components/DependenciesPanel";
+import { CommandPanel } from "@/components/CommandPanel";
 import { HooksPanel } from "@/components/HooksPanel";
 import { NotificationsPanel } from "@/components/NotificationsPanel";
 import { StatePanel } from "@/components/StatePanel";
@@ -112,7 +113,7 @@ function PlanButton({ envId }: { envId: string }) {
   );
 }
 
-type EnvTab = "inputs" | "hooks" | "deps" | "state" | "cloud" | "notify";
+type EnvTab = "inputs" | "hooks" | "deps" | "state" | "cloud" | "notify" | "command";
 
 function EnvTabButton({ active, label, onClick }: { active: boolean; label: string; onClick: () => void }) {
   return (
@@ -183,6 +184,7 @@ export function StackDetailPage() {
                 <EnvTabButton active={open?.envId === env.id && open.tab === "state"} label="State" onClick={() => toggle(env.id, "state")} />
                 <EnvTabButton active={open?.envId === env.id && open.tab === "cloud"} label="Cloud" onClick={() => toggle(env.id, "cloud")} />
                 <EnvTabButton active={open?.envId === env.id && open.tab === "notify"} label="Notify" onClick={() => toggle(env.id, "notify")} />
+                <EnvTabButton active={open?.envId === env.id && open.tab === "command"} label="Command" onClick={() => toggle(env.id, "command")} />
               </div>
             </div>
             {open?.envId === env.id && (
@@ -193,6 +195,7 @@ export function StackDetailPage() {
                 {open.tab === "state" && <StatePanel envId={env.id} />}
                 {open.tab === "cloud" && <CloudPanel envId={env.id} />}
                 {open.tab === "notify" && <NotificationsPanel scope="environments" id={env.id} />}
+                {open.tab === "command" && <CommandPanel envId={env.id} />}
               </div>
             )}
           </Card>

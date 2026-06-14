@@ -64,6 +64,55 @@ async def trigger_run(
     return run
 
 
+async def trigger_command_run(
+    session: AsyncSession,
+    env: Environment,
+    user: User,
+    *,
+    command: str,
+    args: list[str],
+    commit_sha: str | None = None,
+) -> Run:
+    """Create a one-off `command` run (an allowlisted tofu/terraform subcommand, §4.3). Read-only
+    commands need only writer (the route gate); mutating ones require `can_apply`."""
+    from app.permissions import can_apply
+    from app.runs.commands import ALLOWED_COMMANDS, is_mutating
+
+    if command not in ALLOWED_COMMANDS:
+        raise ProblemException(
+            400, "Command not allowed", f"'{command}' is not in the allowlist of runnable commands."
+        )
+    if is_mutating(command):
+        decision = can_apply(user, env)
+        if not decision.allowed:
+            raise ProblemException(403, "Forbidden", decision.reason)
+
+    run = Run(
+        environment_id=env.id,
+        type=RunType.command,
+        state=RunState.queued,
+        triggered_by=TriggeredBy.manual,
+        trigger_user_id=user.id,
+        commit_sha=commit_sha,
+        command={"name": command, "args": args},
+    )
+    session.add(run)
+    await session.flush()
+    await record_audit(
+        session,
+        action="run.command_triggered",
+        actor_kind=AuditActorKind.user,
+        actor_id=user.id,
+        actor_email=user.email,
+        target_kind="run",
+        target_id=run.id,
+        context={"environment_id": str(env.id), "command": command, "args": args},
+    )
+    await session.commit()
+    await session.refresh(run)
+    return run
+
+
 async def confirm_run(session: AsyncSession, run: Run, user: User) -> Run:
     """unconfirmed → confirmed, gated by can_apply + 4-eyes + mock block (§2.4, §9.3)."""
     if run.state != RunState.unconfirmed:

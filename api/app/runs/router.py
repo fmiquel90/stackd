@@ -14,8 +14,14 @@ from app.errors import ProblemException
 from app.models.environment import Environment
 from app.models.run import Run
 from app.models.run_log import RunLog
-from app.runs.schemas import LogChunkOut, RunOut, TriggerRunIn
-from app.runs.service import cancel_run, confirm_run, discard_run, trigger_run
+from app.runs.schemas import CommandTriggerIn, LogChunkOut, RunOut, TriggerRunIn
+from app.runs.service import (
+    cancel_run,
+    confirm_run,
+    discard_run,
+    trigger_command_run,
+    trigger_run,
+)
 
 router = APIRouter(prefix="/api/v1", tags=["runs"])
 DbSession = Annotated[AsyncSession, Depends(get_session)]
@@ -48,6 +54,25 @@ async def create_run(
         user=user,
         commit_sha=body.commit_sha,
         group_root=body.with_downstream,
+    )
+
+
+@router.post(
+    "/environments/{env_id}/commands",
+    response_model=RunOut,
+    status_code=201,
+    dependencies=[Depends(require_role(Role.writer))],
+)
+async def run_command(
+    env_id: uuid.UUID, body: CommandTriggerIn, user: CurrentUser, session: DbSession
+) -> Run:
+    """Run a one-off allowlisted tofu/terraform subcommand (import, state rm, …) as a `command`
+    run. Read-only commands need writer; mutating ones additionally require can_apply (§4.3)."""
+    env = await session.get(Environment, env_id)
+    if env is None:
+        raise ProblemException(404, "Environment not found", None)
+    return await trigger_command_run(
+        session, env, user, command=body.command, args=body.args, commit_sha=body.commit_sha
     )
 
 

@@ -45,7 +45,8 @@ per run and expire with it. You keep everything, on your own infrastructure.
 - 📜 **Full audit trail** — every mutation writes an append-only event *in the same transaction*.
 - 🔔 **Notifications** — Slack/webhook on "awaiting approval", "finished", "failed" — close the loop without watching the UI.
 - 📡 **Live updates** — the run page and dependency graph light up in real time over WebSocket.
-- 🧪 **Tested for real** — 59 tests on real Postgres + a live end-to-end scenario running actual OpenTofu.
+- 🧰 **Ad-hoc commands** — run allowlisted subcommands (import, state rm/mv, taint…) as audited runs, gated like apply.
+- 🧪 **Tested for real** — 66 tests on real Postgres + a live end-to-end scenario running actual OpenTofu.
 
 ## ⚡ Quick start
 
@@ -163,6 +164,9 @@ stateDiagram-v2
     queued --> canceled
     queued --> discarded
     preparing --> planning
+    preparing --> running: command run (import, state rm…)
+    running --> finished
+    running --> failed
     preparing --> failed
     planning --> checking: has after_plan hooks
     planning --> unconfirmed: diff, no autodeploy
@@ -266,7 +270,7 @@ the `one_active_run_per_env` unique index). What's worth knowing:
 
 ## 🧪 Tests & CI
 
-**62 automated tests** on real Postgres 18 (testcontainers) + moto — **57 API + 5 worker** — plus a
+**66 automated tests** on real Postgres 18 (testcontainers) + moto — **61 API + 5 worker** — plus a
 **live end-to-end scenario** (`task e2e`) that drives the full `plan → confirm → apply → cascade`
 against the running stack with a real worker executing OpenTofu. Full map in
 [`docs/TESTING.md`](docs/TESTING.md).

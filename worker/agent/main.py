@@ -264,6 +264,59 @@ def handle_apply(client: ApiClient, job: dict, settings: Settings) -> None:
         ws.cleanup()
 
 
+def handle_command_run(client: ApiClient, job: dict, settings: Settings) -> None:
+    """Run one allowlisted tofu/terraform subcommand (RunType.command): clone, init, run it.
+    No hooks, no plan/apply phases — a one-off operation (import, state rm, …)."""
+    job_id = job["job_id"]
+    env_info = job["environment"]
+    cmd = job.get("command") or {}
+    masker = Masker(job.get("mask_values", []))
+    streamer = LogStreamer(client, job_id, masker)
+    ws = Workspace(settings.workspace_root, job_id)
+    tool = _tool_bin(env_info["tool"])
+
+    try:
+        cwd = ws.git_clone(
+            env_info["repo_url"], env_info.get("commit_sha"), env_info["project_root"]
+        )
+        ws.write_tfvars(cwd, job.get("tfvars_json", {}))
+        backend = job.get("backend")
+        if backend:
+            ws.write_backend_override(cwd)
+        platform_env = {
+            **os.environ,
+            **job.get("env", {}),
+            **job.get("sensitive_env", {}),
+            **_cloud_env(ws, job),
+        }
+
+        client.event(job_id, "phase_started", phase="running")
+        if (
+            run_command(
+                _init_cmd(tool, backend),
+                cwd,
+                platform_env,
+                phase="running",
+                section=None,
+                streamer=streamer,
+            )
+            != 0
+        ):
+            return client.event(job_id, "job_failed", phase="init", result={"error": "init failed"})
+
+        argv = [tool, *str(cmd.get("name", "")).split(), *cmd.get("args", [])]
+        if (
+            run_command(argv, cwd, platform_env, phase="running", section=None, streamer=streamer)
+            != 0
+        ):
+            return client.event(
+                job_id, "job_failed", phase="command", result={"error": f"{cmd.get('name')} failed"}
+            )
+        client.event(job_id, "phase_finished", result={"command": cmd.get("name")})
+    finally:
+        ws.cleanup()
+
+
 def _handle_command(client: ApiClient, cmd: dict, settings: Settings) -> None:
     """Downward commands delivered via heartbeat (§7.1). Today: read-only diagnostics."""
     if cmd.get("type") == "diagnostics":
@@ -316,8 +369,10 @@ def run() -> None:
         try:
             if job["phase"] == "plan":
                 handle_plan(client, job, settings)
-            else:
+            elif job["phase"] == "apply":
                 handle_apply(client, job, settings)
+            else:
+                handle_command_run(client, job, settings)
             log.info("job done", extra={"event": "agent.done", "run_id": job["job_id"]})
         except Exception as exc:  # noqa: BLE001 — report and keep polling
             log.exception("job failed", extra={"event": "agent.failed", "run_id": job["job_id"]})

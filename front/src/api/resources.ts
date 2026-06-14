@@ -61,7 +61,13 @@ export const runs = {
   discard: (id: string) => api<Run>(`/runs/${id}/discard`, { method: "POST" }),
   cancel: (id: string) => api<Run>(`/runs/${id}/cancel`, { method: "POST" }),
   logs: (id: string) => api<LogChunk[]>(`/runs/${id}/logs`),
+  command: (envId: string, command: string, args: string[]) =>
+    api<Run>(`/environments/${envId}/commands`, { body: { command, args } }),
 };
+
+// Allowlisted ad-hoc subcommands (mirrors app/runs/commands.py). Mutating ones need apply rights.
+export const COMMANDS_READONLY = ["output", "show", "state list", "state show", "validate", "providers"];
+export const COMMANDS_MUTATING = ["import", "state rm", "state mv", "taint", "untaint", "refresh"];
 
 export const queue = {
   list: () => api<QueueEntry[]>("/queue"),

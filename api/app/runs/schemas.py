@@ -14,6 +14,12 @@ class TriggerRunIn(BaseModel):
     commit_sha: str | None = None
 
 
+class CommandTriggerIn(BaseModel):
+    command: str  # one of the allowlisted subcommands (app.runs.commands.ALLOWED_COMMANDS)
+    args: list[str] = []
+    commit_sha: str | None = None
+
+
 class RunOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
@@ -21,6 +27,7 @@ class RunOut(BaseModel):
     environment_id: uuid.UUID
     type: RunType
     state: RunState
+    command: dict | None
     commit_sha: str | None
     commit_message: str | None
     commit_author: str | None

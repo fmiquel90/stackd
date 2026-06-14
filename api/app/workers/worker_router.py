@@ -48,6 +48,7 @@ _PHASE_TO_STATE = {
     "planning": RunState.planning,
     "checking": RunState.checking,
     "applying": RunState.applying,
+    "running": RunState.running,  # RunType.command execution
 }
 
 
@@ -253,7 +254,18 @@ async def post_event(
         return {"ok": True}
 
     if body.event == "phase_finished":
-        if run.state == RunState.applying:
+        if run.state == RunState.running:
+            # A `command` run finished (no outputs/cascade — it's a one-off subcommand).
+            await transition(
+                session,
+                run,
+                RunState.finished,
+                actor=RunEventActor.worker,
+                actor_id=worker.id,
+                audit_action="run.command_executed",
+                audit_context={"command": (run.command or {}).get("name")},
+            )
+        elif run.state == RunState.applying:
             # Capture outputs (§9.1) then finish, then cascade downstream (§9.2) — same txn.
             await capture_outputs(session, run, result.get("outputs") or {})
             await transition(

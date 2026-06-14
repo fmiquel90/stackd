@@ -28,7 +28,9 @@ NOTIFY_STATES: frozenset[RunState] = frozenset(
 # so planning has the same outgoing edges as checking.
 ALLOWED: dict[RunState, set[RunState]] = {
     RunState.queued: {RunState.preparing, RunState.canceled, RunState.discarded},
-    RunState.preparing: {RunState.planning, RunState.failed, RunState.canceled},
+    # `running` is reached only by a RunType.command run (a one-off subcommand, no plan/apply).
+    RunState.preparing: {RunState.planning, RunState.running, RunState.failed, RunState.canceled},
+    RunState.running: {RunState.finished, RunState.failed, RunState.canceled},
     RunState.planning: {
         RunState.checking,
         RunState.unconfirmed,

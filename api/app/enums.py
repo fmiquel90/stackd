@@ -52,6 +52,7 @@ class RunType(enum.StrEnum):
     tracked = "tracked"
     proposed = "proposed"
     destroy = "destroy"
+    command = "command"  # a single allowlisted tofu/terraform subcommand (import, state rm, …)
 
 
 class RunState(enum.StrEnum):
@@ -62,6 +63,7 @@ class RunState(enum.StrEnum):
     unconfirmed = "unconfirmed"
     confirmed = "confirmed"
     applying = "applying"
+    running = "running"  # executing a `command` run (no plan/apply phases)
     finished = "finished"
     failed = "failed"
     discarded = "discarded"
@@ -77,6 +79,7 @@ ACTIVE_STATES: frozenset[RunState] = frozenset(
         RunState.unconfirmed,
         RunState.confirmed,
         RunState.applying,
+        RunState.running,
     }
 )
 TERMINAL_STATES: frozenset[RunState] = frozenset(
@@ -121,6 +124,7 @@ class HookOnFailure(enum.StrEnum):
 class JobPhase(enum.StrEnum):
     plan = "plan"
     apply = "apply"
+    command = "command"  # one-off allowlisted subcommand
 
 
 class TriggerPolicy(enum.StrEnum):
