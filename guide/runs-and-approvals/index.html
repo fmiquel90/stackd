@@ -551,6 +551,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#promotion-trunk-based" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Promotion (trunk-based)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#proposed-runs-from-a-pr" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -1197,6 +1208,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#promotion-trunk-based" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Promotion (trunk-based)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#proposed-runs-from-a-pr" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -1316,13 +1338,22 @@ is a misclick safeguard only — it never bypasses <code>can_apply</code> (still
 <h2 id="mock-block">Mock block<a class="headerlink" href="#mock-block" title="Permanent link">&para;</a></h2>
 <p>A run that consumed a mock upstream output (<code>used_mocks=true</code>) <strong>cannot be applied</strong> unless the env
 sets <code>allow_mock_apply=true</code> — see <a href="../dependencies-and-mocks/">Dependencies &amp; mocks</a>.</p>
+<h2 id="promotion-trunk-based">Promotion (trunk-based)<a class="headerlink" href="#promotion-trunk-based" title="Permanent link">&para;</a></h2>
+<p>To roll out the <strong>exact commit</strong> running on one environment to another of the same stack
+(dev → staging → prod), use <strong>promote</strong> — the env's <strong>Promote</strong> tab, or:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>curl<span class="w"> </span>-s<span class="w"> </span>-X<span class="w"> </span>POST<span class="w"> </span>localhost:8000/api/v1/environments/<span class="nv">$STAGING_ID</span>/promote<span class="w"> </span>-H<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$AUTH</span><span class="s2">&quot;</span><span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="w">  </span>-d<span class="w"> </span><span class="s1">&#39;{&quot;from_environment_id&quot;: &quot;&#39;</span><span class="nv">$DEV_ID</span><span class="s1">&#39;&quot;}&#39;</span>
+</code></pre></div>
+<p>It pins a new tracked run on the target to the source's last applied commit, so you deploy <em>what
+was tested</em> — not whatever HEAD happens to be. The apply is gated as usual (tier + four-eyes) at
+confirm. This is the same-stack counterpart to the cross-stack <a href="../dependencies-and-mocks/">cascade</a>.</p>
 <h2 id="proposed-runs-from-a-pr">Proposed runs (from a PR)<a class="headerlink" href="#proposed-runs-from-a-pr" title="Permanent link">&para;</a></h2>
 <p>A pull request triggers a <strong>proposed</strong> run: plan-only, read-only state, no secrets — a safe preview
 that is never applied. See <a href="../../SPECS/">the Git integration in SPECS</a>.</p>
 <h2 id="triggering-over-the-api">Triggering over the API<a class="headerlink" href="#triggering-over-the-api" title="Permanent link">&para;</a></h2>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>curl<span class="w"> </span>-s<span class="w"> </span>-X<span class="w"> </span>POST<span class="w"> </span>localhost:8000/api/v1/environments/<span class="nv">$ENV_ID</span>/runs<span class="w"> </span>-H<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$AUTH</span><span class="s2">&quot;</span><span class="w"> </span>-d<span class="w"> </span><span class="s1">&#39;{}&#39;</span><span class="w">   </span><span class="c1"># trigger plan</span>
-<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a>curl<span class="w"> </span>-s<span class="w"> </span>-X<span class="w"> </span>POST<span class="w"> </span>localhost:8000/api/v1/runs/<span class="nv">$RUN_ID</span>/confirm<span class="w"> </span>-H<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$AUTH</span><span class="s2">&quot;</span><span class="w">                 </span><span class="c1"># approve → apply</span>
-<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a>curl<span class="w"> </span>-s<span class="w"> </span>-X<span class="w"> </span>POST<span class="w"> </span>localhost:8000/api/v1/runs/<span class="nv">$RUN_ID</span>/discard<span class="w"> </span>-H<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$AUTH</span><span class="s2">&quot;</span><span class="w">                 </span><span class="c1"># discard</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>curl<span class="w"> </span>-s<span class="w"> </span>-X<span class="w"> </span>POST<span class="w"> </span>localhost:8000/api/v1/environments/<span class="nv">$ENV_ID</span>/runs<span class="w"> </span>-H<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$AUTH</span><span class="s2">&quot;</span><span class="w"> </span>-d<span class="w"> </span><span class="s1">&#39;{}&#39;</span><span class="w">   </span><span class="c1"># trigger plan</span>
+<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a>curl<span class="w"> </span>-s<span class="w"> </span>-X<span class="w"> </span>POST<span class="w"> </span>localhost:8000/api/v1/runs/<span class="nv">$RUN_ID</span>/confirm<span class="w"> </span>-H<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$AUTH</span><span class="s2">&quot;</span><span class="w">                 </span><span class="c1"># approve → apply</span>
+<a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a>curl<span class="w"> </span>-s<span class="w"> </span>-X<span class="w"> </span>POST<span class="w"> </span>localhost:8000/api/v1/runs/<span class="nv">$RUN_ID</span>/discard<span class="w"> </span>-H<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$AUTH</span><span class="s2">&quot;</span><span class="w">                 </span><span class="c1"># discard</span>
 </code></pre></div>
 <h2 id="see-also">See also<a class="headerlink" href="#see-also" title="Permanent link">&para;</a></h2>
 <ul>

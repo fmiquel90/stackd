@@ -1481,6 +1481,17 @@
   
 </li>
         
+          <li class="md-nav__item">
+  <a href="#97-environment-promotion-trunk-based" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        9.7 Environment promotion (trunk-based)
+      
+    </span>
+  </a>
+  
+</li>
+        
       </ul>
     </nav>
   
@@ -2404,6 +2415,17 @@
     <span class="md-ellipsis">
       
         9.6 Git staleness — "applied ≠ branch head"
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#97-environment-promotion-trunk-based" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        9.7 Environment promotion (trunk-based)
       
     </span>
   </a>
@@ -3361,6 +3383,14 @@
 - <strong>Obsolete <code>unconfirmed</code> run</strong>: if <code>head_sha</code> advances while a plan awaits confirmation, banner on the run page — "plan computed on <code>abc1234</code>, the branch advanced by N commits" — with a <em>Re-plan</em> action (discard + new run on the head). Confirmation remains <strong>possible</strong> (applying a specific commit is legitimate) but the obsolescence is impossible to miss.
 - No automatic action: staleness is information, never a trigger (that is the role of webhooks).
 - <code>GET /api/v1/environments/{id}</code> exposes <code>head_sha</code>, <code>commits_ahead</code>, <code>affects_project_root</code>, <code>stale</code>.</p>
+<h3 id="97-environment-promotion-trunk-based">9.7 Environment promotion (trunk-based)<a class="headerlink" href="#97-environment-promotion-trunk-based" title="Permanent link">&para;</a></h3>
+<p><code>POST /api/v1/environments/{target_id}/promote</code> <code>{from_environment_id}</code> re-deploys the <strong>exact commit
+currently applied</strong> on a sibling environment (same stack) to the target: it takes the source's last
+<code>finished</code> run <code>commit_sha</code> and creates a <strong>tracked</strong> run on the target pinned to that commit. This
+is the trunk-based promotion primitive (dev → staging → prod of the <em>same</em> stack, as opposed to the
+cross-stack §9.2 cascade). Triggering needs <code>writer</code>; the apply is gated as usual at confirm
+(<code>can_apply</code> + 4-eyes). 400 on a cross-stack pair, 409 if the source has no applied commit yet.
+Audited as <code>run.promoted</code> (context: from env/run, target env, commit).</p>
 <hr />
 <h2 id="10-dynamic-cloud-credentials-oidc-workload-identity">10. Dynamic cloud credentials — OIDC workload identity<a class="headerlink" href="#10-dynamic-cloud-credentials-oidc-workload-identity" title="Permanent link">&para;</a></h2>
 <h3 id="101-the-platform-as-oidc-issuer">10.1 The platform as OIDC issuer<a class="headerlink" href="#101-the-platform-as-oidc-issuer" title="Permanent link">&para;</a></h3>
