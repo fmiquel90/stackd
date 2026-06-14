@@ -870,6 +870,17 @@ s3://stackd-<org>/
 
 `managed_state: false` → nothing injected, the repo keeps its `backend "s3"` block (existing CarCutter compat).
 
+### 11.4 Importing an existing stack
+
+To adopt a stack that already has remote state into Stackd-managed state (`managed_state: true`):
+`POST /api/v1/environments/{env_id}/state/import-session` (admin) mints a short-lived (30 min),
+run-less `rw` state token and returns a ready-to-use `http` backend config. The operator migrates
+their current state with one standard command — `tofu init -migrate-state -backend-config=...` —
+which `LOCK`s, uploads the state via §11.2 (stored as a `state_version` with
+`created_by_run_id = NULL`), then `UNLOCK`s. Audited as `state.import_session_created`; the address
+uses the public URL (the operator runs locally). For stacks that should keep their own backend, use
+`managed_state: false` (§11.3) instead — no migration needed.
+
 ---
 
 ## 12. REST API (main surface)

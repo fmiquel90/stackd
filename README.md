@@ -264,7 +264,7 @@ the `one_active_run_per_env` unique index). What's worth knowing:
 
 ## 🧪 Tests & CI
 
-**59 automated tests** on real Postgres 18 (testcontainers) + moto — **54 API + 5 worker** — plus a
+**62 automated tests** on real Postgres 18 (testcontainers) + moto — **57 API + 5 worker** — plus a
 **live end-to-end scenario** (`task e2e`) that drives the full `plan → confirm → apply → cascade`
 against the running stack with a real worker executing OpenTofu. Full map in
 [`docs/TESTING.md`](docs/TESTING.md).

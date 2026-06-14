@@ -110,7 +110,7 @@ no DB, no network.
 
 ## 4. Test map (what each test asserts)
 
-### API — unit & integration (`api/tests/`, 54 tests)
+### API — unit & integration (`api/tests/`, 57 tests)
 
 **`test_auth.py` (5)** — auth flow & session security
 - `test_dev_login_personas` — persona login returns the user (role/tier) + a usable access token.
@@ -150,10 +150,13 @@ no DB, no network.
 - `test_platform_hook_crud_and_appears_in_claim` — a created hook shows up in the claim payload tagged platform; PATCH/DELETE work.
 - `test_hooks_require_writer` — writer may manage hooks (reader is gated by the permission model).
 
-**`test_state_backend.py` (3)** — Terraform HTTP state backend (moto S3)
+**`test_state_backend.py` (6)** — Terraform HTTP state backend + import (moto S3)
 - `test_state_lock_post_get_unlock` — LOCK→409-on-second→POST→serial-regression-409→GET→UNLOCK.
 - `test_readonly_token_cannot_write` — a `ro` state token (proposed runs) can't POST state → 403.
 - `test_state_token_scoped_to_env` — a token scoped to env X can't touch env Y → 403.
+- `test_import_session_adopts_existing_state` — an admin import session mints a backend config; the LOCK/POST/UNLOCK migration stores a `state_version` with no originating run (§11.4).
+- `test_import_session_requires_admin` — a non-admin can't mint an import session → 403.
+- `test_import_session_requires_managed_state` — importing into a `managed_state=false` env → 409.
 
 **`test_oidc.py` (4)** — workload credentials (§10)
 - `test_issuer_metadata_and_jwks` — discovery doc + JWKS endpoints serve RSA keys.
@@ -243,10 +246,10 @@ identity components are instead pinned by **Ladle stories** (the DESIGN §8 visu
 
 | Location | Files | Tests |
 |---|---|---|
-| `api/tests` | 17 | 54 |
+| `api/tests` | 17 | 57 |
 | `api/e2e` | 1 | 1 (multi-step scenario) |
 | `worker/tests` | 2 | 5 |
-| **Total** | **20** | **60** |
+| **Total** | **20** | **63** |
 
 ---
 

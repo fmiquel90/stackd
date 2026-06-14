@@ -12,13 +12,15 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.audit import record_audit
 from app.auth.deps import CurrentUser, require_role
+from app.config import get_settings
 from app.db import get_session
 from app.enums import AuditActorKind, Role
 from app.errors import ProblemException
 from app.ids import uuid7
+from app.models.environment import Environment
 from app.models.state import StateLock, StateVersion
 from app.statebackend.store import get_object, put_object, state_key
-from app.statebackend.tokens import decode_state_token
+from app.statebackend.tokens import decode_state_token, mint_state_token
 
 # Terraform HTTP backend protocol (SPECS §11.2). Auth: HTTP Basic, password = scoped state JWT.
 tf_router = APIRouter(prefix="/state/v1", tags=["state-backend"])
@@ -166,6 +168,71 @@ async def list_versions(env_id: uuid.UUID, _: CurrentUser, session: DbSession) -
         }
         for v in rows
     ]
+
+
+_IMPORT_TTL_SECONDS = 30 * 60
+
+
+@human_router.post(
+    "/{env_id}/state/import-session", dependencies=[Depends(require_role(Role.admin))]
+)
+async def create_import_session(env_id: uuid.UUID, user: CurrentUser, session: DbSession) -> dict:
+    """Adopt an existing stack into Stackd-managed state (SPECS §11.4).
+
+    Mints a short-lived, run-less `rw` state token and returns a ready-to-use `http` backend config
+    so an operator can migrate their current remote state with one standard command:
+    `tofu init -migrate-state -backend-config=...`. Terraform LOCKs, uploads the state through the
+    backend (stored as a `state_version` with no originating run), then UNLOCKs. Admin-only.
+    """
+    env = await session.get(Environment, env_id)
+    if env is None:
+        raise ProblemException(404, "Environment not found", None)
+    if not env.managed_state:
+        raise ProblemException(
+            409,
+            "Managed state is off",
+            "Enable managed_state on this environment before importing state.",
+        )
+
+    token = mint_state_token(environment_id=env_id, scope="rw", ttl_seconds=_IMPORT_TTL_SECONDS)
+    # Public URL: the operator runs `tofu` from their machine/CI, not from inside the cluster.
+    addr = f"{get_settings().stackd_public_url.rstrip('/')}/state/v1/{env_id}"
+    latest = await _latest(session, env_id)
+
+    await record_audit(
+        session,
+        action="state.import_session_created",
+        actor_kind=AuditActorKind.user,
+        actor_id=user.id,
+        actor_email=user.email,
+        target_kind="environment",
+        target_id=env_id,
+        context={"ttl_seconds": _IMPORT_TTL_SECONDS},
+    )
+    await session.commit()
+
+    backend = {
+        "address": addr,
+        "lock_address": f"{addr}/lock",
+        "unlock_address": f"{addr}/lock",
+        "lock_method": "LOCK",
+        "unlock_method": "UNLOCK",
+        "username": "env",
+        "password": token,
+    }
+    init_args = " ".join(f'-backend-config="{k}={v}"' for k, v in backend.items())
+    return {
+        "expires_in": _IMPORT_TTL_SECONDS,
+        "current_serial": latest.serial if latest else None,
+        "backend": {"type": "http", **backend},
+        "instructions": [
+            'Replace your stack\'s backend block with: terraform { backend "http" {} }',
+            f"Run once to migrate your current state into Stackd:\n"
+            f"  tofu init -migrate-state {init_args}",
+            "After it succeeds, future runs use the managed backend automatically. The token "
+            f"expires in {_IMPORT_TTL_SECONDS // 60} minutes.",
+        ],
+    }
 
 
 @human_router.delete(

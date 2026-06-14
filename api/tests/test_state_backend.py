@@ -88,3 +88,77 @@ async def test_state_token_scoped_to_env(client: httpx.AsyncClient) -> None:
     )
     got = await client.get(f"/state/v1/{env_id}", headers=_basic(other))
     assert got.status_code == 403
+
+
+async def _set_managed_state(env_id: str, value: bool) -> None:
+    from sqlalchemy import update
+
+    from app.db import SessionLocal
+    from app.models.environment import Environment
+
+    async with SessionLocal() as s:
+        await s.execute(
+            update(Environment)
+            .where(Environment.id == uuid.UUID(env_id))
+            .values(managed_state=value)
+        )
+        await s.commit()
+
+
+async def test_import_session_adopts_existing_state(client: httpx.AsyncClient) -> None:
+    """Adopt an existing stack: mint an import session, then migrate state with the returned
+    backend config (the LOCK/POST/UNLOCK that `tofu init -migrate-state` performs)."""
+    admin = await login(client, "admin")
+    stack = await make_stack(client, admin, "state-import-stack")
+    env_id = await make_env(client, admin, stack, "dev", "dev")  # managed_state defaults to true
+
+    r = await client.post(f"/api/v1/environments/{env_id}/state/import-session", headers=admin)
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["current_serial"] is None
+    assert body["backend"]["type"] == "http"
+    assert body["backend"]["address"].endswith(f"/state/v1/{env_id}")
+    assert body["instructions"]
+    token = body["backend"]["password"]
+
+    with mock_aws():
+        lock_body = json.dumps({"ID": "import-1", "Operation": "OperationTypeMigrate"})
+        assert (
+            await client.request(
+                "LOCK", f"/state/v1/{env_id}/lock", headers=_basic(token), content=lock_body
+            )
+        ).status_code == 200
+        post = await client.post(
+            f"/state/v1/{env_id}?ID=import-1", headers=_basic(token), content=_state_doc(7)
+        )
+        assert post.status_code == 200
+        assert (
+            await client.request(
+                "UNLOCK", f"/state/v1/{env_id}/lock", headers=_basic(token), content=lock_body
+            )
+        ).status_code == 200
+
+    versions = (
+        await client.get(f"/api/v1/environments/{env_id}/state/versions", headers=admin)
+    ).json()
+    assert len(versions) == 1
+    assert versions[0]["serial"] == 7
+    assert versions[0]["created_by_run_id"] is None  # imported out of any run
+
+
+async def test_import_session_requires_admin(client: httpx.AsyncClient) -> None:
+    admin = await login(client, "admin")
+    bob = await login(client, "bob")
+    stack = await make_stack(client, admin, "state-import-rbac")
+    env_id = await make_env(client, admin, stack, "dev", "dev")
+    r = await client.post(f"/api/v1/environments/{env_id}/state/import-session", headers=bob)
+    assert r.status_code == 403
+
+
+async def test_import_session_requires_managed_state(client: httpx.AsyncClient) -> None:
+    admin = await login(client, "admin")
+    stack = await make_stack(client, admin, "state-import-unmanaged")
+    env_id = await make_env(client, admin, stack, "dev", "dev")
+    await _set_managed_state(env_id, False)
+    r = await client.post(f"/api/v1/environments/{env_id}/state/import-session", headers=admin)
+    assert r.status_code == 409

@@ -11,13 +11,14 @@ from app.config import get_settings
 
 
 def mint_state_token(
-    *, environment_id: uuid.UUID, run_id: uuid.UUID, scope: str, ttl_seconds: int
+    *, environment_id: uuid.UUID, run_id: uuid.UUID | None = None, scope: str, ttl_seconds: int
 ) -> str:
+    # run_id is None for an out-of-run import session (admin-minted, §11.4).
     now = datetime.now(UTC)
     return jwt.encode(
         {
             "env_id": str(environment_id),
-            "run_id": str(run_id),
+            "run_id": str(run_id) if run_id else None,
             "scope": scope,  # "rw" | "ro"
             "typ": "state",
             "iat": int(now.timestamp()),
