@@ -9,7 +9,7 @@ from agent.client import ApiClient
 from agent.config import Settings
 from agent.logging import get_logger, setup as setup_logging
 from agent.masking import Masker
-from agent.runner import LogStreamer, run_command, run_hooks
+from agent.runner import LogStreamer, run_command, run_hooks, stream_json_command
 from agent.workspace import Workspace
 
 log = get_logger()
@@ -31,17 +31,26 @@ def _merge_hooks(platform: dict, repo: dict) -> dict[str, list[dict]]:
     return merged
 
 
-def _plan_summary(plan_json: dict) -> dict:
-    add = change = destroy = 0
-    for rc in plan_json.get("resource_changes", []):
-        actions = rc.get("change", {}).get("actions", [])
-        if actions == ["create"]:
-            add += 1
-        elif actions == ["delete"]:
-            destroy += 1
-        elif "update" in actions or set(actions) == {"create", "delete"}:
-            change += 1
-    return {"add": add, "change": change, "destroy": destroy}
+def _summary_from_events(events: list[dict]) -> dict:
+    """Plan/apply counts straight from tofu's authoritative `change_summary` event (last wins)."""
+    for evt in reversed(events):
+        if evt.get("type") == "change_summary":
+            c = evt.get("changes", {}) or {}
+            return {
+                "add": c.get("add", 0),
+                "change": c.get("change", 0),
+                "destroy": c.get("remove", 0),
+            }
+    return {"add": 0, "change": 0, "destroy": 0}
+
+
+def _first_error(events: list[dict]) -> str | None:
+    """The first error diagnostic's summary — surfaced as the run's error (real tofu message)."""
+    for evt in events:
+        if evt.get("@level") == "error":
+            diag = evt.get("diagnostic") or {}
+            return diag.get("summary") or evt.get("@message")
+    return None
 
 
 def _tool_bin(tool: str) -> str:
@@ -144,19 +153,28 @@ def handle_plan(client: ApiClient, job: dict, settings: Settings) -> None:
         stage("after_init")
         stage("before_plan")
 
-        code = run_command(
-            [tool, "plan", "-input=false", "-detailed-exitcode", "-out=plan.tfplan"],
+        # `-json`: stream readable @message lines while collecting structured events (change_summary
+        # for the counts, diagnostics for the real error message). detailed-exitcode: 0=no changes,
+        # 2=changes, 1=error.
+        code, events = stream_json_command(
+            [tool, "plan", "-input=false", "-json", "-detailed-exitcode", "-out=plan.tfplan"],
             cwd,
             platform_env,
             phase="planning",
             section=None,
             streamer=streamer,
         )
-        # detailed-exitcode: 0 = no changes, 2 = changes, 1 = error.
         if code == 1:
-            return client.event(job_id, "job_failed", phase="plan", result={"error": "plan failed"})
+            return client.event(
+                job_id,
+                "job_failed",
+                phase="plan",
+                result={"error": _first_error(events) or "plan failed"},
+            )
         has_changes = code == 2
+        summary = _summary_from_events(events)
 
+        # plan.json artifact for after_plan hooks (infracost/jq); `show -json` is already machine-readable.
         show = subprocess.run(
             [tool, "show", "-json", "plan.tfplan"],
             cwd=cwd,
@@ -164,10 +182,10 @@ def handle_plan(client: ApiClient, job: dict, settings: Settings) -> None:
             capture_output=True,
             text=True,
         )
-        plan_json = _safe_json(show.stdout) if show.returncode == 0 else {}
-        (cwd / "plan.json").write_text(json.dumps(plan_json))
+        plan_doc = show.stdout if show.returncode == 0 and show.stdout.strip() else "{}"
+        (cwd / "plan.json").write_text(plan_doc)
         # Mask the artifact too: plan.json can echo sensitive variable values (§8.3 leak note).
-        client.upload_artifact(job_id, "plan.json", masker.mask(show.stdout).encode())
+        client.upload_artifact(job_id, "plan.json", masker.mask(plan_doc).encode())
 
         if job.get("hooks", {}).get("after_plan") or ws.load_stackd_yml(cwd).get("after_plan"):
             client.event(job_id, "phase_started", phase="checking")
@@ -188,7 +206,7 @@ def handle_plan(client: ApiClient, job: dict, settings: Settings) -> None:
             "phase_finished",
             result={
                 "has_changes": has_changes,
-                "summary": _plan_summary(plan_json),
+                "summary": summary,
                 "checks": checks,
             },
         )
@@ -241,19 +259,20 @@ def handle_apply(client: ApiClient, job: dict, settings: Settings) -> None:
             phase="applying",
             streamer=streamer,
         )
-        if (
-            run_command(
-                [tool, "apply", "-input=false", "-auto-approve"],
-                cwd,
-                platform_env,
-                phase="applying",
-                section=None,
-                streamer=streamer,
-            )
-            != 0
-        ):
+        code, events = stream_json_command(
+            [tool, "apply", "-input=false", "-json", "-auto-approve"],
+            cwd,
+            platform_env,
+            phase="applying",
+            section=None,
+            streamer=streamer,
+        )
+        if code != 0:
             return client.event(
-                job_id, "job_failed", phase="apply", result={"error": "apply failed"}
+                job_id,
+                "job_failed",
+                phase="apply",
+                result={"error": _first_error(events) or "apply failed"},
             )
         out = subprocess.run(
             [tool, "output", "-json"], cwd=cwd, env=platform_env, capture_output=True, text=True

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from agent.main import _merge_hooks, _plan_summary
+from agent.main import _first_error, _merge_hooks, _summary_from_events
 from agent.masking import Masker
 
 
@@ -26,13 +26,35 @@ def test_merge_hooks_platform_before_repo() -> None:
     assert names == ["tfsec", "infracost"]  # platform (non-bypassable) runs first
 
 
-def test_plan_summary_counts_actions() -> None:
-    plan = {
-        "resource_changes": [
-            {"change": {"actions": ["create"]}},
-            {"change": {"actions": ["update"]}},
-            {"change": {"actions": ["delete"]}},
-            {"change": {"actions": ["no-op"]}},
-        ]
+def test_summary_from_change_summary_event() -> None:
+    events = [
+        {"type": "planned_change", "@message": "aws_vpc.main: Plan to create"},
+        {
+            "type": "change_summary",
+            "@message": "Plan: 3 to add, 1 to change, 2 to destroy.",
+            "changes": {"add": 3, "change": 1, "remove": 2, "import": 0, "operation": "plan"},
+        },
+    ]
+    assert _summary_from_events(events) == {"add": 3, "change": 1, "destroy": 2}
+
+
+def test_summary_defaults_when_no_change_summary() -> None:
+    assert _summary_from_events([{"type": "version", "@message": "Terraform v1.12"}]) == {
+        "add": 0,
+        "change": 0,
+        "destroy": 0,
     }
-    assert _plan_summary(plan) == {"add": 1, "change": 1, "destroy": 1}
+
+
+def test_first_error_picks_the_diagnostic_summary() -> None:
+    events = [
+        {"@level": "info", "@message": "Initializing…"},
+        {
+            "@level": "error",
+            "@message": "Error: Reference to undeclared resource",
+            "type": "diagnostic",
+            "diagnostic": {"severity": "error", "summary": "Reference to undeclared resource"},
+        },
+    ]
+    assert _first_error(events) == "Reference to undeclared resource"
+    assert _first_error([{"@level": "info", "@message": "ok"}]) is None

@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import json
 import subprocess
 import threading
 import time
+from collections.abc import Callable
 from pathlib import Path
 
 from agent.client import ApiClient
@@ -33,7 +35,7 @@ class LogStreamer:
         self._client.logs(self._job_id, phase, seq, payload, section=section)
 
 
-def run_command(
+def _stream_proc(
     cmd: list[str],
     cwd: Path,
     env: dict[str, str],
@@ -41,10 +43,11 @@ def run_command(
     phase: str,
     section: str | None,
     streamer: LogStreamer,
-    timeout: int = _DEFAULT_TIMEOUT_SECONDS,
+    timeout: int,
+    transform: Callable[[str], str | None],
 ) -> int:
-    """Run a command, streaming masked stdout/stderr to the API. Returns the exit code (124 if it
-    exceeds `timeout` and is killed)."""
+    """Run a command, applying `transform` to each output line before streaming it (return None to
+    skip a line). A watchdog kills the process past `timeout` (exit 124, like coreutils `timeout`)."""
     proc = subprocess.Popen(
         cmd,
         cwd=cwd,
@@ -54,7 +57,6 @@ def run_command(
         text=True,
         bufsize=1,
     )
-    # Watchdog: kill the process if it runs past the timeout, so a hang can't pin the worker.
     killed = {"v": False}
 
     def _kill() -> None:
@@ -68,7 +70,10 @@ def run_command(
             raise RuntimeError("subprocess stdout pipe missing")
         buffer: list[str] = []
         for line in proc.stdout:
-            buffer.append(line.rstrip("\n"))
+            text = transform(line.rstrip("\n"))
+            if text is None:
+                continue
+            buffer.append(text)
             if len(buffer) >= 20:
                 streamer.emit(phase, buffer, section=section)
                 buffer = []
@@ -82,6 +87,69 @@ def run_command(
         )
         return 124
     return rc
+
+
+def run_command(
+    cmd: list[str],
+    cwd: Path,
+    env: dict[str, str],
+    *,
+    phase: str,
+    section: str | None,
+    streamer: LogStreamer,
+    timeout: int = _DEFAULT_TIMEOUT_SECONDS,
+) -> int:
+    """Run a command, streaming masked stdout/stderr to the API. Returns the exit code."""
+    return _stream_proc(
+        cmd,
+        cwd,
+        env,
+        phase=phase,
+        section=section,
+        streamer=streamer,
+        timeout=timeout,
+        transform=lambda line: line,
+    )
+
+
+def stream_json_command(
+    cmd: list[str],
+    cwd: Path,
+    env: dict[str, str],
+    *,
+    phase: str,
+    section: str | None,
+    streamer: LogStreamer,
+    timeout: int = _DEFAULT_TIMEOUT_SECONDS,
+) -> tuple[int, list[dict]]:
+    """Run a `-json` tofu/terraform command (plan/apply): stream the human-readable `@message` of
+    each event (masked) while collecting the structured events (`change_summary`, `diagnostic`, …)
+    for the caller. Non-JSON lines are streamed verbatim. Returns (exit_code, events)."""
+    events: list[dict] = []
+
+    def _tx(line: str) -> str | None:
+        if not line:
+            return None
+        try:
+            evt = json.loads(line)
+        except json.JSONDecodeError:
+            return line  # not a JSON event (e.g. a stray stderr line) — stream as-is
+        if isinstance(evt, dict) and "@message" in evt:
+            events.append(evt)
+            return str(evt["@message"])
+        return line
+
+    rc = _stream_proc(
+        cmd,
+        cwd,
+        env,
+        phase=phase,
+        section=section,
+        streamer=streamer,
+        timeout=timeout,
+        transform=_tx,
+    )
+    return rc, events
 
 
 def run_hooks(

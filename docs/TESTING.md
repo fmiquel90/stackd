@@ -240,11 +240,13 @@ worker running OpenTofu (≈2 min). It drives, in order:
 **`test_diagnostics.py` (1)**
 - `test_diagnostics_exposes_env_names_not_values` — the bundle lists env var **names** but never their values.
 
-**`test_masking.py` (4)**
+**`test_masking.py` (6)** — masking + the `-json` event parsing
 - `test_masker_replaces_all_secrets` — every known secret in a string is replaced.
 - `test_masker_longest_first` — overlapping secrets are masked longest-first (no partial leaks).
 - `test_merge_hooks_platform_before_repo` — platform hooks are merged ahead of repo hooks (non-bypassable).
-- `test_plan_summary_counts_actions` — `plan.json` actions are counted into add/change/destroy.
+- `test_summary_from_change_summary_event` — the plan summary comes from tofu's `change_summary` event.
+- `test_summary_defaults_when_no_change_summary` — no `change_summary` → zero counts.
+- `test_first_error_picks_the_diagnostic_summary` — the run error is the first `diagnostic` summary.
 
 ### Front (`front/`)
 
@@ -260,8 +262,8 @@ identity components are instead pinned by **Ladle stories** (the DESIGN §8 visu
 |---|---|---|
 | `api/tests` | 19 | 65 |
 | `api/e2e` | 1 | 1 (multi-step scenario) |
-| `worker/tests` | 2 | 5 |
-| **Total** | **22** | **71** |
+| `worker/tests` | 2 | 7 |
+| **Total** | **22** | **73** |
 
 ---
 

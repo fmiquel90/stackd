@@ -593,9 +593,12 @@ if job.phase == "plan":
     write_tfvars(ws, job.tfvars_json, job.mock_inputs)
     run_hooks(hooks.before_init); run(tf, "init", "-input=false"); run_hooks(hooks.after_init)
     run_hooks(hooks.before_plan)
-    code = run(tf, "plan", "-out=plan.tfplan", "-detailed-exitcode")
+    # plan/apply run with -json: the agent streams each event's human @message to the log (masked)
+    # AND collects the structured events — the `change_summary` event gives the authoritative
+    # add/change/destroy counts and `diagnostic` events surface the real error as the run's `error`.
+    code, events = run_json(tf, "plan", "-json", "-out=plan.tfplan", "-detailed-exitcode")
     # 0 = no changes, 2 = changes, 1 = error
-    plan_json = run(tf, "show", "-json", "plan.tfplan")
+    plan_json = run(tf, "show", "-json", "plan.tfplan")   # still produced for after_plan hooks
     upload_artifacts(plan_json, "plan.tfplan")
     checks = run_hooks(hooks.after_plan, expose="plan.json")   # checking phase
     report(phase_finished, has_changes=(code == 2), summary=..., checks=checks)
