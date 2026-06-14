@@ -64,6 +64,68 @@ async def trigger_run(
     return run
 
 
+async def promote_run(
+    session: AsyncSession, source_env: Environment, target_env: Environment, user: User
+) -> Run:
+    """Promote the commit currently applied on `source_env` to `target_env` of the SAME stack: a
+    tracked run on the target pinned to the source's last finished commit (§9.7). Triggering a plan
+    needs writer; the apply is still gated by can_apply + 4-eyes at confirm time."""
+    from sqlalchemy import select
+
+    if source_env.stack_id != target_env.stack_id:
+        raise ProblemException(
+            400, "Cross-stack promotion", "Source and target must belong to the same stack."
+        )
+    if source_env.id == target_env.id:
+        raise ProblemException(400, "Same environment", "Pick a different source environment.")
+
+    src = (
+        await session.execute(
+            select(Run)
+            .where(
+                Run.environment_id == source_env.id,
+                Run.state == RunState.finished,
+                Run.commit_sha.is_not(None),
+            )
+            .order_by(Run.finished_at.desc())
+            .limit(1)
+        )
+    ).scalar_one_or_none()
+    if src is None:
+        raise ProblemException(
+            409, "Nothing to promote", "The source environment has no applied commit yet."
+        )
+
+    run = Run(
+        environment_id=target_env.id,
+        type=RunType.tracked,
+        state=RunState.queued,
+        triggered_by=TriggeredBy.manual,
+        trigger_user_id=user.id,
+        commit_sha=src.commit_sha,
+    )
+    session.add(run)
+    await session.flush()
+    await record_audit(
+        session,
+        action="run.promoted",
+        actor_kind=AuditActorKind.user,
+        actor_id=user.id,
+        actor_email=user.email,
+        target_kind="run",
+        target_id=run.id,
+        context={
+            "from_environment_id": str(source_env.id),
+            "from_run_id": str(src.id),
+            "target_environment_id": str(target_env.id),
+            "commit": src.commit_sha,
+        },
+    )
+    await session.commit()
+    await session.refresh(run)
+    return run
+
+
 async def trigger_command_run(
     session: AsyncSession,
     env: Environment,

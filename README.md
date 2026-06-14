@@ -46,8 +46,9 @@ per run and expire with it. You keep everything, on your own infrastructure.
 - 🔔 **Notifications** — Slack/webhook on "awaiting approval", "finished", "failed" — close the loop without watching the UI.
 - 📡 **Live updates** — the run page and dependency graph light up in real time over WebSocket.
 - 🧰 **Ad-hoc commands** — run allowlisted subcommands (import, state rm/mv, taint…) as audited runs, gated like apply.
+- ⬆️ **Promotion** — deploy the *exact* commit running on one env to the next (trunk-based dev→staging→prod), gated like apply.
 - 🔓 **Low lock-in** — code stays in Git, state is plain `tfstate`, IAM is standard; leaving is a reversible `tofu init -migrate-state` ([exit guide](https://fmiquel90.github.io/stackd/guide/leaving/)).
-- 🧪 **Tested for real** — 67 tests on real Postgres + a live end-to-end scenario running actual OpenTofu.
+- 🧪 **Tested for real** — 70 tests on real Postgres + a live end-to-end scenario running actual OpenTofu.
 
 ## ⚡ Quick start
 
@@ -271,7 +272,7 @@ the `one_active_run_per_env` unique index). What's worth knowing:
 
 ## 🧪 Tests & CI
 
-**67 automated tests** on real Postgres 18 (testcontainers) + moto — **62 API + 5 worker** — plus a
+**70 automated tests** on real Postgres 18 (testcontainers) + moto — **65 API + 5 worker** — plus a
 **live end-to-end scenario** (`task e2e`) that drives the full `plan → confirm → apply → cascade`
 against the running stack with a real worker executing OpenTofu. Full map in
 [`docs/TESTING.md`](docs/TESTING.md).

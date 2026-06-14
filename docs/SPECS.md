@@ -784,6 +784,16 @@ stale            = head_sha present AND head_sha ≠ last_applied_sha
 - No automatic action: staleness is information, never a trigger (that is the role of webhooks).
 - `GET /api/v1/environments/{id}` exposes `head_sha`, `commits_ahead`, `affects_project_root`, `stale`.
 
+### 9.7 Environment promotion (trunk-based)
+
+`POST /api/v1/environments/{target_id}/promote` `{from_environment_id}` re-deploys the **exact commit
+currently applied** on a sibling environment (same stack) to the target: it takes the source's last
+`finished` run `commit_sha` and creates a **tracked** run on the target pinned to that commit. This
+is the trunk-based promotion primitive (dev → staging → prod of the *same* stack, as opposed to the
+cross-stack §9.2 cascade). Triggering needs `writer`; the apply is gated as usual at confirm
+(`can_apply` + 4-eyes). 400 on a cross-stack pair, 409 if the source has no applied commit yet.
+Audited as `run.promoted` (context: from env/run, target env, commit).
+
 ---
 
 ## 10. Dynamic cloud credentials — OIDC workload identity

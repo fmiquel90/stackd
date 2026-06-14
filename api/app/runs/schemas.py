@@ -20,6 +20,10 @@ class CommandTriggerIn(BaseModel):
     commit_sha: str | None = None
 
 
+class PromoteIn(BaseModel):
+    from_environment_id: uuid.UUID  # promote that env's currently-applied commit to this one
+
+
 class RunOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 

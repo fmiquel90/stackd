@@ -110,7 +110,7 @@ no DB, no network.
 
 ## 4. Test map (what each test asserts)
 
-### API — unit & integration (`api/tests/`, 62 tests)
+### API — unit & integration (`api/tests/`, 65 tests)
 
 **`test_auth.py` (5)** — auth flow & session security
 - `test_dev_login_personas` — persona login returns the user (role/tier) + a usable access token.
@@ -144,6 +144,11 @@ no DB, no network.
 - `test_readonly_command_allowed_for_writer` — a writer may run a read-only command (`output`) → 201, `type=command`.
 - `test_mutating_command_requires_can_apply` — a writer is refused `state rm` (403); an admin is allowed.
 - `test_command_run_lifecycle` — claim carries `phase=command` + the subcommand; `running → finished`; audited (`run.command_triggered`/`run.command_executed`).
+
+**`test_promote.py` (3)** — environment promotion (§9.7)
+- `test_promote_carries_the_applied_commit` — promote dev→staging creates a tracked run pinned to dev's last applied commit; audited `run.promoted`.
+- `test_promote_requires_an_applied_source` — promoting from an env with nothing applied → 409.
+- `test_promote_rejects_cross_stack` — promoting between different stacks → 400.
 
 **`test_dependencies.py` (5)** — cross-env outputs, mocks, cascade
 - `test_mock_used_and_blocks_apply` — no real upstream output → the mock is injected, `used_mocks=true`, apply blocked.
@@ -253,10 +258,10 @@ identity components are instead pinned by **Ladle stories** (the DESIGN §8 visu
 
 | Location | Files | Tests |
 |---|---|---|
-| `api/tests` | 18 | 62 |
+| `api/tests` | 19 | 65 |
 | `api/e2e` | 1 | 1 (multi-step scenario) |
 | `worker/tests` | 2 | 5 |
-| **Total** | **21** | **68** |
+| **Total** | **22** | **71** |
 
 ---
 

@@ -63,6 +63,8 @@ export const runs = {
   logs: (id: string) => api<LogChunk[]>(`/runs/${id}/logs`),
   command: (envId: string, command: string, args: string[]) =>
     api<Run>(`/environments/${envId}/commands`, { body: { command, args } }),
+  promote: (targetEnvId: string, fromEnvId: string) =>
+    api<Run>(`/environments/${targetEnvId}/promote`, { body: { from_environment_id: fromEnvId } }),
 };
 
 // Allowlisted ad-hoc subcommands (mirrors app/runs/commands.py). Mutating ones need apply rights.

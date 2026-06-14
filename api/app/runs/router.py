@@ -14,11 +14,12 @@ from app.errors import ProblemException
 from app.models.environment import Environment
 from app.models.run import Run
 from app.models.run_log import RunLog
-from app.runs.schemas import CommandTriggerIn, LogChunkOut, RunOut, TriggerRunIn
+from app.runs.schemas import CommandTriggerIn, LogChunkOut, PromoteIn, RunOut, TriggerRunIn
 from app.runs.service import (
     cancel_run,
     confirm_run,
     discard_run,
+    promote_run,
     trigger_command_run,
     trigger_run,
 )
@@ -74,6 +75,24 @@ async def run_command(
     return await trigger_command_run(
         session, env, user, command=body.command, args=body.args, commit_sha=body.commit_sha
     )
+
+
+@router.post(
+    "/environments/{env_id}/promote",
+    response_model=RunOut,
+    status_code=201,
+    dependencies=[Depends(require_role(Role.writer))],
+)
+async def promote(env_id: uuid.UUID, body: PromoteIn, user: CurrentUser, session: DbSession) -> Run:
+    """Promote the commit currently applied on `from_environment_id` to this environment (same
+    stack). Creates a tracked run pinned to that commit; the apply is gated as usual at confirm."""
+    target = await session.get(Environment, env_id)
+    if target is None:
+        raise ProblemException(404, "Environment not found", None)
+    source = await session.get(Environment, body.from_environment_id)
+    if source is None:
+        raise ProblemException(404, "Source environment not found", None)
+    return await promote_run(session, source, target, user)
 
 
 @router.get("/environments/{env_id}/runs", response_model=list[RunOut])

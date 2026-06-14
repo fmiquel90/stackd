@@ -56,6 +56,20 @@ An environment with `autodeploy` auto-confirms when the plan is clean — **but 
 A run that consumed a mock upstream output (`used_mocks=true`) **cannot be applied** unless the env
 sets `allow_mock_apply=true` — see [Dependencies & mocks](dependencies-and-mocks.md).
 
+## Promotion (trunk-based)
+
+To roll out the **exact commit** running on one environment to another of the same stack
+(dev → staging → prod), use **promote** — the env's **Promote** tab, or:
+
+```bash
+curl -s -X POST localhost:8000/api/v1/environments/$STAGING_ID/promote -H "$AUTH" \
+  -d '{"from_environment_id": "'$DEV_ID'"}'
+```
+
+It pins a new tracked run on the target to the source's last applied commit, so you deploy *what
+was tested* — not whatever HEAD happens to be. The apply is gated as usual (tier + four-eyes) at
+confirm. This is the same-stack counterpart to the cross-stack [cascade](dependencies-and-mocks.md).
+
 ## Proposed runs (from a PR)
 
 A pull request triggers a **proposed** run: plan-only, read-only state, no secrets — a safe preview

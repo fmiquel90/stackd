@@ -10,6 +10,7 @@ import { DependenciesPanel } from "@/components/DependenciesPanel";
 import { CommandPanel } from "@/components/CommandPanel";
 import { HooksPanel } from "@/components/HooksPanel";
 import { NotificationsPanel } from "@/components/NotificationsPanel";
+import { PromotePanel } from "@/components/PromotePanel";
 import { StatePanel } from "@/components/StatePanel";
 import { Button, Card, Field, PageTitle, Select, TextInput } from "@/components/ui";
 
@@ -113,7 +114,7 @@ function PlanButton({ envId }: { envId: string }) {
   );
 }
 
-type EnvTab = "inputs" | "hooks" | "deps" | "state" | "cloud" | "notify" | "command";
+type EnvTab = "inputs" | "hooks" | "deps" | "state" | "cloud" | "notify" | "command" | "promote";
 
 function EnvTabButton({ active, label, onClick }: { active: boolean; label: string; onClick: () => void }) {
   return (
@@ -185,6 +186,7 @@ export function StackDetailPage() {
                 <EnvTabButton active={open?.envId === env.id && open.tab === "cloud"} label="Cloud" onClick={() => toggle(env.id, "cloud")} />
                 <EnvTabButton active={open?.envId === env.id && open.tab === "notify"} label="Notify" onClick={() => toggle(env.id, "notify")} />
                 <EnvTabButton active={open?.envId === env.id && open.tab === "command"} label="Command" onClick={() => toggle(env.id, "command")} />
+                <EnvTabButton active={open?.envId === env.id && open.tab === "promote"} label="Promote" onClick={() => toggle(env.id, "promote")} />
               </div>
             </div>
             {open?.envId === env.id && (
@@ -196,6 +198,14 @@ export function StackDetailPage() {
                 {open.tab === "cloud" && <CloudPanel envId={env.id} />}
                 {open.tab === "notify" && <NotificationsPanel scope="environments" id={env.id} />}
                 {open.tab === "command" && <CommandPanel envId={env.id} />}
+                {open.tab === "promote" && (
+                  <PromotePanel
+                    envId={env.id}
+                    siblings={(envs.data ?? [])
+                      .filter((e) => e.id !== env.id)
+                      .map((e) => ({ id: e.id, name: e.name }))}
+                  />
+                )}
               </div>
             )}
           </Card>
