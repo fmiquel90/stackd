@@ -1687,43 +1687,48 @@
 <tbody>
 <tr>
 <td><code>bg-base</code></td>
-<td><code>#0D1117</code> → adjusted <code>#0E141B</code></td>
+<td><code>#0C1118</code></td>
 <td>app background (bluish slate, never pure black)</td>
 </tr>
 <tr>
 <td><code>bg-surface</code></td>
-<td><code>#151C24</code></td>
+<td><code>#141B24</code></td>
 <td>panels, tables</td>
 </tr>
 <tr>
 <td><code>bg-raised</code></td>
-<td><code>#1C2530</code></td>
+<td><code>#1D2733</code></td>
 <td>interactive elements, hover, sticky headers</td>
 </tr>
 <tr>
 <td><code>border</code></td>
-<td><code>#2A3441</code></td>
+<td><code>#2A3542</code></td>
 <td>1px rules (the main structural material)</td>
 </tr>
 <tr>
 <td><code>text-primary</code></td>
-<td><code>#E6EDF3</code></td>
+<td><code>#E8EEF4</code></td>
 <td>body text</td>
 </tr>
 <tr>
 <td><code>text-secondary</code></td>
-<td><code>#8B98A5</code></td>
+<td><code>#8A97A4</code></td>
 <td>labels, meta</td>
 </tr>
 <tr>
 <td><code>accent</code></td>
-<td><code>#D9A23B</code> (signal amber)</td>
-<td>human-decision actions: Confirm, focus, active links</td>
+<td><code>#8B6CF0</code> (brand violet)</td>
+<td>structure: focus, active links/nav, primary CTAs, the mark</td>
+</tr>
+<tr>
+<td><code>decision</code></td>
+<td><code>#E8A838</code> (signal amber)</td>
+<td>the human-decision moment only: Confirm / apply</td>
 </tr>
 </tbody>
 </table>
-<p><strong>Amber</strong> as the single accent is a deliberate choice: it is the color of decision (confirming an apply), it stands out from the blue background without shouting, and it leaves the entire green/red spectrum available for state semantics. The most important button in the app (Confirm on prod) is amber — not green, because green would say "all is well" whereas it says "your judgment is needed".</p>
-<p>Light theme: same tokens inverted (<code>bg-base #F7F9FB</code>, slate for text, darkened amber <code>#A87A1F</code> for AA contrast).</p>
+<p><strong>Two accents, two jobs.</strong> The <strong>brand violet</strong> (from the StackD logo) is the structural accent — focus rings, active nav, links, primary CTAs, the wordmark's "D". <strong>Amber</strong> is reserved for the one moment that needs human judgment: the <strong>Confirm/apply</strong> button (and the <code>unconfirmed</code> state). Keeping them separate means amber <em>stands out from the violet chrome</em> — the most important button in the app is amber, not green ("your judgment is needed", not "all is well"). The green/red spectrum stays free for state semantics.</p>
+<p>Light theme: same tokens (<code>bg-base #F7F9FB</code>, navy <code>#1B2733</code> for text — the logo's own colour, brand violet <code>#6D3FD4</code> and darkened amber <code>#A87A1F</code> for AA contrast).</p>
 <h3 id="32-state-colors-the-semantic-language-identical-in-both-themes">3.2 State colors (the semantic language, identical in both themes)<a class="headerlink" href="#32-state-colors-the-semantic-language-identical-in-both-themes" title="Permanent link">&para;</a></h3>
 <table>
 <thead>
@@ -1750,8 +1755,8 @@
 <tr>
 <td><code>unconfirmed</code> (waiting on a human)</td>
 <td>amber</td>
-<td><code>#D9A23B</code></td>
-<td>the same color as the accent: <em>waiting on a human IS the action</em></td>
+<td><code>#E8A838</code></td>
+<td>the same color as <code>decision</code>: <em>waiting on a human IS the action</em></td>
 </tr>
 <tr>
 <td><code>finished</code></td>
@@ -1773,7 +1778,7 @@
 </tr>
 </tbody>
 </table>
-<p><code>mocked</code> is not a state but a <strong>modifier</strong> that overlays the current state (a mocked run is also <code>unconfirmed</code>, <code>planning</code>...) — rendered by a distinct purple badge <code>#A371F7</code>, deliberately outside the operational spectrum ("this is not real"): MOCKED badge, mocked values.</p>
+<p><code>mocked</code> is not a state but a <strong>modifier</strong> that overlays the current state (a mocked run is also <code>unconfirmed</code>, <code>planning</code>...) — rendered by a distinct magenta badge <code>#EC6AB4</code>, deliberately outside the operational spectrum ("this is not real"): MOCKED badge, mocked values. (Magenta, not purple — purple is now the brand.)</p>
 <p>Absolute rule: these colors serve <strong>only</strong> state semantics. Never decorative blue, never green on a button unrelated to a success. This is what makes the app legible at a glance at 3 a.m.</p>
 <h3 id="33-typography">3.3 Typography<a class="headerlink" href="#33-typography" title="Permanent link">&para;</a></h3>
 <table>
@@ -1823,7 +1828,7 @@
 <a id="__codelineno-0-9" name="__codelineno-0-9" href="#__codelineno-0-9"></a>└──────────┴─────────────────────────────────────────┘
 </code></pre></div>
 <ul>
-<li><strong>Labeled side nav (≈ 208 px, icon + text label)</strong>: Stacks, Graph, Audit, Workers, Variable Sets, Settings, with the <code>Stackd</code> wordmark at the top. Active item = amber text + <code>raised</code> background. The product has few sections: no mega-menu.</li>
+<li><strong>Labeled side nav (≈ 208 px, icon + text label)</strong>: Stacks, Graph, Audit, Workers, Variable Sets, Settings, with the <code>StackD</code> mark + wordmark at the top. Active item = brand-violet text + <code>raised</code> background. The product has few sections: no mega-menu.</li>
 <li><strong>Decision (revised): labels are always visible, not only on hover.</strong> An icons-only nav forces <em>recall</em> (guessing what an icon means); a labeled nav plays on <em>recognition</em> — faster, less ambiguous, and better for accessibility (the label is not carried by the <code>aria-label</code> alone). For an expert tool used daily, clarity wins over the 150 px gained. The earlier "56 px icons + tooltip, expandable on hover" track is abandoned: the tooltip hides information behind an interaction.</li>
 <li><strong>Structural breadcrumb</strong>: <code>space / stack / environment / run #142</code> — always present, each segment clickable. It is the backbone of orientation, given the 4-level hierarchy.</li>
 <li><strong>⌘K command palette</strong> from v1: go to a stack/env, trigger a run, copy an ID. For an expert audience, this is the real primary navigation; the visual nav is the fallback.</li>
@@ -1856,7 +1861,7 @@
 <li>Header: triggerer AND confirmer shown (Google avatars) — audit is in the interface, not hidden in a page.</li>
 <li><strong>Plan</strong> tab: <code>+3 ~1 −0</code> summary in giant mono, then a list of resources grouped by action (create/update/delete), each resource expandable into an attribute-by-attribute diff (added green / modified amber / deleted red, values in mono). <strong>Destructions are always expanded by default</strong> — a delete is never hidden.</li>
 <li><strong>Checks</strong> tab: one block per after_plan hook (name, status, duration, output), warn = amber with the note "manual confirmation required".</li>
-<li><strong>Inputs</strong> tab: resolved variables with their <strong>provenance as a mono badge</strong> (<code>set:common-aws</code>, <code>stack</code>, <code>env</code>, <code>dependency</code>, <code>MOCK</code> in purple). Sensitive values: <code>•••</code> with no "reveal" button.</li>
+<li><strong>Inputs</strong> tab: resolved variables with their <strong>provenance as a mono badge</strong> (<code>set:common-aws</code>, <code>stack</code>, <code>env</code>, <code>dependency</code>, <code>MOCK</code> in magenta). Sensitive values: <code>•••</code> with no "reveal" button.</li>
 </ul>
 <h3 id="53-log-viewer-in-the-run-page">5.3 Log viewer (in the run page)<a class="headerlink" href="#53-log-viewer-in-the-run-page" title="Permanent link">&para;</a></h3>
 <ul>
@@ -1869,7 +1874,7 @@
 <h3 id="54-graph-and-run-groups">5.4 <code>/graph</code> and run groups<a class="headerlink" href="#54-graph-and-run-groups" title="Permanent link">&para;</a></h3>
 <ul>
 <li>react-flow, dagre layout left→right, <strong>filter by environment name at the top</strong> (see the "prod" graph without the dev noise).</li>
-<li>Node = minimal card: stack/env + mini-rail of the last run. Edge labeled with the number of output references; dashed purple edge if mocks are involved.</li>
+<li>Node = minimal card: stack/env + mini-rail of the last run. Edge labeled with the number of output references; dashed magenta edge if mocks are involved.</li>
 <li>Run group view: same graph, the nodes color in real time during the cascade. No confetti at the end — a green <code>finished</code> state is enough.</li>
 <li><strong>Mandatory accessible alternative</strong>: a react-flow graph is not navigable by screen reader nor by keyboard alone. A systematic <strong>"list view"</strong> toggle = an adjacency table (<code>upstream env → downstream env · N references · MOCK?</code>) that is sortable, focusable, with the same filter. The graph is the default display; the list is the complete functional equivalent, not a stopgap. The graph nodes remain reachable via <code>Tab</code> (topological order) with an <code>aria-label</code> announcement of the last run's state.</li>
 <li><strong>Auto-link by name</strong>: a collapsible action wires two stacks in bulk — for every same-named env pair it links each matching upstream output to the downstream input of the same name (one POST instead of adding references one by one). Reports the count of references created.</li>
@@ -1920,7 +1925,7 @@
 <ul>
 <li>Minimum AA contrast on both themes (verified on the state colors over their actual backgrounds).</li>
 <li><strong>Color is never the sole carrier of state</strong>: each badge has its text label, the rail has icons per segment (✓ ✕ ⏸ ▶). Color blindness = the nominal case in this trade.</li>
-<li>Full keyboard navigation: <code>j/k</code> in tables, <code>f</code> full-screen logs, <code>⌘K</code> palette, visible amber 2 px focus. <code>prefers-reduced-motion</code>: the rail's pulse becomes a static opacity change.</li>
+<li>Full keyboard navigation: <code>j/k</code> in tables, <code>f</code> full-screen logs, <code>⌘K</code> palette, visible brand-violet 2 px focus. <code>prefers-reduced-motion</code>: the rail's pulse becomes a static opacity change.</li>
 <li><strong>Skip-link</strong> "Go to content" as the first focusable element (side nav + breadcrumb = many tab stops before the content on a dense app).</li>
 <li><strong>Polite live regions, never focus stealing</strong>: real-time state changes (rail, badges, "Reconnecting…" banner) are announced via <code>aria-live="polite"</code> and never move the user's focus (they may be reading logs or filling out a form). Action toasts use <code>aria-live</code> and do not capture focus.</li>
 <li><strong>Tabular figures</strong>: <code>font-variant-numeric: tabular-nums</code> on any data aligned in a column (durations, <code>+a ~c −d</code>, counters, timestamps) — JetBrains Mono is already monospaced, but we force tabular-nums so the columns do not dance during streaming.</li>
@@ -1946,7 +1951,7 @@
 <h2 id="9-what-we-forbid-ourselves-reminder">9. What we forbid ourselves (reminder)<a class="headerlink" href="#9-what-we-forbid-ourselves-reminder" title="Permanent link">&para;</a></h2>
 <ul>
 <li>Drop shadows, gradients, glassmorphism, decorative illustrations, emojis in the UI.</li>
-<li>State colors used for anything other than state; amber accent used for anything other than decision/focus.</li>
+<li>State colors used for anything other than state; brand violet used to carry state meaning; amber used for anything other than the decision moment + <code>unconfirmed</code>.</li>
 <li>An icon alone on a destructive action; confirmation without typing the name for deletions <strong>and for any <code>tier=prod</code> or <code>destroy</code> apply</strong> (§5.2).</li>
 <li>Toasts for background events; unsolicited animations beyond the rail's pulse.</li>
 <li>Hiding or collapsing a resource destruction in a plan.</li>
