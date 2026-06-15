@@ -42,7 +42,7 @@ Bootstrap: the first user of an allowed domain = `admin`, subsequent ones = `rea
 ```
 id uuid PK, google_sub text unique, email text, display_name, avatar_url,
 role enum(admin|approver|writer|reader),    -- global capabilities (§2.3)
-max_apply_tier enum(dev|staging|prod) nullable,  -- max tier where the user can confirm an apply (§2.4)
+allowed_tiers text[] not null default '{}',  -- set of tiers where the user can confirm an apply (§2.4)
 can_destroy bool default false,             -- right to trigger/confirm a destroy run (§2.4)
 disabled bool, last_login_at, created_at
 ```
@@ -63,24 +63,24 @@ Triggering a plan ≠ confirming: any writer+ can **prepare** a plan on any env 
 
 ### 2.4 Per-environment permissions — tier & destroy
 
-The "apply everywhere except prod" need depends on the targeted environment, not just on the user. We express it through a **tier** on the environment and a **cap** on the user, rather than through a full policy system (sufficient for the vast majority of orgs; per-space RBAC remains Phase 7).
+The "apply everywhere except prod" need depends on the targeted environment, not just on the user. We express it through a **tier** on the environment and a **set of allowed tiers** on the user, rather than through a full policy system (sufficient for the vast majority of orgs; per-space RBAC remains Phase 7).
 
-- `environments.tier` enum(`dev`|`staging`|`prod`) — implicit ordering `dev < staging < prod`.
-- `users.max_apply_tier` — maximum tier where the user can **confirm an apply**. NULL = none (can read and plan, never apply).
-- Apply rule: `confirm` allowed iff `role ∈ {approver, admin}` **AND** `max_apply_tier >= env.tier`. Example: Bob `max_apply_tier=staging` confirms in dev/staging, denied in prod; Alice `prod` confirms everywhere.
+> **Set-based, not linear** (evolved from the original MVP design): tiers are a **configurable catalog** (`tiers` table — `name` unique, `requires_four_eyes`, `position`), not a fixed `dev<staging<prod` enum, and a user carries a **set** of allowed tiers, not a single ceiling. This expresses custom tiers (`qa`, `preprod`, `sandbox`) and **non-contiguous** grants (e.g. `dev`+`prod` but not `staging`) that the old linear ceiling could not.
+
+- `environments.tier` text — references `tiers.name` (validated against the catalog on env create/update). No ordering.
+- `users.allowed_tiers` text[] — the set of tiers where the user can **confirm an apply**. Empty = none (can read and plan, never apply). Each entry is validated against the catalog; deleting a tier strips it from every user's set (no FK on the array, so this is enforced in app code).
+- Apply rule: `confirm` allowed iff `role ∈ {approver, admin}` **AND** `env.tier ∈ allowed_tiers` (set membership). Example: Bob `{dev, staging}` confirms in dev/staging, denied in prod; Alice `{dev, staging, prod}` confirms everywhere; a user `{dev, prod}` skips staging.
 - `users.can_destroy` — a run `type=destroy` (trigger AND confirm) requires `can_destroy=true` **in addition** to the tier rule. A destruction is more dangerous than an apply: a distinct, explicit right.
 
-**Relationship with `protected`**: we **decouple** sensitivity and access right, which were mixed until now. `environments.protected` now carries only its own effects — forcing confirmation (no autodeploy) and enabling 4-eyes; *who* can confirm now comes from the tier. Consequence: an env can be `tier=prod` without being `protected` (restricted apply but autodeploy possible for the authorized) and vice versa.
+**Relationship with `protected`**: we **decouple** sensitivity and access right. `environments.protected` carries only its own effects — forcing confirmation (no autodeploy) and enabling 4-eyes; *who* can confirm comes from the tier set. An env can be `tier=prod` without being `protected` and vice versa.
 
-**4-eyes / tier consistency**: for `tier=prod` environments, self-confirmation is forbidden by default (the triggerer ≠ the confirmer), whether `require_second_pair_of_eyes` is checked or not — the rule follows from the tier instead of being a flag to maintain everywhere.
+**4-eyes / tier consistency**: a tier with `requires_four_eyes=true` (seeded on `prod`; was hardcoded to the prod tier, now a per-tier flag) forces self-confirmation off by default (the triggerer ≠ the confirmer), as does the per-env `require_second_pair_of_eyes`. The check **fails closed**: if an env points at a tier that no longer exists in the catalog, four-eyes is required rather than silently dropped.
 
 **Scope of 4-eyes**: the "triggerer ≠ confirmer" rule only bites on runs with a **human** triggerer (`triggered_by=manual`, `trigger_user_id` set). A run with no human at its origin (`webhook`, `dependency`) has no `trigger_user_id`: any confirmer authorized at the tier can confirm it (there is no one to oppose). This is not a bypass — the access guard remains the tier (`can_apply`); 4-eyes only prevents *the same person* from triggering **and** confirming.
 
-**Double-lock boundary**: when workload OIDC is active (§10), the prod apply restriction must **also** live in the AWS trust policy (`sub` claim filtered on `run:prod:*:apply`), not only in Stackd — otherwise bypassing the API bypasses the control. Both layers express the same rule; the `tier` feeds the token's `sub` (§10.2).
+**Double-lock boundary**: when workload OIDC is active (§10), the apply restriction must **also** live in the AWS trust policy (`sub` claim filtered on `run:<tier>:*:apply`), not only in Stackd — otherwise bypassing the API bypasses the control. Both layers express the same rule; the `tier` **name** feeds the token's `sub` (§10.2). Tier names are charset-constrained (`^[a-z0-9][a-z0-9-]*$`, no `:`/whitespace) precisely so a crafted name can't alias another tier's `sub` segment.
 
-**Assumed limitation**: the tier is linear (nested rights: whoever can prod can do anything). An env "sensitive but not prod" (customer sandbox, compliance) is not expressed cleanly and would then justify explicit per-env permissions — out of MVP scope.
-
-Per-env option `require_second_pair_of_eyes`: the triggerer cannot confirm (redundant with the prod tier rule, useful for staging).
+Per-env option `require_second_pair_of_eyes`: the triggerer cannot confirm (forces 4-eyes on a tier that does not itself require it).
 
 ### 2.5 Table `refresh_tokens`
 
@@ -138,7 +138,7 @@ created_at, updated_at
 
 ```
 id uuid PK, stack_id FK, name text unique(stack),       -- dev, staging, prod
-tier enum(dev|staging|prod),       -- §2.4: carries the apply/destroy permissions
+tier text references tiers.name,   -- §2.4: carries the apply/destroy permissions (catalog, not enum)
 branch text,                       -- branch tracked by THIS env
 autodeploy bool,                   -- forced false if protected
 protected bool,                    -- §2.4: forces confirmation + 4-eyes (NOT the access control → tier)
@@ -381,7 +381,7 @@ Terminal: `finished`, `failed`, `discarded`, `canceled`. `canceled`: user on `qu
 | `checking → unconfirmed` | worker | checks OK or warn; non-empty diff. A warn **forces** confirmation even if autodeploy |
 | `checking → confirmed` | system | all checks OK, non-empty diff, `autodeploy=true`, env not protected, `used_mocks=false` |
 | `planning/checking → finished` | worker | empty diff (outputs captured after refresh) |
-| `unconfirmed → confirmed` | user | `can_apply(user, env)` = role∈{approver,admin} AND `max_apply_tier >= env.tier` (§2.4); ≠ triggerer if tier=prod or 4-eyes; for a `destroy` run: `can_destroy` required; **blocked if `used_mocks` and `allow_mock_apply=false`** |
+| `unconfirmed → confirmed` | user | `can_apply(user, env)` = role∈{approver,admin} AND `env.tier ∈ allowed_tiers` (§2.4); ≠ triggerer if the tier requires four-eyes or 4-eyes; for a `destroy` run: `can_destroy` required; **blocked if `used_mocks` and `allow_mock_apply=false`** |
 | `confirmed → applying` | worker | resume of the workspace (TTL 24 h), otherwise re-plan |
 | `applying → finished` | worker | apply exit 0 + outputs uploaded |
 | `* → failed` | worker/system | exit ≠ 0, hook `fail`, timeouts (prepare 10 / plan 30 / apply 60 min) |
@@ -470,6 +470,8 @@ worker_pool.created / worker_pool.token_rotated / worker_pool.deleted
 worker.diagnostics_requested                  # read-only debug bundle (cf. §observability)
 hook.* (created|updated|deleted)
 user.role_changed / user.apply_tier_changed / user.destroy_permission_changed / user.disabled
+tier.created / tier.updated / tier.deleted     # configurable tier catalog (§2.4)
+secret_source.* (created|updated|token_rotated|deleted) / secret.fallback_used / secret.fallback_overridden / secret.unavailable  # §15
 ```
 
 `run.confirmed` + `run.applied` = the answer to "who applied what": Google identity of the confirmer, env, commit, plan summary, assumed IAM role (if OIDC), link to the logs.
@@ -950,7 +952,13 @@ GET /api/v1/audit ; GET /api/v1/audit/export
 
 # Users & permissions (admin)
 GET   /api/v1/users
-PATCH /api/v1/users/{id}     # role, max_apply_tier, can_destroy, disabled (audited)
+PATCH /api/v1/users/{id}     # role, allowed_tiers, can_destroy, disabled (audited)
+
+# Tiers (catalog, §2.4) — listing open; create/update/delete admin
+GET /api/v1/tiers ; POST /api/v1/tiers ; PATCH|DELETE /api/v1/tiers/{id}
+
+# Plan-review comments (§16)
+GET|POST /api/v1/runs/{id}/comments ; PATCH|DELETE /api/v1/runs/{id}/comments/{cid}
 
 # Workers & execution queue
 GET|POST|DELETE /api/v1/worker-pools ; GET /api/v1/workers
@@ -995,7 +1003,7 @@ GET|POST|DELETE /state/v1/{env_id} ; LOCK|UNLOCK /state/v1/{env_id}/lock
 | External secrets | provider bootstrap credential AES-256-GCM write-only (`secret_sources.bootstrap_secret_encrypted` §15.1); live values fetched at claim, never persisted, masked; **fallback value (static or break-glass override) forbids apply by default** (`allow_fallback_apply=false`), badge, audit `secret.fallback_used` (§15) |
 | Workers | revocable tokens, no incoming port, labels (isolated prod pool); tool binaries verified by checksum/signature (§7.4, supply-chain) |
 | State | S3 SSE-KMS via API only; scoped tokens, RO for PR; audited locking |
-| Apply permissions | tier per env × `max_apply_tier` cap per user (§2.4); distinct `can_destroy`; double lock with the OIDC trust policy on the tier |
+| Apply permissions | tier per env × `allowed_tiers` set per user (§2.4, configurable catalog, non-linear); distinct `can_destroy`; double lock with the OIDC trust policy on the tier name |
 | Protected envs | autodeploy forbidden, 4-eyes (auto if tier=prod), never bypassed (cascade included); the *right* to apply comes from the tier, not from `protected` |
 | Proposed runs | plan-only, state RO, secrets not injected by default, mocks allowed |
 | Webhooks | HMAC SHA-256 (secret per repo, `stacks.webhook_secret_encrypted` §3.1), anti-replay 5 min |

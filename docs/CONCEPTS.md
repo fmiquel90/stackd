@@ -176,13 +176,14 @@ Two orthogonal axes:
 
 - **`role`** (global capability): `reader < writer < approver < admin`. *What* you can do in nature
   (read, manage config, confirm, administer).
-- **`tier`** on the environment (`dev < staging < prod`) × **`max_apply_tier`** ceiling on the user.
-  *Where* you can apply.
+- **`tier`** on the environment (a configurable catalog, e.g. `dev`/`staging`/`prod`/`qa`) ×
+  **`allowed_tiers`** set on the user. *Where* you can apply.
 
 > **Anyone (writer+) can trigger a plan on any environment** — a plan changes nothing. Only the
 > **apply confirmation** is gated.
 
-`can_apply(user, env)` = `role ∈ {approver, admin}` **AND** `max_apply_tier ≥ env.tier`.
+`can_apply(user, env)` = `role ∈ {approver, admin}` **AND** `env.tier ∈ user.allowed_tiers` (set
+membership — tiers are not ordered, so a grant can be non-contiguous like `{dev, prod}`).
 
 **Examples:**
 
@@ -478,7 +479,7 @@ Deep links use `STACKD_APP_URL` (the SPA base, e.g. `http://localhost:5173`).
 | **Provenance** | where a resolved variable came from (`set:…`, `stack`, `env`, `dependency:…`, `mock`) |
 | **Run** | one execution against one env, driven by the state machine |
 | **`transition()`** | the only thing that changes a run's state |
-| **Tier** | `dev<staging<prod`; gates apply via `max_apply_tier` |
+| **Tier** | configurable catalog; gates apply via the user's `allowed_tiers` set (not ordered) |
 | **4-eyes** | triggerer ≠ confirmer on prod / when required |
 | **Hook** | shell step at a lifecycle stage; platform (governance) or repo |
 | **Worker** | stateless agent that pulls and runs jobs |

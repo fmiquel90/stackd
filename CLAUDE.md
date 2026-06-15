@@ -59,7 +59,7 @@ These rules run through all the code. Violating them breaks the security or audi
 1. **A run's state only changes through `transition(run, to_state, actor, payload)`** (SPECS §4.2). This single function checks legality, performs the atomic update guarded on `from_state`, writes the `run_event`, the `audit_event` if the action is human or terminal, publishes to the WS and calls the hooks. Never an `UPDATE runs SET state=...` anywhere else.
 2. **Every mutating action writes an `audit_event` in the SAME DB transaction** as the action (SPECS §6.3). No event bus, no "after the fact" write.
 3. **Secrets are never logged nor returned in clear text.** `sensitive` variables: write-only via the API, AES-256-GCM at rest, decrypted only when building the claim payload, masked in logs by the agent (SPECS §13).
-4. **Apply permission = `can_apply(user, env)`**: `role ∈ {approver, admin}` AND `max_apply_tier >= env.tier` (SPECS §2.4). `destroy` additionally requires `can_destroy`. This control does **not** rely on `protected` (which only forces confirmation + 4-eyes).
+4. **Apply permission = `can_apply(user, env)`**: `role ∈ {approver, admin}` AND `env.tier ∈ user.allowed_tiers` (set membership — tiers are a configurable, non-ordered catalog, SPECS §2.4). `destroy` additionally requires `can_destroy`. This control does **not** rely on `protected` (which only forces confirmation + 4-eyes). Four-eyes comes from the tier's `requires_four_eyes` flag (fail-closed if the tier row is missing), not a hardcoded `prod`.
 5. **Concurrency: a single active run per environment** (partial unique index, SPECS §3.5). Two envs of the same stack can run in parallel.
 6. **A run that has consumed mocks (`used_mocks=true`) cannot be applied** unless `environment.allow_mock_apply=true` (SPECS §9.3).
 7. **Sensitive outputs: never stored, never propagated** in cascades (SPECS §9.1).
@@ -112,7 +112,7 @@ task reset        # start from scratch
 - **`phase` is overloaded**: in the claim payload, `phase ∈ {plan, apply}` is the *job type*; in the state machine and the logs, phases are fine-grained (preparing/planning/checking/...). Do not confuse them (SPECS §7.2).
 - **The state lives in S3 but Terraform talks to the API's HTTP backend**, not to S3 directly (SPECS §11). Do not suggest pointing Terraform at a native `s3` backend for `managed_state=true` envs.
 - **Hooks have two sources**: platform (DB, non-bypassable) and repo (`.stackd.yml`). Security checks go on the platform side (SPECS §8).
-- **`tier` is linear** (dev < staging < prod): whoever can do prod can do everything. Do not build a generic policy system on top of it — that is explicitly deferred to Phase 7.
+- **`tier` is a configurable catalog, not linear** (the `tiers` table; was a fixed `dev<staging<prod` enum). A user holds a **set** of `allowed_tiers` (non-contiguous OK), and `env.tier ∈ allowed_tiers` is the gate — there is no rank/ceiling. Do not reintroduce ordering or a single `max_apply_tier`. A full per-space policy system (OPA-style) is still deferred to Phase 7.
 - **Mocks**: real value > mock > explicit error. A mock only serves to bootstrap a cascade and blocks apply by default (SPECS §9.3).
 
 ---

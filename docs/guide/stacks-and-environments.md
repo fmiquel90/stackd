@@ -54,7 +54,7 @@ curl -s -X POST localhost:8000/api/v1/stacks/$STACK/environments \
 
 ### Fields that matter
 
-- **`tier`** (`dev < staging < prod`) — carries apply/destroy permissions: `can_apply` requires `max_apply_tier >= env.tier`. See [Runs & approvals](runs-and-approvals.md).
+- **`tier`** (a configurable catalog, e.g. `dev`/`staging`/`prod`/`qa`) — carries apply/destroy permissions: `can_apply` requires `env.tier ∈ user.allowed_tiers`. See [Runs & approvals](runs-and-approvals.md).
 - **`branch`** — the branch this environment tracks for staleness and webhook-driven runs.
 - **`protected`** — forces confirmation and 4-eyes; it is **not** the access control (that is `tier`).
 - **`require_second_pair_of_eyes`** — the triggerer cannot confirm (already implied for `tier=prod`; useful on staging).

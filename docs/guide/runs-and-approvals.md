@@ -24,10 +24,12 @@ to `finished`; a failure to `failed`; a human can `discard` or `cancel`.
 Confirming an apply requires **both**:
 
 1. **Role** ∈ `{approver, admin}` — a `writer` may trigger a plan but never approve.
-2. **`max_apply_tier` ≥ the environment's `tier`** (`dev < staging < prod`). An approver capped at
-   `staging` can apply dev/staging, not prod.
+2. **The environment's `tier` is in your `allowed_tiers`** set. Tiers are a configurable catalog
+   (not an ordered `dev<staging<prod`), so a grant can be non-contiguous — e.g. `{dev, prod}`
+   confirms in dev and prod but not staging.
 
-A `destroy` run additionally requires the `can_destroy` permission.
+A `destroy` run additionally requires the `can_destroy` permission. A tier flagged
+`requires_four_eyes` (e.g. `prod`) also forces the triggerer ≠ the confirmer.
 
 | Persona | Can trigger a plan | Can approve dev/staging | Can approve prod |
 |---|---|---|---|

@@ -110,7 +110,7 @@ no DB, no network.
 
 ## 4. Test map (what each test asserts)
 
-### API — unit & integration (`api/tests/`, 73 tests)
+### API — unit & integration (`api/tests/`, 84 tests)
 
 **`test_auth.py` (5)** — auth flow & session security
 - `test_dev_login_personas` — persona login returns the user (role/tier) + a usable access token.
@@ -123,17 +123,18 @@ no DB, no network.
 - `test_audit_filter_and_export` — mutations land in `/audit`; filtering by action works; CSV export has the right columns.
 - `test_audit_export_admin_only` — a non-admin gets 403 on export.
 
-**`test_permissions.py` (5)** — `can_apply` logic (pure, no HTTP)
-- `test_approver_prod_can_apply_prod` — approver with `max_apply_tier=prod` may apply prod.
+**`test_permissions.py` (6)** — `can_apply` logic (pure, no HTTP)
+- `test_approver_can_apply_allowed_tier` — approver whose `allowed_tiers` contains the env tier may apply.
 - `test_writer_cannot_confirm` — a writer is refused (apply needs approver+); the reason mentions the role.
-- `test_apply_everywhere_except_prod` — an approver capped at `staging` may apply dev/staging, not prod.
-- `test_no_tier_cannot_apply` — `max_apply_tier=None` → denied.
+- `test_membership_not_linear` — a non-contiguous set `{dev, prod}` applies dev/prod, refused on staging.
+- `test_no_tiers_cannot_apply` — empty `allowed_tiers` → denied.
+- `test_custom_tier` — a custom tier (`qa`) in the set is honored.
 - `test_destroy_requires_can_destroy` — destroy needs `can_destroy` on top of `can_apply`.
 
 **`test_runs.py` (7)** — the run lifecycle & its gates
 - `test_full_run_lifecycle` — trigger → claim → plan events → unconfirmed → confirm → apply → finished.
 - `test_one_active_run_per_env_under_concurrency` — two workers claim the same env → exactly one wins, the loser is netted by `23505`.
-- `test_confirm_blocked_by_tier` — confirming above one's `max_apply_tier` → 403.
+- `test_confirm_blocked_by_tier` — confirming a tier not in one's `allowed_tiers` → 403.
 - `test_four_eyes_on_prod` — the triggerer can't confirm their own prod run; a second person can.
 - `test_autodeploy_and_warn_forces_unconfirmed` — autodeploy auto-confirms, but a `warn` check forces `unconfirmed`.
 - `test_confirm_rejected_when_not_unconfirmed` — confirming a non-`unconfirmed` run → 409.
@@ -199,6 +200,19 @@ no DB, no network.
 - `test_override_requires_apply_permission` — a writer (no apply right) supplying `secret_overrides` → 403.
 - `test_source_crud_hides_bootstrap_and_gates_writes` — a writer can't create a source (admin-only); the bootstrap credential is never serialized.
 - `test_source_in_use_cannot_be_deleted` — deleting a source a variable still references → 409 (FK RESTRICT).
+
+**`test_tiers.py` (4)** — configurable tier catalog (§2.4)
+- `test_tier_name_charset_rejected` — names with `:`/whitespace/uppercase → 422 (OIDC `sub` safety).
+- `test_update_user_rejects_unknown_tier` — `allowed_tiers` validated against the catalog → 422.
+- `test_delete_tier_strips_user_grants` — deleting a tier removes its name from every user's set (no resurrection).
+- `test_delete_tier_in_use_blocked` — deleting a tier an env references → 409.
+
+**`test_comments.py` (5)** — plan-review comments (§16)
+- `test_comment_thread_and_anchor` — general + anchored (`plan_line`) comment + a reply; listed together.
+- `test_anchor_validation` — a `plan_line` anchor missing `phase`/`seq` → 422.
+- `test_no_nested_replies` — replying to a reply → 422 (threads stay one level deep).
+- `test_resolve_and_edit_permissions` — non-author can't edit the body; an approver may resolve; author edits own.
+- `test_delete_only_author_or_admin` — an approver ≠ author is refused (403); an admin can delete.
 
 **`test_notifications.py` (4)** — outbound notifications
 - `test_notification_target_crud` — create/list/patch/delete a target (default `on_states=[unconfirmed, failed]`); each mutation audited.
@@ -269,10 +283,10 @@ identity components are instead pinned by **Ladle stories** (the DESIGN §8 visu
 
 | Location | Files | Tests |
 |---|---|---|
-| `api/tests` | 20 | 73 |
+| `api/tests` | 22 | 84 |
 | `api/e2e` | 1 | 1 (multi-step scenario) |
 | `worker/tests` | 2 | 7 |
-| **Total** | **23** | **81** |
+| **Total** | **25** | **92** |
 
 ---
 
