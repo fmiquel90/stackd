@@ -1,23 +1,28 @@
-site_name: Stackd
+site_name: StackD
 site_description: Self-hostable Terraform/OpenTofu orchestration — plan → human approval → apply.
 repo_url: https://github.com/fmiquel90/stackd
 repo_name: fmiquel90/stackd
 edit_uri: edit/main/docs/
 
+extra_css:
+  - assets/brand.css
+
 theme:
   name: material
+  logo: assets/logo-mark-white.svg
+  favicon: assets/logo-mark.svg
   palette:
     - media: "(prefers-color-scheme: dark)"
       scheme: slate
-      primary: amber
-      accent: amber
+      primary: deep purple
+      accent: deep purple
       toggle:
         icon: material/weather-sunny
         name: Switch to light mode
     - media: "(prefers-color-scheme: light)"
       scheme: default
-      primary: amber
-      accent: amber
+      primary: deep purple
+      accent: deep purple
       toggle:
         icon: material/weather-night
         name: Switch to dark mode

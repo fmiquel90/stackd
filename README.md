@@ -1,6 +1,6 @@
 <div align="center">
 
-# 🚀 Stackd
+<img src="docs/assets/logo.png" alt="StackD" width="340">
 
 ### Ship infrastructure changes with confidence.
 

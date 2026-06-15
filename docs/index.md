@@ -1,7 +1,11 @@
-# Stackd
+<p align="center">
+  <img src="assets/logo.png" alt="StackD" width="340">
+</p>
 
-**Ship infrastructure changes with confidence.** Stackd is a self-hostable control plane for
-Terraform & OpenTofu: every change becomes a reviewable **`plan → human approval → apply`** run,
+# Ship infrastructure changes with confidence
+
+**StackD is a self-hostable control plane for
+Terraform & OpenTofu:** every change becomes a reviewable **`plan → human approval → apply`** run,
 executed on disposable pull-based workers, with a full audit trail and short-lived cloud
 credentials minted per run.
 
