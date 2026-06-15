@@ -4,7 +4,7 @@ import { X } from "lucide-react";
 import { observability, tiers, type UserUpdate, users } from "@/api/resources";
 import type { Role, TierDef, User } from "@/api/types";
 import { useIsAdmin } from "@/auth/session";
-import { Button, Card, Field, PageTitle, Select, TextInput } from "@/components/ui";
+import { Button, Card, Checkbox, Field, PageTitle, Select, TextInput } from "@/components/ui";
 
 const ROLES: Role[] = ["reader", "writer", "approver", "admin"];
 
@@ -40,39 +40,31 @@ function UserRow({ user, tierNames }: { user: User; tierNames: string[] }) {
         {/* Set membership — any combination of tiers, incl. non-contiguous (§2.4). */}
         <span className="flex flex-wrap gap-2">
           {tierNames.map((name) => (
-            <label key={name} className="flex items-center gap-1">
-              <input
-                type="checkbox"
-                checked={user.allowed_tiers.includes(name)}
-                disabled={update.isPending}
-                onChange={() => toggleTier(name)}
-              />
-              {name}
-            </label>
+            <Checkbox
+              key={name}
+              checked={user.allowed_tiers.includes(name)}
+              disabled={update.isPending}
+              onChange={() => toggleTier(name)}
+              label={name}
+            />
           ))}
         </span>
       </td>
       <td className={cell}>
-        <label className="flex items-center gap-1.5">
-          <input
-            type="checkbox"
-            checked={user.can_destroy}
-            disabled={update.isPending}
-            onChange={(e) => update.mutate({ can_destroy: e.target.checked })}
-          />
-          can destroy
-        </label>
+        <Checkbox
+          checked={user.can_destroy}
+          disabled={update.isPending}
+          onChange={(v) => update.mutate({ can_destroy: v })}
+          label="can destroy"
+        />
       </td>
       <td className={cell}>
-        <label className="flex items-center gap-1.5">
-          <input
-            type="checkbox"
-            checked={user.disabled}
-            disabled={update.isPending}
-            onChange={(e) => update.mutate({ disabled: e.target.checked })}
-          />
-          disabled
-        </label>
+        <Checkbox
+          checked={user.disabled}
+          disabled={update.isPending}
+          onChange={(v) => update.mutate({ disabled: v })}
+          label="disabled"
+        />
       </td>
     </tr>
   );
@@ -140,15 +132,12 @@ function TiersPanel({ catalog }: { catalog: TierDef[] }) {
         {catalog.map((t) => (
           <div key={t.id} className="font-data flex items-center gap-3 text-[12px]">
             <span style={{ minWidth: 100 }}>{t.name}</span>
-            <label className="flex items-center gap-1.5">
-              <input
-                type="checkbox"
-                checked={t.requires_four_eyes}
-                disabled={toggle.isPending}
-                onChange={() => toggle.mutate(t)}
-              />
-              four-eyes
-            </label>
+            <Checkbox
+              checked={t.requires_four_eyes}
+              disabled={toggle.isPending}
+              onChange={() => toggle.mutate(t)}
+              label="four-eyes"
+            />
             <button
               type="button"
               aria-label={`Delete ${t.name}`}
@@ -171,10 +160,7 @@ function TiersPanel({ catalog }: { catalog: TierDef[] }) {
         <Field label="New tier">
           <TextInput value={name} onChange={(e) => setName(e.target.value)} placeholder="qa" required />
         </Field>
-        <label className="flex items-center gap-1.5 pb-1.5 text-[13px]">
-          <input type="checkbox" checked={fourEyes} onChange={(e) => setFourEyes(e.target.checked)} />
-          four-eyes
-        </label>
+        <Checkbox className="pb-1.5" checked={fourEyes} onChange={setFourEyes} label="four-eyes" />
         <Button type="submit" disabled={create.isPending}>
           Add tier
         </Button>

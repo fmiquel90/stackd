@@ -1,5 +1,5 @@
 import type { ButtonHTMLAttributes, InputHTMLAttributes, ReactNode, SelectHTMLAttributes } from "react";
-import { type LucideIcon, Trash2 } from "lucide-react";
+import { Check, type LucideIcon, Trash2 } from "lucide-react";
 
 // Minimal token-based primitives. No hard-coded colors (CLAUDE §5 / DESIGN §8).
 
@@ -62,6 +62,48 @@ export function DeleteButton({ label, onClick, disabled }: { label: string; onCl
 
 // `accent` = brand violet (primary actions). `decision` = amber, reserved for the human-decision
 // moment (Confirm/apply) so it stands apart from the violet chrome (DESIGN §3.2 / invariant #4).
+// Token-driven checkbox: a real <input> (kept for a11y, visually hidden) + a styled box that fills
+// with the brand accent when checked. Label is mono, matching Field labels (DESIGN §2.1).
+export function Checkbox({
+  checked,
+  onChange,
+  label,
+  disabled,
+  className = "",
+}: {
+  checked: boolean;
+  onChange: (checked: boolean) => void;
+  label: ReactNode;
+  disabled?: boolean;
+  className?: string;
+}) {
+  return (
+    <label
+      className={`font-data inline-flex select-none items-center gap-2 text-[13px] ${disabled ? "cursor-not-allowed opacity-50" : "cursor-pointer"} ${className}`}
+    >
+      <input
+        type="checkbox"
+        className="peer sr-only"
+        checked={checked}
+        disabled={disabled}
+        onChange={(e) => onChange(e.target.checked)}
+      />
+      <span
+        aria-hidden
+        className="flex h-4 w-4 shrink-0 items-center justify-center transition-colors peer-focus-visible:[outline:2px_solid_var(--color-accent)] peer-focus-visible:[outline-offset:2px]"
+        style={{
+          borderRadius: 4,
+          border: `1px solid ${checked ? "var(--color-accent)" : "var(--color-border)"}`,
+          backgroundColor: checked ? "var(--color-accent)" : "transparent",
+        }}
+      >
+        {checked && <Check size={12} strokeWidth={3} style={{ color: "var(--color-bg-base)" }} aria-hidden />}
+      </span>
+      {label}
+    </label>
+  );
+}
+
 export function Button({
   variant = "default",
   ...props

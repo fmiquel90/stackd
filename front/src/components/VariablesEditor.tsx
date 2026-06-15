@@ -3,7 +3,7 @@ import { type QueryKey, useMutation, useQuery, useQueryClient } from "@tanstack/
 import { Pencil } from "lucide-react";
 import { type NewVariable, type VariablePatch } from "@/api/resources";
 import type { Variable, VariableKind } from "@/api/types";
-import { Badge, Button, DeleteButton, Field, ItemTile, Select, TextInput } from "@/components/ui";
+import { Badge, Button, Checkbox, DeleteButton, Field, ItemTile, Select, TextInput } from "@/components/ui";
 
 // Reusable view+add+edit+remove for a list of variables (stack-level, env-level or variable-set
 // members). All carry the same layered-resolution semantics (SPECS §3.4); sensitive values stay
@@ -117,14 +117,12 @@ export function VariablesEditor({
             required
           />
         </Field>
-        <label className="flex items-center gap-2 pb-1.5 text-[13px]">
-          <input
-            type="checkbox"
-            checked={form.sensitive}
-            onChange={(e) => setForm({ ...form, sensitive: e.target.checked })}
-          />
-          sensitive
-        </label>
+        <Checkbox
+          className="pb-1.5"
+          checked={form.sensitive ?? false}
+          onChange={(v) => setForm({ ...form, sensitive: v })}
+          label="sensitive"
+        />
         <Button type="submit" disabled={addMut.isPending}>
           Add variable
         </Button>
@@ -187,14 +185,8 @@ function EditRow({
             onChange={(e) => setValue(e.target.value)}
           />
         </Field>
-        <label className="flex items-center gap-2 pb-1.5 text-[13px]">
-          <input type="checkbox" checked={sensitive} onChange={(e) => setSensitive(e.target.checked)} />
-          sensitive
-        </label>
-        <label className="flex items-center gap-2 pb-1.5 text-[13px]">
-          <input type="checkbox" checked={hcl} onChange={(e) => setHcl(e.target.checked)} />
-          hcl
-        </label>
+        <Checkbox className="pb-1.5" checked={sensitive} onChange={setSensitive} label="sensitive" />
+        <Checkbox className="pb-1.5" checked={hcl} onChange={setHcl} label="hcl" />
         <Button type="submit" variant="accent" disabled={pending}>
           Save
         </Button>

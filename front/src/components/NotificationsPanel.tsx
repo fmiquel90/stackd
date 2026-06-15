@@ -7,7 +7,7 @@ import {
   type NotificationKind,
   type NotificationState,
 } from "@/api/resources";
-import { Badge, Button, Card, DeleteButton, Field, ItemTile, Select, TextInput } from "@/components/ui";
+import { Badge, Button, Card, Checkbox, DeleteButton, Field, ItemTile, Select, TextInput } from "@/components/ui";
 
 const STATES: NotificationState[] = ["unconfirmed", "finished", "failed"];
 
@@ -163,16 +163,9 @@ export function NotificationsPanel({ scope, id }: { scope: HookScope; id: string
           <TextInput value={form.url} onChange={(e) => setForm({ ...form, url: e.target.value })} required />
         </Field>
         <Field label="On states">
-          <div className="flex items-center gap-2 text-[12px]">
+          <div className="flex items-center gap-3 pb-1">
             {STATES.map((s) => (
-              <label key={s} className="font-data flex items-center gap-1">
-                <input
-                  type="checkbox"
-                  checked={form.on_states.includes(s)}
-                  onChange={() => flipState(s)}
-                />
-                {s}
-              </label>
+              <Checkbox key={s} checked={form.on_states.includes(s)} onChange={() => flipState(s)} label={s} />
             ))}
           </div>
         </Field>

@@ -17,7 +17,7 @@ import { SecretSourcesPanel } from "@/components/SecretSourcesPanel";
 import { StackGeneralPanel } from "@/components/StackGeneralPanel";
 import { StatePanel } from "@/components/StatePanel";
 import { VariablesEditor } from "@/components/VariablesEditor";
-import { Button, Card, Field, PageTitle, Select, Tabs, TextInput } from "@/components/ui";
+import { Button, Card, Checkbox, Field, PageTitle, Select, Tabs, TextInput } from "@/components/ui";
 
 function ResolvedVariables({ envId }: { envId: string }) {
   const { data, isLoading } = useQuery({
@@ -142,14 +142,12 @@ function CreateEnvForm({ stackId, onDone }: { stackId: string; onDone: () => voi
         <Field label="Branch">
           <TextInput value={form.branch} onChange={(e) => setForm({ ...form, branch: e.target.value })} />
         </Field>
-        <label className="flex items-center gap-2 pb-1.5 text-[13px]">
-          <input
-            type="checkbox"
-            checked={form.managed_state ?? true}
-            onChange={(e) => setForm({ ...form, managed_state: e.target.checked })}
-          />
-          managed state
-        </label>
+        <Checkbox
+          className="pb-1.5"
+          checked={form.managed_state ?? true}
+          onChange={(v) => setForm({ ...form, managed_state: v })}
+          label="managed state"
+        />
         <Button type="submit" variant="accent" disabled={create.isPending || !form.tier}>
           Add environment
         </Button>

@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { variableSets } from "@/api/resources";
-import { Button, Card, Field, PageTitle, TextInput } from "@/components/ui";
+import { Button, Card, Checkbox, Field, PageTitle, TextInput } from "@/components/ui";
 import { VariablesEditor } from "@/components/VariablesEditor";
 
 function CreateForm({ onDone }: { onDone: () => void }) {
@@ -27,10 +27,7 @@ function CreateForm({ onDone }: { onDone: () => void }) {
         <Field label="Name">
           <TextInput value={name} onChange={(e) => setName(e.target.value)} placeholder="common-aws" required />
         </Field>
-        <label className="flex items-center gap-2 text-[13px]">
-          <input type="checkbox" checked={autoAttach} onChange={(e) => setAutoAttach(e.target.checked)} />
-          auto-attach
-        </label>
+        <Checkbox className="pb-1.5" checked={autoAttach} onChange={setAutoAttach} label="auto-attach" />
         <Button type="submit" variant="accent" disabled={create.isPending}>
           Create set
         </Button>
