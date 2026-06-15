@@ -42,17 +42,18 @@ The rail IS the product's pedagogy: it makes the state machine visible instead o
 
 | Token | Hex | Usage |
 |---|---|---|
-| `bg-base` | `#0D1117` → adjusted `#0E141B` | app background (bluish slate, never pure black) |
-| `bg-surface` | `#151C24` | panels, tables |
-| `bg-raised` | `#1C2530` | interactive elements, hover, sticky headers |
-| `border` | `#2A3441` | 1px rules (the main structural material) |
-| `text-primary` | `#E6EDF3` | body text |
-| `text-secondary` | `#8B98A5` | labels, meta |
-| `accent` | `#D9A23B` (signal amber) | human-decision actions: Confirm, focus, active links |
+| `bg-base` | `#0C1118` | app background (bluish slate, never pure black) |
+| `bg-surface` | `#141B24` | panels, tables |
+| `bg-raised` | `#1D2733` | interactive elements, hover, sticky headers |
+| `border` | `#2A3542` | 1px rules (the main structural material) |
+| `text-primary` | `#E8EEF4` | body text |
+| `text-secondary` | `#8A97A4` | labels, meta |
+| `accent` | `#8B6CF0` (brand violet) | structure: focus, active links/nav, primary CTAs, the mark |
+| `decision` | `#E8A838` (signal amber) | the human-decision moment only: Confirm / apply |
 
-**Amber** as the single accent is a deliberate choice: it is the color of decision (confirming an apply), it stands out from the blue background without shouting, and it leaves the entire green/red spectrum available for state semantics. The most important button in the app (Confirm on prod) is amber — not green, because green would say "all is well" whereas it says "your judgment is needed".
+**Two accents, two jobs.** The **brand violet** (from the StackD logo) is the structural accent — focus rings, active nav, links, primary CTAs, the wordmark's "D". **Amber** is reserved for the one moment that needs human judgment: the **Confirm/apply** button (and the `unconfirmed` state). Keeping them separate means amber *stands out from the violet chrome* — the most important button in the app is amber, not green ("your judgment is needed", not "all is well"). The green/red spectrum stays free for state semantics.
 
-Light theme: same tokens inverted (`bg-base #F7F9FB`, slate for text, darkened amber `#A87A1F` for AA contrast).
+Light theme: same tokens (`bg-base #F7F9FB`, navy `#1B2733` for text — the logo's own colour, brand violet `#6D3FD4` and darkened amber `#A87A1F` for AA contrast).
 
 ### 3.2 State colors (the semantic language, identical in both themes)
 
@@ -60,12 +61,12 @@ Light theme: same tokens inverted (`bg-base #F7F9FB`, slate for text, darkened a
 |---|---|---|---|
 | `queued` / neutral | gray | `#6E7B8B` | badges, rail, graph nodes |
 | `running` (preparing/planning/checking/applying) | blue | `#4C8DFF` | + pulse on the active element |
-| `unconfirmed` (waiting on a human) | amber | `#D9A23B` | the same color as the accent: *waiting on a human IS the action* |
+| `unconfirmed` (waiting on a human) | amber | `#E8A838` | the same color as `decision`: *waiting on a human IS the action* |
 | `finished` | green | `#3FB950` | |
 | `failed` | red | `#F85149` | |
 | `discarded` / `canceled` | struck-through gray | `#6E7B8B` | |
 
-`mocked` is not a state but a **modifier** that overlays the current state (a mocked run is also `unconfirmed`, `planning`...) — rendered by a distinct purple badge `#A371F7`, deliberately outside the operational spectrum ("this is not real"): MOCKED badge, mocked values.
+`mocked` is not a state but a **modifier** that overlays the current state (a mocked run is also `unconfirmed`, `planning`...) — rendered by a distinct magenta badge `#EC6AB4`, deliberately outside the operational spectrum ("this is not real"): MOCKED badge, mocked values. (Magenta, not purple — purple is now the brand.)
 
 Absolute rule: these colors serve **only** state semantics. Never decorative blue, never green on a button unrelated to a success. This is what makes the app legible at a glance at 3 a.m.
 
@@ -102,7 +103,7 @@ Absolute rule: these colors serve **only** state semantics. Never decorative blu
 └──────────┴─────────────────────────────────────────┘
 ```
 
-- **Labeled side nav (≈ 208 px, icon + text label)**: Stacks, Graph, Audit, Workers, Variable Sets, Settings, with the `Stackd` wordmark at the top. Active item = amber text + `raised` background. The product has few sections: no mega-menu.
+- **Labeled side nav (≈ 208 px, icon + text label)**: Stacks, Graph, Audit, Workers, Variable Sets, Settings, with the `StackD` mark + wordmark at the top. Active item = brand-violet text + `raised` background. The product has few sections: no mega-menu.
   - **Decision (revised): labels are always visible, not only on hover.** An icons-only nav forces *recall* (guessing what an icon means); a labeled nav plays on *recognition* — faster, less ambiguous, and better for accessibility (the label is not carried by the `aria-label` alone). For an expert tool used daily, clarity wins over the 150 px gained. The earlier "56 px icons + tooltip, expandable on hover" track is abandoned: the tooltip hides information behind an interaction.
 - **Structural breadcrumb**: `space / stack / environment / run #142` — always present, each segment clickable. It is the backbone of orientation, given the 4-level hierarchy.
 - **⌘K command palette** from v1: go to a stack/env, trigger a run, copy an ID. For an expert audience, this is the real primary navigation; the visual nav is the fallback.
@@ -139,7 +140,7 @@ Absolute rule: these colors serve **only** state semantics. Never decorative blu
 - Header: triggerer AND confirmer shown (Google avatars) — audit is in the interface, not hidden in a page.
 - **Plan** tab: `+3 ~1 −0` summary in giant mono, then a list of resources grouped by action (create/update/delete), each resource expandable into an attribute-by-attribute diff (added green / modified amber / deleted red, values in mono). **Destructions are always expanded by default** — a delete is never hidden.
 - **Checks** tab: one block per after_plan hook (name, status, duration, output), warn = amber with the note "manual confirmation required".
-- **Inputs** tab: resolved variables with their **provenance as a mono badge** (`set:common-aws`, `stack`, `env`, `dependency`, `MOCK` in purple). Sensitive values: `•••` with no "reveal" button.
+- **Inputs** tab: resolved variables with their **provenance as a mono badge** (`set:common-aws`, `stack`, `env`, `dependency`, `MOCK` in magenta). Sensitive values: `•••` with no "reveal" button.
 
 ### 5.3 Log viewer (in the run page)
 
@@ -152,7 +153,7 @@ Absolute rule: these colors serve **only** state semantics. Never decorative blu
 ### 5.4 `/graph` and run groups
 
 - react-flow, dagre layout left→right, **filter by environment name at the top** (see the "prod" graph without the dev noise).
-- Node = minimal card: stack/env + mini-rail of the last run. Edge labeled with the number of output references; dashed purple edge if mocks are involved.
+- Node = minimal card: stack/env + mini-rail of the last run. Edge labeled with the number of output references; dashed magenta edge if mocks are involved.
 - Run group view: same graph, the nodes color in real time during the cascade. No confetti at the end — a green `finished` state is enough.
 - **Mandatory accessible alternative**: a react-flow graph is not navigable by screen reader nor by keyboard alone. A systematic **"list view"** toggle = an adjacency table (`upstream env → downstream env · N references · MOCK?`) that is sortable, focusable, with the same filter. The graph is the default display; the list is the complete functional equivalent, not a stopgap. The graph nodes remain reachable via `Tab` (topological order) with an `aria-label` announcement of the last run's state.
 - **Auto-link by name**: a collapsible action wires two stacks in bulk — for every same-named env pair it links each matching upstream output to the downstream input of the same name (one POST instead of adding references one by one). Reports the count of references created.
@@ -206,7 +207,7 @@ The visual answer to "why isn't my run starting?".
 
 - Minimum AA contrast on both themes (verified on the state colors over their actual backgrounds).
 - **Color is never the sole carrier of state**: each badge has its text label, the rail has icons per segment (✓ ✕ ⏸ ▶). Color blindness = the nominal case in this trade.
-- Full keyboard navigation: `j/k` in tables, `f` full-screen logs, `⌘K` palette, visible amber 2 px focus. `prefers-reduced-motion`: the rail's pulse becomes a static opacity change.
+- Full keyboard navigation: `j/k` in tables, `f` full-screen logs, `⌘K` palette, visible brand-violet 2 px focus. `prefers-reduced-motion`: the rail's pulse becomes a static opacity change.
 - **Skip-link** "Go to content" as the first focusable element (side nav + breadcrumb = many tab stops before the content on a dense app).
 - **Polite live regions, never focus stealing**: real-time state changes (rail, badges, "Reconnecting…" banner) are announced via `aria-live="polite"` and never move the user's focus (they may be reading logs or filling out a form). Action toasts use `aria-live` and do not capture focus.
 - **Tabular figures**: `font-variant-numeric: tabular-nums` on any data aligned in a column (durations, `+a ~c −d`, counters, timestamps) — JetBrains Mono is already monospaced, but we force tabular-nums so the columns do not dance during streaming.
@@ -234,7 +235,7 @@ The visual answer to "why isn't my run starting?".
 ## 9. What we forbid ourselves (reminder)
 
 - Drop shadows, gradients, glassmorphism, decorative illustrations, emojis in the UI.
-- State colors used for anything other than state; amber accent used for anything other than decision/focus.
+- State colors used for anything other than state; brand violet used to carry state meaning; amber used for anything other than the decision moment + `unconfirmed`.
 - An icon alone on a destructive action; confirmation without typing the name for deletions **and for any `tier=prod` or `destroy` apply** (§5.2).
 - Toasts for background events; unsolicited animations beyond the rail's pulse.
 - Hiding or collapsing a resource destruction in a plan.

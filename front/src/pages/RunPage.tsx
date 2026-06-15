@@ -167,7 +167,7 @@ export function RunPage() {
               </span>
             )}
             <Button
-              variant="accent"
+              variant="decision"
               disabled={run.state !== "unconfirmed" || confirm.isPending || !env.data}
               onClick={onConfirmClick}
             >
@@ -201,7 +201,7 @@ export function RunPage() {
                 <TextInput value={typed} onChange={(e) => setTyped(e.target.value)} autoFocus />
               </div>
               <Button
-                variant="accent"
+                variant="decision"
                 disabled={typed !== env.data.name || confirm.isPending}
                 onClick={() => confirm.mutate()}
               >

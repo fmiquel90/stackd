@@ -60,19 +60,27 @@ export function DeleteButton({ label, onClick, disabled }: { label: string; onCl
   );
 }
 
+// `accent` = brand violet (primary actions). `decision` = amber, reserved for the human-decision
+// moment (Confirm/apply) so it stands apart from the violet chrome (DESIGN §3.2 / invariant #4).
 export function Button({
   variant = "default",
   ...props
-}: ButtonHTMLAttributes<HTMLButtonElement> & { variant?: "default" | "accent" }) {
-  const accent = variant === "accent";
+}: ButtonHTMLAttributes<HTMLButtonElement> & { variant?: "default" | "accent" | "decision" }) {
+  const filled = variant === "accent" || variant === "decision";
+  const bg =
+    variant === "accent"
+      ? "var(--color-accent)"
+      : variant === "decision"
+        ? "var(--color-decision)"
+        : "var(--color-bg-raised)";
   return (
     <button
       {...props}
       className="ui-btn rounded-base px-3 py-1.5 text-[13px] font-medium disabled:opacity-50"
       style={{
         border: "1px solid var(--color-border)",
-        color: accent ? "var(--color-bg-base)" : "var(--color-text-primary)",
-        backgroundColor: accent ? "var(--color-accent)" : "var(--color-bg-raised)",
+        color: filled ? "var(--color-bg-base)" : "var(--color-text-primary)",
+        backgroundColor: bg,
       }}
     />
   );

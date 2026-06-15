@@ -1,6 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { auth } from "@/api/client";
 import { useDevLogin } from "@/auth/session";
+import { Brand } from "@/components/BrandMark";
 
 export function LoginPage() {
   const personas = useQuery({ queryKey: ["dev-personas"], queryFn: auth.devPersonas, retry: false });
@@ -12,7 +13,9 @@ export function LoginPage() {
         className="w-full max-w-[420px] rounded-base p-8"
         style={{ backgroundColor: "var(--color-bg-surface)", border: "1px solid var(--color-border)" }}
       >
-        <h1 className="text-[24px] font-semibold tracking-[-0.01em]">Stackd</h1>
+        <h1>
+          <Brand markSize={26} textClass="text-[24px]" />
+        </h1>
         <p className="mt-1 text-[13px]" style={{ color: "var(--color-text-secondary)" }}>
           Terraform orchestration control room.
         </p>

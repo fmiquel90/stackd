@@ -1,24 +1,29 @@
 /* Design tokens — the visual contract (DESIGN §3). Components MUST use these vars / the
-   Tailwind utilities derived from them; never hard-code a color (CLAUDE §5). */
+   Tailwind utilities derived from them; never hard-code a color (CLAUDE §5).
+
+   Brand: violet (StackD logo) is the structural accent (--color-accent) — focus, links, nav,
+   primary CTAs. Amber is reserved for the human-decision moment (--color-decision: Confirm/apply)
+   and the `unconfirmed` state. Mock is magenta — a modifier kept outside the operational spectrum. */
 
 :root,
 [data-theme="dark"] {
   /* Surfaces & structure (dark = reference theme, DESIGN §3.1) */
-  --color-bg-base: #0e141b;
-  --color-bg-surface: #151c24;
-  --color-bg-raised: #1c2530;
-  --color-border: #2a3441;
-  --color-text-primary: #e6edf3;
-  --color-text-secondary: #8b98a5;
-  --color-accent: #d9a23b; /* amber — human decision / focus only */
+  --color-bg-base: #0c1118;
+  --color-bg-surface: #141b24;
+  --color-bg-raised: #1d2733;
+  --color-border: #2a3542;
+  --color-text-primary: #e8eef4;
+  --color-text-secondary: #8a97a4;
+  --color-accent: #8b6cf0; /* brand violet — structure / focus / links / primary CTAs */
+  --color-decision: #e8a838; /* amber — the human-decision moment (Confirm/apply) only */
 
   /* State language (DESIGN §3.2) — identical semantics in both themes */
   --color-state-queued: #6e7b8b;
   --color-state-running: #4c8dff;
-  --color-state-unconfirmed: #d9a23b;
+  --color-state-unconfirmed: #e8a838;
   --color-state-finished: #3fb950;
   --color-state-failed: #f85149;
-  --color-mock: #a371f7; /* modifier, deliberately outside the operational spectrum */
+  --color-mock: #ec6ab4; /* magenta modifier, deliberately outside the operational spectrum */
   --color-overlay: rgba(0, 0, 0, 0.55); /* modal scrim */
 }
 
@@ -29,13 +34,14 @@
   --color-border: #d3dae2;
   --color-text-primary: #1b2733;
   --color-text-secondary: #5a6776;
-  --color-accent: #a87a1f; /* darkened amber for AA contrast */
+  --color-accent: #6d3fd4; /* brand violet (the logo's "D"), AA on light */
+  --color-decision: #a87a1f; /* darkened amber for AA contrast */
 
   --color-state-queued: #6e7b8b;
   --color-state-running: #1f6feb;
   --color-state-unconfirmed: #a87a1f;
   --color-state-finished: #2da44e;
   --color-state-failed: #cf222e;
-  --color-mock: #8250df;
+  --color-mock: #bc3f9e;
   --color-overlay: rgba(27, 39, 51, 0.45);
 }

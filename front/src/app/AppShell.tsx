@@ -21,6 +21,7 @@ import { QueuePage } from "@/pages/QueuePage";
 import { RunPage } from "@/pages/RunPage";
 import { SettingsPage } from "@/pages/SettingsPage";
 import { StackDetailPage } from "@/pages/StackDetailPage";
+import { Brand } from "@/components/BrandMark";
 import { StacksPage } from "@/pages/StacksPage";
 import { VariableSetsPage } from "@/pages/VariableSetsPage";
 
@@ -46,9 +47,8 @@ function NavRail() {
       style={{ borderRight: "1px solid var(--color-border)", backgroundColor: "var(--color-bg-surface)" }}
       aria-label="Primary"
     >
-      <div className="mb-3 flex items-center gap-2 px-2 pt-1">
-        <Boxes size={18} strokeWidth={1.75} style={{ color: "var(--color-accent)" }} aria-hidden />
-        <span className="text-[15px] font-semibold tracking-[-0.01em]">Stackd</span>
+      <div className="mb-3 flex items-center px-2 pt-1">
+        <Brand />
       </div>
       {/* Labels are always visible (recognition > recall, a11y) — DESIGN §4. */}
       {NAV.map(({ to, label, icon: Icon }) => (
