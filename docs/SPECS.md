@@ -1186,3 +1186,78 @@ Successful live resolutions are intentionally **not** audited (volume); the run'
    `allow_fallback_apply`.
 4. Run state only changes through `transition()` (invariant §4.2): no new state; failure path uses
    `→ failed`, break-glass uses the normal trigger path.
+
+---
+
+## 16. Plan review — comments & highlights (post-MVP)
+
+> Status: **post-MVP**, additive. Turns the approval gate into a collaborative review: an open
+> discussion thread on a run, with comments optionally **anchored** to a part of the plan. Built on
+> existing substrate — immutable run logs (the anchor target), `LISTEN/NOTIFY` (live updates, §5.3),
+> the approval gate (§4). No run-state change; `transition()` is untouched.
+
+### 16.1 Model
+
+```sql
+CREATE TABLE run_comments (
+    id                  uuid PRIMARY KEY DEFAULT uuidv7(),
+    run_id              uuid NOT NULL REFERENCES runs(id) ON DELETE CASCADE,
+    parent_id           uuid REFERENCES run_comments(id) ON DELETE CASCADE,  -- thread reply
+    author_user_id      uuid REFERENCES users(id),
+    author_email        text,            -- denormalized, readable if the user is later removed
+    body                text NOT NULL,
+    anchor              jsonb,           -- NULL = general comment; else a polymorphic anchor (§16.2)
+    resolved_at         timestamptz,
+    resolved_by_user_id uuid REFERENCES users(id),
+    created_at          timestamptz NOT NULL DEFAULT now(),
+    edited_at           timestamptz
+);
+```
+
+Comments are **per run** — each plan is a distinct artifact, so a new run starts a fresh discussion.
+
+### 16.2 Anchors (polymorphic)
+
+An anchor pins a comment to a part of the plan. Two kinds (a comment with no anchor is a general
+thread):
+
+```jsonc
+// v1 — a range of plan log lines (the rendered, already-masked plan output)
+{ "kind": "plan_line", "phase": "planning", "seq": 3, "line_start": 12, "line_end": 14,
+  "snippet": "~ aws_s3_bucket.logs" }
+// v2 — a Terraform resource address (from the structured plan.json)
+{ "kind": "resource", "address": "aws_s3_bucket.logs", "action": "update" }
+```
+
+The `plan_line` anchor targets `run_logs` (`(run_id, phase, seq)` is immutable and idempotent, §5.2),
+so the anchor is stable for the life of the run. The `snippet` is copied from the **masked** log line
+(`run_logs.lines[].msg`), so an anchor can never carry a secret (invariant §13.3). `resource` anchors
+(v2) require serving the structured plan; the column is polymorphic so v2 needs no migration.
+
+### 16.3 API
+
+`/api/v1/runs/{run_id}/comments` — listing & posting are open to any authenticated user
+(collaboration, reader+); editing a body is author-only; resolving a thread needs the author or
+`role ∈ {approver, admin}`; deleting needs the author or admin.
+
+| Method | Path | Who | Effect |
+|---|---|---|---|
+| GET | `/comments` | any auth | list (oldest first; replies carry `parent_id`) |
+| POST | `/comments` | any auth | create `{body, anchor?, parent_id?}` |
+| PATCH | `/comments/{id}` | author / approver | edit `body` (author) and/or `resolved` (author or approver+) |
+| DELETE | `/comments/{id}` | author / admin | delete (cascades replies) |
+
+Every create/edit/delete/resolve emits a light `pg_notify('run_<id>', …)` (§5.3) so the run page's
+existing WS subscription invalidates `["run-comments", run_id]` and the thread updates live.
+
+### 16.4 Interaction with the gate
+
+**Advisory** at v1: the run page shows the count of open (unresolved) threads next to the Confirm
+button; it does **not** block. (`can_apply` and the §9.3/§15.5 gates are untouched.) A future opt-in
+env flag could make confirm require all threads resolved — deliberately deferred.
+
+### 16.5 Invariants preserved
+
+1. No run-state change — comments are a side record; `transition()` (invariant §4.2) is untouched.
+2. Snippets come from already-masked log lines, so no secret leaks (invariant §13.3).
+3. Live updates reuse `LISTEN/NOTIFY` (§5.3) — no new transport.

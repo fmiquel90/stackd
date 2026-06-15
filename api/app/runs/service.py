@@ -72,7 +72,7 @@ async def trigger_run(
         actor_email=user.email if user else None,
         target_kind="run",
         target_id=run.id,
-        context={"environment_id": str(env.id), "type": run_type.value, "tier": env.tier.value},
+        context={"environment_id": str(env.id), "type": run_type.value, "tier": env.tier},
     )
     await session.commit()
     await session.refresh(run)
@@ -215,8 +215,19 @@ async def confirm_run(session: AsyncSession, run: Run, user: User) -> Run:
             "This run resolved a secret via fallback (allow_fallback_apply is off).",
         )
 
-    # 4-eyes (§2.4): triggerer ≠ confirmer for prod or when required, human triggers only.
-    needs_four_eyes = env.tier.value == "prod" or env.require_second_pair_of_eyes
+    # 4-eyes (§2.4): triggerer ≠ confirmer when the env's tier requires it (was hardcoded to prod;
+    # now a per-tier flag), or when the env opts in. Human triggers only.
+    from sqlalchemy import select
+
+    from app.models.tier import Tier
+
+    tier_def = (
+        await session.execute(select(Tier).where(Tier.name == env.tier))
+    ).scalar_one_or_none()
+    # Fail closed: a four-eyes requirement is a security control, so an env pointing at a missing
+    # tier row (should be impossible via the API, but never silently weaken) forces four-eyes.
+    tier_four_eyes = tier_def.requires_four_eyes if tier_def else True
+    needs_four_eyes = tier_four_eyes or env.require_second_pair_of_eyes
     if (
         needs_four_eyes
         and run.triggered_by == TriggeredBy.manual

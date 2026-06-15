@@ -10,14 +10,11 @@ class Role(enum.StrEnum):
     admin = "admin"
 
 
-class Tier(enum.StrEnum):
-    dev = "dev"
-    staging = "staging"
-    prod = "prod"
-
-    @property
-    def rank(self) -> int:
-        return {"dev": 0, "staging": 1, "prod": 2}[self.value]
+# Tiers are no longer a fixed linear enum — they're a configurable, non-ordered catalog (the `tiers`
+# table, app.models.tier). A tier is referenced by name (str); apply permission is set membership
+# (user.allowed_tiers), not a rank ceiling. Defaults live here for the seed/migration.
+DEFAULT_TIERS: tuple[str, ...] = ("dev", "staging", "prod")
+FOUR_EYES_DEFAULT_TIERS: frozenset[str] = frozenset({"prod"})
 
 
 class AuditActorKind(enum.StrEnum):

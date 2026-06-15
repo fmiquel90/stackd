@@ -112,10 +112,10 @@ async def sign_workload_token(
     exp = now + timedelta(seconds=min(ttl, PHASE_MAX_SECONDS[phase]))
     payload = {
         "iss": get_settings().stackd_public_url.rstrip("/"),
-        "sub": f"run:{env.tier.value}:{stack.name}:{phase.value}",
+        "sub": f"run:{env.tier}:{stack.name}:{phase.value}",
         "aud": AUDIENCE,
         "environment": env.name,
-        "tier": env.tier.value,
+        "tier": env.tier,
         "stack": stack.name,
         "environment_id": str(env.id),
         "run_id": str(run.id),

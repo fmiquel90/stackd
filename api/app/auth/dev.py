@@ -10,7 +10,7 @@ from app.auth.schemas import DevLoginIn, SessionOut, UserOut
 from app.auth.sessions import start_session
 from app.config import get_settings
 from app.db import get_session
-from app.enums import Role, Tier
+from app.enums import Role
 from app.errors import ProblemException
 
 # This module is physically removed from the production image build (DEV §3) — never
@@ -23,7 +23,7 @@ PERSONAS = {
         "email": "admin@dev.local",
         "display_name": "Admin (dev)",
         "role": Role.admin,
-        "max_apply_tier": Tier.prod,
+        "allowed_tiers": ["dev", "staging", "prod"],
         "can_destroy": True,
     },
     "alice": {
@@ -31,7 +31,7 @@ PERSONAS = {
         "email": "alice@dev.local",
         "display_name": "Alice (dev)",
         "role": Role.approver,
-        "max_apply_tier": Tier.prod,
+        "allowed_tiers": ["dev", "staging", "prod"],
         "can_destroy": False,
     },
     "bob": {
@@ -39,7 +39,7 @@ PERSONAS = {
         "email": "bob@dev.local",
         "display_name": "Bob (dev)",
         "role": Role.writer,
-        "max_apply_tier": Tier.staging,
+        "allowed_tiers": ["dev", "staging"],
         "can_destroy": False,
     },
 }
@@ -74,7 +74,7 @@ async def dev_login(
         email=persona["email"],
         display_name=persona["display_name"],
         role=persona["role"],
-        max_apply_tier=persona["max_apply_tier"],
+        allowed_tiers=persona["allowed_tiers"],
         can_destroy=persona["can_destroy"],
     )
     access_token = await start_session(session, user, response, request)

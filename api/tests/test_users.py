@@ -24,15 +24,16 @@ async def test_admin_updates_tier_is_audited(client: httpx.AsyncClient) -> None:
 
     users = (await client.get("/api/v1/users", headers=_bearer(admin_token))).json()
     bob = next(u for u in users if u["email"] == "bob@dev.local")
-    assert bob["max_apply_tier"] == "staging"
+    assert bob["allowed_tiers"] == ["dev", "staging"]
 
     patched = await client.patch(
         f"/api/v1/users/{bob['id']}",
         headers=_bearer(admin_token),
-        json={"max_apply_tier": "prod", "can_destroy": True},
+        # Non-contiguous set — impossible under the old linear ceiling.
+        json={"allowed_tiers": ["dev", "prod"], "can_destroy": True},
     )
     assert patched.status_code == 200
-    assert patched.json()["max_apply_tier"] == "prod"
+    assert patched.json()["allowed_tiers"] == ["dev", "prod"]
     assert patched.json()["can_destroy"] is True
 
     # Invariant #2: the mutation wrote audit events in the same txn (/audit HTTP is Phase 3).

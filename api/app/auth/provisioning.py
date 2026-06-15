@@ -3,7 +3,7 @@ from __future__ import annotations
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.enums import Role, Tier
+from app.enums import Role
 from app.models.user import User
 
 
@@ -15,7 +15,7 @@ async def upsert_user(
     display_name: str | None = None,
     avatar_url: str | None = None,
     role: Role | None = None,
-    max_apply_tier: Tier | None = None,
+    allowed_tiers: list[str] | None = None,
     can_destroy: bool | None = None,
 ) -> User:
     """Upsert on the stable `google_sub` (SPECS §2.1 step 6).
@@ -37,7 +37,7 @@ async def upsert_user(
             display_name=display_name,
             avatar_url=avatar_url,
             role=role,
-            max_apply_tier=max_apply_tier,
+            allowed_tiers=allowed_tiers if allowed_tiers is not None else [],
             can_destroy=can_destroy if can_destroy is not None else False,
         )
         session.add(user)

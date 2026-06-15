@@ -27,7 +27,7 @@ async def test_dev_login_personas(client: httpx.AsyncClient) -> None:
     user = r.json()["user"]
     assert user["email"] == "bob@dev.local"
     assert user["role"] == "writer"
-    assert user["max_apply_tier"] == "staging"  # bob cannot confirm prod (§2.4)
+    assert user["allowed_tiers"] == ["dev", "staging"]  # bob cannot confirm prod (§2.4)
 
     me = await client.get(
         "/api/v1/auth/me", headers={"Authorization": f"Bearer {r.json()['access_token']}"}

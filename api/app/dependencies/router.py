@@ -222,7 +222,7 @@ async def graph(_: CurrentUser, session: DbSession) -> dict:
         agg["has_mock"] = agg["has_mock"] or r.mock_value is not None
     return {
         "nodes": [
-            {"id": str(e.id), "name": e.name, "stack_id": str(e.stack_id), "tier": e.tier.value}
+            {"id": str(e.id), "name": e.name, "stack_id": str(e.stack_id), "tier": e.tier}
             for e in envs
         ],
         "edges": [

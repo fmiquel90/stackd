@@ -53,7 +53,7 @@ def _render(
         "run_type": run.type.value,
         "stack": stack.name,
         "environment": env.name,
-        "tier": env.tier.value,
+        "tier": env.tier,
         "commit_sha": run.commit_sha,
         "url": url,
     }

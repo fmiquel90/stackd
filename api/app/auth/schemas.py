@@ -5,7 +5,7 @@ from datetime import datetime
 
 from pydantic import BaseModel, ConfigDict
 
-from app.enums import Role, Tier
+from app.enums import Role
 
 
 class UserOut(BaseModel):
@@ -16,7 +16,7 @@ class UserOut(BaseModel):
     display_name: str | None
     avatar_url: str | None
     role: Role
-    max_apply_tier: Tier | None
+    allowed_tiers: list[str]
     can_destroy: bool
     disabled: bool
     onboarded: bool
@@ -30,7 +30,7 @@ class SessionOut(BaseModel):
 
 class UserUpdate(BaseModel):
     role: Role | None = None
-    max_apply_tier: Tier | None = None
+    allowed_tiers: list[str] | None = None
     can_destroy: bool | None = None
     disabled: bool | None = None
 

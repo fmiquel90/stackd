@@ -20,7 +20,7 @@ router = APIRouter(prefix="/api/v1/users", tags=["users"])
 # Each mutable field maps to its dedicated audit action (§6.2).
 _AUDIT_ACTIONS = {
     "role": "user.role_changed",
-    "max_apply_tier": "user.apply_tier_changed",
+    "allowed_tiers": "user.apply_tier_changed",
     "can_destroy": "user.destroy_permission_changed",
     "disabled": "user.disabled",
 }
@@ -44,6 +44,16 @@ async def update_user(
         raise ProblemException(404, "User not found", None)
 
     changes = body.model_dump(exclude_unset=True)
+    # allowed_tiers carries no FK; validate every entry against the catalog so a typo (or a stale
+    # name) can't be stored — symmetry with environments.tier validation (§2.4).
+    if "allowed_tiers" in changes:
+        from app.models.tier import Tier
+
+        known = set((await session.execute(select(Tier.name))).scalars().all())
+        unknown = sorted(set(changes["allowed_tiers"]) - known)
+        if unknown:
+            raise ProblemException(422, "Unknown tier", f"No such tier(s): {', '.join(unknown)}.")
+        changes["allowed_tiers"] = sorted(set(changes["allowed_tiers"]))
     for field, value in changes.items():
         before = getattr(target, field)
         if before == value:

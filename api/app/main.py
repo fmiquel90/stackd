@@ -11,6 +11,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.audit.router import router as audit_router
 from app.auth.router import router as auth_router
+from app.comments.router import router as comments_router
 from app.config import get_settings
 from app.dependencies.router import router as dependencies_router
 from app.environments.router import router as environments_router
@@ -26,6 +27,7 @@ from app.secret_sources.router import router as secret_sources_router
 from app.stacks.router import router as stacks_router
 from app.statebackend.router import human_router as state_human_router
 from app.statebackend.router import tf_router as state_tf_router
+from app.tiers.router import router as tiers_router
 from app.users.router import router as users_router
 from app.variable_sets.router import router as variable_sets_router
 from app.webhooks.router import router as webhooks_router
@@ -138,11 +140,13 @@ def create_app() -> FastAPI:
     app.include_router(auth_router)
     app.include_router(users_router)
     app.include_router(stacks_router)
+    app.include_router(tiers_router)
     app.include_router(environments_router)
     app.include_router(variable_sets_router)
     app.include_router(secret_sources_router)
     app.include_router(hooks_router)
     app.include_router(runs_router)
+    app.include_router(comments_router)
     app.include_router(worker_admin_router)
     app.include_router(worker_router)
     app.include_router(state_tf_router)

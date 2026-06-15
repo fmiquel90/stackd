@@ -8,11 +8,18 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db import SessionLocal
-from app.enums import AttachmentTarget, Tier, TriggerPolicy, VariableKind
+from app.enums import (
+    DEFAULT_TIERS,
+    FOUR_EYES_DEFAULT_TIERS,
+    AttachmentTarget,
+    TriggerPolicy,
+    VariableKind,
+)
 from app.models.dependency import EnvDependency, OutputReference
 from app.models.environment import Environment
 from app.models.space import Space
 from app.models.stack import Stack
+from app.models.tier import Tier
 from app.models.variable import Variable
 from app.models.variable_set import VariableSet, VariableSetAttachment
 from app.models.worker import WorkerPool
@@ -25,7 +32,8 @@ REPO_BASE = os.environ.get("STACKD_SEED_REPO_BASE", "file:///stackd-dev/repos")
 
 
 async def seed() -> None:
-    """Idempotent base data the app (and tests) require: the spaces (SPECS §3.0)."""
+    """Idempotent base data the app (and tests) require: the spaces (SPECS §3.0) and the default
+    tier catalog (§2.4) — dev/staging/prod, prod requiring four-eyes (old hardcoded behavior)."""
     async with SessionLocal() as session:
         for name, desc in (("default", "Default space"), ("demo", "Demo space")):
             exists = (
@@ -33,8 +41,20 @@ async def seed() -> None:
             ).scalar_one_or_none()
             if exists is None:
                 session.add(Space(name=name, description=desc))
+        for position, name in enumerate(DEFAULT_TIERS):
+            exists = (
+                await session.execute(select(Tier).where(Tier.name == name))
+            ).scalar_one_or_none()
+            if exists is None:
+                session.add(
+                    Tier(
+                        name=name,
+                        requires_four_eyes=name in FOUR_EYES_DEFAULT_TIERS,
+                        position=position,
+                    )
+                )
         await session.commit()
-    print("seed: spaces ensured (default, demo)")
+    print("seed: spaces + tiers ensured")
 
 
 async def _get(session: AsyncSession, model, **filters):  # type: ignore[no-untyped-def]
@@ -194,14 +214,14 @@ async def seed_demo() -> None:
                 session,
                 Environment,
                 match={"stack_id": stack.id, "name": "dev"},
-                defaults={"tier": Tier.dev, "branch": "main", "managed_state": False},
+                defaults={"tier": "dev", "branch": "main", "managed_state": False},
             )
             envs[f"{sname}/prod"] = await _ensure(
                 session,
                 Environment,
                 match={"stack_id": stack.id, "name": "prod"},
                 defaults={
-                    "tier": Tier.prod,
+                    "tier": "prod",
                     "branch": "main",
                     "protected": True,
                     "require_second_pair_of_eyes": True,

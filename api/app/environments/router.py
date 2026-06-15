@@ -17,6 +17,7 @@ from app.environments.schemas import EnvironmentCreate, EnvironmentOut, Environm
 from app.errors import ProblemException
 from app.models.environment import Environment
 from app.models.stack import Stack
+from app.models.tier import Tier
 from app.stacks.git import ls_remote_sha
 from app.variables.crud import create_variable, get_variable, update_variable, variables_for
 from app.variables.resolution import resolve_variables
@@ -40,7 +41,13 @@ async def _get_env(session: AsyncSession, env_id: uuid.UUID) -> Environment:
 
 
 def _env_audit_ctx(env: Environment) -> dict:
-    return {"name": env.name, "tier": env.tier.value}
+    return {"name": env.name, "tier": env.tier}
+
+
+async def _require_tier(session: AsyncSession, name: str) -> None:
+    exists = (await session.execute(select(Tier).where(Tier.name == name))).scalar_one_or_none()
+    if exists is None:
+        raise ProblemException(422, "Unknown tier", f"No tier named '{name}'. Define it first.")
 
 
 @router.get("/stacks/{stack_id}/environments", response_model=list[EnvironmentOut])
@@ -72,6 +79,7 @@ async def create_environment(
 ) -> EnvironmentOut:
     if (await session.get(Stack, stack_id)) is None:
         raise ProblemException(404, "Stack not found", None)
+    await _require_tier(session, body.tier)
     env = Environment(stack_id=stack_id, **body.model_dump())
     if env.protected:
         env.autodeploy = False  # protected forces manual confirmation (§3.2)
@@ -108,6 +116,8 @@ async def update_environment(
 ) -> EnvironmentOut:
     env = await _get_env(session, env_id)
     changes = body.model_dump(exclude_unset=True)
+    if "tier" in changes:
+        await _require_tier(session, changes["tier"])
     for field, value in changes.items():
         setattr(env, field, value)
     if env.protected:

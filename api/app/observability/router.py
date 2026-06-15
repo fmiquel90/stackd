@@ -13,7 +13,7 @@ from app.db import get_session
 from app.enums import ACTIVE_STATES, Role, RunState, WorkerStatus
 from app.logging import ring_buffer
 from app.models.run import Run
-from app.models.worker import Worker
+from app.models.worker import Worker, WorkerPool
 
 router = APIRouter(prefix="/api/v1", tags=["observability"])
 DbSession = Annotated[AsyncSession, Depends(get_session)]
@@ -32,6 +32,9 @@ async def health(_: CurrentUser, session: DbSession) -> dict:
         db_ok = False
 
     workers = (await session.execute(select(Worker))).scalars().all()
+    # Workers are heterogeneous and routed by pool + labels (SPECS §7), so the UI groups by pool and
+    # shows each worker's labels (its declared, routable capability — e.g. tool/version/arch).
+    pools = {p.id: p for p in (await session.execute(select(WorkerPool))).scalars().all()}
     offline_after = settings.stackd_worker_offline_seconds
     worker_rows = []
     online = 0
@@ -39,10 +42,14 @@ async def health(_: CurrentUser, session: DbSession) -> dict:
         secs = (now - w.last_heartbeat_at).total_seconds() if w.last_heartbeat_at else None
         is_online = secs is not None and secs <= offline_after and w.status != WorkerStatus.offline
         online += 1 if is_online else 0
+        pool = pools.get(w.pool_id)
         worker_rows.append(
             {
                 "id": str(w.id),
                 "name": w.name,
+                "pool": pool.name if pool else None,
+                "pool_labels": pool.labels if pool else None,
+                "labels": w.labels,
                 "status": w.status.value,
                 "online": is_online,
                 "last_heartbeat_at": w.last_heartbeat_at.isoformat()

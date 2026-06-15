@@ -42,6 +42,7 @@ class StackOut(BaseModel):
     repo_url: str
     repo_auth_kind: RepoAuthKind
     has_repo_secret: bool
+    has_webhook_secret: bool
     project_root: str
     tool: Tool
     tool_version: str
@@ -58,6 +59,7 @@ class StackOut(BaseModel):
             repo_url=s.repo_url,
             repo_auth_kind=s.repo_auth_kind,
             has_repo_secret=s.repo_secret_encrypted is not None,
+            has_webhook_secret=s.webhook_secret_encrypted is not None,
             project_root=s.project_root,
             tool=s.tool,
             tool_version=s.tool_version,

@@ -4,16 +4,17 @@ import uuid
 from datetime import datetime
 
 from sqlalchemy import Boolean, Enum, ForeignKey, String, UniqueConstraint
+from sqlalchemy.dialects.postgresql import ARRAY
 from sqlalchemy.dialects.postgresql import UUID as PGUUID
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db import Base, created_at_col, pk_uuid
-from app.enums import Role, Tier
+from app.enums import Role
 
 
 class User(Base):
-    """SPECS §2.2. `role` = global capabilities; `max_apply_tier`/`can_destroy`
-    gate per-env apply (§2.4)."""
+    """SPECS §2.2. `role` = global capabilities; `allowed_tiers`/`can_destroy`
+    gate per-env apply (§2.4) — a user may apply to any environment whose tier is in the set."""
 
     __tablename__ = "users"
 
@@ -23,7 +24,7 @@ class User(Base):
     display_name: Mapped[str | None] = mapped_column(String, default=None)
     avatar_url: Mapped[str | None] = mapped_column(String, default=None)
     role: Mapped[Role] = mapped_column(Enum(Role, name="role"), default=Role.reader)
-    max_apply_tier: Mapped[Tier | None] = mapped_column(Enum(Tier, name="tier"), default=None)
+    allowed_tiers: Mapped[list[str]] = mapped_column(ARRAY(String), default=list)
     can_destroy: Mapped[bool] = mapped_column(Boolean, default=False)
     disabled: Mapped[bool] = mapped_column(Boolean, default=False)
     last_login_at: Mapped[datetime | None] = mapped_column(default=None)

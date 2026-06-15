@@ -3,13 +3,12 @@ from __future__ import annotations
 import uuid
 from datetime import datetime
 
-from sqlalchemy import Boolean, Enum, ForeignKey, Integer, String, UniqueConstraint
+from sqlalchemy import Boolean, ForeignKey, Integer, String, UniqueConstraint
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.dialects.postgresql import UUID as PGUUID
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db import Base, created_at_col, pk_uuid, updated_at_col
-from app.enums import Tier
 
 
 class Environment(Base):
@@ -23,7 +22,7 @@ class Environment(Base):
         PGUUID(as_uuid=True), ForeignKey("stacks.id", ondelete="CASCADE")
     )
     name: Mapped[str] = mapped_column(String)
-    tier: Mapped[Tier] = mapped_column(Enum(Tier, name="tier"))  # §2.4 apply/destroy permissions
+    tier: Mapped[str] = mapped_column(String)  # references tiers.name (§2.4 apply/destroy perms)
     branch: Mapped[str] = mapped_column(String)
 
     autodeploy: Mapped[bool] = mapped_column(Boolean, default=False)  # forced false if protected

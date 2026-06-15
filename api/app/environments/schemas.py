@@ -5,13 +5,12 @@ from datetime import datetime
 
 from pydantic import BaseModel, ConfigDict
 
-from app.enums import Tier
 from app.models.environment import Environment
 
 
 class EnvironmentCreate(BaseModel):
     name: str
-    tier: Tier
+    tier: str  # a tiers.name (validated against the catalog at create time)
     branch: str
     autodeploy: bool = False
     protected: bool = False
@@ -25,7 +24,7 @@ class EnvironmentCreate(BaseModel):
 
 class EnvironmentUpdate(BaseModel):
     name: str | None = None
-    tier: Tier | None = None
+    tier: str | None = None
     branch: str | None = None
     autodeploy: bool | None = None
     protected: bool | None = None
@@ -43,7 +42,7 @@ class EnvironmentOut(BaseModel):
     id: uuid.UUID
     stack_id: uuid.UUID
     name: str
-    tier: Tier
+    tier: str
     branch: str
     autodeploy: bool
     protected: bool
