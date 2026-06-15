@@ -47,6 +47,21 @@ body {
   font-variant-numeric: tabular-nums;
 }
 
+/* Interactive affordance for buttons: pointer cursor + a brightness lift on hover so an enabled
+   control is visibly actionable (works on any token background without a hard-coded color). */
+.ui-btn {
+  cursor: pointer;
+  transition:
+    filter 0.12s ease,
+    opacity 0.12s ease;
+}
+.ui-btn:hover:not(:disabled) {
+  filter: brightness(1.18);
+}
+.ui-btn:disabled {
+  cursor: not-allowed;
+}
+
 /* The only ambient animation in the app: the active phase segment (DESIGN §2.2). */
 @keyframes rail-pulse {
   0%,

@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { X } from "lucide-react";
 import { type NewSecretSource, secretSourcesApi } from "@/api/resources";
 import { Button, Card, Field, Select, TextInput } from "@/components/ui";
 
@@ -47,7 +48,7 @@ export function SecretSourcesPanel({ spaceId }: { spaceId: string }) {
               style={{ color: "var(--color-state-failed)" }}
               onClick={() => remove.mutate(s.id)}
             >
-              ✕
+              <X size={13} strokeWidth={1.75} aria-hidden />
             </button>
           </div>
         ))}

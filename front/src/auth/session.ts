@@ -24,6 +24,11 @@ export function useSession() {
   });
 }
 
+/** Current user's admin status, read from the cached session (no extra request). */
+export function useIsAdmin(): boolean {
+  return useSession().data?.role === "admin";
+}
+
 export function useDevLogin() {
   const qc = useQueryClient();
   return useMutation({

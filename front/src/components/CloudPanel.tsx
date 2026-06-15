@@ -1,11 +1,13 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ApiError } from "@/api/client";
 import { cloudApi } from "@/api/resources";
+import { useIsAdmin } from "@/auth/session";
 import { Button, Card, Field, TextInput } from "@/components/ui";
 
 export function CloudPanel({ envId }: { envId: string }) {
   const qc = useQueryClient();
+  const isAdmin = useIsAdmin();
   const key = ["cloud-integration", envId];
   const { data, isError } = useQuery({
     queryKey: key,
@@ -13,8 +15,13 @@ export function CloudPanel({ envId }: { envId: string }) {
     retry: false,
   });
   const [form, setForm] = useState({ plan_role_arn: "", apply_role_arn: "", region: "" });
+  const loaded = useRef(false);
   useEffect(() => {
-    if (data) setForm({ plan_role_arn: data.plan_role_arn, apply_role_arn: data.apply_role_arn, region: data.region ?? "" });
+    // Hydrate the form once; a background refetch must not clobber in-progress edits.
+    if (data && !loaded.current) {
+      loaded.current = true;
+      setForm({ plan_role_arn: data.plan_role_arn, apply_role_arn: data.apply_role_arn, region: data.region ?? "" });
+    }
   }, [data]);
 
   const save = useMutation({
@@ -40,6 +47,23 @@ export function CloudPanel({ envId }: { envId: string }) {
           {configured ? "dynamic credentials" : "not configured (static fallback)"}
         </span>
       </div>
+
+      {/* Editing OIDC roles is admin-only (server enforces it on PUT/DELETE/test). Others see it read-only. */}
+      {!isAdmin ? (
+        <div className="font-data flex flex-col gap-1 text-[12px]" style={{ color: "var(--color-text-secondary)" }}>
+          {configured ? (
+            <>
+              <div>plan role: {data!.plan_role_arn}</div>
+              <div>apply role: {data!.apply_role_arn}</div>
+              {data!.region && <div>region: {data!.region}</div>}
+            </>
+          ) : (
+            <div>No cloud integration configured.</div>
+          )}
+          <div className="mt-1">Editing cloud integration requires the admin role.</div>
+        </div>
+      ) : (
+        <>
       <form
         className="flex flex-wrap items-end gap-2"
         onSubmit={(e) => {
@@ -83,6 +107,8 @@ export function CloudPanel({ envId }: { envId: string }) {
       <p className="mt-2 text-[12px]" style={{ color: "var(--color-text-secondary)" }}>
         Plan and apply assume different roles; the token <span className="font-data">sub=run:tier:stack:phase</span>.
       </p>
+        </>
+      )}
     </Card>
   );
 }

@@ -1,10 +1,13 @@
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useParams } from "react-router-dom";
+import { Link, useParams } from "react-router-dom";
+import { MessageSquarePlus, TriangleAlert } from "lucide-react";
 import { ApiError } from "@/api/client";
-import { environments, runs } from "@/api/resources";
+import { comments, environments, runs, stacks, tiers } from "@/api/resources";
 import { useEntityStream } from "@/api/stream";
-import type { Run, RunState } from "@/api/types";
+import type { CommentAnchor, Run, RunState } from "@/api/types";
+import { AnsiText } from "@/components/ansi";
+import { CommentsPanel } from "@/components/CommentsPanel";
 import { PhaseRail, type Phase, type PhaseStatus } from "@/components/PhaseRail";
 import { StateBadge } from "@/components/StateBadge";
 import { ProvenanceBadge, parseProvenance } from "@/components/ProvenanceBadge";
@@ -54,7 +57,11 @@ export function RunPage() {
   const { runId = "" } = useParams();
   const qc = useQueryClient();
   // Live updates via WS (DESIGN §6); the 10s poll is just the reconnection fallback.
-  useEntityStream(`run:${runId}`, [["run", runId], ["run-logs", runId]]);
+  useEntityStream(`run:${runId}`, [
+    ["run", runId],
+    ["run-logs", runId],
+    ["run-comments", runId],
+  ]);
   const { data: run } = useQuery({
     queryKey: ["run", runId],
     queryFn: () => runs.get(runId),
@@ -72,6 +79,20 @@ export function RunPage() {
     queryFn: () => environments.get(run!.environment_id),
     enabled: Boolean(run?.environment_id),
   });
+  const stack = useQuery({
+    queryKey: ["stack", env.data?.stack_id],
+    queryFn: () => stacks.get(env.data!.stack_id),
+    enabled: Boolean(env.data?.stack_id),
+  });
+  const catalog = useQuery({ queryKey: ["tiers"], queryFn: tiers.list });
+  const commentList = useQuery({
+    queryKey: ["run-comments", runId],
+    queryFn: () => comments.list(runId),
+  });
+  const openThreads = (commentList.data ?? []).filter(
+    (c) => c.parent_id == null && !c.resolved,
+  ).length;
+  const [anchorDraft, setAnchorDraft] = useState<CommentAnchor | null>(null);
   const [confirming, setConfirming] = useState(false);
   const [typed, setTyped] = useState("");
 
@@ -88,8 +109,10 @@ export function RunPage() {
 
   if (!run) return <p className="font-data text-[12px]">Loading…</p>;
 
-  // Friction proportional to risk (DESIGN §5.2 / §9): prod or destroy → type the env name first.
-  const highRisk = run.type === "destroy" || env.data?.tier === "prod";
+  // Friction proportional to risk (DESIGN §5.2 / §9): destroy, or a tier that requires four-eyes →
+  // type the env name first. Keyed to the tier's flag (not a hardcoded "prod") now tiers are custom.
+  const tierDef = catalog.data?.find((t) => t.name === env.data?.tier);
+  const highRisk = run.type === "destroy" || Boolean(tierDef?.requires_four_eyes);
   const onConfirmClick = () => {
     if (highRisk) setConfirming(true);
     else confirm.mutate();
@@ -101,6 +124,15 @@ export function RunPage() {
         <PhaseRail phases={buildPhases(run)} />
       </div>
       <div className="flex min-w-0 flex-1 flex-col gap-4">
+        {env.data && (
+          <Link
+            to={`/stacks/${env.data.stack_id}`}
+            className="font-data text-[12px]"
+            style={{ color: "var(--color-text-secondary)" }}
+          >
+            ← {stack.data?.name ?? "stack"}/{env.data.name}
+          </Link>
+        )}
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-3">
             <StateBadge state={run.state} mocked={run.used_mocks} fallback={run.used_secret_fallback} />
@@ -109,6 +141,16 @@ export function RunPage() {
             </span>
           </div>
           <div className="flex items-center gap-2">
+            {openThreads > 0 && (
+              <span
+                className="font-data inline-flex items-center gap-1 text-[12px]"
+                style={{ color: "var(--color-state-unconfirmed)" }}
+                title="Open discussion threads on this plan"
+              >
+                <TriangleAlert size={12} strokeWidth={1.75} aria-hidden />
+                {openThreads} open thread{openThreads > 1 ? "s" : ""}
+              </span>
+            )}
             <Button
               variant="accent"
               disabled={run.state !== "unconfirmed" || confirm.isPending || !env.data}
@@ -204,9 +246,33 @@ export function RunPage() {
           >
             {(logs.data ?? []).flatMap((chunk) =>
               chunk.lines.map((l, i) => (
-                <div key={`${chunk.phase}-${chunk.seq}-${i}`}>
-                  <span style={{ color: "var(--color-text-secondary)" }}>{chunk.section ?? chunk.phase} </span>
-                  {l.msg}
+                <div
+                  key={`${chunk.phase}-${chunk.seq}-${i}`}
+                  className="group flex items-start gap-2 whitespace-pre-wrap"
+                >
+                  {/* Hover affordance: anchor a comment to this plan line (SPECS §16.2). */}
+                  <button
+                    type="button"
+                    aria-label="Comment on this line"
+                    className="ui-btn shrink-0 opacity-0 group-hover:opacity-100"
+                    style={{ color: "var(--color-accent)" }}
+                    onClick={() =>
+                      setAnchorDraft({
+                        kind: "plan_line",
+                        phase: chunk.phase,
+                        seq: chunk.seq,
+                        line_start: i,
+                        line_end: i,
+                        snippet: l.msg.slice(0, 120),
+                      })
+                    }
+                  >
+                    <MessageSquarePlus size={13} strokeWidth={1.75} aria-hidden />
+                  </button>
+                  <span className="min-w-0">
+                    <span style={{ color: "var(--color-text-secondary)" }}>{chunk.section ?? chunk.phase} </span>
+                    <AnsiText text={l.msg} />
+                  </span>
                 </div>
               )),
             )}
@@ -215,6 +281,8 @@ export function RunPage() {
             )}
           </div>
         </Card>
+
+        <CommentsPanel runId={runId} anchorDraft={anchorDraft} onClearDraft={() => setAnchorDraft(null)} />
       </div>
     </div>
   );

@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { observability, workers } from "@/api/resources";
-import type { LogEntry } from "@/api/types";
+import type { HealthWorker, LogEntry } from "@/api/types";
 import { Button, Card, PageTitle, Select, TextInput } from "@/components/ui";
 
 function Metric({ label, value, tone }: { label: string; value: string | number; tone?: string }) {
@@ -24,6 +24,36 @@ const LEVEL_COLOR: Record<string, string> = {
   INFO: "var(--color-state-running)",
   DEBUG: "var(--color-text-secondary)",
 };
+
+function statusColor(status: number): string {
+  if (status >= 500) return "var(--color-state-failed)";
+  if (status >= 400) return "var(--color-state-unconfirmed)";
+  if (status >= 200 && status < 300) return "var(--color-state-finished)";
+  return "var(--color-text-secondary)";
+}
+
+// http.request access logs carry method/path/status/duration — render them instead of the bare
+// "request" message so a WARNING is self-explanatory (which route, what status, how slow).
+function HttpDetail({ e }: { e: LogEntry }) {
+  if (e.method === undefined || e.path === undefined) return null;
+  const slow = (e.duration_ms ?? 0) > 1500;
+  return (
+    <>
+      <span style={{ color: "var(--color-text-primary)" }}>
+        {e.method} {e.path}
+      </span>
+      {e.status !== undefined && (
+        <span style={{ color: statusColor(e.status) }}> → {e.status}</span>
+      )}
+      {e.duration_ms !== undefined && (
+        <span style={{ color: slow ? "var(--color-state-unconfirmed)" : "var(--color-text-secondary)" }}>
+          {" "}
+          · {e.duration_ms}ms{slow ? " (slow)" : ""}
+        </span>
+      )}
+    </>
+  );
+}
 
 function DiagnosticsPanel({ workerId, onClose }: { workerId: string; onClose: () => void }) {
   const request = useMutation({ mutationFn: () => workers.requestDiagnostics(workerId) });
@@ -114,7 +144,8 @@ function LogsPanel({ workerId, setWorkerId }: { workerId: string; setWorkerId: (
             <span style={{ color: LEVEL_COLOR[e.level] ?? "var(--color-text-secondary)" }}>{e.level.padEnd(5)} </span>
             <span style={{ color: "var(--color-text-secondary)" }}>{e.logger} </span>
             {e.event ? <span style={{ color: "var(--color-accent)" }}>{e.event} </span> : null}
-            {e.msg}
+            {/* For http access logs show method/path/status/duration; otherwise the message. */}
+            {e.method !== undefined ? <HttpDetail e={e} /> : e.msg}
             {e.run_id ? <span style={{ color: "var(--color-text-secondary)" }}> run={String(e.run_id).slice(0, 8)}</span> : null}
             {e.worker_id ? <span style={{ color: "var(--color-text-secondary)" }}> worker={String(e.worker_id).slice(0, 8)}</span> : null}
           </div>
@@ -125,6 +156,36 @@ function LogsPanel({ workerId, setWorkerId }: { workerId: string; setWorkerId: (
       </div>
     </Card>
   );
+}
+
+function LabelChips({ labels }: { labels: Record<string, unknown> | null }) {
+  const entries = Object.entries(labels ?? {});
+  if (entries.length === 0) return <span style={{ color: "var(--color-text-secondary)" }}>—</span>;
+  return (
+    <span className="flex flex-wrap gap-1">
+      {entries.map(([k, v]) => (
+        <span
+          key={k}
+          className="rounded-badge px-1.5 text-[11px]"
+          style={{ border: "1px solid var(--color-border)", color: "var(--color-text-secondary)" }}
+        >
+          {k}={String(v)}
+        </span>
+      ))}
+    </span>
+  );
+}
+
+// Workers are heterogeneous and routed by pool + labels (§7), so group them by pool — preserving
+// first-seen order — rather than showing one flat list.
+function groupByPool(items: HealthWorker[]): [string | null, HealthWorker[]][] {
+  const map = new Map<string | null, HealthWorker[]>();
+  for (const w of items) {
+    const list = map.get(w.pool) ?? [];
+    list.push(w);
+    map.set(w.pool, list);
+  }
+  return [...map.entries()];
 }
 
 export function HealthPage() {
@@ -150,39 +211,67 @@ export function HealthPage() {
           </div>
 
           <Card>
-            <div className="mb-2 text-[13px] font-medium">Workers</div>
+            <div className="mb-1 text-[13px] font-medium">Workers</div>
+            <div className="mb-3 text-[12px]" style={{ color: "var(--color-text-secondary)" }}>
+              Grouped by pool. A run is routed to a worker whose labels cover the environment's
+              labels — use labels to pin tool, version or architecture. Installed tool versions are
+              visible via Diagnostics.
+            </div>
             {h.workers.items.length === 0 ? (
               <p className="text-[13px]" style={{ color: "var(--color-text-secondary)" }}>
                 No workers registered. Start an agent with a pool token.
               </p>
             ) : (
-              <table className="w-full text-left font-data text-[12px]">
-                <thead>
-                  <tr style={{ color: "var(--color-text-secondary)" }}>
-                    <th className="py-1 pr-4">NAME</th>
-                    <th className="py-1 pr-4">STATUS</th>
-                    <th className="py-1 pr-4">LAST HEARTBEAT</th>
-                    <th className="py-1 pr-4">VERSION</th>
-                    <th className="py-1">DEBUG</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {h.workers.items.map((w) => (
-                    <tr key={w.id}>
-                      <td className="py-1 pr-4">{w.name}</td>
-                      <td className="py-1 pr-4" style={{ color: w.online ? "var(--color-state-finished)" : "var(--color-state-queued)" }}>
-                        {w.online ? "online" : w.status}
-                      </td>
-                      <td className="py-1 pr-4">{w.seconds_since_heartbeat != null ? `${w.seconds_since_heartbeat}s ago` : "—"}</td>
-                      <td className="py-1 pr-4">{w.version ?? "—"}</td>
-                      <td className="flex gap-2 py-1">
-                        <Button onClick={() => setDiagWorker(w.id)}>Diagnostics</Button>
-                        <Button onClick={() => setLogWorker(w.id)}>Logs</Button>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
+              <div className="flex flex-col gap-4">
+                {groupByPool(h.workers.items).map(([pool, items]) => (
+                  <div key={pool ?? "(no pool)"}>
+                    <div className="mb-1 flex flex-wrap items-center gap-2">
+                      <span className="text-[13px] font-medium">{pool ?? "(no pool)"}</span>
+                      <span className="font-data text-[12px]" style={{ color: "var(--color-text-secondary)" }}>
+                        {items.filter((w) => w.online).length}/{items.length} online
+                      </span>
+                      <LabelChips labels={items[0]?.pool_labels ?? null} />
+                    </div>
+                    <table className="w-full text-left font-data text-[12px]">
+                      <thead>
+                        <tr style={{ color: "var(--color-text-secondary)" }}>
+                          <th className="py-1 pr-4">NAME</th>
+                          <th className="py-1 pr-4">LABELS</th>
+                          <th className="py-1 pr-4">STATUS</th>
+                          <th className="py-1 pr-4">LAST HEARTBEAT</th>
+                          <th className="py-1 pr-4">AGENT</th>
+                          <th className="py-1">DEBUG</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {items.map((w) => (
+                          <tr key={w.id}>
+                            <td className="py-1 pr-4">{w.name}</td>
+                            <td className="py-1 pr-4">
+                              <LabelChips labels={w.labels} />
+                            </td>
+                            <td className="py-1 pr-4" style={{ color: w.online ? "var(--color-state-finished)" : "var(--color-state-queued)" }}>
+                              {w.online ? "online" : w.status}
+                            </td>
+                            <td className="py-1 pr-4">{w.seconds_since_heartbeat != null ? `${w.seconds_since_heartbeat}s ago` : "—"}</td>
+                            <td className="py-1 pr-4">{w.version ?? "—"}</td>
+                            <td className="flex gap-2 py-1">
+                              <Button
+                                onClick={() => setDiagWorker(w.id)}
+                                disabled={!w.online}
+                                title={w.online ? undefined : "Worker offline — it can't pick up a diagnostics request"}
+                              >
+                                Diagnostics
+                              </Button>
+                              <Button onClick={() => setLogWorker(w.id)}>Logs</Button>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                ))}
+              </div>
             )}
           </Card>
         </>

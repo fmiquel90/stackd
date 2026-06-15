@@ -1,18 +1,72 @@
 import { api } from "./client";
 import type {
   AuditEvent,
+  CommentAnchor,
   Environment,
   Health,
   LogChunk,
   LogEntry,
+  RunComment,
   QueueEntry,
+  RepoAuthKind,
   ResolvedVariable,
+  Role,
   Run,
   Stack,
   Tier,
+  TierDef,
   Tool,
+  User,
+  Variable,
+  VariableKind,
   VariableSet,
 } from "./types";
+
+export interface UserUpdate {
+  role?: Role;
+  allowed_tiers?: string[];
+  can_destroy?: boolean;
+  disabled?: boolean;
+}
+
+// Admin-only (server enforces require_role(admin); the UI also hides it for non-admins).
+export const users = {
+  list: () => api<User[]>("/users"),
+  update: (id: string, body: UserUpdate) => api<User>(`/users/${id}`, { method: "PATCH", body }),
+};
+
+// Configurable tier catalog (§2.4). Listing is open (forms need it); mutations are admin.
+export interface NewTier {
+  name: string;
+  requires_four_eyes?: boolean;
+  position?: number;
+}
+
+export const tiers = {
+  list: () => api<TierDef[]>("/tiers"),
+  create: (body: NewTier) => api<TierDef>("/tiers", { body }),
+  update: (id: string, body: { requires_four_eyes?: boolean; position?: number }) =>
+    api<TierDef>(`/tiers/${id}`, { method: "PATCH", body }),
+  remove: (id: string) => api<void>(`/tiers/${id}`, { method: "DELETE" }),
+};
+
+export interface StackPatch {
+  name?: string;
+  description?: string | null;
+  repo_url?: string;
+  repo_auth_kind?: RepoAuthKind;
+  repo_secret?: string; // write-only; "" clears it, omit to keep
+  webhook_secret?: string; // write-only HMAC secret; "" clears it, omit to keep
+  project_root?: string;
+  tool?: Tool;
+  tool_version?: string;
+}
+
+export interface CheckRepoResult {
+  ok: boolean;
+  branches: string[];
+  detail: string | null;
+}
 
 export interface NewStack {
   name: string;
@@ -35,9 +89,18 @@ export const stacks = {
   list: () => api<Stack[]>("/stacks"),
   get: (id: string) => api<Stack>(`/stacks/${id}`),
   create: (body: NewStack) => api<Stack>("/stacks", { body }),
+  update: (id: string, body: StackPatch) => api<Stack>(`/stacks/${id}`, { method: "PATCH", body }),
+  checkRepo: (id: string) =>
+    api<CheckRepoResult>(`/stacks/${id}/check-repo`, { method: "POST" }),
   environments: (id: string) => api<Environment[]>(`/stacks/${id}/environments`),
   createEnvironment: (id: string, body: NewEnvironment) =>
     api<Environment>(`/stacks/${id}/environments`, { body }),
+  // Stack-level variables (environment_id NULL — common to every env of the stack).
+  variables: (id: string) => api<Variable[]>(`/stacks/${id}/variables`),
+  addVariable: (id: string, body: NewVariable) =>
+    api<Variable>(`/stacks/${id}/variables`, { body }),
+  removeVariable: (id: string, varId: string) =>
+    api<void>(`/stacks/${id}/variables/${varId}`, { method: "DELETE" }),
 };
 
 export const environments = {
@@ -46,10 +109,42 @@ export const environments = {
     api<ResolvedVariable[]>(`/environments/${id}/resolved-variables`),
 };
 
+export interface NewVariable {
+  kind: VariableKind;
+  name: string;
+  value: string;
+  sensitive?: boolean;
+  hcl?: boolean;
+}
+
 export const variableSets = {
   list: () => api<VariableSet[]>("/variable-sets"),
   create: (body: { name: string; description?: string; auto_attach?: boolean }) =>
     api<VariableSet>("/variable-sets", { body }),
+  remove: (id: string) => api<void>(`/variable-sets/${id}`, { method: "DELETE" }),
+  variables: (setId: string) => api<Variable[]>(`/variable-sets/${setId}/variables`),
+  addVariable: (setId: string, body: NewVariable) =>
+    api<Variable>(`/variable-sets/${setId}/variables`, { body }),
+  updateVariable: (setId: string, varId: string, body: { value?: string; sensitive?: boolean }) =>
+    api<Variable>(`/variable-sets/${setId}/variables/${varId}`, { method: "PATCH", body }),
+  removeVariable: (setId: string, varId: string) =>
+    api<void>(`/variable-sets/${setId}/variables/${varId}`, { method: "DELETE" }),
+};
+
+export interface NewComment {
+  body: string;
+  anchor?: CommentAnchor | null;
+  parent_id?: string | null;
+}
+
+export const comments = {
+  list: (runId: string) => api<RunComment[]>(`/runs/${runId}/comments`),
+  create: (runId: string, body: NewComment) =>
+    api<RunComment>(`/runs/${runId}/comments`, { body }),
+  update: (runId: string, cid: string, body: { body?: string; resolved?: boolean }) =>
+    api<RunComment>(`/runs/${runId}/comments/${cid}`, { method: "PATCH", body }),
+  remove: (runId: string, cid: string) =>
+    api<void>(`/runs/${runId}/comments/${cid}`, { method: "DELETE" }),
 };
 
 export const runs = {

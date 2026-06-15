@@ -1,5 +1,14 @@
 export type Role = "reader" | "writer" | "approver" | "admin";
-export type Tier = "dev" | "staging" | "prod";
+// Tiers are a configurable catalog now (no fixed dev/staging/prod) — a tier is referenced by name.
+export type Tier = string;
+
+export interface TierDef {
+  id: string;
+  name: string;
+  requires_four_eyes: boolean;
+  position: number;
+  created_at: string;
+}
 
 export interface User {
   id: string;
@@ -7,7 +16,7 @@ export interface User {
   display_name: string | null;
   avatar_url: string | null;
   role: Role;
-  max_apply_tier: Tier | null;
+  allowed_tiers: string[];
   can_destroy: boolean;
   disabled: boolean;
   onboarded: boolean;
@@ -37,6 +46,7 @@ export interface Stack {
   repo_url: string;
   repo_auth_kind: RepoAuthKind;
   has_repo_secret: boolean;
+  has_webhook_secret: boolean;
   project_root: string;
   tool: Tool;
   tool_version: string;
@@ -83,6 +93,20 @@ export interface VariableSet {
   auto_attach: boolean;
 }
 
+export type SecretFallbackMode = "error" | "static" | "break_glass";
+
+export interface Variable {
+  id: string;
+  kind: VariableKind;
+  name: string;
+  sensitive: boolean;
+  hcl: boolean;
+  value: string | null; // masked ("•••") for sensitive / reference variables
+  secret_source_id: string | null;
+  secret_ref: string | null;
+  secret_fallback_mode: SecretFallbackMode | null;
+}
+
 export type RunState =
   | "queued"
   | "preparing"
@@ -123,6 +147,32 @@ export interface LogChunk {
   lines: { t: string; msg: string }[];
 }
 
+// Plan-review comment (SPECS §16). `anchor` is null for a general thread, or pins it to the plan.
+export interface CommentAnchor {
+  kind: "plan_line" | "resource";
+  phase?: string;
+  seq?: number;
+  line_start?: number;
+  line_end?: number;
+  snippet?: string;
+  address?: string;
+  action?: string;
+}
+
+export interface RunComment {
+  id: string;
+  run_id: string;
+  parent_id: string | null;
+  author_user_id: string | null;
+  author_email: string | null;
+  body: string;
+  anchor: CommentAnchor | null;
+  resolved: boolean;
+  resolved_by_user_id: string | null;
+  created_at: string;
+  edited_at: string | null;
+}
+
 export interface AuditEvent {
   id: string;
   actor_kind: string;
@@ -145,6 +195,9 @@ export interface QueueEntry {
 export interface HealthWorker {
   id: string;
   name: string;
+  pool: string | null;
+  pool_labels: Record<string, unknown> | null;
+  labels: Record<string, unknown> | null;
   status: string;
   online: boolean;
   last_heartbeat_at: string | null;
@@ -171,5 +224,10 @@ export interface LogEntry {
   run_id?: string;
   worker_id?: string;
   request_id?: string;
+  // http.request access logs carry these (see the API access-log middleware).
+  method?: string;
+  path?: string;
+  status?: number;
+  duration_ms?: number;
   [key: string]: unknown;
 }
