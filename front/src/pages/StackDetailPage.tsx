@@ -106,7 +106,7 @@ function CreateEnvForm({ stackId, onDone }: { stackId: string; onDone: () => voi
   const qc = useQueryClient();
   const catalog = useQuery({ queryKey: ["tiers"], queryFn: tiers.list });
   const tierNames = (catalog.data ?? []).map((t) => t.name);
-  const [form, setForm] = useState<NewEnvironment>({ name: "", tier: "", branch: "main" });
+  const [form, setForm] = useState<NewEnvironment>({ name: "", tier: "", branch: "main", managed_state: true });
   // Default the tier to the first catalog entry once it loads.
   useEffect(() => {
     if (!form.tier && tierNames.length > 0) setForm((f) => ({ ...f, tier: tierNames[0] }));
@@ -142,10 +142,22 @@ function CreateEnvForm({ stackId, onDone }: { stackId: string; onDone: () => voi
         <Field label="Branch">
           <TextInput value={form.branch} onChange={(e) => setForm({ ...form, branch: e.target.value })} />
         </Field>
+        <label className="flex items-center gap-2 pb-1.5 text-[13px]">
+          <input
+            type="checkbox"
+            checked={form.managed_state ?? true}
+            onChange={(e) => setForm({ ...form, managed_state: e.target.checked })}
+          />
+          managed state
+        </label>
         <Button type="submit" variant="accent" disabled={create.isPending || !form.tier}>
           Add environment
         </Button>
       </form>
+      <div className="mt-2 text-[12px]" style={{ color: "var(--color-text-secondary)" }}>
+        Managed state: Terraform talks to the platform's HTTP backend (state stored & locked by Stackd,
+        SPECS §11). Uncheck to keep your own backend configured in the repo.
+      </div>
       {create.isError && (
         <div className="mt-2 font-data text-[12px]" style={{ color: "var(--color-state-failed)" }}>
           {(create.error as Error).message}

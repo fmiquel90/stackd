@@ -62,7 +62,7 @@ export function SecretSourcesPanel({ spaceId }: { spaceId: string }) {
           <ItemTile key={s.id}>
             <div className="flex items-center justify-between gap-3">
               <div className="flex min-w-0 items-center gap-2">
-                <span className="text-[13px] font-medium">{s.name}</span>
+                <span className="font-data text-[13px] font-medium">{s.name}</span>
                 <Badge>{PROVIDERS[s.provider]?.label ?? s.provider}</Badge>
               </div>
               <div className="flex shrink-0 items-center gap-2">

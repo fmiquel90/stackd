@@ -62,7 +62,7 @@ export function HooksPanel({ scope, id }: { scope: HookScope; id: string }) {
               <div className="flex items-start justify-between gap-3">
                 <div className="flex min-w-0 flex-wrap items-center gap-2">
                   <Badge>{h.stage}</Badge>
-                  <span className="text-[13px] font-medium">{h.name}</span>
+                  <span className="font-data text-[13px] font-medium">{h.name}</span>
                   <Badge
                     color={
                       h.on_failure === "warn"

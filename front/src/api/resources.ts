@@ -90,6 +90,7 @@ export interface NewEnvironment {
   branch: string;
   protected?: boolean;
   autodeploy?: boolean;
+  managed_state?: boolean;
 }
 
 export const stacks = {

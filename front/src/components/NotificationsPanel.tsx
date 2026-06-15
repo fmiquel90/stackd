@@ -82,7 +82,7 @@ export function NotificationsPanel({ scope, id }: { scope: HookScope; id: string
                       : "var(--color-state-queued)",
                   }}
                 />
-                <span className="text-[13px] font-medium">{t.name}</span>
+                <span className="font-data text-[13px] font-medium">{t.name}</span>
                 <Badge icon={t.kind === "slack" ? MessageSquare : Webhook}>{t.kind}</Badge>
                 <span className="font-data text-[11px]" style={{ color: "var(--color-text-secondary)" }}>
                   {t.enabled ? "enabled" : "disabled"}
