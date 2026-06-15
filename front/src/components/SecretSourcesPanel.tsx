@@ -1,8 +1,18 @@
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { X } from "lucide-react";
-import { type NewSecretSource, secretSourcesApi } from "@/api/resources";
+import { type NewSecretSource, type SecretProvider, secretSourcesApi } from "@/api/resources";
 import { Button, Card, Field, Select, TextInput } from "@/components/ui";
+
+// Per-provider specifics: the credential's name and the reference (locator) format both differ —
+// e.g. Proton Pass uses pass://… while Vault/AWS would use their own. Add an entry per provider.
+const PROVIDERS: Record<SecretProvider, { label: string; credential: string; refExample: string }> = {
+  proton_pass: {
+    label: "Proton Pass",
+    credential: "Proton PAT / AI Access Token",
+    refExample: "pass://vault/item/field",
+  },
+};
 
 // Manage the external secret sources of a space (SPECS §15.1). Sources are space-scoped; variables
 // in any stack of the space reference them. The bootstrap credential is write-only — never shown.
@@ -32,9 +42,10 @@ export function SecretSourcesPanel({ spaceId }: { spaceId: string }) {
     <Card>
       <div className="mb-1 text-[13px] font-medium">Secret sources</div>
       <div className="mb-2 text-[12px]" style={{ color: "var(--color-text-secondary)" }}>
-        Inject variable values straight from a secrets manager. A variable points at a source via a{" "}
-        <span className="font-data">pass://vault/item/field</span> reference; the value is fetched
-        live at run time and never stored here.
+        Inject variable values straight from a secrets manager. A variable points at a source via a
+        provider-specific reference (for {PROVIDERS[form.provider].label}:{" "}
+        <span className="font-data">{PROVIDERS[form.provider].refExample}</span>); the value is
+        fetched live at run time and never stored here.
       </div>
 
       <div className="flex flex-col gap-1">
@@ -85,14 +96,20 @@ export function SecretSourcesPanel({ spaceId }: { spaceId: string }) {
               setForm({ ...form, provider: e.target.value as NewSecretSource["provider"] })
             }
           >
-            <option value="proton_pass">Proton Pass</option>
+            {(Object.entries(PROVIDERS) as [SecretProvider, (typeof PROVIDERS)[SecretProvider]][]).map(
+              ([value, meta]) => (
+                <option key={value} value={value}>
+                  {meta.label}
+                </option>
+              ),
+            )}
           </Select>
         </Field>
         <Field label="Bootstrap token (write-only)">
           <TextInput
             type="password"
             value={form.bootstrap_secret}
-            placeholder="Proton PAT / AI Access Token"
+            placeholder={PROVIDERS[form.provider].credential}
             onChange={(e) => setForm({ ...form, bootstrap_secret: e.target.value })}
             required
           />
