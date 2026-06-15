@@ -84,7 +84,7 @@ async def _matching_targets(
     return [t for t in rows if to_state in (t.on_states or [])]
 
 
-async def _deliver(target: NotificationTarget, body: dict) -> bool:
+async def deliver(target: NotificationTarget, body: dict) -> bool:
     async with httpx.AsyncClient(timeout=_HTTP_TIMEOUT) as http:
         resp = await http.post(target.url, json=body)
         resp.raise_for_status()
@@ -136,7 +136,7 @@ async def dispatch_pending(session: AsyncSession, now: datetime, *, limit: int =
         ok = True
         for target in targets:
             try:
-                await _deliver(target, _render(target, to_state, run, stack, env))
+                await deliver(target, _render(target, to_state, run, stack, env))
             except Exception as exc:  # external endpoint — never crash the loop
                 ok = False
                 _log.warning(

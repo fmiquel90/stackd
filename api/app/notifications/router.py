@@ -15,6 +15,7 @@ from app.errors import ProblemException
 from app.models.environment import Environment
 from app.models.notification import NotificationTarget
 from app.models.stack import Stack
+from app.notifications.dispatcher import deliver
 from app.notifications.schemas import NotificationCreate, NotificationOut, NotificationUpdate
 
 # Outbound notification targets: where run events (awaiting-confirmation / finished / failed) are
@@ -123,6 +124,25 @@ async def _delete(session: AsyncSession, user: CurrentUser, t: NotificationTarge
     await session.commit()
 
 
+def _test_payload(t: NotificationTarget) -> dict:
+    """A delivery clearly flagged as a test, so a real run is never mistaken for one."""
+    if t.kind.value == "slack":
+        return {"text": "🧪 *Stackd test notification* — your Slack webhook is configured (test)."}
+    return {
+        "event": "notification.test",
+        "test": True,
+        "message": "Stackd test notification — your webhook is configured.",
+    }
+
+
+async def _send_test(t: NotificationTarget) -> dict:
+    try:
+        await deliver(t, _test_payload(t))
+    except Exception as exc:  # external endpoint failure → surface as a 502 with the reason
+        raise ProblemException(502, "Test delivery failed", str(exc)) from exc
+    return {"ok": True}
+
+
 # --- stack-level ---
 
 
@@ -174,6 +194,13 @@ async def delete_stack_notification(
     await _delete(
         session, user, await _get_owned(session, target_id, AttachmentTarget.stack, stack_id)
     )
+
+
+@router.post("/stacks/{stack_id}/notifications/{target_id}/test", dependencies=[Writer])
+async def test_stack_notification(
+    stack_id: uuid.UUID, target_id: uuid.UUID, _: CurrentUser, session: DbSession
+) -> dict:
+    return await _send_test(await _get_owned(session, target_id, AttachmentTarget.stack, stack_id))
 
 
 # --- environment-level ---
@@ -232,4 +259,13 @@ async def delete_env_notification(
         session,
         user,
         await _get_owned(session, target_id, AttachmentTarget.environment, env_id),
+    )
+
+
+@router.post("/environments/{env_id}/notifications/{target_id}/test", dependencies=[Writer])
+async def test_env_notification(
+    env_id: uuid.UUID, target_id: uuid.UUID, _: CurrentUser, session: DbSession
+) -> dict:
+    return await _send_test(
+        await _get_owned(session, target_id, AttachmentTarget.environment, env_id)
     )

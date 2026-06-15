@@ -91,3 +91,30 @@ async def test_feed_is_per_user_and_mark_read(client: httpx.AsyncClient) -> None
     assert any(not n["read"] for n in before)
     await client.post("/api/v1/notifications/read", headers=alice, json={})
     assert all(n["read"] for n in await _bell(client, alice))
+
+
+async def test_delete_and_clear_read(client: httpx.AsyncClient) -> None:
+    admin = await login(client, "admin")
+    alice = await login(client, "alice")
+    wh = await register_worker(client, admin, "pool-inbox-5")
+    stack = await make_stack(client, admin, "inbox5-stack")
+    env_id = await make_env(client, admin, stack, "prod", "prod")
+    bob = await login(client, "bob")
+    await _drive_to_unconfirmed(client, wh, env_id, bob)
+
+    feed = await _bell(client, alice)
+    nid = feed[0]["id"]
+    # Delete a single notification (own only).
+    assert (await client.delete(f"/api/v1/notifications/{nid}", headers=alice)).status_code == 204
+    assert all(n["id"] != nid for n in await _bell(client, alice))
+    # Another user can't delete it (404, not found for them).
+    other = await _bell(client, alice)
+    if other:
+        assert (
+            await client.delete(f"/api/v1/notifications/{other[0]['id']}", headers=bob)
+        ).status_code == 404
+
+    # Clear-all-read removes read ones, keeps unread.
+    await client.post("/api/v1/notifications/read", headers=alice, json={})
+    assert (await client.delete("/api/v1/notifications", headers=alice)).status_code == 204
+    assert await _bell(client, alice) == []

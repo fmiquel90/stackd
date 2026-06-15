@@ -6,11 +6,12 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel, ConfigDict
-from sqlalchemy import select, update
+from sqlalchemy import delete, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.deps import CurrentUser
 from app.db import get_session
+from app.errors import ProblemException
 from app.models.user_notification import UserNotification
 
 router = APIRouter(prefix="/api/v1/notifications", tags=["notifications-inbox"])
@@ -75,4 +76,24 @@ async def mark_read(body: MarkRead, user: CurrentUser, session: DbSession) -> No
     if body.ids:
         stmt = stmt.where(UserNotification.id.in_(body.ids))
     await session.execute(stmt)
+    await session.commit()
+
+
+@router.delete("/{nid}", status_code=204)
+async def delete_notification(nid: uuid.UUID, user: CurrentUser, session: DbSession) -> None:
+    n = await session.get(UserNotification, nid)
+    if n is None or n.user_id != user.id:
+        raise ProblemException(404, "Notification not found", None)
+    await session.delete(n)
+    await session.commit()
+
+
+@router.delete("", status_code=204)
+async def clear_read(user: CurrentUser, session: DbSession) -> None:
+    """Dismiss all already-read notifications (keep unread ones)."""
+    await session.execute(
+        delete(UserNotification).where(
+            UserNotification.user_id == user.id, UserNotification.read_at.is_not(None)
+        )
+    )
     await session.commit()

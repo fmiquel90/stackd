@@ -43,6 +43,34 @@ async def test_notification_target_crud(client: httpx.AsyncClient) -> None:
     deleted = await client.delete(f"/api/v1/stacks/{stack}/notifications/{tid}", headers=admin)
     assert deleted.status_code == 204
 
+
+async def test_send_test_notification(
+    client: httpx.AsyncClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from app.notifications import router as notif_router
+
+    admin = await login(client, "admin")
+    stack = await make_stack(client, admin, "notif-test")
+    tid = (
+        await client.post(
+            f"/api/v1/stacks/{stack}/notifications",
+            headers=admin,
+            json={"name": "ops", "kind": "slack", "url": "https://hooks.example/x"},
+        )
+    ).json()["id"]
+
+    captured: list[dict] = []
+
+    async def fake_deliver(target, body):  # type: ignore[no-untyped-def]
+        captured.append(body)
+        return True
+
+    monkeypatch.setattr(notif_router, "deliver", fake_deliver)
+    r = await client.post(f"/api/v1/stacks/{stack}/notifications/{tid}/test", headers=admin)
+    assert r.status_code == 200 and r.json()["ok"] is True
+    # The payload is explicitly flagged as a test (slack → "test" in the text).
+    assert "test" in captured[0]["text"].lower()
+
     audit = await client.get(
         "/api/v1/audit", headers=admin, params={"target_kind": "notification_target"}
     )
@@ -128,7 +156,7 @@ async def test_dispatcher_delivers_to_matching_targets(
         captured.append((target.url, body))
         return True
 
-    monkeypatch.setattr(dispatcher, "_deliver", fake_deliver)
+    monkeypatch.setattr(dispatcher, "deliver", fake_deliver)
 
     run_id = await _drive_to_unconfirmed(client, wh, env, admin)
 
