@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { X } from "lucide-react";
 import { dependenciesApi, graphApi, stacks } from "@/api/resources";
 import { Button, Card, Field, Select, TextInput } from "@/components/ui";
 
@@ -61,8 +62,8 @@ export function DependenciesPanel({ envId }: { envId: string }) {
             <span style={{ color: "var(--color-text-secondary)" }}>
               {d.references.map((r) => `${r.output_name}→${r.input_name}${r.has_mock ? " (mock)" : ""}`).join(", ")}
             </span>
-            <button type="button" onClick={() => remove.mutate(d.id)} style={{ color: "var(--color-text-secondary)" }}>
-              ✕
+            <button type="button" aria-label="Delete dependency" onClick={() => remove.mutate(d.id)} style={{ color: "var(--color-text-secondary)" }}>
+              <X size={13} strokeWidth={1.75} aria-hidden />
             </button>
           </div>
         ))}

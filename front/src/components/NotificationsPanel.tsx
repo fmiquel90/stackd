@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { X } from "lucide-react";
 import {
   notificationsApi,
   type HookScope,
@@ -70,10 +71,11 @@ export function NotificationsPanel({ scope, id }: { scope: HookScope; id: string
             </button>
             <button
               type="button"
+              aria-label="Delete notification target"
               onClick={() => remove.mutate(t.id)}
               style={{ color: "var(--color-text-secondary)" }}
             >
-              ✕
+              <X size={13} strokeWidth={1.75} aria-hidden />
             </button>
           </div>
         ))}

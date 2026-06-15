@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { X } from "lucide-react";
 import { hooksApi, type HookScope, type HookStage } from "@/api/resources";
 import { Button, Card, Field, Select, TextInput } from "@/components/ui";
 
@@ -46,8 +47,8 @@ export function HooksPanel({ scope, id }: { scope: HookScope; id: string }) {
             <span style={{ color: h.on_failure === "warn" ? "var(--color-state-unconfirmed)" : "var(--color-state-failed)" }}>
               {h.on_failure}
             </span>
-            <button type="button" onClick={() => remove.mutate(h.id)} style={{ color: "var(--color-text-secondary)" }}>
-              ✕
+            <button type="button" aria-label="Delete hook" onClick={() => remove.mutate(h.id)} style={{ color: "var(--color-text-secondary)" }}>
+              <X size={13} strokeWidth={1.75} aria-hidden />
             </button>
           </div>
         ))}
