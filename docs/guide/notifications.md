@@ -14,6 +14,28 @@ A **notification target** is an outbound webhook attached to a **stack** or an *
 
 Default `on_states` is `["unconfirmed", "failed"]`. Two kinds exist: `slack` posts `{"text": …}` to a Slack/Mattermost incoming webhook (with a deep link to the run), and `webhook` posts a structured JSON envelope (state, run id, stack/env, tier, commit, url). Deep links use `STACKD_APP_URL`, the SPA base.
 
+## Setting up Slack
+
+The `slack` kind posts to a **Slack incoming webhook** — a URL Slack gives you that drops a message into one channel. No bot token, no scopes.
+
+1. Go to **api.slack.com/apps → Create New App → From scratch**, pick your workspace.
+2. Open **Incoming Webhooks** and toggle it **On**.
+3. **Add New Webhook to Workspace**, choose the target channel, **Allow**.
+4. Copy the URL — it looks like `https://hooks.slack.com/services/T000/B000/XXXX`. That's the `url` you give Stackd.
+
+[Mattermost](https://docs.mattermost.com/developer/webhooks-incoming.html) incoming webhooks accept the same `{"text": …}` payload — use the `slack` kind with the Mattermost URL.
+
+!!! tip "Verify before you rely on it"
+    After creating a target, hit **test** (UI) or `POST …/notifications/{id}/test` (API). It delivers a message **explicitly flagged as a test** (`🧪 … (test)` for Slack, `{"event":"notification.test","test":true}` for a webhook), so you can confirm the URL works without waiting for a real run — and no one mistakes it for a real event.
+
+## Setting up a generic webhook
+
+The `webhook` kind POSTs the JSON envelope (see [below](#a-generic-webhook-target)) to any HTTPS endpoint you control (a CI bridge, a Lambda URL, an internal service).
+
+- **Method/format**: `POST`, `Content-Type: application/json`.
+- **No signature**: outbound notification webhooks are **not** HMAC-signed (unlike *inbound* GitHub webhooks, which use `stacks.webhook_secret`). Treat the URL itself as the secret — use an unguessable path or a token your receiver checks — and prefer an endpoint reachable only over TLS.
+- **Idempotency**: delivery is at-least-once (see [Delivery guarantees](#delivery-guarantees)); key on `run_id` + `state` so a retry is a no-op.
+
 ## Ping the approver when a prod plan is waiting
 
 Attach a Slack target to a production environment. It pings on `unconfirmed` (something to approve) and on `failed`:
