@@ -91,6 +91,7 @@ export const stacks = {
   get: (id: string) => api<Stack>(`/stacks/${id}`),
   create: (body: NewStack) => api<Stack>("/stacks", { body }),
   update: (id: string, body: StackPatch) => api<Stack>(`/stacks/${id}`, { method: "PATCH", body }),
+  remove: (id: string) => api<void>(`/stacks/${id}`, { method: "DELETE" }),
   checkRepo: (id: string) =>
     api<CheckRepoResult>(`/stacks/${id}/check-repo`, { method: "POST" }),
   environments: (id: string) => api<Environment[]>(`/stacks/${id}/environments`),

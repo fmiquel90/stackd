@@ -1,9 +1,55 @@
 import { useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useNavigate } from "react-router-dom";
 import { type StackPatch, stacks } from "@/api/resources";
 import type { RepoAuthKind, Tool } from "@/api/types";
 import { useIsAdmin } from "@/auth/session";
 import { Button, Card, Field, Select, TextInput } from "@/components/ui";
+
+// Deleting a stack cascades its environments, runs and state — high impact, so we gate it behind a
+// type-the-name confirmation (friction proportional to risk, DESIGN §5.2).
+function DeleteStackPanel({ stackId, name }: { stackId: string; name: string }) {
+  const qc = useQueryClient();
+  const navigate = useNavigate();
+  const [typed, setTyped] = useState("");
+  const remove = useMutation({
+    mutationFn: () => stacks.remove(stackId),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["stacks"] });
+      navigate("/stacks");
+    },
+  });
+  return (
+    <Card>
+      <div className="mb-1 text-[13px] font-medium" style={{ color: "var(--color-state-failed)" }}>
+        Danger zone
+      </div>
+      <div className="mb-2 text-[12px]" style={{ color: "var(--color-text-secondary)" }}>
+        Deleting this stack removes all its environments, runs, state history and config. This cannot
+        be undone.
+      </div>
+      <div className="flex items-end gap-2">
+        <Field label={`Type "${name}" to confirm`}>
+          <TextInput value={typed} onChange={(e) => setTyped(e.target.value)} />
+        </Field>
+        <button
+          type="button"
+          className="ui-btn rounded-base px-3 py-1.5 text-[13px] font-medium disabled:opacity-50"
+          style={{ border: "1px solid var(--color-state-failed)", color: "var(--color-state-failed)" }}
+          disabled={typed !== name || remove.isPending}
+          onClick={() => remove.mutate()}
+        >
+          Delete stack
+        </button>
+      </div>
+      {remove.isError && (
+        <div className="mt-2 font-data text-[12px]" style={{ color: "var(--color-state-failed)" }}>
+          {(remove.error as Error).message}
+        </div>
+      )}
+    </Card>
+  );
+}
 
 interface FormState {
   name: string;
@@ -51,6 +97,7 @@ export function StackGeneralPanel({ stackId }: { stackId: string }) {
   const check = useMutation({ mutationFn: () => stacks.checkRepo(stackId) });
 
   if (!form || !stack) return <span className="font-data text-[12px]">Loading…</span>;
+  const stackName = stack.name;
 
   const submit = () => {
     const body: StackPatch = {
@@ -70,6 +117,7 @@ export function StackGeneralPanel({ stackId }: { stackId: string }) {
   const set = (patch: Partial<FormState>) => setForm((f) => (f ? { ...f, ...patch } : f));
 
   return (
+    <div className="flex flex-col gap-4">
     <Card>
       <form
         className="flex flex-col gap-3"
@@ -173,5 +221,7 @@ export function StackGeneralPanel({ stackId }: { stackId: string }) {
         </div>
       )}
     </Card>
+      {isAdmin && <DeleteStackPanel stackId={stackId} name={stackName} />}
+    </div>
   );
 }
