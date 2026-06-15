@@ -112,6 +112,7 @@ export const environments = {
   get: (id: string) => api<Environment>(`/environments/${id}`),
   resolvedVariables: (id: string) =>
     api<ResolvedVariable[]>(`/environments/${id}/resolved-variables`),
+  remove: (id: string) => api<void>(`/environments/${id}`, { method: "DELETE" }),
 };
 
 export interface NewVariable {

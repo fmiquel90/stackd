@@ -4,6 +4,7 @@ import { Link, useNavigate, useParams } from "react-router-dom";
 import { ChevronDown, ChevronRight } from "lucide-react";
 import { environments, runs, stacks, tiers, type NewEnvironment } from "@/api/resources";
 import type { Environment } from "@/api/types";
+import { useIsAdmin } from "@/auth/session";
 import { StateBadge } from "@/components/StateBadge";
 import { ProvenanceBadge, parseProvenance } from "@/components/ProvenanceBadge";
 import { CloudPanel } from "@/components/CloudPanel";
@@ -131,7 +132,16 @@ function PlanButton({ envId }: { envId: string }) {
   );
 }
 
-type EnvTab = "inputs" | "deps" | "hooks" | "notify" | "cloud" | "state" | "command" | "promote";
+type EnvTab =
+  | "inputs"
+  | "deps"
+  | "hooks"
+  | "notify"
+  | "cloud"
+  | "state"
+  | "command"
+  | "promote"
+  | "danger";
 
 const ENV_TABS: { key: EnvTab; label: string }[] = [
   { key: "inputs", label: "Inputs" },
@@ -144,13 +154,55 @@ const ENV_TABS: { key: EnvTab; label: string }[] = [
   { key: "promote", label: "Promote" },
 ];
 
+// Deleting an environment cascades its runs and state — type-the-name confirmation (DESIGN §5.2).
+function DeleteEnvPanel({ env }: { env: Environment }) {
+  const qc = useQueryClient();
+  const [typed, setTyped] = useState("");
+  const remove = useMutation({
+    mutationFn: () => environments.remove(env.id),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["environments", env.stack_id] }),
+  });
+  return (
+    <Card>
+      <div className="mb-1 text-[13px] font-medium" style={{ color: "var(--color-state-failed)" }}>
+        Delete environment
+      </div>
+      <div className="mb-2 text-[12px]" style={{ color: "var(--color-text-secondary)" }}>
+        Removes this environment and all its runs and state history. This cannot be undone.
+      </div>
+      <div className="flex items-end gap-2">
+        <Field label={`Type "${env.name}" to confirm`}>
+          <TextInput value={typed} onChange={(e) => setTyped(e.target.value)} />
+        </Field>
+        <button
+          type="button"
+          className="ui-btn rounded-base px-3 py-1.5 text-[13px] font-medium disabled:opacity-50"
+          style={{ border: "1px solid var(--color-state-failed)", color: "var(--color-state-failed)" }}
+          disabled={typed !== env.name || remove.isPending}
+          onClick={() => remove.mutate()}
+        >
+          Delete environment
+        </button>
+      </div>
+      {remove.isError && (
+        <div className="mt-2 font-data text-[12px]" style={{ color: "var(--color-state-failed)" }}>
+          {(remove.error as Error).message}
+        </div>
+      )}
+    </Card>
+  );
+}
+
 // One environment row. The daily action (Plan) is the sole accent CTA; the eight config sections are
 // folded behind a single "Configure" disclosure that reveals a tab bar (progressive disclosure —
 // only one panel shown at a time) instead of cramming nine buttons on the row.
 function EnvCard({ env, siblings }: { env: Environment; siblings: { id: string; name: string }[] }) {
+  const isAdmin = useIsAdmin();
   const [expanded, setExpanded] = useState(false);
   const [tab, setTab] = useState<EnvTab>("inputs");
   const Chevron = expanded ? ChevronDown : ChevronRight;
+  // Deleting an env is admin-only in the UI (the API allows writer); appended as a Danger tab.
+  const tabs = isAdmin ? [...ENV_TABS, { key: "danger" as EnvTab, label: "Danger" }] : ENV_TABS;
 
   return (
     <Card>
@@ -183,7 +235,7 @@ function EnvCard({ env, siblings }: { env: Environment; siblings: { id: string; 
       </div>
       {expanded && (
         <div className="mt-3 flex flex-col gap-3">
-          <Tabs tabs={ENV_TABS} active={tab} onChange={setTab} />
+          <Tabs tabs={tabs} active={tab} onChange={setTab} />
           {tab === "inputs" && <ResolvedVariables envId={env.id} />}
           {tab === "deps" && <DependenciesPanel envId={env.id} />}
           {tab === "hooks" && <HooksPanel scope="environments" id={env.id} />}
@@ -192,6 +244,7 @@ function EnvCard({ env, siblings }: { env: Environment; siblings: { id: string; 
           {tab === "state" && <StatePanel envId={env.id} />}
           {tab === "command" && <CommandPanel envId={env.id} />}
           {tab === "promote" && <PromotePanel envId={env.id} siblings={siblings} />}
+          {tab === "danger" && isAdmin && <DeleteEnvPanel env={env} />}
         </div>
       )}
     </Card>
