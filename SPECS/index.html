@@ -1796,6 +1796,78 @@
   
 </li>
       
+        <li class="md-nav__item">
+  <a href="#16-plan-review-comments-highlights-post-mvp" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        16. Plan review — comments &amp; highlights (post-MVP)
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="16. Plan review — comments &amp; highlights (post-MVP)">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#161-model" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        16.1 Model
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#162-anchors-polymorphic" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        16.2 Anchors (polymorphic)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#163-api" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        16.3 API
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#164-interaction-with-the-gate" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        16.4 Interaction with the gate
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#165-invariants-preserved" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        16.5 Invariants preserved
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
     </ul>
   
 </nav>
@@ -2830,6 +2902,78 @@
     <span class="md-ellipsis">
       
         15.8 Invariants preserved
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#16-plan-review-comments-highlights-post-mvp" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        16. Plan review — comments &amp; highlights (post-MVP)
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="16. Plan review — comments &amp; highlights (post-MVP)">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#161-model" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        16.1 Model
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#162-anchors-polymorphic" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        16.2 Anchors (polymorphic)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#163-api" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        16.3 API
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#164-interaction-with-the-gate" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        16.4 Interaction with the gate
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#165-invariants-preserved" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        16.5 Invariants preserved
       
     </span>
   </a>
@@ -4036,6 +4180,95 @@ mock badge). Plan of a <code>used_secret_fallback</code> run is always allowed; 
    <code>allow_fallback_apply</code>.</li>
 <li>Run state only changes through <code>transition()</code> (invariant §4.2): no new state; failure path uses
    <code>→ failed</code>, break-glass uses the normal trigger path.</li>
+</ol>
+<hr />
+<h2 id="16-plan-review-comments-highlights-post-mvp">16. Plan review — comments &amp; highlights (post-MVP)<a class="headerlink" href="#16-plan-review-comments-highlights-post-mvp" title="Permanent link">&para;</a></h2>
+<blockquote>
+<p>Status: <strong>post-MVP</strong>, additive. Turns the approval gate into a collaborative review: an open
+discussion thread on a run, with comments optionally <strong>anchored</strong> to a part of the plan. Built on
+existing substrate — immutable run logs (the anchor target), <code>LISTEN/NOTIFY</code> (live updates, §5.3),
+the approval gate (§4). No run-state change; <code>transition()</code> is untouched.</p>
+</blockquote>
+<h3 id="161-model">16.1 Model<a class="headerlink" href="#161-model" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-44-1" name="__codelineno-44-1" href="#__codelineno-44-1"></a><span class="k">CREATE</span><span class="w"> </span><span class="k">TABLE</span><span class="w"> </span><span class="n">run_comments</span><span class="w"> </span><span class="p">(</span>
+<a id="__codelineno-44-2" name="__codelineno-44-2" href="#__codelineno-44-2"></a><span class="w">    </span><span class="n">id</span><span class="w">                  </span><span class="n">uuid</span><span class="w"> </span><span class="k">PRIMARY</span><span class="w"> </span><span class="k">KEY</span><span class="w"> </span><span class="k">DEFAULT</span><span class="w"> </span><span class="n">uuidv7</span><span class="p">(),</span>
+<a id="__codelineno-44-3" name="__codelineno-44-3" href="#__codelineno-44-3"></a><span class="w">    </span><span class="n">run_id</span><span class="w">              </span><span class="n">uuid</span><span class="w"> </span><span class="k">NOT</span><span class="w"> </span><span class="k">NULL</span><span class="w"> </span><span class="k">REFERENCES</span><span class="w"> </span><span class="n">runs</span><span class="p">(</span><span class="n">id</span><span class="p">)</span><span class="w"> </span><span class="k">ON</span><span class="w"> </span><span class="k">DELETE</span><span class="w"> </span><span class="k">CASCADE</span><span class="p">,</span>
+<a id="__codelineno-44-4" name="__codelineno-44-4" href="#__codelineno-44-4"></a><span class="w">    </span><span class="n">parent_id</span><span class="w">           </span><span class="n">uuid</span><span class="w"> </span><span class="k">REFERENCES</span><span class="w"> </span><span class="n">run_comments</span><span class="p">(</span><span class="n">id</span><span class="p">)</span><span class="w"> </span><span class="k">ON</span><span class="w"> </span><span class="k">DELETE</span><span class="w"> </span><span class="k">CASCADE</span><span class="p">,</span><span class="w">  </span><span class="c1">-- thread reply</span>
+<a id="__codelineno-44-5" name="__codelineno-44-5" href="#__codelineno-44-5"></a><span class="w">    </span><span class="n">author_user_id</span><span class="w">      </span><span class="n">uuid</span><span class="w"> </span><span class="k">REFERENCES</span><span class="w"> </span><span class="n">users</span><span class="p">(</span><span class="n">id</span><span class="p">),</span>
+<a id="__codelineno-44-6" name="__codelineno-44-6" href="#__codelineno-44-6"></a><span class="w">    </span><span class="n">author_email</span><span class="w">        </span><span class="nb">text</span><span class="p">,</span><span class="w">            </span><span class="c1">-- denormalized, readable if the user is later removed</span>
+<a id="__codelineno-44-7" name="__codelineno-44-7" href="#__codelineno-44-7"></a><span class="w">    </span><span class="n">body</span><span class="w">                </span><span class="nb">text</span><span class="w"> </span><span class="k">NOT</span><span class="w"> </span><span class="k">NULL</span><span class="p">,</span>
+<a id="__codelineno-44-8" name="__codelineno-44-8" href="#__codelineno-44-8"></a><span class="w">    </span><span class="n">anchor</span><span class="w">              </span><span class="n">jsonb</span><span class="p">,</span><span class="w">           </span><span class="c1">-- NULL = general comment; else a polymorphic anchor (§16.2)</span>
+<a id="__codelineno-44-9" name="__codelineno-44-9" href="#__codelineno-44-9"></a><span class="w">    </span><span class="n">resolved_at</span><span class="w">         </span><span class="n">timestamptz</span><span class="p">,</span>
+<a id="__codelineno-44-10" name="__codelineno-44-10" href="#__codelineno-44-10"></a><span class="w">    </span><span class="n">resolved_by_user_id</span><span class="w"> </span><span class="n">uuid</span><span class="w"> </span><span class="k">REFERENCES</span><span class="w"> </span><span class="n">users</span><span class="p">(</span><span class="n">id</span><span class="p">),</span>
+<a id="__codelineno-44-11" name="__codelineno-44-11" href="#__codelineno-44-11"></a><span class="w">    </span><span class="n">created_at</span><span class="w">          </span><span class="n">timestamptz</span><span class="w"> </span><span class="k">NOT</span><span class="w"> </span><span class="k">NULL</span><span class="w"> </span><span class="k">DEFAULT</span><span class="w"> </span><span class="n">now</span><span class="p">(),</span>
+<a id="__codelineno-44-12" name="__codelineno-44-12" href="#__codelineno-44-12"></a><span class="w">    </span><span class="n">edited_at</span><span class="w">           </span><span class="n">timestamptz</span>
+<a id="__codelineno-44-13" name="__codelineno-44-13" href="#__codelineno-44-13"></a><span class="p">);</span>
+</code></pre></div>
+<p>Comments are <strong>per run</strong> — each plan is a distinct artifact, so a new run starts a fresh discussion.</p>
+<h3 id="162-anchors-polymorphic">16.2 Anchors (polymorphic)<a class="headerlink" href="#162-anchors-polymorphic" title="Permanent link">&para;</a></h3>
+<p>An anchor pins a comment to a part of the plan. Two kinds (a comment with no anchor is a general
+thread):</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-45-1" name="__codelineno-45-1" href="#__codelineno-45-1"></a>// v1 — a range of plan log lines (the rendered, already-masked plan output)
+<a id="__codelineno-45-2" name="__codelineno-45-2" href="#__codelineno-45-2"></a>{ &quot;kind&quot;: &quot;plan_line&quot;, &quot;phase&quot;: &quot;planning&quot;, &quot;seq&quot;: 3, &quot;line_start&quot;: 12, &quot;line_end&quot;: 14,
+<a id="__codelineno-45-3" name="__codelineno-45-3" href="#__codelineno-45-3"></a>  &quot;snippet&quot;: &quot;~ aws_s3_bucket.logs&quot; }
+<a id="__codelineno-45-4" name="__codelineno-45-4" href="#__codelineno-45-4"></a>// v2 — a Terraform resource address (from the structured plan.json)
+<a id="__codelineno-45-5" name="__codelineno-45-5" href="#__codelineno-45-5"></a>{ &quot;kind&quot;: &quot;resource&quot;, &quot;address&quot;: &quot;aws_s3_bucket.logs&quot;, &quot;action&quot;: &quot;update&quot; }
+</code></pre></div>
+<p>The <code>plan_line</code> anchor targets <code>run_logs</code> (<code>(run_id, phase, seq)</code> is immutable and idempotent, §5.2),
+so the anchor is stable for the life of the run. The <code>snippet</code> is copied from the <strong>masked</strong> log line
+(<code>run_logs.lines[].msg</code>), so an anchor can never carry a secret (invariant §13.3). <code>resource</code> anchors
+(v2) require serving the structured plan; the column is polymorphic so v2 needs no migration.</p>
+<h3 id="163-api">16.3 API<a class="headerlink" href="#163-api" title="Permanent link">&para;</a></h3>
+<p><code>/api/v1/runs/{run_id}/comments</code> — listing &amp; posting are open to any authenticated user
+(collaboration, reader+); editing a body is author-only; resolving a thread needs the author or
+<code>role ∈ {approver, admin}</code>; deleting needs the author or admin.</p>
+<table>
+<thead>
+<tr>
+<th>Method</th>
+<th>Path</th>
+<th>Who</th>
+<th>Effect</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>GET</td>
+<td><code>/comments</code></td>
+<td>any auth</td>
+<td>list (oldest first; replies carry <code>parent_id</code>)</td>
+</tr>
+<tr>
+<td>POST</td>
+<td><code>/comments</code></td>
+<td>any auth</td>
+<td>create <code>{body, anchor?, parent_id?}</code></td>
+</tr>
+<tr>
+<td>PATCH</td>
+<td><code>/comments/{id}</code></td>
+<td>author / approver</td>
+<td>edit <code>body</code> (author) and/or <code>resolved</code> (author or approver+)</td>
+</tr>
+<tr>
+<td>DELETE</td>
+<td><code>/comments/{id}</code></td>
+<td>author / admin</td>
+<td>delete (cascades replies)</td>
+</tr>
+</tbody>
+</table>
+<p>Every create/edit/delete/resolve emits a light <code>pg_notify('run_&lt;id&gt;', …)</code> (§5.3) so the run page's
+existing WS subscription invalidates <code>["run-comments", run_id]</code> and the thread updates live.</p>
+<h3 id="164-interaction-with-the-gate">16.4 Interaction with the gate<a class="headerlink" href="#164-interaction-with-the-gate" title="Permanent link">&para;</a></h3>
+<p><strong>Advisory</strong> at v1: the run page shows the count of open (unresolved) threads next to the Confirm
+button; it does <strong>not</strong> block. (<code>can_apply</code> and the §9.3/§15.5 gates are untouched.) A future opt-in
+env flag could make confirm require all threads resolved — deliberately deferred.</p>
+<h3 id="165-invariants-preserved">16.5 Invariants preserved<a class="headerlink" href="#165-invariants-preserved" title="Permanent link">&para;</a></h3>
+<ol>
+<li>No run-state change — comments are a side record; <code>transition()</code> (invariant §4.2) is untouched.</li>
+<li>Snippets come from already-masked log lines, so no secret leaks (invariant §13.3).</li>
+<li>Live updates reuse <code>LISTEN/NOTIFY</code> (§5.3) — no new transport.</li>
 </ol>
 
 
