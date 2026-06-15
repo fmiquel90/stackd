@@ -13,6 +13,7 @@ import {
 import { environments, observability, runs, stacks } from "@/api/resources";
 import type { User } from "@/api/types";
 import { useLogout } from "@/auth/session";
+import { NotificationBell } from "@/components/NotificationBell";
 import { AuditPage } from "@/pages/AuditPage";
 import { GraphPage } from "@/pages/GraphPage";
 import { HealthPage } from "@/pages/HealthPage";
@@ -184,6 +185,7 @@ function TopBar({ user }: { user: User }) {
       <Breadcrumb />
       <div className="flex items-center gap-3">
         <HealthDot />
+        <NotificationBell userId={user.id} />
         <span className="font-data text-[12px]" style={{ color: "var(--color-text-secondary)" }}>
           {user.email}
         </span>

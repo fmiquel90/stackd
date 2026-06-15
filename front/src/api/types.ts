@@ -147,6 +147,23 @@ export interface LogChunk {
   lines: { t: string; msg: string }[];
 }
 
+export type NotificationKindInbox =
+  | "approval_request"
+  | "run_finished"
+  | "run_failed"
+  | "comment_reply"
+  | "mention";
+
+export interface UserNotification {
+  id: string;
+  kind: NotificationKindInbox;
+  run_id: string | null;
+  comment_id: string | null;
+  context: Record<string, unknown> | null;
+  read: boolean;
+  created_at: string;
+}
+
 // Plan-review comment (SPECS §16). `anchor` is null for a general thread, or pins it to the plan.
 export interface CommentAnchor {
   kind: "plan_line" | "resource";

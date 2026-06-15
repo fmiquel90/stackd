@@ -17,6 +17,7 @@ import type {
   TierDef,
   Tool,
   User,
+  UserNotification,
   Variable,
   VariableKind,
   VariableSet,
@@ -168,6 +169,13 @@ export const COMMANDS_MUTATING = ["import", "state rm", "state mv", "taint", "un
 
 export const queue = {
   list: () => api<QueueEntry[]>("/queue"),
+};
+
+// In-app notification center (§17) — the current user's inbox.
+export const inbox = {
+  list: () => api<UserNotification[]>("/notifications"),
+  markRead: (ids?: string[]) =>
+    api<void>("/notifications/read", { method: "POST", body: { ids: ids ?? null } }),
 };
 
 export const audit = {
