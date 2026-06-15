@@ -1318,7 +1318,7 @@
 </code></pre></div>
 <h3 id="fields-that-matter">Fields that matter<a class="headerlink" href="#fields-that-matter" title="Permanent link">&para;</a></h3>
 <ul>
-<li><strong><code>tier</code></strong> (<code>dev &lt; staging &lt; prod</code>) — carries apply/destroy permissions: <code>can_apply</code> requires <code>max_apply_tier &gt;= env.tier</code>. See <a href="../runs-and-approvals/">Runs &amp; approvals</a>.</li>
+<li><strong><code>tier</code></strong> (a configurable catalog, e.g. <code>dev</code>/<code>staging</code>/<code>prod</code>/<code>qa</code>) — carries apply/destroy permissions: <code>can_apply</code> requires <code>env.tier ∈ user.allowed_tiers</code>. See <a href="../runs-and-approvals/">Runs &amp; approvals</a>.</li>
 <li><strong><code>branch</code></strong> — the branch this environment tracks for staleness and webhook-driven runs.</li>
 <li><strong><code>protected</code></strong> — forces confirmation and 4-eyes; it is <strong>not</strong> the access control (that is <code>tier</code>).</li>
 <li><strong><code>require_second_pair_of_eyes</code></strong> — the triggerer cannot confirm (already implied for <code>tier=prod</code>; useful on staging).</li>

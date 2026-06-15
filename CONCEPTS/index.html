@@ -1682,14 +1682,15 @@ index). Two environments of the same stack can run in parallel; two runs on the 
 <ul>
 <li><strong><code>role</code></strong> (global capability): <code>reader &lt; writer &lt; approver &lt; admin</code>. <em>What</em> you can do in nature
   (read, manage config, confirm, administer).</li>
-<li><strong><code>tier</code></strong> on the environment (<code>dev &lt; staging &lt; prod</code>) × <strong><code>max_apply_tier</code></strong> ceiling on the user.
-  <em>Where</em> you can apply.</li>
+<li><strong><code>tier</code></strong> on the environment (a configurable catalog, e.g. <code>dev</code>/<code>staging</code>/<code>prod</code>/<code>qa</code>) ×
+  <strong><code>allowed_tiers</code></strong> set on the user. <em>Where</em> you can apply.</li>
 </ul>
 <blockquote>
 <p><strong>Anyone (writer+) can trigger a plan on any environment</strong> — a plan changes nothing. Only the
 <strong>apply confirmation</strong> is gated.</p>
 </blockquote>
-<p><code>can_apply(user, env)</code> = <code>role ∈ {approver, admin}</code> <strong>AND</strong> <code>max_apply_tier ≥ env.tier</code>.</p>
+<p><code>can_apply(user, env)</code> = <code>role ∈ {approver, admin}</code> <strong>AND</strong> <code>env.tier ∈ user.allowed_tiers</code> (set
+membership — tiers are not ordered, so a grant can be non-contiguous like <code>{dev, prod}</code>).</p>
 <p><strong>Examples:</strong></p>
 <table>
 <thead>
@@ -2066,7 +2067,7 @@ and POSTs. Consequences worth knowing:</p>
 </tr>
 <tr>
 <td><strong>Tier</strong></td>
-<td><code>dev&lt;staging&lt;prod</code>; gates apply via <code>max_apply_tier</code></td>
+<td>configurable catalog; gates apply via the user's <code>allowed_tiers</code> set (not ordered)</td>
 </tr>
 <tr>
 <td><strong>4-eyes</strong></td>

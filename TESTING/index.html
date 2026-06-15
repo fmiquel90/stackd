@@ -1128,10 +1128,10 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
-  <a href="#api-unit-integration-apitests-73-tests" class="md-nav__link">
+  <a href="#api-unit-integration-apitests-84-tests" class="md-nav__link">
     <span class="md-ellipsis">
       
-        API — unit &amp; integration (api/tests/, 73 tests)
+        API — unit &amp; integration (api/tests/, 84 tests)
       
     </span>
   </a>
@@ -1353,10 +1353,10 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
-  <a href="#api-unit-integration-apitests-73-tests" class="md-nav__link">
+  <a href="#api-unit-integration-apitests-84-tests" class="md-nav__link">
     <span class="md-ellipsis">
       
-        API — unit &amp; integration (api/tests/, 73 tests)
+        API — unit &amp; integration (api/tests/, 84 tests)
       
     </span>
   </a>
@@ -1600,7 +1600,7 @@ throwaway one). <code>task e2e</code> points pytest at <code>e2e</code> explicit
 no DB, no network.</p>
 <hr />
 <h2 id="4-test-map-what-each-test-asserts">4. Test map (what each test asserts)<a class="headerlink" href="#4-test-map-what-each-test-asserts" title="Permanent link">&para;</a></h2>
-<h3 id="api-unit-integration-apitests-73-tests">API — unit &amp; integration (<code>api/tests/</code>, 73 tests)<a class="headerlink" href="#api-unit-integration-apitests-73-tests" title="Permanent link">&para;</a></h3>
+<h3 id="api-unit-integration-apitests-84-tests">API — unit &amp; integration (<code>api/tests/</code>, 84 tests)<a class="headerlink" href="#api-unit-integration-apitests-84-tests" title="Permanent link">&para;</a></h3>
 <p><strong><code>test_auth.py</code> (5)</strong> — auth flow &amp; session security
 - <code>test_dev_login_personas</code> — persona login returns the user (role/tier) + a usable access token.
 - <code>test_refresh_requires_csrf</code> — <code>/refresh</code> rejects a request missing the <code>X-CSRF-Token</code> (double-submit).
@@ -1610,16 +1610,17 @@ no DB, no network.</p>
 <p><strong><code>test_audit.py</code> (2)</strong> — the who-did-what journal
 - <code>test_audit_filter_and_export</code> — mutations land in <code>/audit</code>; filtering by action works; CSV export has the right columns.
 - <code>test_audit_export_admin_only</code> — a non-admin gets 403 on export.</p>
-<p><strong><code>test_permissions.py</code> (5)</strong> — <code>can_apply</code> logic (pure, no HTTP)
-- <code>test_approver_prod_can_apply_prod</code> — approver with <code>max_apply_tier=prod</code> may apply prod.
+<p><strong><code>test_permissions.py</code> (6)</strong> — <code>can_apply</code> logic (pure, no HTTP)
+- <code>test_approver_can_apply_allowed_tier</code> — approver whose <code>allowed_tiers</code> contains the env tier may apply.
 - <code>test_writer_cannot_confirm</code> — a writer is refused (apply needs approver+); the reason mentions the role.
-- <code>test_apply_everywhere_except_prod</code> — an approver capped at <code>staging</code> may apply dev/staging, not prod.
-- <code>test_no_tier_cannot_apply</code> — <code>max_apply_tier=None</code> → denied.
+- <code>test_membership_not_linear</code> — a non-contiguous set <code>{dev, prod}</code> applies dev/prod, refused on staging.
+- <code>test_no_tiers_cannot_apply</code> — empty <code>allowed_tiers</code> → denied.
+- <code>test_custom_tier</code> — a custom tier (<code>qa</code>) in the set is honored.
 - <code>test_destroy_requires_can_destroy</code> — destroy needs <code>can_destroy</code> on top of <code>can_apply</code>.</p>
 <p><strong><code>test_runs.py</code> (7)</strong> — the run lifecycle &amp; its gates
 - <code>test_full_run_lifecycle</code> — trigger → claim → plan events → unconfirmed → confirm → apply → finished.
 - <code>test_one_active_run_per_env_under_concurrency</code> — two workers claim the same env → exactly one wins, the loser is netted by <code>23505</code>.
-- <code>test_confirm_blocked_by_tier</code> — confirming above one's <code>max_apply_tier</code> → 403.
+- <code>test_confirm_blocked_by_tier</code> — confirming a tier not in one's <code>allowed_tiers</code> → 403.
 - <code>test_four_eyes_on_prod</code> — the triggerer can't confirm their own prod run; a second person can.
 - <code>test_autodeploy_and_warn_forces_unconfirmed</code> — autodeploy auto-confirms, but a <code>warn</code> check forces <code>unconfirmed</code>.
 - <code>test_confirm_rejected_when_not_unconfirmed</code> — confirming a non-<code>unconfirmed</code> run → 409.
@@ -1675,6 +1676,17 @@ no DB, no network.</p>
 - <code>test_override_requires_apply_permission</code> — a writer (no apply right) supplying <code>secret_overrides</code> → 403.
 - <code>test_source_crud_hides_bootstrap_and_gates_writes</code> — a writer can't create a source (admin-only); the bootstrap credential is never serialized.
 - <code>test_source_in_use_cannot_be_deleted</code> — deleting a source a variable still references → 409 (FK RESTRICT).</p>
+<p><strong><code>test_tiers.py</code> (4)</strong> — configurable tier catalog (§2.4)
+- <code>test_tier_name_charset_rejected</code> — names with <code>:</code>/whitespace/uppercase → 422 (OIDC <code>sub</code> safety).
+- <code>test_update_user_rejects_unknown_tier</code> — <code>allowed_tiers</code> validated against the catalog → 422.
+- <code>test_delete_tier_strips_user_grants</code> — deleting a tier removes its name from every user's set (no resurrection).
+- <code>test_delete_tier_in_use_blocked</code> — deleting a tier an env references → 409.</p>
+<p><strong><code>test_comments.py</code> (5)</strong> — plan-review comments (§16)
+- <code>test_comment_thread_and_anchor</code> — general + anchored (<code>plan_line</code>) comment + a reply; listed together.
+- <code>test_anchor_validation</code> — a <code>plan_line</code> anchor missing <code>phase</code>/<code>seq</code> → 422.
+- <code>test_no_nested_replies</code> — replying to a reply → 422 (threads stay one level deep).
+- <code>test_resolve_and_edit_permissions</code> — non-author can't edit the body; an approver may resolve; author edits own.
+- <code>test_delete_only_author_or_admin</code> — an approver ≠ author is refused (403); an admin can delete.</p>
 <p><strong><code>test_notifications.py</code> (4)</strong> — outbound notifications
 - <code>test_notification_target_crud</code> — create/list/patch/delete a target (default <code>on_states=[unconfirmed, failed]</code>); each mutation audited.
 - <code>test_rejects_unsupported_state</code> — an <code>on_states</code> value that never fires → 422.
@@ -1740,8 +1752,8 @@ identity components are instead pinned by <strong>Ladle stories</strong> (the DE
 <tbody>
 <tr>
 <td><code>api/tests</code></td>
-<td>20</td>
-<td>73</td>
+<td>22</td>
+<td>84</td>
 </tr>
 <tr>
 <td><code>api/e2e</code></td>
@@ -1755,8 +1767,8 @@ identity components are instead pinned by <strong>Ladle stories</strong> (the DE
 </tr>
 <tr>
 <td><strong>Total</strong></td>
-<td><strong>23</strong></td>
-<td><strong>81</strong></td>
+<td><strong>25</strong></td>
+<td><strong>92</strong></td>
 </tr>
 </tbody>
 </table>

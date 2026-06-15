@@ -1319,10 +1319,12 @@ run's state out of band.</p>
 <p>Confirming an apply requires <strong>both</strong>:</p>
 <ol>
 <li><strong>Role</strong> ∈ <code>{approver, admin}</code> — a <code>writer</code> may trigger a plan but never approve.</li>
-<li><strong><code>max_apply_tier</code> ≥ the environment's <code>tier</code></strong> (<code>dev &lt; staging &lt; prod</code>). An approver capped at
-   <code>staging</code> can apply dev/staging, not prod.</li>
+<li><strong>The environment's <code>tier</code> is in your <code>allowed_tiers</code></strong> set. Tiers are a configurable catalog
+   (not an ordered <code>dev&lt;staging&lt;prod</code>), so a grant can be non-contiguous — e.g. <code>{dev, prod}</code>
+   confirms in dev and prod but not staging.</li>
 </ol>
-<p>A <code>destroy</code> run additionally requires the <code>can_destroy</code> permission.</p>
+<p>A <code>destroy</code> run additionally requires the <code>can_destroy</code> permission. A tier flagged
+<code>requires_four_eyes</code> (e.g. <code>prod</code>) also forces the triggerer ≠ the confirmer.</p>
 <table>
 <thead>
 <tr>

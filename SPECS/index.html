@@ -3038,7 +3038,7 @@
 <h3 id="22-table-users">2.2 Table <code>users</code><a class="headerlink" href="#22-table-users" title="Permanent link">&para;</a></h3>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>id uuid PK, google_sub text unique, email text, display_name, avatar_url,
 <a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a>role enum(admin|approver|writer|reader),    -- global capabilities (§2.3)
-<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a>max_apply_tier enum(dev|staging|prod) nullable,  -- max tier where the user can confirm an apply (§2.4)
+<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a>allowed_tiers text[] not null default &#39;{}&#39;,  -- set of tiers where the user can confirm an apply (§2.4)
 <a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a>can_destroy bool default false,             -- right to trigger/confirm a destroy run (§2.4)
 <a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a>disabled bool, last_login_at, created_at
 </code></pre></div>
@@ -3094,19 +3094,21 @@
 </table>
 <p>Triggering a plan ≠ confirming: any writer+ can <strong>prepare</strong> a plan on any env (a plan changes nothing), prod included. Only the <strong>confirmation</strong> of the apply is guarded by the tier — which lets a writer build a prod plan that an authorized approver will confirm.</p>
 <h3 id="24-per-environment-permissions-tier-destroy">2.4 Per-environment permissions — tier &amp; destroy<a class="headerlink" href="#24-per-environment-permissions-tier-destroy" title="Permanent link">&para;</a></h3>
-<p>The "apply everywhere except prod" need depends on the targeted environment, not just on the user. We express it through a <strong>tier</strong> on the environment and a <strong>cap</strong> on the user, rather than through a full policy system (sufficient for the vast majority of orgs; per-space RBAC remains Phase 7).</p>
+<p>The "apply everywhere except prod" need depends on the targeted environment, not just on the user. We express it through a <strong>tier</strong> on the environment and a <strong>set of allowed tiers</strong> on the user, rather than through a full policy system (sufficient for the vast majority of orgs; per-space RBAC remains Phase 7).</p>
+<blockquote>
+<p><strong>Set-based, not linear</strong> (evolved from the original MVP design): tiers are a <strong>configurable catalog</strong> (<code>tiers</code> table — <code>name</code> unique, <code>requires_four_eyes</code>, <code>position</code>), not a fixed <code>dev&lt;staging&lt;prod</code> enum, and a user carries a <strong>set</strong> of allowed tiers, not a single ceiling. This expresses custom tiers (<code>qa</code>, <code>preprod</code>, <code>sandbox</code>) and <strong>non-contiguous</strong> grants (e.g. <code>dev</code>+<code>prod</code> but not <code>staging</code>) that the old linear ceiling could not.</p>
+</blockquote>
 <ul>
-<li><code>environments.tier</code> enum(<code>dev</code>|<code>staging</code>|<code>prod</code>) — implicit ordering <code>dev &lt; staging &lt; prod</code>.</li>
-<li><code>users.max_apply_tier</code> — maximum tier where the user can <strong>confirm an apply</strong>. NULL = none (can read and plan, never apply).</li>
-<li>Apply rule: <code>confirm</code> allowed iff <code>role ∈ {approver, admin}</code> <strong>AND</strong> <code>max_apply_tier &gt;= env.tier</code>. Example: Bob <code>max_apply_tier=staging</code> confirms in dev/staging, denied in prod; Alice <code>prod</code> confirms everywhere.</li>
+<li><code>environments.tier</code> text — references <code>tiers.name</code> (validated against the catalog on env create/update). No ordering.</li>
+<li><code>users.allowed_tiers</code> text[] — the set of tiers where the user can <strong>confirm an apply</strong>. Empty = none (can read and plan, never apply). Each entry is validated against the catalog; deleting a tier strips it from every user's set (no FK on the array, so this is enforced in app code).</li>
+<li>Apply rule: <code>confirm</code> allowed iff <code>role ∈ {approver, admin}</code> <strong>AND</strong> <code>env.tier ∈ allowed_tiers</code> (set membership). Example: Bob <code>{dev, staging}</code> confirms in dev/staging, denied in prod; Alice <code>{dev, staging, prod}</code> confirms everywhere; a user <code>{dev, prod}</code> skips staging.</li>
 <li><code>users.can_destroy</code> — a run <code>type=destroy</code> (trigger AND confirm) requires <code>can_destroy=true</code> <strong>in addition</strong> to the tier rule. A destruction is more dangerous than an apply: a distinct, explicit right.</li>
 </ul>
-<p><strong>Relationship with <code>protected</code></strong>: we <strong>decouple</strong> sensitivity and access right, which were mixed until now. <code>environments.protected</code> now carries only its own effects — forcing confirmation (no autodeploy) and enabling 4-eyes; <em>who</em> can confirm now comes from the tier. Consequence: an env can be <code>tier=prod</code> without being <code>protected</code> (restricted apply but autodeploy possible for the authorized) and vice versa.</p>
-<p><strong>4-eyes / tier consistency</strong>: for <code>tier=prod</code> environments, self-confirmation is forbidden by default (the triggerer ≠ the confirmer), whether <code>require_second_pair_of_eyes</code> is checked or not — the rule follows from the tier instead of being a flag to maintain everywhere.</p>
+<p><strong>Relationship with <code>protected</code></strong>: we <strong>decouple</strong> sensitivity and access right. <code>environments.protected</code> carries only its own effects — forcing confirmation (no autodeploy) and enabling 4-eyes; <em>who</em> can confirm comes from the tier set. An env can be <code>tier=prod</code> without being <code>protected</code> and vice versa.</p>
+<p><strong>4-eyes / tier consistency</strong>: a tier with <code>requires_four_eyes=true</code> (seeded on <code>prod</code>; was hardcoded to the prod tier, now a per-tier flag) forces self-confirmation off by default (the triggerer ≠ the confirmer), as does the per-env <code>require_second_pair_of_eyes</code>. The check <strong>fails closed</strong>: if an env points at a tier that no longer exists in the catalog, four-eyes is required rather than silently dropped.</p>
 <p><strong>Scope of 4-eyes</strong>: the "triggerer ≠ confirmer" rule only bites on runs with a <strong>human</strong> triggerer (<code>triggered_by=manual</code>, <code>trigger_user_id</code> set). A run with no human at its origin (<code>webhook</code>, <code>dependency</code>) has no <code>trigger_user_id</code>: any confirmer authorized at the tier can confirm it (there is no one to oppose). This is not a bypass — the access guard remains the tier (<code>can_apply</code>); 4-eyes only prevents <em>the same person</em> from triggering <strong>and</strong> confirming.</p>
-<p><strong>Double-lock boundary</strong>: when workload OIDC is active (§10), the prod apply restriction must <strong>also</strong> live in the AWS trust policy (<code>sub</code> claim filtered on <code>run:prod:*:apply</code>), not only in Stackd — otherwise bypassing the API bypasses the control. Both layers express the same rule; the <code>tier</code> feeds the token's <code>sub</code> (§10.2).</p>
-<p><strong>Assumed limitation</strong>: the tier is linear (nested rights: whoever can prod can do anything). An env "sensitive but not prod" (customer sandbox, compliance) is not expressed cleanly and would then justify explicit per-env permissions — out of MVP scope.</p>
-<p>Per-env option <code>require_second_pair_of_eyes</code>: the triggerer cannot confirm (redundant with the prod tier rule, useful for staging).</p>
+<p><strong>Double-lock boundary</strong>: when workload OIDC is active (§10), the apply restriction must <strong>also</strong> live in the AWS trust policy (<code>sub</code> claim filtered on <code>run:&lt;tier&gt;:*:apply</code>), not only in Stackd — otherwise bypassing the API bypasses the control. Both layers express the same rule; the <code>tier</code> <strong>name</strong> feeds the token's <code>sub</code> (§10.2). Tier names are charset-constrained (<code>^[a-z0-9][a-z0-9-]*$</code>, no <code>:</code>/whitespace) precisely so a crafted name can't alias another tier's <code>sub</code> segment.</p>
+<p>Per-env option <code>require_second_pair_of_eyes</code>: the triggerer cannot confirm (forces 4-eyes on a tier that does not itself require it).</p>
 <h3 id="25-table-refresh_tokens">2.5 Table <code>refresh_tokens</code><a class="headerlink" href="#25-table-refresh_tokens" title="Permanent link">&para;</a></h3>
 <p>Rotation with reuse detection (§2.1, step 7) requires persisting refresh tokens by <strong>family</strong>:</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="n">refresh_tokens</span><span class="w"> </span><span class="p">(</span>
@@ -3147,7 +3149,7 @@
 </blockquote>
 <h3 id="32-environments-the-executable-instance">3.2 <code>environments</code> — the executable instance<a class="headerlink" href="#32-environments-the-executable-instance" title="Permanent link">&para;</a></h3>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a>id uuid PK, stack_id FK, name text unique(stack),       -- dev, staging, prod
-<a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a>tier enum(dev|staging|prod),       -- §2.4: carries the apply/destroy permissions
+<a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a>tier text references tiers.name,   -- §2.4: carries the apply/destroy permissions (catalog, not enum)
 <a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a>branch text,                       -- branch tracked by THIS env
 <a id="__codelineno-5-4" name="__codelineno-5-4" href="#__codelineno-5-4"></a>autodeploy bool,                   -- forced false if protected
 <a id="__codelineno-5-5" name="__codelineno-5-5" href="#__codelineno-5-5"></a>protected bool,                    -- §2.4: forces confirmation + 4-eyes (NOT the access control → tier)
@@ -3373,7 +3375,7 @@
 <tr>
 <td><code>unconfirmed → confirmed</code></td>
 <td>user</td>
-<td><code>can_apply(user, env)</code> = role∈{approver,admin} AND <code>max_apply_tier &gt;= env.tier</code> (§2.4); ≠ triggerer if tier=prod or 4-eyes; for a <code>destroy</code> run: <code>can_destroy</code> required; <strong>blocked if <code>used_mocks</code> and <code>allow_mock_apply=false</code></strong></td>
+<td><code>can_apply(user, env)</code> = role∈{approver,admin} AND <code>env.tier ∈ allowed_tiers</code> (§2.4); ≠ triggerer if the tier requires four-eyes or 4-eyes; for a <code>destroy</code> run: <code>can_destroy</code> required; <strong>blocked if <code>used_mocks</code> and <code>allow_mock_apply=false</code></strong></td>
 </tr>
 <tr>
 <td><code>confirmed → applying</code></td>
@@ -3473,6 +3475,8 @@
 <a id="__codelineno-20-13" name="__codelineno-20-13" href="#__codelineno-20-13"></a>worker.diagnostics_requested                  # read-only debug bundle (cf. §observability)
 <a id="__codelineno-20-14" name="__codelineno-20-14" href="#__codelineno-20-14"></a>hook.* (created|updated|deleted)
 <a id="__codelineno-20-15" name="__codelineno-20-15" href="#__codelineno-20-15"></a>user.role_changed / user.apply_tier_changed / user.destroy_permission_changed / user.disabled
+<a id="__codelineno-20-16" name="__codelineno-20-16" href="#__codelineno-20-16"></a>tier.created / tier.updated / tier.deleted     # configurable tier catalog (§2.4)
+<a id="__codelineno-20-17" name="__codelineno-20-17" href="#__codelineno-20-17"></a>secret_source.* (created|updated|token_rotated|deleted) / secret.fallback_used / secret.fallback_overridden / secret.unavailable  # §15
 </code></pre></div>
 <p><code>run.confirmed</code> + <code>run.applied</code> = the answer to "who applied what": Google identity of the confirmer, env, commit, plan summary, assumed IAM role (if OIDC), link to the logs.</p>
 <h3 id="63-assumed-double-write">6.3 Assumed double write<a class="headerlink" href="#63-assumed-double-write" title="Permanent link">&para;</a></h3>
@@ -3924,34 +3928,40 @@ uses the public URL (the operator runs locally). For stacks that should keep the
 <a id="__codelineno-37-44" name="__codelineno-37-44" href="#__codelineno-37-44"></a>
 <a id="__codelineno-37-45" name="__codelineno-37-45" href="#__codelineno-37-45"></a># Users &amp; permissions (admin)
 <a id="__codelineno-37-46" name="__codelineno-37-46" href="#__codelineno-37-46"></a>GET   /api/v1/users
-<a id="__codelineno-37-47" name="__codelineno-37-47" href="#__codelineno-37-47"></a>PATCH /api/v1/users/{id}     # role, max_apply_tier, can_destroy, disabled (audited)
+<a id="__codelineno-37-47" name="__codelineno-37-47" href="#__codelineno-37-47"></a>PATCH /api/v1/users/{id}     # role, allowed_tiers, can_destroy, disabled (audited)
 <a id="__codelineno-37-48" name="__codelineno-37-48" href="#__codelineno-37-48"></a>
-<a id="__codelineno-37-49" name="__codelineno-37-49" href="#__codelineno-37-49"></a># Workers &amp; execution queue
-<a id="__codelineno-37-50" name="__codelineno-37-50" href="#__codelineno-37-50"></a>GET|POST|DELETE /api/v1/worker-pools ; GET /api/v1/workers
-<a id="__codelineno-37-51" name="__codelineno-37-51" href="#__codelineno-37-51"></a>GET /api/v1/queue          # runs in progress + waiting, with computed blocking reason
-<a id="__codelineno-37-52" name="__codelineno-37-52" href="#__codelineno-37-52"></a>                           # (active_run|env_locked|no_compatible_worker|apply_affinity_hold)
-<a id="__codelineno-37-53" name="__codelineno-37-53" href="#__codelineno-37-53"></a>POST|GET /api/v1/workers/{id}/diagnostics   # admin: read-only debug bundle (via heartbeat)
+<a id="__codelineno-37-49" name="__codelineno-37-49" href="#__codelineno-37-49"></a># Tiers (catalog, §2.4) — listing open; create/update/delete admin
+<a id="__codelineno-37-50" name="__codelineno-37-50" href="#__codelineno-37-50"></a>GET /api/v1/tiers ; POST /api/v1/tiers ; PATCH|DELETE /api/v1/tiers/{id}
+<a id="__codelineno-37-51" name="__codelineno-37-51" href="#__codelineno-37-51"></a>
+<a id="__codelineno-37-52" name="__codelineno-37-52" href="#__codelineno-37-52"></a># Plan-review comments (§16)
+<a id="__codelineno-37-53" name="__codelineno-37-53" href="#__codelineno-37-53"></a>GET|POST /api/v1/runs/{id}/comments ; PATCH|DELETE /api/v1/runs/{id}/comments/{cid}
 <a id="__codelineno-37-54" name="__codelineno-37-54" href="#__codelineno-37-54"></a>
-<a id="__codelineno-37-55" name="__codelineno-37-55" href="#__codelineno-37-55"></a># Observability &amp; onboarding
-<a id="__codelineno-37-56" name="__codelineno-37-56" href="#__codelineno-37-56"></a>GET /api/v1/health         # DB, workers (online + heartbeat), active/waiting runs, recent errors
-<a id="__codelineno-37-57" name="__codelineno-37-57" href="#__codelineno-37-57"></a>GET /api/v1/logs           # admin: structured JSON buffer, filters level/event/worker_id/run_id/q
-<a id="__codelineno-37-58" name="__codelineno-37-58" href="#__codelineno-37-58"></a>POST /api/v1/auth/me/onboarded              # marks the walkthrough seen (persisted server-side)
-<a id="__codelineno-37-59" name="__codelineno-37-59" href="#__codelineno-37-59"></a>
-<a id="__codelineno-37-60" name="__codelineno-37-60" href="#__codelineno-37-60"></a># State
-<a id="__codelineno-37-61" name="__codelineno-37-61" href="#__codelineno-37-61"></a>GET /api/v1/environments/{id}/state/versions[...]
-<a id="__codelineno-37-62" name="__codelineno-37-62" href="#__codelineno-37-62"></a>DELETE /api/v1/environments/{id}/state/lock              # force-unlock (admin, audited)
-<a id="__codelineno-37-63" name="__codelineno-37-63" href="#__codelineno-37-63"></a>
-<a id="__codelineno-37-64" name="__codelineno-37-64" href="#__codelineno-37-64"></a># Webhooks
-<a id="__codelineno-37-65" name="__codelineno-37-65" href="#__codelineno-37-65"></a>POST /api/v1/webhooks/github                             # HMAC
-<a id="__codelineno-37-66" name="__codelineno-37-66" href="#__codelineno-37-66"></a>
-<a id="__codelineno-37-67" name="__codelineno-37-67" href="#__codelineno-37-67"></a># Worker API (agents — detail §7)
-<a id="__codelineno-37-68" name="__codelineno-37-68" href="#__codelineno-37-68"></a>POST /worker/v1/register | /heartbeat | /jobs/claim
-<a id="__codelineno-37-69" name="__codelineno-37-69" href="#__codelineno-37-69"></a>POST /worker/v1/jobs/{id}/events | /jobs/{id}/logs
-<a id="__codelineno-37-70" name="__codelineno-37-70" href="#__codelineno-37-70"></a>PUT  /worker/v1/jobs/{id}/artifacts/{name}
-<a id="__codelineno-37-71" name="__codelineno-37-71" href="#__codelineno-37-71"></a>POST /worker/v1/commands/{id}/result        # result of a downstream command (diagnostics…)
+<a id="__codelineno-37-55" name="__codelineno-37-55" href="#__codelineno-37-55"></a># Workers &amp; execution queue
+<a id="__codelineno-37-56" name="__codelineno-37-56" href="#__codelineno-37-56"></a>GET|POST|DELETE /api/v1/worker-pools ; GET /api/v1/workers
+<a id="__codelineno-37-57" name="__codelineno-37-57" href="#__codelineno-37-57"></a>GET /api/v1/queue          # runs in progress + waiting, with computed blocking reason
+<a id="__codelineno-37-58" name="__codelineno-37-58" href="#__codelineno-37-58"></a>                           # (active_run|env_locked|no_compatible_worker|apply_affinity_hold)
+<a id="__codelineno-37-59" name="__codelineno-37-59" href="#__codelineno-37-59"></a>POST|GET /api/v1/workers/{id}/diagnostics   # admin: read-only debug bundle (via heartbeat)
+<a id="__codelineno-37-60" name="__codelineno-37-60" href="#__codelineno-37-60"></a>
+<a id="__codelineno-37-61" name="__codelineno-37-61" href="#__codelineno-37-61"></a># Observability &amp; onboarding
+<a id="__codelineno-37-62" name="__codelineno-37-62" href="#__codelineno-37-62"></a>GET /api/v1/health         # DB, workers (online + heartbeat), active/waiting runs, recent errors
+<a id="__codelineno-37-63" name="__codelineno-37-63" href="#__codelineno-37-63"></a>GET /api/v1/logs           # admin: structured JSON buffer, filters level/event/worker_id/run_id/q
+<a id="__codelineno-37-64" name="__codelineno-37-64" href="#__codelineno-37-64"></a>POST /api/v1/auth/me/onboarded              # marks the walkthrough seen (persisted server-side)
+<a id="__codelineno-37-65" name="__codelineno-37-65" href="#__codelineno-37-65"></a>
+<a id="__codelineno-37-66" name="__codelineno-37-66" href="#__codelineno-37-66"></a># State
+<a id="__codelineno-37-67" name="__codelineno-37-67" href="#__codelineno-37-67"></a>GET /api/v1/environments/{id}/state/versions[...]
+<a id="__codelineno-37-68" name="__codelineno-37-68" href="#__codelineno-37-68"></a>DELETE /api/v1/environments/{id}/state/lock              # force-unlock (admin, audited)
+<a id="__codelineno-37-69" name="__codelineno-37-69" href="#__codelineno-37-69"></a>
+<a id="__codelineno-37-70" name="__codelineno-37-70" href="#__codelineno-37-70"></a># Webhooks
+<a id="__codelineno-37-71" name="__codelineno-37-71" href="#__codelineno-37-71"></a>POST /api/v1/webhooks/github                             # HMAC
 <a id="__codelineno-37-72" name="__codelineno-37-72" href="#__codelineno-37-72"></a>
-<a id="__codelineno-37-73" name="__codelineno-37-73" href="#__codelineno-37-73"></a># State backend HTTP (Terraform — detail §11)
-<a id="__codelineno-37-74" name="__codelineno-37-74" href="#__codelineno-37-74"></a>GET|POST|DELETE /state/v1/{env_id} ; LOCK|UNLOCK /state/v1/{env_id}/lock
+<a id="__codelineno-37-73" name="__codelineno-37-73" href="#__codelineno-37-73"></a># Worker API (agents — detail §7)
+<a id="__codelineno-37-74" name="__codelineno-37-74" href="#__codelineno-37-74"></a>POST /worker/v1/register | /heartbeat | /jobs/claim
+<a id="__codelineno-37-75" name="__codelineno-37-75" href="#__codelineno-37-75"></a>POST /worker/v1/jobs/{id}/events | /jobs/{id}/logs
+<a id="__codelineno-37-76" name="__codelineno-37-76" href="#__codelineno-37-76"></a>PUT  /worker/v1/jobs/{id}/artifacts/{name}
+<a id="__codelineno-37-77" name="__codelineno-37-77" href="#__codelineno-37-77"></a>POST /worker/v1/commands/{id}/result        # result of a downstream command (diagnostics…)
+<a id="__codelineno-37-78" name="__codelineno-37-78" href="#__codelineno-37-78"></a>
+<a id="__codelineno-37-79" name="__codelineno-37-79" href="#__codelineno-37-79"></a># State backend HTTP (Terraform — detail §11)
+<a id="__codelineno-37-80" name="__codelineno-37-80" href="#__codelineno-37-80"></a>GET|POST|DELETE /state/v1/{env_id} ; LOCK|UNLOCK /state/v1/{env_id}/lock
 </code></pre></div>
 <hr />
 <h2 id="13-security-summary">13. Security — summary<a class="headerlink" href="#13-security-summary" title="Permanent link">&para;</a></h2>
@@ -4001,7 +4011,7 @@ uses the public URL (the operator runs locally). For stacks that should keep the
 </tr>
 <tr>
 <td>Apply permissions</td>
-<td>tier per env × <code>max_apply_tier</code> cap per user (§2.4); distinct <code>can_destroy</code>; double lock with the OIDC trust policy on the tier</td>
+<td>tier per env × <code>allowed_tiers</code> set per user (§2.4, configurable catalog, non-linear); distinct <code>can_destroy</code>; double lock with the OIDC trust policy on the tier name</td>
 </tr>
 <tr>
 <td>Protected envs</td>
