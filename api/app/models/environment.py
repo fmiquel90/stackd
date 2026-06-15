@@ -22,7 +22,9 @@ class Environment(Base):
         PGUUID(as_uuid=True), ForeignKey("stacks.id", ondelete="CASCADE")
     )
     name: Mapped[str] = mapped_column(String)
-    tier: Mapped[str] = mapped_column(String)  # references tiers.name (§2.4 apply/destroy perms)
+    # FK to the tier catalog (§2.4): RESTRICT so a tier in use can't vanish from under an env — the
+    # DB backstop to the app-level delete guard, keeping the fail-closed four-eyes invariant.
+    tier: Mapped[str] = mapped_column(String, ForeignKey("tiers.name", ondelete="RESTRICT"))
     branch: Mapped[str] = mapped_column(String)
 
     autodeploy: Mapped[bool] = mapped_column(Boolean, default=False)  # forced false if protected

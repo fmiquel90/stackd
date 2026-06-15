@@ -110,3 +110,18 @@ async def test_delete_only_author_or_admin(client: httpx.AsyncClient) -> None:
         await client.delete(f"{base}/{cid}", headers=alice)
     ).status_code == 403  # approver ≠ author
     assert (await client.delete(f"{base}/{cid}", headers=admin)).status_code == 204  # admin can
+
+
+async def test_delete_thread_with_replies_guarded(client: httpx.AsyncClient) -> None:
+    bob = await login(client, "bob")
+    alice = await login(client, "alice")
+    admin = await login(client, "admin")
+    run_id = await _make_run(client, admin, "DELREP")
+    base = f"/api/v1/runs/{run_id}/comments"
+
+    root = (await client.post(base, headers=bob, json={"body": "root"})).json()["id"]
+    await client.post(base, headers=alice, json={"body": "reply", "parent_id": root})
+    # The author can't nuke a thread carrying someone else's reply (cascade) …
+    assert (await client.delete(f"{base}/{root}", headers=bob)).status_code == 409
+    # … but an admin can.
+    assert (await client.delete(f"{base}/{root}", headers=admin)).status_code == 204

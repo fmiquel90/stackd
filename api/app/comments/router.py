@@ -112,6 +112,16 @@ async def delete_comment(
     comment = await _get_comment(session, run_id, cid)
     if comment.author_user_id != user.id and user.role != Role.admin:
         raise ProblemException(403, "Forbidden", "Only the author or an admin can delete.")
+    # Deleting a root cascades its replies (FK). Don't let an author silently nuke other people's
+    # replies — a thread with replies can only be deleted by an admin.
+    if comment.parent_id is None and user.role != Role.admin:
+        has_replies = (
+            await session.execute(select(RunComment.id).where(RunComment.parent_id == cid).limit(1))
+        ).scalar_one_or_none()
+        if has_replies is not None:
+            raise ProblemException(
+                409, "Thread has replies", "Only an admin can delete a thread that has replies."
+            )
     await session.delete(comment)
     await _publish(session, run_id)
     await session.commit()
