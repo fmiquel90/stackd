@@ -4051,39 +4051,40 @@ uses the public URL (the operator runs locally). For stacks that should keep the
 <a id="__codelineno-37-45" name="__codelineno-37-45" href="#__codelineno-37-45"></a># Users &amp; permissions (admin)
 <a id="__codelineno-37-46" name="__codelineno-37-46" href="#__codelineno-37-46"></a>GET   /api/v1/users
 <a id="__codelineno-37-47" name="__codelineno-37-47" href="#__codelineno-37-47"></a>PATCH /api/v1/users/{id}     # role, allowed_tiers, can_destroy, disabled (audited)
-<a id="__codelineno-37-48" name="__codelineno-37-48" href="#__codelineno-37-48"></a>
-<a id="__codelineno-37-49" name="__codelineno-37-49" href="#__codelineno-37-49"></a># Tiers (catalog, §2.4) — listing open; create/update/delete admin
-<a id="__codelineno-37-50" name="__codelineno-37-50" href="#__codelineno-37-50"></a>GET /api/v1/tiers ; POST /api/v1/tiers ; PATCH|DELETE /api/v1/tiers/{id}
-<a id="__codelineno-37-51" name="__codelineno-37-51" href="#__codelineno-37-51"></a>
-<a id="__codelineno-37-52" name="__codelineno-37-52" href="#__codelineno-37-52"></a># Plan-review comments (§16)
-<a id="__codelineno-37-53" name="__codelineno-37-53" href="#__codelineno-37-53"></a>GET|POST /api/v1/runs/{id}/comments ; PATCH|DELETE /api/v1/runs/{id}/comments/{cid}
-<a id="__codelineno-37-54" name="__codelineno-37-54" href="#__codelineno-37-54"></a>
-<a id="__codelineno-37-55" name="__codelineno-37-55" href="#__codelineno-37-55"></a># Workers &amp; execution queue
-<a id="__codelineno-37-56" name="__codelineno-37-56" href="#__codelineno-37-56"></a>GET|POST|DELETE /api/v1/worker-pools ; GET /api/v1/workers
-<a id="__codelineno-37-57" name="__codelineno-37-57" href="#__codelineno-37-57"></a>GET /api/v1/queue          # runs in progress + waiting, with computed blocking reason
-<a id="__codelineno-37-58" name="__codelineno-37-58" href="#__codelineno-37-58"></a>                           # (active_run|env_locked|no_compatible_worker|apply_affinity_hold)
-<a id="__codelineno-37-59" name="__codelineno-37-59" href="#__codelineno-37-59"></a>POST|GET /api/v1/workers/{id}/diagnostics   # admin: read-only debug bundle (via heartbeat)
-<a id="__codelineno-37-60" name="__codelineno-37-60" href="#__codelineno-37-60"></a>
-<a id="__codelineno-37-61" name="__codelineno-37-61" href="#__codelineno-37-61"></a># Observability &amp; onboarding
-<a id="__codelineno-37-62" name="__codelineno-37-62" href="#__codelineno-37-62"></a>GET /api/v1/health         # DB, workers (online + heartbeat), active/waiting runs, recent errors
-<a id="__codelineno-37-63" name="__codelineno-37-63" href="#__codelineno-37-63"></a>GET /api/v1/logs           # admin: structured JSON buffer, filters level/event/worker_id/run_id/q
-<a id="__codelineno-37-64" name="__codelineno-37-64" href="#__codelineno-37-64"></a>POST /api/v1/auth/me/onboarded              # marks the walkthrough seen (persisted server-side)
-<a id="__codelineno-37-65" name="__codelineno-37-65" href="#__codelineno-37-65"></a>
-<a id="__codelineno-37-66" name="__codelineno-37-66" href="#__codelineno-37-66"></a># State
-<a id="__codelineno-37-67" name="__codelineno-37-67" href="#__codelineno-37-67"></a>GET /api/v1/environments/{id}/state/versions[...]
-<a id="__codelineno-37-68" name="__codelineno-37-68" href="#__codelineno-37-68"></a>DELETE /api/v1/environments/{id}/state/lock              # force-unlock (admin, audited)
-<a id="__codelineno-37-69" name="__codelineno-37-69" href="#__codelineno-37-69"></a>
-<a id="__codelineno-37-70" name="__codelineno-37-70" href="#__codelineno-37-70"></a># Webhooks
-<a id="__codelineno-37-71" name="__codelineno-37-71" href="#__codelineno-37-71"></a>POST /api/v1/webhooks/github                             # HMAC
-<a id="__codelineno-37-72" name="__codelineno-37-72" href="#__codelineno-37-72"></a>
-<a id="__codelineno-37-73" name="__codelineno-37-73" href="#__codelineno-37-73"></a># Worker API (agents — detail §7)
-<a id="__codelineno-37-74" name="__codelineno-37-74" href="#__codelineno-37-74"></a>POST /worker/v1/register | /heartbeat | /jobs/claim
-<a id="__codelineno-37-75" name="__codelineno-37-75" href="#__codelineno-37-75"></a>POST /worker/v1/jobs/{id}/events | /jobs/{id}/logs
-<a id="__codelineno-37-76" name="__codelineno-37-76" href="#__codelineno-37-76"></a>PUT  /worker/v1/jobs/{id}/artifacts/{name}
-<a id="__codelineno-37-77" name="__codelineno-37-77" href="#__codelineno-37-77"></a>POST /worker/v1/commands/{id}/result        # result of a downstream command (diagnostics…)
-<a id="__codelineno-37-78" name="__codelineno-37-78" href="#__codelineno-37-78"></a>
-<a id="__codelineno-37-79" name="__codelineno-37-79" href="#__codelineno-37-79"></a># State backend HTTP (Terraform — detail §11)
-<a id="__codelineno-37-80" name="__codelineno-37-80" href="#__codelineno-37-80"></a>GET|POST|DELETE /state/v1/{env_id} ; LOCK|UNLOCK /state/v1/{env_id}/lock
+<a id="__codelineno-37-48" name="__codelineno-37-48" href="#__codelineno-37-48"></a>GET   /api/v1/users/mentionable   # minimal directory (id/email/display_name) for @mention, any auth
+<a id="__codelineno-37-49" name="__codelineno-37-49" href="#__codelineno-37-49"></a>
+<a id="__codelineno-37-50" name="__codelineno-37-50" href="#__codelineno-37-50"></a># Tiers (catalog, §2.4) — listing open; create/update/delete admin
+<a id="__codelineno-37-51" name="__codelineno-37-51" href="#__codelineno-37-51"></a>GET /api/v1/tiers ; POST /api/v1/tiers ; PATCH|DELETE /api/v1/tiers/{id}
+<a id="__codelineno-37-52" name="__codelineno-37-52" href="#__codelineno-37-52"></a>
+<a id="__codelineno-37-53" name="__codelineno-37-53" href="#__codelineno-37-53"></a># Plan-review comments (§16)
+<a id="__codelineno-37-54" name="__codelineno-37-54" href="#__codelineno-37-54"></a>GET|POST /api/v1/runs/{id}/comments ; PATCH|DELETE /api/v1/runs/{id}/comments/{cid}
+<a id="__codelineno-37-55" name="__codelineno-37-55" href="#__codelineno-37-55"></a>
+<a id="__codelineno-37-56" name="__codelineno-37-56" href="#__codelineno-37-56"></a># Workers &amp; execution queue
+<a id="__codelineno-37-57" name="__codelineno-37-57" href="#__codelineno-37-57"></a>GET|POST|DELETE /api/v1/worker-pools ; GET /api/v1/workers
+<a id="__codelineno-37-58" name="__codelineno-37-58" href="#__codelineno-37-58"></a>GET /api/v1/queue          # runs in progress + waiting, with computed blocking reason
+<a id="__codelineno-37-59" name="__codelineno-37-59" href="#__codelineno-37-59"></a>                           # (active_run|env_locked|no_compatible_worker|apply_affinity_hold)
+<a id="__codelineno-37-60" name="__codelineno-37-60" href="#__codelineno-37-60"></a>POST|GET /api/v1/workers/{id}/diagnostics   # admin: read-only debug bundle (via heartbeat)
+<a id="__codelineno-37-61" name="__codelineno-37-61" href="#__codelineno-37-61"></a>
+<a id="__codelineno-37-62" name="__codelineno-37-62" href="#__codelineno-37-62"></a># Observability &amp; onboarding
+<a id="__codelineno-37-63" name="__codelineno-37-63" href="#__codelineno-37-63"></a>GET /api/v1/health         # DB, workers (online + heartbeat), active/waiting runs, recent errors
+<a id="__codelineno-37-64" name="__codelineno-37-64" href="#__codelineno-37-64"></a>GET /api/v1/logs           # admin: structured JSON buffer, filters level/event/worker_id/run_id/q
+<a id="__codelineno-37-65" name="__codelineno-37-65" href="#__codelineno-37-65"></a>POST /api/v1/auth/me/onboarded              # marks the walkthrough seen (persisted server-side)
+<a id="__codelineno-37-66" name="__codelineno-37-66" href="#__codelineno-37-66"></a>
+<a id="__codelineno-37-67" name="__codelineno-37-67" href="#__codelineno-37-67"></a># State
+<a id="__codelineno-37-68" name="__codelineno-37-68" href="#__codelineno-37-68"></a>GET /api/v1/environments/{id}/state/versions[...]
+<a id="__codelineno-37-69" name="__codelineno-37-69" href="#__codelineno-37-69"></a>DELETE /api/v1/environments/{id}/state/lock              # force-unlock (admin, audited)
+<a id="__codelineno-37-70" name="__codelineno-37-70" href="#__codelineno-37-70"></a>
+<a id="__codelineno-37-71" name="__codelineno-37-71" href="#__codelineno-37-71"></a># Webhooks
+<a id="__codelineno-37-72" name="__codelineno-37-72" href="#__codelineno-37-72"></a>POST /api/v1/webhooks/github                             # HMAC
+<a id="__codelineno-37-73" name="__codelineno-37-73" href="#__codelineno-37-73"></a>
+<a id="__codelineno-37-74" name="__codelineno-37-74" href="#__codelineno-37-74"></a># Worker API (agents — detail §7)
+<a id="__codelineno-37-75" name="__codelineno-37-75" href="#__codelineno-37-75"></a>POST /worker/v1/register | /heartbeat | /jobs/claim
+<a id="__codelineno-37-76" name="__codelineno-37-76" href="#__codelineno-37-76"></a>POST /worker/v1/jobs/{id}/events | /jobs/{id}/logs
+<a id="__codelineno-37-77" name="__codelineno-37-77" href="#__codelineno-37-77"></a>PUT  /worker/v1/jobs/{id}/artifacts/{name}
+<a id="__codelineno-37-78" name="__codelineno-37-78" href="#__codelineno-37-78"></a>POST /worker/v1/commands/{id}/result        # result of a downstream command (diagnostics…)
+<a id="__codelineno-37-79" name="__codelineno-37-79" href="#__codelineno-37-79"></a>
+<a id="__codelineno-37-80" name="__codelineno-37-80" href="#__codelineno-37-80"></a># State backend HTTP (Terraform — detail §11)
+<a id="__codelineno-37-81" name="__codelineno-37-81" href="#__codelineno-37-81"></a>GET|POST|DELETE /state/v1/{env_id} ; LOCK|UNLOCK /state/v1/{env_id}/lock
 </code></pre></div>
 <hr />
 <h2 id="13-security-summary">13. Security — summary<a class="headerlink" href="#13-security-summary" title="Permanent link">&para;</a></h2>
@@ -4421,7 +4422,9 @@ mention</code>. Each row is created <strong>in the same transaction</strong> as 
   (role ∈ {approver, admin} AND <code>env.tier ∈ allowed_tiers</code>, excluding the triggerer); a terminal
   state notifies the run's human triggerer (<code>run_finished</code> / <code>run_failed</code>).</li>
 <li><strong>comment create</strong> (§16): a reply notifies the root author; <code>@mention</code> tokens (matched against a
-  user's email local-part or full email) notify the mentioned users. Never the author.</li>
+  user's email local-part or full email) notify the mentioned users. Never the author. The composer
+  offers <code>@</code> autocomplete from <code>GET /users/mentionable</code> (a minimal directory readable by any auth),
+  inserting <code>@&lt;email-local-part&gt;</code> so it resolves against the parser.</li>
 </ul>
 <h3 id="172-live-delivery-private-per-user-channel">17.2 Live delivery — private per-user channel<a class="headerlink" href="#172-live-delivery-private-per-user-channel" title="Permanent link">&para;</a></h3>
 <p><code>notify()</code> emits <code>pg_notify('user_&lt;uid&gt;', …)</code> alongside the row. The WS hub maps a <code>user:&lt;id&gt;</code>
