@@ -11,10 +11,10 @@
       
       
       
-        <link rel="prev" href="../external-secrets/">
+        <link rel="prev" href="../variables/">
       
       
-        <link rel="next" href="../commands/">
+        <link rel="next" href="../runs-and-approvals/">
       
       
         
@@ -25,7 +25,7 @@
     
     
       
-        <title>Runs & approvals - Stackd</title>
+        <title>External secret sources - Stackd</title>
       
     
     
@@ -76,7 +76,7 @@
     <div data-md-component="skip">
       
         
-        <a href="#runs-approvals" class="md-skip">
+        <a href="#external-secret-sources" class="md-skip">
           Skip to content
         </a>
       
@@ -112,7 +112,7 @@
         <div class="md-header__topic" data-md-component="header-topic">
           <span class="md-ellipsis">
             
-              Runs & approvals
+              External secret sources
             
           </span>
         </div>
@@ -422,34 +422,6 @@
                 
   
   
-  
-  
-    <li class="md-nav__item">
-      <a href="../external-secrets/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    External secret sources
-  
-
-    
-  </span>
-  
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
     
   
   
@@ -469,7 +441,7 @@
   <span class="md-ellipsis">
     
   
-    Runs & approvals
+    External secret sources
   
 
     
@@ -487,7 +459,7 @@
   <span class="md-ellipsis">
     
   
-    Runs & approvals
+    External secret sources
   
 
     
@@ -513,10 +485,10 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#the-lifecycle" class="md-nav__link">
+  <a href="#how-it-fits-together" class="md-nav__link">
     <span class="md-ellipsis">
       
-        The lifecycle
+        How it fits together
       
     </span>
   </a>
@@ -524,10 +496,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#who-can-approve-can_apply" class="md-nav__link">
+  <a href="#1-create-a-secret-source" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Who can approve — can_apply
+        1. Create a secret source
       
     </span>
   </a>
@@ -535,10 +507,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#four-eyes-on-prod" class="md-nav__link">
+  <a href="#2-reference-it-from-a-variable" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Four-eyes on prod
+        2. Reference it from a variable
       
     </span>
   </a>
@@ -546,10 +518,49 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#friction-proportional-to-risk" class="md-nav__link">
+  <a href="#fallback-when-the-source-is-down" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Friction proportional to risk
+        Fallback when the source is down
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Fallback when the source is down">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#static-fallback" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Static fallback
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#break-glass-override" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Break-glass override
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#fallback-blocks-apply-by-default" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Fallback blocks apply by default
       
     </span>
   </a>
@@ -557,54 +568,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#autodeploy-checks" class="md-nav__link">
+  <a href="#audit" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Autodeploy &amp; checks
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#mock-block" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Mock block
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#promotion-trunk-based" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Promotion (trunk-based)
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#proposed-runs-from-a-pr" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Proposed runs (from a PR)
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#triggering-over-the-api" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Triggering over the API
+        Audit
       
     </span>
   </a>
@@ -626,6 +593,34 @@
   
 </nav>
       
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../runs-and-approvals/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Runs & approvals
+  
+
+    
+  </span>
+  
+  
+
+      </a>
     </li>
   
 
@@ -1170,10 +1165,10 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#the-lifecycle" class="md-nav__link">
+  <a href="#how-it-fits-together" class="md-nav__link">
     <span class="md-ellipsis">
       
-        The lifecycle
+        How it fits together
       
     </span>
   </a>
@@ -1181,10 +1176,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#who-can-approve-can_apply" class="md-nav__link">
+  <a href="#1-create-a-secret-source" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Who can approve — can_apply
+        1. Create a secret source
       
     </span>
   </a>
@@ -1192,10 +1187,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#four-eyes-on-prod" class="md-nav__link">
+  <a href="#2-reference-it-from-a-variable" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Four-eyes on prod
+        2. Reference it from a variable
       
     </span>
   </a>
@@ -1203,10 +1198,49 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#friction-proportional-to-risk" class="md-nav__link">
+  <a href="#fallback-when-the-source-is-down" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Friction proportional to risk
+        Fallback when the source is down
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Fallback when the source is down">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#static-fallback" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Static fallback
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#break-glass-override" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Break-glass override
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#fallback-blocks-apply-by-default" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Fallback blocks apply by default
       
     </span>
   </a>
@@ -1214,54 +1248,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#autodeploy-checks" class="md-nav__link">
+  <a href="#audit" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Autodeploy &amp; checks
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#mock-block" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Mock block
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#promotion-trunk-based" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Promotion (trunk-based)
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#proposed-runs-from-a-pr" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Proposed runs (from a PR)
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#triggering-over-the-api" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Triggering over the API
+        Audit
       
     </span>
   </a>
@@ -1299,94 +1289,108 @@
   
 
 
-<h1 id="runs-approvals">Runs &amp; approvals<a class="headerlink" href="#runs-approvals" title="Permanent link">&para;</a></h1>
-<p>A <strong>run</strong> is one execution against one environment. It always pauses for a human between <code>plan</code> and
-<code>apply</code> — that approval gate, and who's allowed through it, is the heart of Stackd.</p>
-<h2 id="the-lifecycle">The lifecycle<a class="headerlink" href="#the-lifecycle" title="Permanent link">&para;</a></h2>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>queued → preparing → planning → [checking] → unconfirmed → confirmed → applying → finished
-</code></pre></div>
-<p>A worker claims a <code>queued</code> run, clones the repo at the pinned commit, runs hooks + <code>plan</code>, and
-reports back. With a non-empty diff the run stops at <strong><code>unconfirmed</code></strong> and waits for a human. After
-<strong>confirm</strong>, a worker claims the apply and drives it to <strong><code>finished</code></strong>. An empty diff goes straight
-to <code>finished</code>; a failure to <code>failed</code>; a human can <code>discard</code> or <code>cancel</code>.</p>
-<div class="admonition note">
-<p class="admonition-title">Note</p>
-<p>State only ever changes through one function (<code>transition()</code>), which records a <code>run_event</code> and
-— for human/terminal actions — an <code>audit_event</code> in the <strong>same transaction</strong>. Nothing changes a
-run's state out of band.</p>
+<h1 id="external-secret-sources">External secret sources<a class="headerlink" href="#external-secret-sources" title="Permanent link">&para;</a></h1>
+<p>A sensitive variable can carry its value <strong>by reference</strong> to an external secrets manager instead of storing the value in Stackd. At run time the platform resolves the reference to a live value, injects it like any other sensitive variable, and <strong>never persists it</strong>.</p>
+<p>This is a security upgrade over a stored secret: no secret at rest in Stackd's database, automatic rotation (you rotate in the manager, not here), and a single revocable bootstrap credential per source.</p>
+<div class="admonition info">
+<p class="admonition-title">Provider support</p>
+<p><strong>Proton Pass</strong> is the first provider, via its <a href="https://proton.me/blog/proton-pass-cli">CLI</a> and scoped Personal Access / AI Access Tokens. The model is provider-agnostic — Vault, AWS Secrets Manager, 1Password and others plug into the same interface.</p>
 </div>
-<h2 id="who-can-approve-can_apply">Who can approve — <code>can_apply</code><a class="headerlink" href="#who-can-approve-can_apply" title="Permanent link">&para;</a></h2>
-<p>Confirming an apply requires <strong>both</strong>:</p>
+<h2 id="how-it-fits-together">How it fits together<a class="headerlink" href="#how-it-fits-together" title="Permanent link">&para;</a></h2>
+<pre class="mermaid"><code>flowchart LR
+  V["variable&lt;br/&gt;(reference)"] --&gt;|secret_ref| SRC["secret source&lt;br/&gt;(bootstrap token)"]
+  SRC --&gt;|fetch at claim time| PM["secrets manager"]
+  PM --&gt;|live value| CLAIM["worker claim payload&lt;br/&gt;(masked in logs)"]</code></pre>
+<p>Resolution precedence per reference mirrors the rule for dependency mocks — <strong>real value &gt; fallback &gt; error</strong>:</p>
 <ol>
-<li><strong>Role</strong> ∈ <code>{approver, admin}</code> — a <code>writer</code> may trigger a plan but never approve.</li>
-<li><strong><code>max_apply_tier</code> ≥ the environment's <code>tier</code></strong> (<code>dev &lt; staging &lt; prod</code>). An approver capped at
-   <code>staging</code> can apply dev/staging, not prod.</li>
+<li><strong>Provider reachable</strong> → the live value is used. Provenance <code>secret:&lt;source&gt;</code>.</li>
+<li><strong>Provider unreachable</strong> → the configured <a href="#fallback-when-the-source-is-down">fallback</a> applies, or the run fails closed.</li>
 </ol>
-<p>A <code>destroy</code> run additionally requires the <code>can_destroy</code> permission.</p>
+<p>The fetched value flows into the run exactly like a stored sensitive variable: it lands in the worker's <code>tfvars</code>/<code>sensitive_env</code> and the agent masks it in all logs.</p>
+<h2 id="1-create-a-secret-source">1. Create a secret source<a class="headerlink" href="#1-create-a-secret-source" title="Permanent link">&para;</a></h2>
+<p>A secret source is <strong>scoped to a space</strong> and holds the machine credential used to fetch secrets. The credential is AES-256-GCM encrypted at rest and <strong>write-only</strong> — it is never returned by the API. Creating one requires the <strong>admin</strong> role.</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="nv">SRC</span><span class="o">=</span><span class="k">$(</span>curl<span class="w"> </span>-s<span class="w"> </span>-X<span class="w"> </span>POST<span class="w"> </span>localhost:8000/api/v1/spaces/<span class="nv">$SPACE</span>/secret-sources<span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="w">  </span>-H<span class="w"> </span><span class="s2">&quot;Authorization: Bearer </span><span class="nv">$TOKEN</span><span class="s2">&quot;</span><span class="w"> </span>-H<span class="w"> </span><span class="s1">&#39;content-type: application/json&#39;</span><span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a><span class="w">  </span>-d<span class="w"> </span><span class="s1">&#39;{</span>
+<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a><span class="s1">        &quot;name&quot;: &quot;proton&quot;,</span>
+<a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a><span class="s1">        &quot;provider&quot;: &quot;proton_pass&quot;,</span>
+<a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a><span class="s1">        &quot;bootstrap_secret&quot;: &quot;&lt;proton personal access token&gt;&quot;</span>
+<a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a><span class="s1">      }&#39;</span><span class="w"> </span><span class="p">|</span><span class="w"> </span>jq<span class="w"> </span>-r<span class="w"> </span>.id<span class="k">)</span>
+</code></pre></div>
+<p>In the UI: <strong>Stack → Secret sources → Manage secret sources</strong>.</p>
+<h2 id="2-reference-it-from-a-variable">2. Reference it from a variable<a class="headerlink" href="#2-reference-it-from-a-variable" title="Permanent link">&para;</a></h2>
+<p>Point a variable at the source with a provider-specific locator. For Proton Pass that is a <code>pass://vault/item/field</code> URI. A referenced variable is implicitly <strong>sensitive</strong>.</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>curl<span class="w"> </span>-s<span class="w"> </span>-X<span class="w"> </span>POST<span class="w"> </span>localhost:8000/api/v1/environments/<span class="nv">$ENV</span>/variables<span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="w">  </span>-H<span class="w"> </span><span class="s2">&quot;Authorization: Bearer </span><span class="nv">$TOKEN</span><span class="s2">&quot;</span><span class="w"> </span>-H<span class="w"> </span><span class="s1">&#39;content-type: application/json&#39;</span><span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a><span class="w">  </span>-d<span class="w"> </span><span class="s1">&#39;{</span>
+<a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a><span class="s1">        &quot;kind&quot;: &quot;terraform&quot;,</span>
+<a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a><span class="s1">        &quot;name&quot;: &quot;db_password&quot;,</span>
+<a id="__codelineno-1-6" name="__codelineno-1-6" href="#__codelineno-1-6"></a><span class="s1">        &quot;secret_source_id&quot;: &quot;&#39;</span><span class="s2">&quot;</span><span class="nv">$SRC</span><span class="s2">&quot;</span><span class="s1">&#39;&quot;,</span>
+<a id="__codelineno-1-7" name="__codelineno-1-7" href="#__codelineno-1-7"></a><span class="s1">        &quot;secret_ref&quot;: &quot;pass://infra/prod-db/password&quot;</span>
+<a id="__codelineno-1-8" name="__codelineno-1-8" href="#__codelineno-1-8"></a><span class="s1">      }&#39;</span>
+</code></pre></div>
+<p>The resolved value shows up in <code>GET /environments/{id}/resolved-variables</code> with provenance <code>secret:proton</code> (and masked, since it is sensitive).</p>
+<h2 id="fallback-when-the-source-is-down">Fallback when the source is down<a class="headerlink" href="#fallback-when-the-source-is-down" title="Permanent link">&para;</a></h2>
+<p>Each reference has a <code>secret_fallback_mode</code> that decides what happens if the provider is unreachable at run time:</p>
 <table>
 <thead>
 <tr>
-<th>Persona</th>
-<th>Can trigger a plan</th>
-<th>Can approve dev/staging</th>
-<th>Can approve prod</th>
+<th>Mode</th>
+<th>Behaviour when the source is down</th>
 </tr>
 </thead>
 <tbody>
 <tr>
-<td>writer (<code>bob</code>)</td>
-<td>✅</td>
-<td>❌ (needs approver)</td>
-<td>❌</td>
+<td><code>error</code> <em>(default)</em></td>
+<td>The run <strong>fails closed</strong> (<code>secret_unavailable</code>). Nothing is shipped.</td>
 </tr>
 <tr>
-<td>approver capped staging</td>
-<td>✅</td>
-<td>✅</td>
-<td>❌ (tier)</td>
+<td><code>static</code></td>
+<td>A pre-stored, operator-chosen value is used.</td>
 </tr>
 <tr>
-<td>approver/admin, prod ceiling (<code>alice</code>)</td>
-<td>✅</td>
-<td>✅</td>
-<td>✅</td>
+<td><code>break_glass</code></td>
+<td>A value supplied inline at trigger time is used (see below).</td>
 </tr>
 </tbody>
 </table>
-<h2 id="four-eyes-on-prod">Four-eyes on prod<a class="headerlink" href="#four-eyes-on-prod" title="Permanent link">&para;</a></h2>
-<p>On a <code>prod</code> environment (or any env with <code>require_second_pair_of_eyes</code>), the person who <strong>triggered</strong>
-the run cannot be the one who <strong>confirms</strong> it — a second approver is required.</p>
-<h2 id="friction-proportional-to-risk">Friction proportional to risk<a class="headerlink" href="#friction-proportional-to-risk" title="Permanent link">&para;</a></h2>
-<p>An authorized non-prod apply is one click. Confirming on <strong><code>tier=prod</code></strong> or any <strong><code>destroy</code></strong> run
-opens a confirmation popover: type the <strong>environment name</strong> + review a <code>+a ~c −d</code> plan summary. This
-is a misclick safeguard only — it never bypasses <code>can_apply</code> (still evaluated server-side).</p>
-<h2 id="autodeploy-checks">Autodeploy &amp; checks<a class="headerlink" href="#autodeploy-checks" title="Permanent link">&para;</a></h2>
-<p>An environment with <code>autodeploy</code> auto-confirms when the plan is clean — <strong>but a <code>warn</code> check forces
-<code>unconfirmed</code></strong> so a human still sees it. A <code>protected</code> environment can never autodeploy.</p>
-<h2 id="mock-block">Mock block<a class="headerlink" href="#mock-block" title="Permanent link">&para;</a></h2>
-<p>A run that consumed a mock upstream output (<code>used_mocks=true</code>) <strong>cannot be applied</strong> unless the env
-sets <code>allow_mock_apply=true</code> — see <a href="../dependencies-and-mocks/">Dependencies &amp; mocks</a>.</p>
-<h2 id="promotion-trunk-based">Promotion (trunk-based)<a class="headerlink" href="#promotion-trunk-based" title="Permanent link">&para;</a></h2>
-<p>To roll out the <strong>exact commit</strong> running on one environment to another of the same stack
-(dev → staging → prod), use <strong>promote</strong> — the env's <strong>Promote</strong> tab, or:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>curl<span class="w"> </span>-s<span class="w"> </span>-X<span class="w"> </span>POST<span class="w"> </span>localhost:8000/api/v1/environments/<span class="nv">$STAGING_ID</span>/promote<span class="w"> </span>-H<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$AUTH</span><span class="s2">&quot;</span><span class="w"> </span><span class="se">\</span>
-<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="w">  </span>-d<span class="w"> </span><span class="s1">&#39;{&quot;from_environment_id&quot;: &quot;&#39;</span><span class="nv">$DEV_ID</span><span class="s1">&#39;&quot;}&#39;</span>
+<h3 id="static-fallback">Static fallback<a class="headerlink" href="#static-fallback" title="Permanent link">&para;</a></h3>
+<p>Store a value of your choice alongside the reference; it is used automatically only when the provider fails:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>curl<span class="w"> </span>-s<span class="w"> </span>-X<span class="w"> </span>POST<span class="w"> </span>localhost:8000/api/v1/environments/<span class="nv">$ENV</span>/variables<span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="w">  </span>-H<span class="w"> </span><span class="s2">&quot;Authorization: Bearer </span><span class="nv">$TOKEN</span><span class="s2">&quot;</span><span class="w"> </span>-H<span class="w"> </span><span class="s1">&#39;content-type: application/json&#39;</span><span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a><span class="w">  </span>-d<span class="w"> </span><span class="s1">&#39;{</span>
+<a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a><span class="s1">        &quot;kind&quot;: &quot;terraform&quot;,</span>
+<a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a><span class="s1">        &quot;name&quot;: &quot;db_password&quot;,</span>
+<a id="__codelineno-2-6" name="__codelineno-2-6" href="#__codelineno-2-6"></a><span class="s1">        &quot;secret_source_id&quot;: &quot;&#39;</span><span class="s2">&quot;</span><span class="nv">$SRC</span><span class="s2">&quot;</span><span class="s1">&#39;&quot;,</span>
+<a id="__codelineno-2-7" name="__codelineno-2-7" href="#__codelineno-2-7"></a><span class="s1">        &quot;secret_ref&quot;: &quot;pass://infra/prod-db/password&quot;,</span>
+<a id="__codelineno-2-8" name="__codelineno-2-8" href="#__codelineno-2-8"></a><span class="s1">        &quot;secret_fallback_mode&quot;: &quot;static&quot;,</span>
+<a id="__codelineno-2-9" name="__codelineno-2-9" href="#__codelineno-2-9"></a><span class="s1">        &quot;secret_fallback&quot;: &quot;last-known-good-value&quot;</span>
+<a id="__codelineno-2-10" name="__codelineno-2-10" href="#__codelineno-2-10"></a><span class="s1">      }&#39;</span>
 </code></pre></div>
-<p>It pins a new tracked run on the target to the source's last applied commit, so you deploy <em>what
-was tested</em> — not whatever HEAD happens to be. The apply is gated as usual (tier + four-eyes) at
-confirm. This is the same-stack counterpart to the cross-stack <a href="../dependencies-and-mocks/">cascade</a>.</p>
-<h2 id="proposed-runs-from-a-pr">Proposed runs (from a PR)<a class="headerlink" href="#proposed-runs-from-a-pr" title="Permanent link">&para;</a></h2>
-<p>A pull request triggers a <strong>proposed</strong> run: plan-only, read-only state, no secrets — a safe preview
-that is never applied. See <a href="../../SPECS/">the Git integration in SPECS</a>.</p>
-<h2 id="triggering-over-the-api">Triggering over the API<a class="headerlink" href="#triggering-over-the-api" title="Permanent link">&para;</a></h2>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>curl<span class="w"> </span>-s<span class="w"> </span>-X<span class="w"> </span>POST<span class="w"> </span>localhost:8000/api/v1/environments/<span class="nv">$ENV_ID</span>/runs<span class="w"> </span>-H<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$AUTH</span><span class="s2">&quot;</span><span class="w"> </span>-d<span class="w"> </span><span class="s1">&#39;{}&#39;</span><span class="w">   </span><span class="c1"># trigger plan</span>
-<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a>curl<span class="w"> </span>-s<span class="w"> </span>-X<span class="w"> </span>POST<span class="w"> </span>localhost:8000/api/v1/runs/<span class="nv">$RUN_ID</span>/confirm<span class="w"> </span>-H<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$AUTH</span><span class="s2">&quot;</span><span class="w">                 </span><span class="c1"># approve → apply</span>
-<a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a>curl<span class="w"> </span>-s<span class="w"> </span>-X<span class="w"> </span>POST<span class="w"> </span>localhost:8000/api/v1/runs/<span class="nv">$RUN_ID</span>/discard<span class="w"> </span>-H<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$AUTH</span><span class="s2">&quot;</span><span class="w">                 </span><span class="c1"># discard</span>
+<h3 id="break-glass-override">Break-glass override<a class="headerlink" href="#break-glass-override" title="Permanent link">&para;</a></h3>
+<p>For a <code>break_glass</code> reference, an operator supplies the value <strong>inline at trigger time</strong>. It is used only for that run, sealed AES-GCM, and never stored as a variable. Because it bypasses the real secret, it requires <strong>apply permission</strong>:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a>curl<span class="w"> </span>-s<span class="w"> </span>-X<span class="w"> </span>POST<span class="w"> </span>localhost:8000/api/v1/environments/<span class="nv">$ENV</span>/runs<span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a><span class="w">  </span>-H<span class="w"> </span><span class="s2">&quot;Authorization: Bearer </span><span class="nv">$TOKEN</span><span class="s2">&quot;</span><span class="w"> </span>-H<span class="w"> </span><span class="s1">&#39;content-type: application/json&#39;</span><span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a><span class="w">  </span>-d<span class="w"> </span><span class="s1">&#39;{ &quot;secret_overrides&quot;: { &quot;db_password&quot;: &quot;manual-value&quot; } }&#39;</span>
 </code></pre></div>
+<h2 id="fallback-blocks-apply-by-default">Fallback blocks apply by default<a class="headerlink" href="#fallback-blocks-apply-by-default" title="Permanent link">&para;</a></h2>
+<p>A fallback value is <strong>not the real secret</strong> — it may be stale or operator-chosen. So a run that resolved any reference via fallback is flagged <code>used_secret_fallback</code> and <strong>cannot be applied</strong> unless the environment opts in:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a>curl<span class="w"> </span>-s<span class="w"> </span>-X<span class="w"> </span>PATCH<span class="w"> </span>localhost:8000/api/v1/environments/<span class="nv">$ENV</span><span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a><span class="w">  </span>-H<span class="w"> </span><span class="s2">&quot;Authorization: Bearer </span><span class="nv">$TOKEN</span><span class="s2">&quot;</span><span class="w"> </span>-H<span class="w"> </span><span class="s1">&#39;content-type: application/json&#39;</span><span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a><span class="w">  </span>-d<span class="w"> </span><span class="s1">&#39;{ &quot;allow_fallback_apply&quot;: true }&#39;</span>
+</code></pre></div>
+<p>This mirrors the mock apply-gate (<code>allow_mock_apply</code>). The plan is always allowed; only the apply is gated. In the UI the run carries a <strong>Fallback</strong> badge and the variable shows a <code>FALLBACK:</code> / <code>OVERRIDE:</code> provenance.</p>
+<div class="admonition warning">
+<p class="admonition-title">Warning</p>
+<p>Leave <code>allow_fallback_apply</code> off on production environments. A fallback is a break-glass affordance for an outage, not a normal path — keeping it off forces a deliberate, audited opt-in before a non-live secret ever reaches prod.</p>
+</div>
+<h2 id="audit">Audit<a class="headerlink" href="#audit" title="Permanent link">&para;</a></h2>
+<p>Source management and every fallback event are audited (<code>secret_source.created</code>, <code>secret_source.token_rotated</code>, <code>secret.fallback_used</code>, <code>secret.fallback_overridden</code>, <code>secret.unavailable</code>). The secret value itself is never written to the audit context. Successful live resolutions are not audited individually — the run's <code>variable_provenance</code> records <code>secret:&lt;source&gt;</code> per variable.</p>
 <h2 id="see-also">See also<a class="headerlink" href="#see-also" title="Permanent link">&para;</a></h2>
 <ul>
-<li><a href="../variables/">Variables &amp; secrets</a> · <a href="../hooks/">Hooks &amp; <code>.stackd.yml</code></a> · <a href="../notifications/">Notifications</a></li>
-<li><a href="../../CONCEPTS/">Concepts</a> · <a href="../../SPECS/">SPECS</a></li>
+<li><a href="../variables/">Variables &amp; secrets</a></li>
+<li><a href="../cloud-credentials/">Cloud credentials (OIDC)</a> — the same idea for cloud auth</li>
+<li><a href="../../SPECS/">SPECS</a> §15</li>
 </ul>
 
 

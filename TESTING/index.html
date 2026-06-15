@@ -421,6 +421,34 @@
   
   
     <li class="md-nav__item">
+      <a href="../guide/external-secrets/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    External secret sources
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../guide/runs-and-approvals/" class="md-nav__link">
         
   
@@ -1100,10 +1128,10 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
-  <a href="#api-unit-integration-apitests-65-tests" class="md-nav__link">
+  <a href="#api-unit-integration-apitests-73-tests" class="md-nav__link">
     <span class="md-ellipsis">
       
-        API — unit &amp; integration (api/tests/, 65 tests)
+        API — unit &amp; integration (api/tests/, 73 tests)
       
     </span>
   </a>
@@ -1325,10 +1353,10 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
-  <a href="#api-unit-integration-apitests-65-tests" class="md-nav__link">
+  <a href="#api-unit-integration-apitests-73-tests" class="md-nav__link">
     <span class="md-ellipsis">
       
-        API — unit &amp; integration (api/tests/, 65 tests)
+        API — unit &amp; integration (api/tests/, 73 tests)
       
     </span>
   </a>
@@ -1572,7 +1600,7 @@ throwaway one). <code>task e2e</code> points pytest at <code>e2e</code> explicit
 no DB, no network.</p>
 <hr />
 <h2 id="4-test-map-what-each-test-asserts">4. Test map (what each test asserts)<a class="headerlink" href="#4-test-map-what-each-test-asserts" title="Permanent link">&para;</a></h2>
-<h3 id="api-unit-integration-apitests-65-tests">API — unit &amp; integration (<code>api/tests/</code>, 65 tests)<a class="headerlink" href="#api-unit-integration-apitests-65-tests" title="Permanent link">&para;</a></h3>
+<h3 id="api-unit-integration-apitests-73-tests">API — unit &amp; integration (<code>api/tests/</code>, 73 tests)<a class="headerlink" href="#api-unit-integration-apitests-73-tests" title="Permanent link">&para;</a></h3>
 <p><strong><code>test_auth.py</code> (5)</strong> — auth flow &amp; session security
 - <code>test_dev_login_personas</code> — persona login returns the user (role/tier) + a usable access token.
 - <code>test_refresh_requires_csrf</code> — <code>/refresh</code> rejects a request missing the <code>X-CSRF-Token</code> (double-submit).
@@ -1639,6 +1667,14 @@ no DB, no network.</p>
 - <code>test_sensitive_variable_is_write_only</code> — sensitive values are masked everywhere in API responses.
 - <code>test_attached_set_delete_requires_detach</code> — deleting an attached set → 409 until detached.
 - <code>test_protected_env_forces_no_autodeploy</code> — <code>protected=true</code> forces <code>autodeploy=false</code>.</p>
+<p><strong><code>test_secret_sources.py</code> (7)</strong> — external secret references &amp; fallback (§15)
+- <code>test_reference_resolved_live_is_masked</code> — a referenced variable resolves to the live provider value, lands in <code>tfvars</code>, is added to <code>mask_values</code>, provenance <code>secret:&lt;source&gt;</code>.
+- <code>test_static_fallback_used_and_blocks_apply</code> — provider down → the static fallback value is used, <code>used_secret_fallback=true</code>; confirm is blocked until <code>allow_fallback_apply</code> is turned on.
+- <code>test_error_mode_fails_the_run</code> — provider down with <code>mode=error</code> → the claim returns 204 and the run is <code>failed</code> (fail-closed).
+- <code>test_break_glass_override</code> — a <code>break_glass</code> reference uses the operator's inline <code>secret_overrides</code> value when the provider is down; provenance <code>secret_override:&lt;source&gt;</code>.
+- <code>test_override_requires_apply_permission</code> — a writer (no apply right) supplying <code>secret_overrides</code> → 403.
+- <code>test_source_crud_hides_bootstrap_and_gates_writes</code> — a writer can't create a source (admin-only); the bootstrap credential is never serialized.
+- <code>test_source_in_use_cannot_be_deleted</code> — deleting a source a variable still references → 409 (FK RESTRICT).</p>
 <p><strong><code>test_notifications.py</code> (4)</strong> — outbound notifications
 - <code>test_notification_target_crud</code> — create/list/patch/delete a target (default <code>on_states=[unconfirmed, failed]</code>); each mutation audited.
 - <code>test_rejects_unsupported_state</code> — an <code>on_states</code> value that never fires → 422.
@@ -1704,8 +1740,8 @@ identity components are instead pinned by <strong>Ladle stories</strong> (the DE
 <tbody>
 <tr>
 <td><code>api/tests</code></td>
-<td>19</td>
-<td>65</td>
+<td>20</td>
+<td>73</td>
 </tr>
 <tr>
 <td><code>api/e2e</code></td>
@@ -1719,8 +1755,8 @@ identity components are instead pinned by <strong>Ladle stories</strong> (the DE
 </tr>
 <tr>
 <td><strong>Total</strong></td>
-<td><strong>22</strong></td>
-<td><strong>73</strong></td>
+<td><strong>23</strong></td>
+<td><strong>81</strong></td>
 </tr>
 </tbody>
 </table>

@@ -14,7 +14,7 @@
         <link rel="prev" href="../stacks-and-environments/">
       
       
-        <link rel="next" href="../runs-and-approvals/">
+        <link rel="next" href="../external-secrets/">
       
       
         
@@ -523,6 +523,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#values-by-reference-external-secret-sources" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Values by reference (external secret sources)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#see-also" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -537,6 +548,34 @@
   
 </nav>
       
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../external-secrets/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    External secret sources
+  
+
+    
+  </span>
+  
+  
+
+      </a>
     </li>
   
 
@@ -1175,6 +1214,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#values-by-reference-external-secret-sources" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Values by reference (external secret sources)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#see-also" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -1313,11 +1363,14 @@
 <p class="admonition-title">Warning</p>
 <p>A sensitive value is <strong>never returned in clear</strong>. A later <code>GET</code> shows <code>"value": "•••"</code>; the plaintext is not readable again through the API.</p>
 </div>
+<h2 id="values-by-reference-external-secret-sources">Values by reference (external secret sources)<a class="headerlink" href="#values-by-reference-external-secret-sources" title="Permanent link">&para;</a></h2>
+<p>Instead of storing a secret in Stackd, a variable can point at an entry in an external secrets manager (Proton Pass today). The value is fetched <strong>live at run time</strong> and never persisted — see <a href="../external-secrets/">External secret sources</a>.</p>
 <h2 id="see-also">See also<a class="headerlink" href="#see-also" title="Permanent link">&para;</a></h2>
 <ul>
 <li><a href="../stacks-and-environments/">Stacks &amp; environments</a></li>
+<li><a href="../external-secrets/">External secret sources</a></li>
 <li><a href="../../CONCEPTS/">Concepts</a></li>
-<li><a href="../../SPECS/">SPECS</a> §3.4</li>
+<li><a href="../../SPECS/">SPECS</a> §3.4, §15</li>
 </ul>
 
 
