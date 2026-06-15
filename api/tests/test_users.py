@@ -18,6 +18,17 @@ async def test_non_admin_cannot_list_users(client: httpx.AsyncClient) -> None:
     assert r.status_code == 403
 
 
+async def test_mentionable_directory_readable_by_any_user(client: httpx.AsyncClient) -> None:
+    bob = await _login(client, "bob")  # writer — not admin
+    await _login(client, "alice")  # ensure another user exists
+    r = await client.get("/api/v1/users/mentionable", headers=_bearer(bob))
+    assert r.status_code == 200
+    rows = r.json()
+    assert any(u["email"] == "alice@dev.local" for u in rows)
+    # Minimal directory — no roles/permissions leaked.
+    assert set(rows[0].keys()) == {"id", "email", "display_name"}
+
+
 async def test_admin_updates_tier_is_audited(client: httpx.AsyncClient) -> None:
     admin_token = await _login(client, "admin")
     await _login(client, "bob")  # ensure bob exists

@@ -953,6 +953,7 @@ GET /api/v1/audit ; GET /api/v1/audit/export
 # Users & permissions (admin)
 GET   /api/v1/users
 PATCH /api/v1/users/{id}     # role, allowed_tiers, can_destroy, disabled (audited)
+GET   /api/v1/users/mentionable   # minimal directory (id/email/display_name) for @mention, any auth
 
 # Tiers (catalog, §2.4) — listing open; create/update/delete admin
 GET /api/v1/tiers ; POST /api/v1/tiers ; PATCH|DELETE /api/v1/tiers/{id}
@@ -1292,7 +1293,9 @@ mention`. Each row is created **in the same transaction** as its trigger:
   (role ∈ {approver, admin} AND `env.tier ∈ allowed_tiers`, excluding the triggerer); a terminal
   state notifies the run's human triggerer (`run_finished` / `run_failed`).
 - **comment create** (§16): a reply notifies the root author; `@mention` tokens (matched against a
-  user's email local-part or full email) notify the mentioned users. Never the author.
+  user's email local-part or full email) notify the mentioned users. Never the author. The composer
+  offers `@` autocomplete from `GET /users/mentionable` (a minimal directory readable by any auth),
+  inserting `@<email-local-part>` so it resolves against the parser.
 
 ### 17.2 Live delivery — private per-user channel
 

@@ -1,10 +1,14 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { CornerDownRight, X } from "lucide-react";
-import { comments } from "@/api/resources";
-import type { CommentAnchor, RunComment } from "@/api/types";
+import { comments, users } from "@/api/resources";
+import type { CommentAnchor, MentionableUser, RunComment } from "@/api/types";
 import { useSession } from "@/auth/session";
 import { Button, Card } from "@/components/ui";
+
+const localPart = (email: string) => email.split("@")[0];
+// The token immediately before the caret, if the user is typing an @mention (else null).
+const MENTION_RE = /(^|\s)@([\w.+-]*)$/;
 
 export const isRoot = (c: RunComment) => c.parent_id == null;
 
@@ -59,6 +63,12 @@ export function CommentComposer({
 }) {
   const qc = useQueryClient();
   const [body, setBody] = useState("");
+  const taRef = useRef<HTMLTextAreaElement>(null);
+  // @mention autocomplete: `query` is the active token (null = menu closed); insert @<local-part>
+  // so it matches the server-side mention parser (email local-part).
+  const [query, setQuery] = useState<string | null>(null);
+  const [active, setActive] = useState(0);
+  const directory = useQuery({ queryKey: ["mentionable"], queryFn: users.mentionable });
   const post = useMutation({
     mutationFn: () => comments.create(runId, { body, anchor: anchor ?? null, parent_id: parentId }),
     onSuccess: () => {
@@ -67,6 +77,59 @@ export function CommentComposer({
       onPosted?.();
     },
   });
+
+  const matches: MentionableUser[] =
+    query === null
+      ? []
+      : (directory.data ?? [])
+          .filter(
+            (u) =>
+              localPart(u.email).toLowerCase().startsWith(query) ||
+              (u.display_name?.toLowerCase().includes(query) ?? false),
+          )
+          .slice(0, 6);
+
+  const onType = (value: string, caret: number) => {
+    setBody(value);
+    const m = value.slice(0, caret).match(MENTION_RE);
+    setQuery(m ? m[2].toLowerCase() : null);
+    setActive(0);
+  };
+
+  const insertMention = (u: MentionableUser) => {
+    const ta = taRef.current;
+    const caret = ta?.selectionStart ?? body.length;
+    const m = body.slice(0, caret).match(MENTION_RE);
+    if (!m) return;
+    const start = caret - m[2].length - 1; // index of the '@'
+    const ins = `@${localPart(u.email)} `;
+    const next = body.slice(0, start) + ins + body.slice(caret);
+    setBody(next);
+    setQuery(null);
+    requestAnimationFrame(() => {
+      ta?.focus();
+      const pos = start + ins.length;
+      ta?.setSelectionRange(pos, pos);
+    });
+  };
+
+  const onKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    if (query === null || matches.length === 0) return;
+    if (e.key === "ArrowDown") {
+      e.preventDefault();
+      setActive((i) => (i + 1) % matches.length);
+    } else if (e.key === "ArrowUp") {
+      e.preventDefault();
+      setActive((i) => (i - 1 + matches.length) % matches.length);
+    } else if (e.key === "Enter") {
+      e.preventDefault();
+      insertMention(matches[active]);
+    } else if (e.key === "Escape") {
+      e.preventDefault();
+      setQuery(null);
+    }
+  };
+
   return (
     <form
       className="flex items-end gap-2"
@@ -75,19 +138,54 @@ export function CommentComposer({
         if (body.trim()) post.mutate();
       }}
     >
-      <textarea
-        value={body}
-        onChange={(e) => setBody(e.target.value)}
-        placeholder={placeholder}
-        rows={parentId ? 1 : 2}
-        autoFocus={autoFocus}
-        className="font-data flex-1 rounded-base px-2 py-1.5 text-[12px]"
-        style={{
-          border: "1px solid var(--color-border)",
-          backgroundColor: "var(--color-bg-base)",
-          color: "var(--color-text-primary)",
-        }}
-      />
+      <div className="relative flex-1">
+        <textarea
+          ref={taRef}
+          value={body}
+          onChange={(e) => onType(e.target.value, e.target.selectionStart ?? e.target.value.length)}
+          onKeyDown={onKeyDown}
+          placeholder={placeholder}
+          rows={parentId ? 1 : 2}
+          autoFocus={autoFocus}
+          className="font-data w-full rounded-base px-2 py-1.5 text-[12px]"
+          style={{
+            border: "1px solid var(--color-border)",
+            backgroundColor: "var(--color-bg-base)",
+            color: "var(--color-text-primary)",
+          }}
+        />
+        {query !== null && matches.length > 0 && (
+          <div
+            className="absolute bottom-full left-0 z-50 mb-1 w-64 rounded-base p-1"
+            style={{
+              backgroundColor: "var(--color-bg-surface)",
+              border: "1px solid var(--color-border)",
+              boxShadow: "0 8px 24px var(--color-overlay)",
+            }}
+          >
+            {matches.map((u, i) => (
+              <button
+                key={u.id}
+                type="button"
+                // onMouseDown (not onClick) so it fires before the textarea blur.
+                onMouseDown={(e) => {
+                  e.preventDefault();
+                  insertMention(u);
+                }}
+                className="ui-btn flex w-full flex-col items-start rounded-base px-2 py-1 text-left text-[12px]"
+                style={{ backgroundColor: i === active ? "var(--color-bg-raised)" : "transparent" }}
+              >
+                <span>@{localPart(u.email)}</span>
+                {u.display_name && (
+                  <span className="text-[11px]" style={{ color: "var(--color-text-secondary)" }}>
+                    {u.display_name}
+                  </span>
+                )}
+              </button>
+            ))}
+          </div>
+        )}
+      </div>
       <Button type="submit" variant="accent" disabled={post.isPending || !body.trim()}>
         {parentId ? "Reply" : "Comment"}
       </Button>

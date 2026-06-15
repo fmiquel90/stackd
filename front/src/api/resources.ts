@@ -6,6 +6,7 @@ import type {
   Health,
   LogChunk,
   LogEntry,
+  MentionableUser,
   RunComment,
   QueueEntry,
   RepoAuthKind,
@@ -34,6 +35,8 @@ export interface UserUpdate {
 export const users = {
   list: () => api<User[]>("/users"),
   update: (id: string, body: UserUpdate) => api<User>(`/users/${id}`, { method: "PATCH", body }),
+  // Minimal directory for @mention autocomplete — readable by any authenticated user.
+  mentionable: () => api<MentionableUser[]>("/users/mentionable"),
 };
 
 // Configurable tier catalog (§2.4). Listing is open (forms need it); mutations are admin.

@@ -34,6 +34,12 @@ export interface DevPersona {
   role: Role;
 }
 
+export interface MentionableUser {
+  id: string;
+  email: string;
+  display_name: string | null;
+}
+
 export type RepoAuthKind = "none" | "token" | "deploy_key";
 export type Tool = "opentofu" | "terraform";
 export type VariableKind = "terraform" | "environment";

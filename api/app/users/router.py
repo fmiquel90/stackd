@@ -8,8 +8,8 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.audit import record_audit
-from app.auth.deps import require_role
-from app.auth.schemas import UserOut, UserUpdate
+from app.auth.deps import CurrentUser, require_role
+from app.auth.schemas import MentionableUser, UserOut, UserUpdate
 from app.db import get_session
 from app.enums import AuditActorKind, Role
 from app.errors import ProblemException
@@ -29,6 +29,20 @@ _AUDIT_ACTIONS = {
 @router.get("", response_model=list[UserOut], dependencies=[Depends(require_role(Role.admin))])
 async def list_users(session: Annotated[AsyncSession, Depends(get_session)]) -> list[User]:
     rows = (await session.execute(select(User).order_by(User.created_at))).scalars().all()
+    return list(rows)
+
+
+@router.get("/mentionable", response_model=list[MentionableUser])
+async def list_mentionable(
+    _: CurrentUser, session: Annotated[AsyncSession, Depends(get_session)]
+) -> list[User]:
+    """A minimal directory (id/email/display_name) for @mention autocomplete in comments — readable
+    by any authenticated user (collaboration), unlike the admin-only full user list."""
+    rows = (
+        (await session.execute(select(User).where(User.disabled.is_(False)).order_by(User.email)))
+        .scalars()
+        .all()
+    )
     return list(rows)
 
 

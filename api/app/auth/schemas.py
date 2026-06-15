@@ -28,6 +28,16 @@ class SessionOut(BaseModel):
     user: UserOut
 
 
+class MentionableUser(BaseModel):
+    """Minimal directory entry for @mention autocomplete (no roles/permissions exposed)."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    email: str
+    display_name: str | None
+
+
 class UserUpdate(BaseModel):
     role: Role | None = None
     allowed_tiers: list[str] | None = None

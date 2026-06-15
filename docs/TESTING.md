@@ -110,7 +110,7 @@ no DB, no network.
 
 ## 4. Test map (what each test asserts)
 
-### API — unit & integration (`api/tests/`, 89 tests)
+### API — unit & integration (`api/tests/`, 90 tests)
 
 **`test_auth.py` (5)** — auth flow & session security
 - `test_dev_login_personas` — persona login returns the user (role/tier) + a usable access token.
@@ -290,10 +290,10 @@ identity components are instead pinned by **Ladle stories** (the DESIGN §8 visu
 
 | Location | Files | Tests |
 |---|---|---|
-| `api/tests` | 23 | 89 |
+| `api/tests` | 23 | 90 |
 | `api/e2e` | 1 | 1 (multi-step scenario) |
 | `worker/tests` | 2 | 7 |
-| **Total** | **26** | **97** |
+| **Total** | **26** | **98** |
 
 ---
 
