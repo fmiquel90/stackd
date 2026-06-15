@@ -1,8 +1,7 @@
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { X } from "lucide-react";
 import { hooksApi, type HookScope, type HookStage } from "@/api/resources";
-import { Button, Card, Field, Select, TextInput } from "@/components/ui";
+import { Badge, Button, Card, DeleteButton, Field, ItemTile, Select, TextInput } from "@/components/ui";
 
 const STAGES: HookStage[] = [
   "before_init",
@@ -38,19 +37,29 @@ export function HooksPanel({ scope, id }: { scope: HookScope; id: string }) {
   return (
     <Card>
       <div className="mb-2 text-[13px] font-medium">Platform hooks</div>
-      <div className="flex flex-col gap-1">
+      <div className="flex flex-col gap-2">
         {(data ?? []).map((h) => (
-          <div key={h.id} className="font-data flex items-center gap-2 text-[12px]">
-            <span style={{ color: "var(--color-text-secondary)" }}>{h.stage}</span>
-            <span>{h.name}</span>
-            <span style={{ color: "var(--color-text-secondary)" }}>{h.command}</span>
-            <span style={{ color: h.on_failure === "warn" ? "var(--color-state-unconfirmed)" : "var(--color-state-failed)" }}>
-              {h.on_failure}
-            </span>
-            <button type="button" aria-label="Delete hook" onClick={() => remove.mutate(h.id)} style={{ color: "var(--color-text-secondary)" }}>
-              <X size={13} strokeWidth={1.75} aria-hidden />
-            </button>
-          </div>
+          <ItemTile key={h.id}>
+            <div className="flex items-start justify-between gap-3">
+              <div className="flex min-w-0 flex-wrap items-center gap-2">
+                <Badge>{h.stage}</Badge>
+                <span className="text-[13px] font-medium">{h.name}</span>
+                <Badge
+                  color={
+                    h.on_failure === "warn"
+                      ? "var(--color-state-unconfirmed)"
+                      : "var(--color-state-failed)"
+                  }
+                >
+                  on fail: {h.on_failure}
+                </Badge>
+              </div>
+              <DeleteButton label="Delete hook" onClick={() => remove.mutate(h.id)} />
+            </div>
+            <div className="font-data mt-2 truncate text-[11px]" style={{ color: "var(--color-text-secondary)" }} title={h.command}>
+              {h.command}
+            </div>
+          </ItemTile>
         ))}
         {data && data.length === 0 && (
           <span className="font-data text-[12px]" style={{ color: "var(--color-text-secondary)" }}>

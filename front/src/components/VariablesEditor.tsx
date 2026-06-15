@@ -1,9 +1,8 @@
 import { useState } from "react";
 import { type QueryKey, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { X } from "lucide-react";
 import { type NewVariable } from "@/api/resources";
 import type { Variable, VariableKind } from "@/api/types";
-import { Button, Field, Select, TextInput } from "@/components/ui";
+import { Badge, Button, DeleteButton, Field, ItemTile, Select, TextInput } from "@/components/ui";
 
 // Reusable view+add+remove for a list of variables (stack-level or variable-set members). Both carry
 // the same layered-resolution semantics (SPECS §3.4); sensitive values stay masked (write-only).
@@ -34,46 +33,27 @@ export function VariablesEditor({
 
   return (
     <div className="flex flex-col gap-2">
-      <table className="w-full text-left font-data text-[12px]">
-        <thead>
-          <tr style={{ color: "var(--color-text-secondary)" }}>
-            <th className="py-1 pr-4">NAME</th>
-            <th className="py-1 pr-4">KIND</th>
-            <th className="py-1 pr-4">VALUE</th>
-            <th className="py-1" />
-          </tr>
-        </thead>
-        <tbody>
-          {(data ?? []).map((v) => (
-            <tr key={v.id}>
-              <td className="py-1 pr-4">{v.name}</td>
-              <td className="py-1 pr-4" style={{ color: "var(--color-text-secondary)" }}>
-                {v.kind}
-                {v.hcl ? " · hcl" : ""}
-              </td>
-              <td className="py-1 pr-4">{v.sensitive ? "•••" : (v.value ?? "")}</td>
-              <td className="py-1">
-                <button
-                  type="button"
-                  aria-label={`Delete ${v.name}`}
-                  className="ui-btn"
-                  style={{ color: "var(--color-state-failed)" }}
-                  onClick={() => removeMut.mutate(v.id)}
-                >
-                  <X size={13} strokeWidth={1.75} aria-hidden />
-                </button>
-              </td>
-            </tr>
-          ))}
-          {data && data.length === 0 && (
-            <tr>
-              <td colSpan={4} className="py-1" style={{ color: "var(--color-text-secondary)" }}>
-                No variables yet.
-              </td>
-            </tr>
-          )}
-        </tbody>
-      </table>
+      {(data ?? []).map((v) => (
+        <ItemTile key={v.id}>
+          <div className="flex items-center justify-between gap-3">
+            <div className="flex min-w-0 flex-wrap items-center gap-2">
+              <span className="font-data text-[13px] font-medium">{v.name}</span>
+              <Badge>{v.kind}</Badge>
+              {v.hcl && <Badge>hcl</Badge>}
+              {v.sensitive && <Badge color="var(--color-mock)">sensitive</Badge>}
+            </div>
+            <DeleteButton label={`Delete ${v.name}`} onClick={() => removeMut.mutate(v.id)} />
+          </div>
+          <div className="font-data mt-2 truncate text-[12px]" style={{ color: "var(--color-text-secondary)" }}>
+            {v.sensitive ? "•••" : (v.value ?? "")}
+          </div>
+        </ItemTile>
+      ))}
+      {data && data.length === 0 && (
+        <span className="font-data text-[12px]" style={{ color: "var(--color-text-secondary)" }}>
+          No variables yet.
+        </span>
+      )}
 
       <form
         className="flex flex-wrap items-end gap-2"

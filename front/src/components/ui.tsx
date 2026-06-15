@@ -1,6 +1,64 @@
 import type { ButtonHTMLAttributes, InputHTMLAttributes, ReactNode, SelectHTMLAttributes } from "react";
+import { type LucideIcon, Trash2 } from "lucide-react";
 
 // Minimal token-based primitives. No hard-coded colors (CLAUDE §5 / DESIGN §8).
+
+// A config list item — a bordered tile on the base surface, used uniformly across the
+// Variables / Hooks / Notifications / Secret-sources panels. `dimmed` recedes an inactive item.
+export function ItemTile({ dimmed, children }: { dimmed?: boolean; children: ReactNode }) {
+  return (
+    <div
+      className="rounded-base p-3"
+      style={{
+        backgroundColor: "var(--color-bg-base)",
+        border: "1px solid var(--color-border)",
+        opacity: dimmed ? 0.55 : 1,
+      }}
+    >
+      {children}
+    </div>
+  );
+}
+
+// A small pill. `color` (a token) → colored pill (border+text); otherwise neutral (muted text,
+// line border). Color is paired with the label, never the only signal (DESIGN §7).
+export function Badge({
+  children,
+  color,
+  icon: Icon,
+}: {
+  children: ReactNode;
+  color?: string;
+  icon?: LucideIcon;
+}) {
+  const text = color ?? "var(--color-text-secondary)";
+  const border = color ?? "var(--color-border)";
+  return (
+    <span
+      className="font-data inline-flex items-center gap-1 rounded-badge px-1.5 py-0.5 text-[11px]"
+      style={{ color: text, border: `1px solid ${border}` }}
+    >
+      {Icon && <Icon size={11} strokeWidth={1.75} aria-hidden />}
+      {children}
+    </span>
+  );
+}
+
+// The uniform delete affordance (Trash2, danger token) for config list items.
+export function DeleteButton({ label, onClick, disabled }: { label: string; onClick: () => void; disabled?: boolean }) {
+  return (
+    <button
+      type="button"
+      aria-label={label}
+      className="ui-btn rounded-base px-1.5 py-1"
+      onClick={onClick}
+      disabled={disabled}
+      style={{ color: "var(--color-state-failed)" }}
+    >
+      <Trash2 size={14} strokeWidth={1.75} aria-hidden />
+    </button>
+  );
+}
 
 export function Button({
   variant = "default",

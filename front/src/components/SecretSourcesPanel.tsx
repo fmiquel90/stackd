@@ -1,8 +1,7 @@
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { X } from "lucide-react";
 import { type NewSecretSource, type SecretProvider, secretSourcesApi } from "@/api/resources";
-import { Button, Card, Field, Select, TextInput } from "@/components/ui";
+import { Badge, Button, Card, DeleteButton, Field, ItemTile, Select, TextInput } from "@/components/ui";
 
 // Per-provider specifics: the credential's name and the reference (locator) format both differ —
 // e.g. Proton Pass uses pass://… while Vault/AWS would use their own. Add an entry per provider.
@@ -48,20 +47,17 @@ export function SecretSourcesPanel({ spaceId }: { spaceId: string }) {
         fetched live at run time and never stored here.
       </div>
 
-      <div className="flex flex-col gap-1">
+      <div className="flex flex-col gap-2">
         {(data ?? []).map((s) => (
-          <div key={s.id} className="font-data flex items-center gap-2 text-[12px]">
-            <span>{s.name}</span>
-            <span style={{ color: "var(--color-text-secondary)" }}>· {s.provider}</span>
-            <button
-              type="button"
-              aria-label={`Delete ${s.name}`}
-              style={{ color: "var(--color-state-failed)" }}
-              onClick={() => remove.mutate(s.id)}
-            >
-              <X size={13} strokeWidth={1.75} aria-hidden />
-            </button>
-          </div>
+          <ItemTile key={s.id}>
+            <div className="flex items-center justify-between gap-3">
+              <div className="flex min-w-0 items-center gap-2">
+                <span className="text-[13px] font-medium">{s.name}</span>
+                <Badge>{PROVIDERS[s.provider]?.label ?? s.provider}</Badge>
+              </div>
+              <DeleteButton label={`Delete ${s.name}`} onClick={() => remove.mutate(s.id)} />
+            </div>
+          </ItemTile>
         ))}
         {!data && (
           <span className="text-[12px]" style={{ color: "var(--color-text-secondary)" }}>
