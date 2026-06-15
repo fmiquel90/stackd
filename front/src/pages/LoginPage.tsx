@@ -19,7 +19,7 @@ export function LoginPage() {
 
         <a
           href={auth.googleStartUrl}
-          className="mt-6 flex items-center justify-center rounded-base px-4 py-2.5 text-[13px] font-medium"
+          className="ui-btn mt-6 flex items-center justify-center rounded-base px-4 py-2.5 text-[13px] font-medium"
           style={{ border: "1px solid var(--color-border)", color: "var(--color-text-primary)" }}
         >
           Sign in with Google
@@ -40,7 +40,7 @@ export function LoginPage() {
                   type="button"
                   disabled={devLogin.isPending}
                   onClick={() => devLogin.mutate(p.key)}
-                  className="font-data flex items-center justify-between rounded-base px-3 py-2 text-[12px] disabled:opacity-60"
+                  className="ui-btn font-data flex items-center justify-between rounded-base px-3 py-2 text-[12px] disabled:opacity-60"
                   style={{ backgroundColor: "var(--color-bg-raised)", border: "1px solid var(--color-border)" }}
                 >
                   <span>{p.email}</span>

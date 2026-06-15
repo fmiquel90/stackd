@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
-import { Bell } from "lucide-react";
+import { Bell, X } from "lucide-react";
 import { inbox } from "@/api/resources";
 import { useEntityStream } from "@/api/stream";
 import type { UserNotification } from "@/api/types";
@@ -33,10 +33,11 @@ export function NotificationBell({ userId }: { userId: string }) {
   const items = data ?? [];
   const unread = items.filter((n) => !n.read).length;
 
-  const markRead = useMutation({
-    mutationFn: () => inbox.markRead(),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["notifications"] }),
-  });
+  const invalidate = () => qc.invalidateQueries({ queryKey: ["notifications"] });
+  const markRead = useMutation({ mutationFn: () => inbox.markRead(), onSuccess: invalidate });
+  const remove = useMutation({ mutationFn: (id: string) => inbox.remove(id), onSuccess: invalidate });
+  const clearRead = useMutation({ mutationFn: () => inbox.clearRead(), onSuccess: invalidate });
+  const hasRead = items.some((n) => n.read);
 
   const toggle = () => {
     const next = !open;
@@ -78,21 +79,47 @@ export function NotificationBell({ userId }: { userId: string }) {
             boxShadow: "0 8px 24px var(--color-overlay)",
           }}
         >
-          <div className="mb-1 px-1 text-[12px] font-medium">Notifications</div>
+          <div className="mb-1 flex items-center justify-between px-1">
+            <span className="text-[12px] font-medium">Notifications</span>
+            {hasRead && (
+              <button
+                type="button"
+                className="ui-btn text-[11px]"
+                style={{ color: "var(--color-text-secondary)" }}
+                onClick={() => clearRead.mutate()}
+                disabled={clearRead.isPending}
+              >
+                Clear read
+              </button>
+            )}
+          </div>
           <div className="flex max-h-[360px] flex-col gap-0.5 overflow-auto">
             {items.map((n) => (
-              <button
+              <div
                 key={n.id}
-                type="button"
-                onClick={() => go(n)}
-                className="ui-btn flex flex-col items-start rounded-base px-2 py-1.5 text-left"
+                className="flex items-start gap-1 rounded-base"
                 style={{ backgroundColor: n.read ? "transparent" : "var(--color-bg-raised)" }}
               >
-                <span className="text-[12px]">{describe(n)}</span>
-                <span className="font-data text-[11px]" style={{ color: "var(--color-text-secondary)" }}>
-                  {new Date(n.created_at).toLocaleString()}
-                </span>
-              </button>
+                <button
+                  type="button"
+                  onClick={() => go(n)}
+                  className="ui-btn flex flex-1 flex-col items-start rounded-base px-2 py-1.5 text-left"
+                >
+                  <span className="text-[12px]">{describe(n)}</span>
+                  <span className="font-data text-[11px]" style={{ color: "var(--color-text-secondary)" }}>
+                    {new Date(n.created_at).toLocaleString()}
+                  </span>
+                </button>
+                <button
+                  type="button"
+                  aria-label="Dismiss notification"
+                  className="ui-btn shrink-0 px-1.5 py-1.5"
+                  style={{ color: "var(--color-text-secondary)" }}
+                  onClick={() => remove.mutate(n.id)}
+                >
+                  <X size={13} strokeWidth={1.75} aria-hidden />
+                </button>
+              </div>
             ))}
             {items.length === 0 && (
               <span className="px-2 py-3 text-[12px]" style={{ color: "var(--color-text-secondary)" }}>

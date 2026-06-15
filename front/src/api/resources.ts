@@ -180,6 +180,8 @@ export const inbox = {
   list: () => api<UserNotification[]>("/notifications"),
   markRead: (ids?: string[]) =>
     api<void>("/notifications/read", { method: "POST", body: { ids: ids ?? null } }),
+  remove: (id: string) => api<void>(`/notifications/${id}`, { method: "DELETE" }),
+  clearRead: () => api<void>("/notifications", { method: "DELETE" }),
 };
 
 export const audit = {
@@ -273,6 +275,8 @@ export const notificationsApi = {
     api<NotificationTarget>(`/${scope}/${id}/notifications/${targetId}`, { method: "PATCH", body }),
   remove: (scope: HookScope, id: string, targetId: string) =>
     api<void>(`/${scope}/${id}/notifications/${targetId}`, { method: "DELETE" }),
+  test: (scope: HookScope, id: string, targetId: string) =>
+    api<{ ok: boolean }>(`/${scope}/${id}/notifications/${targetId}/test`, { method: "POST" }),
 };
 
 export interface Dependency {

@@ -38,6 +38,12 @@ export function NotificationsPanel({ scope, id }: { scope: HookScope; id: string
     mutationFn: (targetId: string) => notificationsApi.remove(scope, id, targetId),
     onSuccess: () => qc.invalidateQueries({ queryKey: key }),
   });
+  const [tested, setTested] = useState<Record<string, "ok" | "fail">>({});
+  const sendTest = useMutation({
+    mutationFn: (targetId: string) => notificationsApi.test(scope, id, targetId),
+    onSuccess: (_r, targetId) => setTested((m) => ({ ...m, [targetId]: "ok" })),
+    onError: (_e, targetId) => setTested((m) => ({ ...m, [targetId]: "fail" })),
+  });
 
   const flipState = (s: NotificationState) =>
     setForm((f) => ({
@@ -64,6 +70,7 @@ export function NotificationsPanel({ scope, id }: { scope: HookScope; id: string
             )}
             <button
               type="button"
+              className="ui-btn"
               onClick={() => toggle.mutate({ id: t.id, enabled: t.enabled })}
               style={{ color: "var(--color-text-secondary)" }}
             >
@@ -71,7 +78,23 @@ export function NotificationsPanel({ scope, id }: { scope: HookScope; id: string
             </button>
             <button
               type="button"
+              className="ui-btn"
+              onClick={() => sendTest.mutate(t.id)}
+              disabled={sendTest.isPending}
+              style={{ color: "var(--color-accent)" }}
+            >
+              test
+            </button>
+            {tested[t.id] === "ok" && (
+              <span style={{ color: "var(--color-state-finished)" }}>sent ✓</span>
+            )}
+            {tested[t.id] === "fail" && (
+              <span style={{ color: "var(--color-state-failed)" }}>failed</span>
+            )}
+            <button
+              type="button"
               aria-label="Delete notification target"
+              className="ui-btn"
               onClick={() => remove.mutate(t.id)}
               style={{ color: "var(--color-text-secondary)" }}
             >
