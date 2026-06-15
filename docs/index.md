@@ -1,5 +1,8 @@
 <p align="center">
-  <img src="assets/logo.png" alt="StackD" width="340">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="assets/logo-dark.png">
+    <img src="assets/logo.png" alt="StackD" width="340">
+  </picture>
 </p>
 
 # Ship infrastructure changes with confidence

@@ -1,6 +1,7 @@
 <div align="center">
 
-<img src="docs/assets/logo.png" alt="StackD" width="340">
+<img src="docs/assets/logo.png#gh-light-mode-only" alt="StackD" width="340">
+<img src="docs/assets/logo-dark.png#gh-dark-mode-only" alt="StackD" width="340">
 
 ### Ship infrastructure changes with confidence.
 
