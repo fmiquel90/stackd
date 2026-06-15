@@ -55,6 +55,7 @@ async def create_run(
         user=user,
         commit_sha=body.commit_sha,
         group_root=body.with_downstream,
+        secret_overrides=body.secret_overrides,
     )
 
 

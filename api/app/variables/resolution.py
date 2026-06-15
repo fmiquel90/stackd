@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.enums import AttachmentTarget, VariableKind
+from app.enums import AttachmentTarget, SecretFallback, VariableKind
 from app.models.environment import Environment
 from app.models.stack import Stack
 from app.models.variable import Variable
@@ -22,10 +22,20 @@ class ResolvedVariable:
     hcl: bool
     provenance: str  # "set:<name>" | "stack" | "env"; dependency/mock are merged in at claim (§9)
     value: str | None  # masked (None) unless reveal_sensitive and sensitive
+    # External secret reference (§15) — value stays None after layered resolution; it is fetched
+    # from the provider in a dedicated pass at claim time (app.secret_sources.service).
+    secret_source_id: uuid.UUID | None = None
+    secret_ref: str | None = None
+    secret_fallback_mode: SecretFallback = SecretFallback.error
+    secret_fallback_encrypted: bytes | None = None
 
     @property
     def injected_name(self) -> str:
         return f"TF_VAR_{self.name}" if self.kind == VariableKind.terraform else self.name
+
+    @property
+    def is_reference(self) -> bool:
+        return self.secret_source_id is not None
 
 
 def _key(var: Variable) -> tuple[VariableKind, str]:
@@ -96,6 +106,10 @@ async def resolve_variables(
             hcl=var.hcl,
             provenance=provenance,
             value=(reveal_value(var) if (reveal_sensitive or not var.sensitive) else None),
+            secret_source_id=var.secret_source_id,
+            secret_ref=var.secret_ref,
+            secret_fallback_mode=var.secret_fallback_mode,
+            secret_fallback_encrypted=var.secret_fallback_encrypted,
         )
 
     # Layers 1-3: variable sets.

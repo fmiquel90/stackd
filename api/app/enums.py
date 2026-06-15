@@ -146,3 +146,13 @@ class CloudProvider(enum.StrEnum):
 class NotificationKind(enum.StrEnum):
     slack = "slack"  # POST {"text": ...} — Slack/Mattermost incoming webhook
     webhook = "webhook"  # POST a structured JSON envelope
+
+
+class SecretProvider(enum.StrEnum):
+    proton_pass = "proton_pass"  # via pass-cli; vault/aws_secrets_manager/... follow (§15)
+
+
+class SecretFallback(enum.StrEnum):
+    error = "error"  # provider down → run fails closed (default, §15.2)
+    static = "static"  # use a pre-stored operator-chosen value
+    break_glass = "break_glass"  # use an inline override supplied at trigger time

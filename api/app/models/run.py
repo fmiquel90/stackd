@@ -3,7 +3,7 @@ from __future__ import annotations
 import uuid
 from datetime import datetime
 
-from sqlalchemy import Boolean, Enum, ForeignKey, String
+from sqlalchemy import Boolean, Enum, ForeignKey, LargeBinary, String
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.dialects.postgresql import UUID as PGUUID
 from sqlalchemy.orm import Mapped, mapped_column
@@ -47,6 +47,11 @@ class Run(Base):
     check_results: Mapped[dict | None] = mapped_column(JSONB, default=None)
     resolved_inputs: Mapped[dict | None] = mapped_column(JSONB, default=None)
     used_mocks: Mapped[bool] = mapped_column(Boolean, default=False)
+    # A secret reference resolved via fallback (static value or break-glass override) — blocks apply
+    # unless environment.allow_fallback_apply (§15.5), exactly like used_mocks.
+    used_secret_fallback: Mapped[bool] = mapped_column(Boolean, default=False)
+    # Break-glass override values supplied at trigger time, AES-GCM, used only for this run (§15.4).
+    secret_overrides_encrypted: Mapped[bytes | None] = mapped_column(LargeBinary, default=None)
     variable_provenance: Mapped[dict | None] = mapped_column(JSONB, default=None)
 
     claimed_at: Mapped[datetime | None] = mapped_column(default=None)

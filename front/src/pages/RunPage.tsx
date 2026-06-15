@@ -103,7 +103,7 @@ export function RunPage() {
       <div className="flex min-w-0 flex-1 flex-col gap-4">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-3">
-            <StateBadge state={run.state} mocked={run.used_mocks} />
+            <StateBadge state={run.state} mocked={run.used_mocks} fallback={run.used_secret_fallback} />
             <span className="font-data text-[12px]" style={{ color: "var(--color-text-secondary)" }}>
               {run.type} · {run.commit_sha?.slice(0, 7) ?? "—"} · via {run.triggered_by}
             </span>

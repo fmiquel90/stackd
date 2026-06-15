@@ -89,8 +89,13 @@ The value is **AES-256-GCM encrypted at rest**, decrypted only to build the work
 !!! warning
     A sensitive value is **never returned in clear**. A later `GET` shows `"value": "•••"`; the plaintext is not readable again through the API.
 
+## Values by reference (external secret sources)
+
+Instead of storing a secret in Stackd, a variable can point at an entry in an external secrets manager (Proton Pass today). The value is fetched **live at run time** and never persisted — see [External secret sources](external-secrets.md).
+
 ## See also
 
 - [Stacks & environments](stacks-and-environments.md)
+- [External secret sources](external-secrets.md)
 - [Concepts](../CONCEPTS.md)
-- [SPECS](../SPECS.md) §3.4
+- [SPECS](../SPECS.md) §3.4, §15

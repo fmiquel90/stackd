@@ -42,6 +42,7 @@ per run and expire with it. You keep everything, on your own infrastructure.
 - 🧬 **Cross-environment dependencies** — wire one env's outputs into another, with **mocks** to bootstrap a fresh cascade.
 - 🛡️ **Tiers & four-eyes** — `dev < staging < prod`; prod applies require a *second* person.
 - 🗂️ **Layered variables** — sets → stack → env, with a **provenance badge** showing where each value came from.
+- 🔑 **External secret sources** — reference a value in a secrets manager (Proton Pass) instead of storing it; fetched live, with a fallback when the source is down ([guide](https://fmiquel90.github.io/stackd/guide/external-secrets/)).
 - 📜 **Full audit trail** — every mutation writes an append-only event *in the same transaction*.
 - 🔔 **Notifications** — Slack/webhook on "awaiting approval", "finished", "failed" — close the loop without watching the UI.
 - 📡 **Live updates** — the run page and dependency graph light up in real time over WebSocket.

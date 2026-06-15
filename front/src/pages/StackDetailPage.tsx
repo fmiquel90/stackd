@@ -11,6 +11,7 @@ import { CommandPanel } from "@/components/CommandPanel";
 import { HooksPanel } from "@/components/HooksPanel";
 import { NotificationsPanel } from "@/components/NotificationsPanel";
 import { PromotePanel } from "@/components/PromotePanel";
+import { SecretSourcesPanel } from "@/components/SecretSourcesPanel";
 import { StatePanel } from "@/components/StatePanel";
 import { Button, Card, Field, PageTitle, Select, TextInput } from "@/components/ui";
 
@@ -130,6 +131,7 @@ export function StackDetailPage() {
   const [open, setOpen] = useState<{ envId: string; tab: EnvTab } | null>(null);
   const [showStackHooks, setShowStackHooks] = useState(false);
   const [showStackNotifs, setShowStackNotifs] = useState(false);
+  const [showSecrets, setShowSecrets] = useState(false);
   const stack = useQuery({ queryKey: ["stack", stackId], queryFn: () => stacks.get(stackId) });
   const envs = useQuery({ queryKey: ["environments", stackId], queryFn: () => stacks.environments(stackId) });
 
@@ -158,6 +160,14 @@ export function StackDetailPage() {
         <Button onClick={() => setShowStackNotifs((v) => !v)}>{showStackNotifs ? "Hide" : "Manage notifications"}</Button>
       </div>
       {showStackNotifs && <NotificationsPanel scope="stacks" id={stackId} />}
+
+      <div className="flex items-center justify-between">
+        <h2 className="text-[15px] font-semibold">Secret sources</h2>
+        <Button onClick={() => setShowSecrets((v) => !v)}>
+          {showSecrets ? "Hide" : "Manage secret sources"}
+        </Button>
+      </div>
+      {showSecrets && <SecretSourcesPanel spaceId={stack.data.space_id} />}
 
       <div className="flex items-center justify-between">
         <h2 className="text-[15px] font-semibold">Environments</h2>

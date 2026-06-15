@@ -242,3 +242,36 @@ export const cloudApi = {
   test: (envId: string) =>
     api<{ assumed_role: string }>(`/environments/${envId}/cloud-integration/test`, { method: "POST" }),
 };
+
+// External secret sources (SPECS §15) — space-scoped connections to a secrets manager.
+export type SecretProvider = "proton_pass";
+
+export interface SecretSource {
+  id: string;
+  space_id: string;
+  name: string;
+  provider: SecretProvider;
+  config: Record<string, unknown>;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface NewSecretSource {
+  name: string;
+  provider: SecretProvider;
+  config?: Record<string, unknown>;
+  bootstrap_secret: string; // write-only
+}
+
+export const secretSourcesApi = {
+  list: (spaceId: string) => api<SecretSource[]>(`/spaces/${spaceId}/secret-sources`),
+  create: (spaceId: string, body: NewSecretSource) =>
+    api<SecretSource>(`/spaces/${spaceId}/secret-sources`, { body }),
+  rotate: (spaceId: string, srcId: string, bootstrap_secret: string) =>
+    api<SecretSource>(`/spaces/${spaceId}/secret-sources/${srcId}`, {
+      method: "PATCH",
+      body: { bootstrap_secret },
+    }),
+  remove: (spaceId: string, srcId: string) =>
+    api<void>(`/spaces/${spaceId}/secret-sources/${srcId}`, { method: "DELETE" }),
+};

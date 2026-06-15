@@ -8,6 +8,9 @@ const ALL: Provenance[] = [
   { kind: "env" },
   { kind: "dependency", name: "core-network/prod" },
   { kind: "mock" },
+  { kind: "secret", name: "proton" },
+  { kind: "secret_fallback", name: "proton" },
+  { kind: "secret_override", name: "proton" },
 ];
 
 export const AllKinds = () => (

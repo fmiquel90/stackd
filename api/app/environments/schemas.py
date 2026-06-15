@@ -18,6 +18,7 @@ class EnvironmentCreate(BaseModel):
     require_second_pair_of_eyes: bool = False
     managed_state: bool = True
     allow_mock_apply: bool = False
+    allow_fallback_apply: bool = False
     labels: dict | None = None
     position: int = 0
 
@@ -31,6 +32,7 @@ class EnvironmentUpdate(BaseModel):
     require_second_pair_of_eyes: bool | None = None
     managed_state: bool | None = None
     allow_mock_apply: bool | None = None
+    allow_fallback_apply: bool | None = None
     labels: dict | None = None
     position: int | None = None
 
@@ -48,6 +50,7 @@ class EnvironmentOut(BaseModel):
     require_second_pair_of_eyes: bool
     managed_state: bool
     allow_mock_apply: bool
+    allow_fallback_apply: bool
     head_sha: str | None
     commits_ahead: int | None
     affects_project_root: bool | None
@@ -73,6 +76,7 @@ class EnvironmentOut(BaseModel):
             require_second_pair_of_eyes=e.require_second_pair_of_eyes,
             managed_state=e.managed_state,
             allow_mock_apply=e.allow_mock_apply,
+            allow_fallback_apply=e.allow_fallback_apply,
             head_sha=e.head_sha,
             commits_ahead=e.commits_ahead,
             affects_project_root=e.affects_project_root,

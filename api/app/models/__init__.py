@@ -6,6 +6,7 @@ from app.models.notification import NotificationOutbox, NotificationTarget
 from app.models.oidc import CloudIntegration, OidcSigningKey
 from app.models.run import Run, RunEvent
 from app.models.run_log import RunLog
+from app.models.secret_source import SecretSource
 from app.models.space import Space
 from app.models.stack import Stack
 from app.models.state import StateLock, StateVersion
@@ -30,6 +31,7 @@ __all__ = [
     "Run",
     "RunEvent",
     "RunLog",
+    "SecretSource",
     "Space",
     "Stack",
     "StateLock",

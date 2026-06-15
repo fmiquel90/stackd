@@ -26,3 +26,5 @@ export const AllStates = () => (
 );
 
 export const Mocked = () => <StateBadge state="unconfirmed" mocked />;
+
+export const Fallback = () => <StateBadge state="unconfirmed" fallback />;

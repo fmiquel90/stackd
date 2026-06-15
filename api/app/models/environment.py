@@ -31,6 +31,7 @@ class Environment(Base):
     require_second_pair_of_eyes: Mapped[bool] = mapped_column(Boolean, default=False)
     managed_state: Mapped[bool] = mapped_column(Boolean, default=True)
     allow_mock_apply: Mapped[bool] = mapped_column(Boolean, default=False)  # §9.3
+    allow_fallback_apply: Mapped[bool] = mapped_column(Boolean, default=False)  # §15.5
 
     # Git staleness (§9.6) — populated from Phase 5; columns exist now.
     head_sha: Mapped[str | None] = mapped_column(String, default=None)

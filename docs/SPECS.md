@@ -992,6 +992,7 @@ GET|POST|DELETE /state/v1/{env_id} ; LOCK|UNLOCK /state/v1/{env_id}/lock
 | Static secrets | AES-256-GCM, write-only, decrypted at claim, masked in the logs |
 | Hooks | platform hooks not bypassable by PR; repo hooks without `sensitive_env` **nor cloud credentials** by default; repo hooks forbidden at the `*_apply` stages on tier=prod; masking of sensitive values in their stdout; timeout; execution in the run's container (§8.3) |
 | Mocks | apply forbidden by default (`allow_mock_apply=false`), badge, audit `mock_consumed` |
+| External secrets | provider bootstrap credential AES-256-GCM write-only (`secret_sources.bootstrap_secret_encrypted` §15.1); live values fetched at claim, never persisted, masked; **fallback value (static or break-glass override) forbids apply by default** (`allow_fallback_apply=false`), badge, audit `secret.fallback_used` (§15) |
 | Workers | revocable tokens, no incoming port, labels (isolated prod pool); tool binaries verified by checksum/signature (§7.4, supply-chain) |
 | State | S3 SSE-KMS via API only; scoped tokens, RO for PR; audited locking |
 | Apply permissions | tier per env × `max_apply_tier` cap per user (§2.4); distinct `can_destroy`; double lock with the OIDC trust policy on the tier |
@@ -1011,3 +1012,177 @@ GET|POST|DELETE /state/v1/{env_id} ; LOCK|UNLOCK /state/v1/{env_id}/lock
 - **Integration**: Postgres testcontainers; **concurrent claim → only one wins, the loser catches `23505` and re-polls**; HTTP backend with real `tofu` + Garage; log idempotency; **masking of sensitive values (`tfvars` + env) in a hook's stdout**; `after_plan` hook that reads plan.json; **WS fan-out via `LISTEN/NOTIFY`**; **single execution of a periodic task under advisory lock with 2 replicas**; AssumeRoleWithWebIdentity against a mock STS (moto).
 - **E2E**: ephemeral compose + fixture repo + `local_file` provider → bootstrap of a 2-stack cascade **with mocks** (mocked plan → upstream apply → real cascade), assertions on the final state AND the audit events (triggered → checked → confirmed → applied, mock_consumed).
 - **Agent**: exit codes, secret masking, workspace resume, cancellation, writing the OIDC token and exporting the env vars.
+
+---
+
+## 15. External secret sources (post-MVP)
+
+> Status: **post-MVP**, additive. This section extends the variable model (§3.3), the claim
+> build (§7.2) and the security model (§13). It reuses the mock apply-gate pattern (§9.3)
+> verbatim — read it first; everything here is the same shape applied to externally-sourced
+> secrets instead of mocked outputs.
+
+### 15.1 Goal and model
+
+A sensitive variable can carry its value **by reference** to an external secrets manager instead
+of storing the value in Stackd. At claim build the platform resolves the reference to a live value,
+injects it into the job exactly like any other sensitive variable, and **never persists it**. This
+is a security upgrade over a stored `value_encrypted`: no secret at rest in our DB, automatic
+rotation, single revocable bootstrap credential per source.
+
+The provider is abstracted — Proton Pass is the first concrete implementation, others (HashiCorp
+Vault, AWS Secrets Manager, GCP Secret Manager, 1Password Service Accounts, Doppler, Infisical)
+plug into the same interface.
+
+**New table `secret_sources`** (scoped per space, like `cloud_integrations` §3.10):
+
+```sql
+CREATE TABLE secret_sources (
+    id                        uuid PRIMARY KEY DEFAULT uuidv7(),
+    space_id                  uuid NOT NULL REFERENCES spaces(id) ON DELETE CASCADE,
+    name                      text NOT NULL,
+    provider                  secret_provider NOT NULL,   -- enum: proton_pass | vault | aws_secrets_manager | ...
+    config                    jsonb NOT NULL DEFAULT '{}',-- non-sensitive: e.g. proton {server,vault_scope}; vault {address,mount,auth}
+    bootstrap_secret_encrypted bytea NOT NULL,            -- AES-256-GCM, write-only: Proton PAT / AI Access Token, Vault token, ...
+    created_by_user_id        uuid REFERENCES users(id),
+    created_at                timestamptz NOT NULL DEFAULT now(),
+    updated_at                timestamptz NOT NULL DEFAULT now(),
+    UNIQUE (space_id, name)
+);
+```
+
+`bootstrap_secret_encrypted` follows the §1 encryption-at-rest rule and is **never returned** by
+the API (write-only, like `stacks.webhook_secret_encrypted`).
+
+**Variable extension** (`variables`, §3.3) — a third value source alongside `value` /
+`value_encrypted`:
+
+```sql
+ALTER TABLE variables ADD COLUMN secret_source_id          uuid REFERENCES secret_sources(id) ON DELETE RESTRICT;
+ALTER TABLE variables ADD COLUMN secret_ref                text;   -- provider locator, e.g. Proton "pass://vault/item/field"
+ALTER TABLE variables ADD COLUMN secret_fallback_mode      secret_fallback NOT NULL DEFAULT 'error';  -- error | static | break_glass
+ALTER TABLE variables ADD COLUMN secret_fallback_encrypted bytea;  -- AES-256-GCM, only for mode=static
+-- exactly one value source; a referenced variable is implicitly sensitive
+ALTER TABLE variables ADD CONSTRAINT variables_one_value_source CHECK (
+    (value IS NOT NULL)::int
+  + (value_encrypted IS NOT NULL)::int
+  + (secret_source_id IS NOT NULL)::int = 1
+);
+-- ON DELETE RESTRICT: a source in use can't be dropped out from under live variables.
+```
+
+A variable with `secret_source_id` is treated as `sensitive=true` regardless of the flag.
+
+### 15.2 Resolution order (real > fallback > error)
+
+At claim build (`build_job_payload`, §7.2), reference variables resolve **after** the existing
+5-layer resolution, by calling the provider:
+
+1. **Provider reachable, secret found** → use the live value. `variable_provenance[name] =
+   "secret:{source_name}"`. No audit event on success (would be noisy — successes are implicit in
+   the run; only failures and fallbacks are audited).
+2. **Provider unavailable / timeout / not-found** → apply `secret_fallback_mode`:
+   - `error` (**default**) → the claim resolution fails: the run transitions to `failed` with
+     reason `secret_unavailable:{var}`; the claim returns no job and the worker re-polls. Fail-closed.
+   - `static` → use `secret_fallback_encrypted` (the operator-chosen value). Sets
+     `run.used_secret_fallback = true`, provenance `secret_fallback:{source_name}`, audit
+     `secret.fallback_used`.
+   - `break_glass` → no stored value: the run can only proceed if the trigger carried an inline
+     override (see §15.4). Without one it behaves like `error`.
+
+This is the same `real > mock > error` precedence as §9.3, with "fallback" in the middle slot.
+
+A provider fetch has a short timeout (default 10 s); a slow source counts as unavailable. Resolved
+values are **never cached to disk or DB** — caching would re-introduce a secret at rest; an
+optional in-process memoisation lives only for the duration of one claim build.
+
+### 15.3 Where resolution runs
+
+**v1: API-side.** The platform resolves references during claim build and injects the live value
+into the existing payload fields — `sensitive_env` / `tfvars_json` — and the literal into
+`mask_values` (§5.1). **No worker or claim-payload schema change**: a resolved reference is
+indistinguishable downstream from a stored sensitive variable. The bootstrap credential stays on
+the API host and is never shipped to a worker. For Proton Pass this means the API host runs
+`pass-cli` (headless, authenticated by the source's PAT / AI Access Token); for Vault/ASM it is a
+plain HTTPS call.
+
+**Future: worker-side** (mirrors OIDC→STS, §10.4) — ship `{provider, config, scoped_token,
+secret_ref}` in the claim and let the worker fetch locally, so the value never transits the API.
+Deferred: it widens bootstrap-credential exposure to every worker and complicates the fallback path,
+for a marginal gain over the masked API-side flow. Noted here so the payload contract can grow
+compatibly.
+
+### 15.4 Break-glass override (operator-supplied value)
+
+When a source is down and the operator must ship anyway, the run **trigger** accepts an inline
+override (it is never stored, used for that run only):
+
+```
+POST /api/v1/environments/{id}/runs
+  { ..., "secret_overrides": { "<variable_name>": "<value>" } }
+```
+
+- **Permission**: supplying an override is an apply-affecting bypass → requires
+  `can_apply(user, env)` (§2.4). It is rejected unless the targeted variable's
+  `secret_fallback_mode = break_glass` (a source must opt in to being overridable).
+- The override value is injected like a sensitive variable, added to `mask_values`, and sets
+  `run.used_secret_fallback = true`, provenance `secret_override:{source_name}`.
+- Audit `secret.fallback_overridden`, `context = {variable, source, run_id}` — **the value itself
+  is never written to the audit context** (§6.1).
+
+No new run state is introduced: break-glass reuses the trigger path, so `transition()` legality
+(invariant) is untouched.
+
+### 15.5 Apply gate (mirrors §9.3)
+
+A value produced by any fallback is **not the real secret** (it may be stale or operator-chosen), so
+it must not reach prod silently:
+
+```sql
+ALTER TABLE runs         ADD COLUMN used_secret_fallback bool NOT NULL DEFAULT false;
+ALTER TABLE environments ADD COLUMN allow_fallback_apply bool NOT NULL DEFAULT false;
+```
+
+`confirm_run()` enforces, in the same place as the mock gate:
+
+```python
+if run.used_secret_fallback and not env.allow_fallback_apply:
+    raise ProblemException(409, "Apply disabled",
+        "This run resolved a secret via fallback (allow_fallback_apply is off).")
+```
+
+The UI shows a provenance badge on any value sourced from a fallback (DESIGN — same treatment as the
+mock badge). Plan of a `used_secret_fallback` run is always allowed; only apply is gated.
+
+### 15.6 Audit taxonomy additions (extends §6.2)
+
+```
+secret_source.created / secret_source.updated / secret_source.deleted / secret_source.token_rotated
+secret.fallback_used          -- static fallback consumed (provider was down)
+secret.fallback_overridden    -- operator supplied a break-glass value
+secret.unavailable            -- run failed because a reference couldn't resolve and no fallback applied
+```
+
+Successful live resolutions are intentionally **not** audited (volume); the run's
+`variable_provenance` already records `secret:{source}` per variable.
+
+### 15.7 Proton Pass binding
+
+- `provider = proton_pass`; `config = {server?, vault_scope?}`; bootstrap credential = a Proton
+  **Personal Access Token** or **AI Access Token**, scoped to the relevant vault/items (no account
+  password). `secret_ref` uses Proton's URI form `pass://vault/item/field`.
+- Integration runs `pass-cli` on the resolver host (API for v1); the binary must be present in the
+  API image and is verified by checksum (supply-chain, §7.4).
+- The Proton end-to-end model is preserved: decryption happens client-side via the token, Stackd
+  only ever holds the (encrypted-at-rest) token and the reference, never the user's master key.
+
+### 15.8 Invariants preserved
+
+1. Secrets never logged nor returned in clear (invariant §13.3): live value, static fallback and
+   break-glass override all enter `mask_values`; `bootstrap_secret_encrypted` and
+   `secret_fallback_encrypted` are write-only.
+2. Every mutating action audited in the same transaction (§6.3): source CRUD and fallback events.
+3. A non-real value cannot be applied silently (§9.3 parity): `used_secret_fallback` ×
+   `allow_fallback_apply`.
+4. Run state only changes through `transition()` (invariant §4.2): no new state; failure path uses
+   `→ failed`, break-glass uses the normal trigger path.

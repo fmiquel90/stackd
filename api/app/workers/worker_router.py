@@ -29,6 +29,7 @@ from app.models.run_log import RunLog
 from app.models.worker import Worker
 from app.models.worker_command import WorkerCommand
 from app.runs.transition import ALLOWED, transition
+from app.secret_sources.providers import SecretUnavailable
 from app.workers.auth import CurrentWorker, mint_worker_token, pool_from_token
 from app.workers.claim import build_job_payload, claim_one
 from app.workers.schemas import (
@@ -131,8 +132,10 @@ async def claim(worker: CurrentWorker, session: DbSession, wait: int = 0) -> dic
             worker.status = WorkerStatus.busy
             try:
                 payload = await build_job_payload(session, run)
-            except DependencyError as exc:
-                # Unresolvable dependency (§9.3) → fail the run, hand the worker nothing.
+            except (DependencyError, SecretUnavailable) as exc:
+                # Unresolvable dependency (§9.3) or external secret (§15.2) → fail the run closed,
+                # hand the worker nothing.
+                reason = "secret" if isinstance(exc, SecretUnavailable) else "dependency"
                 await transition(
                     session,
                     run,
@@ -140,7 +143,7 @@ async def claim(worker: CurrentWorker, session: DbSession, wait: int = 0) -> dic
                     actor=RunEventActor.system,
                     fields={"error": str(exc)},
                     audit_action="run.apply_failed",
-                    audit_context={"reason": "dependency"},
+                    audit_context={"reason": reason, "detail": str(exc)},
                 )
                 await session.commit()
                 return Response(status_code=204)

@@ -57,6 +57,7 @@ nav:
       - Getting started: guide/getting-started.md
       - Stacks & environments: guide/stacks-and-environments.md
       - Variables & secrets: guide/variables.md
+      - External secret sources: guide/external-secrets.md
       - Runs & approvals: guide/runs-and-approvals.md
       - Running commands: guide/commands.md
       - Hooks & .stackd.yml: guide/hooks.md

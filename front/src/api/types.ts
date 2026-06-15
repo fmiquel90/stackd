@@ -55,6 +55,7 @@ export interface Environment {
   require_second_pair_of_eyes: boolean;
   managed_state: boolean;
   allow_mock_apply: boolean;
+  allow_fallback_apply: boolean;
   head_sha: string | null;
   commits_ahead: number | null;
   affects_project_root: boolean | null;
@@ -108,6 +109,7 @@ export interface Run {
   plan_summary: { add?: number; change?: number; destroy?: number } | null;
   check_results: { checks?: { name: string; status: string; detail?: string }[] } | null;
   used_mocks: boolean;
+  used_secret_fallback: boolean;
   variable_provenance: Record<string, string> | null;
   error: string | null;
   created_at: string;

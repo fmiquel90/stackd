@@ -6,10 +6,11 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.crypto import encrypt
 from app.errors import ProblemException
 from app.models.variable import Variable
 from app.variables.schemas import VariableCreate, VariableUpdate
-from app.variables.values import store_value
+from app.variables.values import set_reference, store_value
 
 
 async def create_variable(
@@ -28,7 +29,17 @@ async def create_variable(
         name=body.name,
         hcl=body.hcl,
     )
-    store_value(var, body.value, sensitive=body.sensitive)
+    if body.secret_source_id is not None:
+        set_reference(
+            var,
+            source_id=body.secret_source_id,
+            secret_ref=body.secret_ref or "",
+            fallback_mode=body.secret_fallback_mode,
+            fallback_value=body.secret_fallback,
+        )
+    else:
+        assert body.value is not None  # schema validator guarantees one source
+        store_value(var, body.value, sensitive=body.sensitive)
     session.add(var)
     try:
         await session.flush()
@@ -51,6 +62,32 @@ async def get_variable(session: AsyncSession, var_id: uuid.UUID) -> Variable:
 def update_variable(var: Variable, body: VariableUpdate) -> None:
     if body.hcl is not None:
         var.hcl = body.hcl
+
+    # Re-point at (or onto) an external secret reference (§15).
+    if body.secret_source_id is not None:
+        set_reference(
+            var,
+            source_id=body.secret_source_id,
+            secret_ref=body.secret_ref or var.secret_ref or "",
+            fallback_mode=body.secret_fallback_mode or var.secret_fallback_mode,
+            fallback_value=body.secret_fallback,
+        )
+        return
+    # Tune an existing reference in place (locator / fallback policy / value) without re-pointing.
+    # Each field is only touched when supplied, so omitting `secret_fallback` keeps the stored one.
+    if var.secret_source_id is not None and (
+        body.secret_ref is not None
+        or body.secret_fallback_mode is not None
+        or body.secret_fallback is not None
+    ):
+        if body.secret_ref is not None:
+            var.secret_ref = body.secret_ref
+        if body.secret_fallback_mode is not None:
+            var.secret_fallback_mode = body.secret_fallback_mode
+        if body.secret_fallback is not None:
+            var.secret_fallback_encrypted = encrypt(body.secret_fallback)
+        return
+
     sensitive = body.sensitive if body.sensitive is not None else var.sensitive
     if body.value is not None:
         store_value(var, body.value, sensitive=sensitive)

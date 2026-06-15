@@ -110,7 +110,7 @@ no DB, no network.
 
 ## 4. Test map (what each test asserts)
 
-### API — unit & integration (`api/tests/`, 65 tests)
+### API — unit & integration (`api/tests/`, 73 tests)
 
 **`test_auth.py` (5)** — auth flow & session security
 - `test_dev_login_personas` — persona login returns the user (role/tier) + a usable access token.
@@ -191,6 +191,15 @@ no DB, no network.
 - `test_attached_set_delete_requires_detach` — deleting an attached set → 409 until detached.
 - `test_protected_env_forces_no_autodeploy` — `protected=true` forces `autodeploy=false`.
 
+**`test_secret_sources.py` (7)** — external secret references & fallback (§15)
+- `test_reference_resolved_live_is_masked` — a referenced variable resolves to the live provider value, lands in `tfvars`, is added to `mask_values`, provenance `secret:<source>`.
+- `test_static_fallback_used_and_blocks_apply` — provider down → the static fallback value is used, `used_secret_fallback=true`; confirm is blocked until `allow_fallback_apply` is turned on.
+- `test_error_mode_fails_the_run` — provider down with `mode=error` → the claim returns 204 and the run is `failed` (fail-closed).
+- `test_break_glass_override` — a `break_glass` reference uses the operator's inline `secret_overrides` value when the provider is down; provenance `secret_override:<source>`.
+- `test_override_requires_apply_permission` — a writer (no apply right) supplying `secret_overrides` → 403.
+- `test_source_crud_hides_bootstrap_and_gates_writes` — a writer can't create a source (admin-only); the bootstrap credential is never serialized.
+- `test_source_in_use_cannot_be_deleted` — deleting a source a variable still references → 409 (FK RESTRICT).
+
 **`test_notifications.py` (4)** — outbound notifications
 - `test_notification_target_crud` — create/list/patch/delete a target (default `on_states=[unconfirmed, failed]`); each mutation audited.
 - `test_rejects_unsupported_state` — an `on_states` value that never fires → 422.
@@ -260,10 +269,10 @@ identity components are instead pinned by **Ladle stories** (the DESIGN §8 visu
 
 | Location | Files | Tests |
 |---|---|---|
-| `api/tests` | 19 | 65 |
+| `api/tests` | 20 | 73 |
 | `api/e2e` | 1 | 1 (multi-step scenario) |
 | `worker/tests` | 2 | 7 |
-| **Total** | **22** | **73** |
+| **Total** | **23** | **81** |
 
 ---
 

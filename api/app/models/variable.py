@@ -7,7 +7,7 @@ from sqlalchemy.dialects.postgresql import UUID as PGUUID
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db import Base, pk_uuid
-from app.enums import VariableKind
+from app.enums import SecretFallback, VariableKind
 
 
 class Variable(Base):
@@ -28,6 +28,12 @@ class Variable(Base):
             "variable_set_id IS NULL OR environment_id IS NULL",
             name="set_var_not_env_scoped",
         ),
+        # Exactly one value source (§15.1): plaintext, encrypted secret, or external reference.
+        CheckConstraint(
+            "(value IS NOT NULL)::int + (value_encrypted IS NOT NULL)::int "
+            "+ (secret_source_id IS NOT NULL)::int = 1",
+            name="one_value_source",
+        ),
     )
 
     id: Mapped[uuid.UUID] = pk_uuid()
@@ -47,3 +53,15 @@ class Variable(Base):
     value_encrypted: Mapped[bytes | None] = mapped_column(LargeBinary, default=None)  # AES-GCM
     sensitive: Mapped[bool] = mapped_column(Boolean, default=False)
     hcl: Mapped[bool] = mapped_column(Boolean, default=False)
+
+    # External secret reference (§15): the value is fetched live at claim time, never stored here.
+    # A referenced variable is always sensitive. `secret_fallback_encrypted` holds the static
+    # fallback value (mode=static) used when the provider is unreachable.
+    secret_source_id: Mapped[uuid.UUID | None] = mapped_column(
+        PGUUID(as_uuid=True), ForeignKey("secret_sources.id", ondelete="RESTRICT"), default=None
+    )
+    secret_ref: Mapped[str | None] = mapped_column(String, default=None)
+    secret_fallback_mode: Mapped[SecretFallback] = mapped_column(
+        Enum(SecretFallback, name="secret_fallback"), default=SecretFallback.error
+    )
+    secret_fallback_encrypted: Mapped[bytes | None] = mapped_column(LargeBinary, default=None)

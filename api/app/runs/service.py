@@ -1,10 +1,12 @@
 from __future__ import annotations
 
+import json
 from datetime import UTC, datetime
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.audit import record_audit
+from app.crypto import encrypt
 from app.enums import (
     AuditActorKind,
     RunEventActor,
@@ -29,11 +31,23 @@ async def trigger_run(
     user: User | None = None,
     commit_sha: str | None = None,
     group_root: bool = False,
+    secret_overrides: dict[str, str] | None = None,
 ) -> Run:
     """Create a run in `queued` (SPECS §4). A plan changes nothing, so any writer+ may trigger;
-    a `destroy` additionally requires can_destroy (§2.4). `group_root` starts a cascade group."""
+    a `destroy` additionally requires can_destroy (§2.4). `group_root` starts a cascade group.
+    `secret_overrides` is a break-glass map of variable→value used if the secret source is down
+    (§15.4) — an apply-affecting bypass, so it requires can_apply and is sealed AES-GCM."""
     if run_type == RunType.destroy and (user is None or not user.can_destroy):
         raise ProblemException(403, "Forbidden", "destroy permission required.")
+
+    overrides_encrypted = None
+    if secret_overrides:
+        is_destroy = run_type == RunType.destroy
+        if user is None or not can_apply(user, env, is_destroy=is_destroy).allowed:
+            raise ProblemException(
+                403, "Forbidden", "Supplying secret overrides requires apply permission."
+            )
+        overrides_encrypted = encrypt(json.dumps(secret_overrides))
 
     run = Run(
         environment_id=env.id,
@@ -42,6 +56,7 @@ async def trigger_run(
         triggered_by=triggered_by,
         trigger_user_id=user.id if (user and triggered_by == TriggeredBy.manual) else None,
         commit_sha=commit_sha,
+        secret_overrides_encrypted=overrides_encrypted,
     )
     session.add(run)
     await session.flush()
@@ -190,6 +205,14 @@ async def confirm_run(session: AsyncSession, run: Run, user: User) -> Run:
     if run.used_mocks and not env.allow_mock_apply:
         raise ProblemException(
             409, "Apply disabled", "This run consumed mock outputs (allow_mock_apply is off)."
+        )
+
+    # Secret fallback block (§15.5): a value resolved via fallback is not the real secret.
+    if run.used_secret_fallback and not env.allow_fallback_apply:
+        raise ProblemException(
+            409,
+            "Apply disabled",
+            "This run resolved a secret via fallback (allow_fallback_apply is off).",
         )
 
     # 4-eyes (§2.4): triggerer ≠ confirmer for prod or when required, human triggers only.

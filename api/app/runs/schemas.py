@@ -12,6 +12,8 @@ class TriggerRunIn(BaseModel):
     type: RunType = RunType.tracked
     with_downstream: bool = False  # start a cascade run group (§9.4)
     commit_sha: str | None = None
+    # Break-glass overrides for down secret sources (§15.4): variable name → value. Requires apply.
+    secret_overrides: dict[str, str] | None = None
 
 
 class CommandTriggerIn(BaseModel):
@@ -42,6 +44,7 @@ class RunOut(BaseModel):
     plan_summary: dict | None
     check_results: dict | None
     used_mocks: bool
+    used_secret_fallback: bool
     variable_provenance: dict | None
     error: str | None
     claimed_at: datetime | None

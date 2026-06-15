@@ -100,6 +100,26 @@ async def build_job_payload(session: AsyncSession, run: Run) -> dict:
     assert stack is not None
 
     resolved = await resolve_variables(session, env, reveal_sensitive=True)
+
+    # Resolve external secret references (§15): fetch live values, or apply the configured fallback.
+    # Raises SecretUnavailable (caught by the claim endpoint → run failed) when a reference can't
+    # resolve and no fallback applies. Done before any run mutation so a failure leaves nothing half
+    # written. Break-glass override values were sealed onto the run at trigger time (§15.4).
+    from app.secret_sources.service import resolve_references
+
+    overrides: dict[str, str] = {}
+    if run.secret_overrides_encrypted is not None:
+        overrides = json.loads(decrypt(run.secret_overrides_encrypted))
+    secret_provenance = await resolve_references(session, run, resolved, overrides=overrides)
+
+    # §15.5: the confirm-time fallback gate was checked against the plan-time resolution. If a
+    # reference newly resolves via fallback at the apply claim (e.g. the provider was up at plan and
+    # is down now), re-enforce the gate here so a non-real secret can't slip into an apply.
+    if run.state == RunState.applying and run.used_secret_fallback and not env.allow_fallback_apply:
+        from app.secret_sources.providers import SecretUnavailable
+
+        raise SecretUnavailable("secret_unavailable:fallback_apply_disabled")
+
     tfvars_json: dict[str, str | None] = {}
     env_vars: dict[str, str | None] = {}
     sensitive_env: dict[str, str | None] = {}
@@ -133,6 +153,7 @@ async def build_job_payload(session: AsyncSession, run: Run) -> dict:
     # Provenance snapshot (§3.4): layered resolution, then dependency/mock overrides.
     provenance = provenance_snapshot(resolved)
     provenance.update(dep.provenance)
+    provenance.update(secret_provenance)  # §15: secret:/secret_fallback:/secret_override:
     run.variable_provenance = provenance
 
     repo_credentials: dict[str, str | None] = {"kind": stack.repo_auth_kind.value}
