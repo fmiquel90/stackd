@@ -68,6 +68,14 @@ tasks:
       - cmd: "cd front && pnpm test --run"
         ignore_error: true
 
+  push-change:
+    desc: Simulate a merge in demo-network (staleness test)
+    dir: .dev/repos/demo-network
+    cmds:
+      - date >> CHANGELOG.txt
+      # Quote the whole command: the ": " in the commit message is a YAML mapping token otherwise.
+      - 'git add -A && git commit -m "feat: simulated merge"'
+
   e2e:
     desc: Full non-regression scenario against the live stack + real worker (DEV §7)
     deps: [dev]
@@ -94,10 +102,3 @@ tasks:
     cmds:
       - "{{.COMPOSE}} exec -T api uv run ruff check ."
       - "{{.COMPOSE}} exec -T api uv run ruff format --check ."
-
-  push-change:
-    desc: Simulate a merge in demo-network (staleness test)
-    dir: .dev/repos/demo-network
-    cmds:
-      - date >> CHANGELOG.txt
-      - git add -A && git commit -m "feat: simulated merge"

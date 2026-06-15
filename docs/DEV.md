@@ -76,7 +76,8 @@ tasks:
     dir: .dev/repos/demo-network
     cmds:
       - date >> CHANGELOG.txt
-      - git add -A && git commit -m "feat: simulated merge"
+      # Quote the whole command — the ": " in the message is a YAML mapping token otherwise.
+      - 'git add -A && git commit -m "feat: simulated merge"'
 
   e2e:
     desc: Complete §7 scenario (non-regression)
