@@ -1128,10 +1128,10 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
-  <a href="#api-unit-integration-apitests-84-tests" class="md-nav__link">
+  <a href="#api-unit-integration-apitests-89-tests" class="md-nav__link">
     <span class="md-ellipsis">
       
-        API — unit &amp; integration (api/tests/, 84 tests)
+        API — unit &amp; integration (api/tests/, 89 tests)
       
     </span>
   </a>
@@ -1353,10 +1353,10 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
-  <a href="#api-unit-integration-apitests-84-tests" class="md-nav__link">
+  <a href="#api-unit-integration-apitests-89-tests" class="md-nav__link">
     <span class="md-ellipsis">
       
-        API — unit &amp; integration (api/tests/, 84 tests)
+        API — unit &amp; integration (api/tests/, 89 tests)
       
     </span>
   </a>
@@ -1600,7 +1600,7 @@ throwaway one). <code>task e2e</code> points pytest at <code>e2e</code> explicit
 no DB, no network.</p>
 <hr />
 <h2 id="4-test-map-what-each-test-asserts">4. Test map (what each test asserts)<a class="headerlink" href="#4-test-map-what-each-test-asserts" title="Permanent link">&para;</a></h2>
-<h3 id="api-unit-integration-apitests-84-tests">API — unit &amp; integration (<code>api/tests/</code>, 84 tests)<a class="headerlink" href="#api-unit-integration-apitests-84-tests" title="Permanent link">&para;</a></h3>
+<h3 id="api-unit-integration-apitests-89-tests">API — unit &amp; integration (<code>api/tests/</code>, 89 tests)<a class="headerlink" href="#api-unit-integration-apitests-89-tests" title="Permanent link">&para;</a></h3>
 <p><strong><code>test_auth.py</code> (5)</strong> — auth flow &amp; session security
 - <code>test_dev_login_personas</code> — persona login returns the user (role/tier) + a usable access token.
 - <code>test_refresh_requires_csrf</code> — <code>/refresh</code> rejects a request missing the <code>X-CSRF-Token</code> (double-submit).
@@ -1681,12 +1681,18 @@ no DB, no network.</p>
 - <code>test_update_user_rejects_unknown_tier</code> — <code>allowed_tiers</code> validated against the catalog → 422.
 - <code>test_delete_tier_strips_user_grants</code> — deleting a tier removes its name from every user's set (no resurrection).
 - <code>test_delete_tier_in_use_blocked</code> — deleting a tier an env references → 409.</p>
-<p><strong><code>test_comments.py</code> (5)</strong> — plan-review comments (§16)
+<p><strong><code>test_inbox.py</code> (4)</strong> — in-app notification center (§17)
+- <code>test_approval_request_fans_out_to_approvers</code> — a run reaching <code>unconfirmed</code> notifies eligible approvers (not the triggerer).
+- <code>test_terminal_notifies_the_triggerer</code> — a finished run notifies its human triggerer.
+- <code>test_comment_reply_and_mention_notify</code> — a reply notifies the root author; an <code>@mention</code> notifies the mentioned user.
+- <code>test_feed_is_per_user_and_mark_read</code> — the feed is per-user; the triggerer isn't approval-notified for their own run; mark-read clears unread.</p>
+<p><strong><code>test_comments.py</code> (6)</strong> — plan-review comments (§16)
 - <code>test_comment_thread_and_anchor</code> — general + anchored (<code>plan_line</code>) comment + a reply; listed together.
 - <code>test_anchor_validation</code> — a <code>plan_line</code> anchor missing <code>phase</code>/<code>seq</code> → 422.
 - <code>test_no_nested_replies</code> — replying to a reply → 422 (threads stay one level deep).
 - <code>test_resolve_and_edit_permissions</code> — non-author can't edit the body; an approver may resolve; author edits own.
-- <code>test_delete_only_author_or_admin</code> — an approver ≠ author is refused (403); an admin can delete.</p>
+- <code>test_delete_only_author_or_admin</code> — an approver ≠ author is refused (403); an admin can delete.
+- <code>test_delete_thread_with_replies_guarded</code> — a non-admin can't delete a root carrying others' replies (409); an admin can.</p>
 <p><strong><code>test_notifications.py</code> (4)</strong> — outbound notifications
 - <code>test_notification_target_crud</code> — create/list/patch/delete a target (default <code>on_states=[unconfirmed, failed]</code>); each mutation audited.
 - <code>test_rejects_unsupported_state</code> — an <code>on_states</code> value that never fires → 422.
@@ -1752,8 +1758,8 @@ identity components are instead pinned by <strong>Ladle stories</strong> (the DE
 <tbody>
 <tr>
 <td><code>api/tests</code></td>
-<td>22</td>
-<td>84</td>
+<td>23</td>
+<td>89</td>
 </tr>
 <tr>
 <td><code>api/e2e</code></td>
@@ -1767,8 +1773,8 @@ identity components are instead pinned by <strong>Ladle stories</strong> (the DE
 </tr>
 <tr>
 <td><strong>Total</strong></td>
-<td><strong>25</strong></td>
-<td><strong>92</strong></td>
+<td><strong>26</strong></td>
+<td><strong>97</strong></td>
 </tr>
 </tbody>
 </table>

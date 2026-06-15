@@ -1868,6 +1868,67 @@
   
 </li>
       
+        <li class="md-nav__item">
+  <a href="#17-in-app-notification-center-post-mvp" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        17. In-app notification center (post-MVP)
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="17. In-app notification center (post-MVP)">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#171-model-events" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        17.1 Model &amp; events
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#172-live-delivery-private-per-user-channel" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        17.2 Live delivery — private per-user channel
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#173-api" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        17.3 API
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#174-invariants-preserved" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        17.4 Invariants preserved
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
     </ul>
   
 </nav>
@@ -2974,6 +3035,67 @@
     <span class="md-ellipsis">
       
         16.5 Invariants preserved
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#17-in-app-notification-center-post-mvp" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        17. In-app notification center (post-MVP)
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="17. In-app notification center (post-MVP)">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#171-model-events" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        17.1 Model &amp; events
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#172-live-delivery-private-per-user-channel" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        17.2 Live delivery — private per-user channel
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#173-api" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        17.3 API
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#174-invariants-preserved" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        17.4 Invariants preserved
       
     </span>
   </a>
@@ -4282,6 +4404,39 @@ env flag could make confirm require all threads resolved — deliberately deferr
 <li>No run-state change — comments are a side record; <code>transition()</code> (invariant §4.2) is untouched.</li>
 <li>Snippets come from already-masked log lines, so no secret leaks (invariant §13.3).</li>
 <li>Live updates reuse <code>LISTEN/NOTIFY</code> (§5.3) — no new transport.</li>
+</ol>
+<hr />
+<h2 id="17-in-app-notification-center-post-mvp">17. In-app notification center (post-MVP)<a class="headerlink" href="#17-in-app-notification-center-post-mvp" title="Permanent link">&para;</a></h2>
+<blockquote>
+<p>Status: <strong>post-MVP</strong>, additive. The <strong>inbound</strong> counterpart to the outbound Slack/webhook outbox
+(§5/notifications): a per-user inbox surfaced as a bell in the UI. Side records only — no run-state
+change (<code>transition()</code> untouched), live over the existing <code>LISTEN/NOTIFY</code> transport (§5.3).</p>
+</blockquote>
+<h3 id="171-model-events">17.1 Model &amp; events<a class="headerlink" href="#171-model-events" title="Permanent link">&para;</a></h3>
+<p><code>user_notifications</code> (per user): <code>user_id</code>, <code>kind</code>, <code>run_id?</code>, <code>comment_id?</code>, <code>context jsonb</code>,
+<code>read_at?</code>, <code>created_at</code>. <code>kind ∈ approval_request | run_finished | run_failed | comment_reply |
+mention</code>. Each row is created <strong>in the same transaction</strong> as its trigger:</p>
+<ul>
+<li><strong><code>transition()</code></strong> (§4.2): <code>→ unconfirmed</code> fans out <code>approval_request</code> to every eligible approver
+  (role ∈ {approver, admin} AND <code>env.tier ∈ allowed_tiers</code>, excluding the triggerer); a terminal
+  state notifies the run's human triggerer (<code>run_finished</code> / <code>run_failed</code>).</li>
+<li><strong>comment create</strong> (§16): a reply notifies the root author; <code>@mention</code> tokens (matched against a
+  user's email local-part or full email) notify the mentioned users. Never the author.</li>
+</ul>
+<h3 id="172-live-delivery-private-per-user-channel">17.2 Live delivery — private per-user channel<a class="headerlink" href="#172-live-delivery-private-per-user-channel" title="Permanent link">&para;</a></h3>
+<p><code>notify()</code> emits <code>pg_notify('user_&lt;uid&gt;', …)</code> alongside the row. The WS hub maps a <code>user:&lt;id&gt;</code>
+subscription to <code>user_&lt;id&gt;</code> <strong>only for the connecting user's own id</strong> (<code>channel_for(sub, user_id)</code>,
+§5.3) — the feed is private; you cannot listen on someone else's signals. The bell subscribes to its
+own channel and invalidates the <code>["notifications"]</code> query on any signal (no payload trusted).</p>
+<h3 id="173-api">17.3 API<a class="headerlink" href="#173-api" title="Permanent link">&para;</a></h3>
+<p><code>GET /api/v1/notifications</code> (current user, newest first, capped) ; <code>POST /api/v1/notifications/read</code>
+(<code>{ids?}</code> — omit to mark all of the user's unread as read). Opening the bell marks all read.</p>
+<h3 id="174-invariants-preserved">17.4 Invariants preserved<a class="headerlink" href="#174-invariants-preserved" title="Permanent link">&para;</a></h3>
+<ol>
+<li>No run-state change — notifications are a side record; <code>transition()</code> (invariant §4.2) untouched.</li>
+<li>Same-txn write (invariant §6.3 spirit): a rolled-back trigger emits no notification (NOTIFY is
+   transactional).</li>
+<li>The per-user channel is access-scoped to self; the WS payload is a content-free signal (§5.3).</li>
 </ol>
 
 
