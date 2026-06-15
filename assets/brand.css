@@ -1,0 +1,11 @@
+/* StackD brand: override Material's named palette with the exact brand violet (logo). */
+:root {
+  --md-primary-fg-color: #6d3fd4;
+  --md-primary-fg-color--light: #8b6cf0;
+  --md-primary-fg-color--dark: #5a2fc0;
+  --md-accent-fg-color: #7c4ddb;
+}
+[data-md-color-scheme="slate"] {
+  --md-primary-fg-color: #6d3fd4;
+  --md-accent-fg-color: #8b6cf0;
+}
