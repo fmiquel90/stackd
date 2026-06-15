@@ -4228,6 +4228,9 @@ thread):</p>
 so the anchor is stable for the life of the run. The <code>snippet</code> is copied from the <strong>masked</strong> log line
 (<code>run_logs.lines[].msg</code>), so an anchor can never carry a secret (invariant §13.3). <code>resource</code> anchors
 (v2) require serving the structured plan; the column is polymorphic so v2 needs no migration.</p>
+<p><strong>Rendering</strong>: <code>plan_line</code> threads render <strong>inline</strong> in the log viewer, directly under their line
+(progressive, line-level review — like PR-review comments), with a hover affordance per line to open
+an inline composer. General (unanchored) and <code>resource</code> threads live in a separate Discussion panel.</p>
 <h3 id="163-api">16.3 API<a class="headerlink" href="#163-api" title="Permanent link">&para;</a></h3>
 <p><code>/api/v1/runs/{run_id}/comments</code> — listing &amp; posting are open to any authenticated user
 (collaboration, reader+); editing a body is author-only; resolving a thread needs the author or
