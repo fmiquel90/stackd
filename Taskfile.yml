@@ -39,6 +39,24 @@ tasks:
       - task: migrate
       - task: seed
 
+  front-install:
+    desc: Install front-end dependencies (idempotent)
+    dir: front
+    cmds: [pnpm install]
+    status: [test -d node_modules]
+
+  front:
+    desc: Front-end dev server (Vite — http://localhost:5173, proxies /api + ws to :8000)
+    deps: [front-install]
+    dir: front
+    cmds: [pnpm dev]
+
+  up:
+    desc: Full stack incl. the front (backend detached, Vite in the foreground)
+    deps: [dev]
+    cmds:
+      - task: front
+
   migrate:
     desc: Apply Alembic migrations
     cmds: ["{{.COMPOSE}} exec -T api uv run alembic upgrade head"]
