@@ -59,6 +59,20 @@ export async function api<T>(path: string, opts: RequestOptions = {}): Promise<T
   return data as T;
 }
 
+// Authenticated GET returning the raw body (for file downloads like the audit CSV export, which
+// is served as text/csv — not JSON — so it can't go through api<T>()).
+export async function apiBlob(path: string): Promise<Blob> {
+  const headers: Record<string, string> = {};
+  if (accessToken) headers["Authorization"] = `Bearer ${accessToken}`;
+  const resp = await fetch(`/api/v1${path}`, { headers, credentials: "include" });
+  if (!resp.ok) {
+    // Errors come back as problem+json even on a blob endpoint — surface the detail, not bare status.
+    const data = resp.headers.get("content-type")?.includes("json") ? await resp.json() : null;
+    throw new ApiError(resp.status, data?.title ?? resp.statusText, data?.detail);
+  }
+  return resp.blob();
+}
+
 export const auth = {
   async refresh(): Promise<Session> {
     const session = await api<Session>("/auth/refresh", { method: "POST", csrf: true });

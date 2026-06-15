@@ -207,6 +207,25 @@ export interface AuditEvent {
   created_at: string;
 }
 
+// An environment's published Terraform outputs (sensitive ones masked: value === null).
+export interface EnvOutput {
+  name: string;
+  value: string | null;
+  sensitive: boolean;
+}
+
+export interface WorkerPool {
+  id: string;
+  name: string;
+  labels: Record<string, unknown> | null;
+  created_at: string;
+}
+
+// Pool creation returns the agent token in cleartext exactly once — never retrievable again.
+export interface PoolCreated extends WorkerPool {
+  token: string;
+}
+
 export interface QueueEntry {
   run_id: string;
   environment_id: string;

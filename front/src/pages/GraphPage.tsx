@@ -1,6 +1,6 @@
 import "@xyflow/react/dist/style.css";
 import { Fragment, useMemo, useState } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   Background,
   Controls,
@@ -16,7 +16,7 @@ import { Link, useNavigate } from "react-router-dom";
 import { dependenciesApi, graphApi, runs, stacks, type GraphEdge, type GraphNode } from "@/api/resources";
 import { useEntityStreams } from "@/api/stream";
 import { StateBadge } from "@/components/StateBadge";
-import { Button, Card, PageTitle } from "@/components/ui";
+import { Button, Card, Field, PageTitle, Select } from "@/components/ui";
 
 interface EnvNodeData extends Record<string, unknown> {
   label: string;
@@ -106,6 +106,92 @@ function EdgeRefs({ downstreamEnvId, depId }: { downstreamEnvId: string; depId: 
   );
 }
 
+// Bulk-wire two stacks: for every same-named env pair, link each matching upstream output to the
+// downstream input of the same name (SPECS §9). A convenience over adding references one by one.
+function LinkByNamePanel() {
+  const qc = useQueryClient();
+  const { data: stackList } = useQuery({ queryKey: ["stacks"], queryFn: stacks.list });
+  const [open, setOpen] = useState(false);
+  const [downstream, setDownstream] = useState("");
+  const [upstream, setUpstream] = useState("");
+  const [policy, setPolicy] = useState("on_output_change");
+  const [result, setResult] = useState<number | null>(null);
+  const link = useMutation({
+    mutationFn: () =>
+      dependenciesApi.linkByName(downstream, { upstream_stack_id: upstream, trigger_policy: policy }),
+    onSuccess: (r) => {
+      setResult(r.created);
+      qc.invalidateQueries({ queryKey: ["graph"] });
+    },
+  });
+  const options = stackList ?? [];
+
+  if (!open)
+    return (
+      <Button onClick={() => setOpen(true)}>Auto-link by name</Button>
+    );
+
+  return (
+    <Card>
+      <div className="mb-2 flex items-center justify-between">
+        <span className="text-[13px] font-medium">Auto-link stacks by name</span>
+        <Button onClick={() => setOpen(false)}>Close</Button>
+      </div>
+      <form
+        className="flex flex-wrap items-end gap-2"
+        onSubmit={(e) => {
+          e.preventDefault();
+          setResult(null);
+          link.mutate();
+        }}
+      >
+        <Field label="Downstream stack">
+          <Select value={downstream} onChange={(e) => setDownstream(e.target.value)} required>
+            <option value="">select…</option>
+            {options.map((s) => (
+              <option key={s.id} value={s.id}>
+                {s.name}
+              </option>
+            ))}
+          </Select>
+        </Field>
+        <Field label="Upstream stack">
+          <Select value={upstream} onChange={(e) => setUpstream(e.target.value)} required>
+            <option value="">select…</option>
+            {options
+              .filter((s) => s.id !== downstream)
+              .map((s) => (
+                <option key={s.id} value={s.id}>
+                  {s.name}
+                </option>
+              ))}
+          </Select>
+        </Field>
+        <Field label="Trigger">
+          <Select value={policy} onChange={(e) => setPolicy(e.target.value)}>
+            <option value="on_output_change">on_output_change</option>
+            <option value="always">always</option>
+            <option value="never">never</option>
+          </Select>
+        </Field>
+        <Button type="submit" variant="accent" disabled={link.isPending || !downstream || !upstream}>
+          Link
+        </Button>
+      </form>
+      {result !== null && (
+        <div className="mt-2 font-data text-[12px]" style={{ color: "var(--color-state-finished)" }}>
+          Created {result} reference{result === 1 ? "" : "s"}.
+        </div>
+      )}
+      {link.isError && (
+        <div className="mt-2 font-data text-[12px]" style={{ color: "var(--color-state-failed)" }}>
+          {(link.error as Error).message}
+        </div>
+      )}
+    </Card>
+  );
+}
+
 function layout(nodes: GraphNode[], edges: GraphEdge[], label: (n: GraphNode) => string) {
   const g = new dagre.graphlib.Graph();
   g.setGraph({ rankdir: "LR", nodesep: 30, ranksep: 110 });
@@ -181,6 +267,8 @@ export function GraphPage() {
           </Button>
         </div>
       </div>
+
+      <LinkByNamePanel />
 
       {view === "graph" ? (
         <>

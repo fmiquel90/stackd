@@ -1,12 +1,14 @@
-import { api } from "./client";
+import { api, apiBlob } from "./client";
 import type {
   AuditEvent,
   CommentAnchor,
   Environment,
+  EnvOutput,
   Health,
   LogChunk,
   LogEntry,
   MentionableUser,
+  PoolCreated,
   RunComment,
   QueueEntry,
   RepoAuthKind,
@@ -22,6 +24,7 @@ import type {
   Variable,
   VariableKind,
   VariableSet,
+  WorkerPool,
 } from "./types";
 
 export interface UserUpdate {
@@ -104,6 +107,8 @@ export const stacks = {
   variables: (id: string) => api<Variable[]>(`/stacks/${id}/variables`),
   addVariable: (id: string, body: NewVariable) =>
     api<Variable>(`/stacks/${id}/variables`, { body }),
+  updateVariable: (id: string, varId: string, body: VariablePatch) =>
+    api<Variable>(`/stacks/${id}/variables/${varId}`, { method: "PATCH", body }),
   removeVariable: (id: string, varId: string) =>
     api<void>(`/stacks/${id}/variables/${varId}`, { method: "DELETE" }),
 };
@@ -113,12 +118,32 @@ export const environments = {
   resolvedVariables: (id: string) =>
     api<ResolvedVariable[]>(`/environments/${id}/resolved-variables`),
   remove: (id: string) => api<void>(`/environments/${id}`, { method: "DELETE" }),
+  // Force-refresh the tracked branch HEAD from the remote (returns the updated environment).
+  refreshHead: (id: string) =>
+    api<Environment>(`/environments/${id}/refresh-head`, { method: "POST" }),
+  outputs: (id: string) => api<EnvOutput[]>(`/environments/${id}/outputs`),
+  // Environment-level variables (override the stack-level value of the same name, SPECS §3.4).
+  variables: (id: string) => api<Variable[]>(`/environments/${id}/variables`),
+  addVariable: (id: string, body: NewVariable) =>
+    api<Variable>(`/environments/${id}/variables`, { body }),
+  updateVariable: (id: string, varId: string, body: VariablePatch) =>
+    api<Variable>(`/environments/${id}/variables/${varId}`, { method: "PATCH", body }),
+  removeVariable: (id: string, varId: string) =>
+    api<void>(`/environments/${id}/variables/${varId}`, { method: "DELETE" }),
 };
 
 export interface NewVariable {
   kind: VariableKind;
   name: string;
   value: string;
+  sensitive?: boolean;
+  hcl?: boolean;
+}
+
+// In-place edit of an existing variable. All fields optional — value is write-only (omit to keep
+// the stored one, important for sensitive vars whose current value the API never returns).
+export interface VariablePatch {
+  value?: string;
   sensitive?: boolean;
   hcl?: boolean;
 }
@@ -131,7 +156,7 @@ export const variableSets = {
   variables: (setId: string) => api<Variable[]>(`/variable-sets/${setId}/variables`),
   addVariable: (setId: string, body: NewVariable) =>
     api<Variable>(`/variable-sets/${setId}/variables`, { body }),
-  updateVariable: (setId: string, varId: string, body: { value?: string; sensitive?: boolean }) =>
+  updateVariable: (setId: string, varId: string, body: VariablePatch) =>
     api<Variable>(`/variable-sets/${setId}/variables/${varId}`, { method: "PATCH", body }),
   removeVariable: (setId: string, varId: string) =>
     api<void>(`/variable-sets/${setId}/variables/${varId}`, { method: "DELETE" }),
@@ -176,6 +201,14 @@ export const queue = {
   list: () => api<QueueEntry[]>("/queue"),
 };
 
+// Worker pools (§7) — admin-only. Creating one mints the agent token (returned once, in cleartext).
+export const pools = {
+  list: () => api<WorkerPool[]>("/worker-pools"),
+  create: (body: { name: string; labels?: Record<string, unknown> | null }) =>
+    api<PoolCreated>("/worker-pools", { body }),
+  remove: (id: string) => api<void>(`/worker-pools/${id}`, { method: "DELETE" }),
+};
+
 // In-app notification center (§17) — the current user's inbox.
 export const inbox = {
   list: () => api<UserNotification[]>("/notifications"),
@@ -189,6 +222,11 @@ export const audit = {
   list: (params: Record<string, string> = {}) => {
     const q = new URLSearchParams(params).toString();
     return api<AuditEvent[]>(`/audit${q ? `?${q}` : ""}`);
+  },
+  // Admin-only CSV export of the (filtered) audit trail.
+  exportCsv: (params: Record<string, string> = {}) => {
+    const q = new URLSearchParams(params).toString();
+    return apiBlob(`/audit/export${q ? `?${q}` : ""}`);
   },
 };
 
@@ -241,6 +279,12 @@ export const hooksApi = {
     id: string,
     body: { stage: HookStage; name: string; command: string; on_failure: "fail" | "warn" },
   ) => api<Hook>(`/${scope}/${id}/hooks`, { body }),
+  update: (
+    scope: HookScope,
+    id: string,
+    hookId: string,
+    body: Partial<{ stage: HookStage; name: string; command: string; on_failure: "fail" | "warn" }>,
+  ) => api<Hook>(`/${scope}/${id}/hooks/${hookId}`, { method: "PATCH", body }),
   remove: (scope: HookScope, id: string, hookId: string) =>
     api<void>(`/${scope}/${id}/hooks/${hookId}`, { method: "DELETE" }),
 };
@@ -298,6 +342,9 @@ export const dependenciesApi = {
   create: (envId: string, body: NewDependency) =>
     api<{ id: string }>(`/environments/${envId}/dependencies`, { body }),
   remove: (depId: string) => api<void>(`/dependencies/${depId}`, { method: "DELETE" }),
+  // Auto-wire every matching upstream output → input by name, across a whole upstream stack.
+  linkByName: (stackId: string, body: { upstream_stack_id: string; trigger_policy?: string }) =>
+    api<{ created: number }>(`/stacks/${stackId}/dependencies/link-by-name`, { body }),
 };
 
 export interface GraphNode {

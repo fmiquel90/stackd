@@ -1,8 +1,9 @@
 import { useEffect, useState } from "react";
-import { useMutation, useQuery } from "@tanstack/react-query";
-import { observability, workers } from "@/api/resources";
-import type { HealthWorker, LogEntry } from "@/api/types";
-import { Button, Card, PageTitle, Select, TextInput } from "@/components/ui";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { observability, pools, workers } from "@/api/resources";
+import type { HealthWorker, LogEntry, PoolCreated } from "@/api/types";
+import { useIsAdmin } from "@/auth/session";
+import { Button, Card, DeleteButton, Field, PageTitle, Select, TextInput } from "@/components/ui";
 
 function Metric({ label, value, tone }: { label: string; value: string | number; tone?: string }) {
   return (
@@ -188,7 +189,102 @@ function groupByPool(items: HealthWorker[]): [string | null, HealthWorker[]][] {
   return [...map.entries()];
 }
 
+// Admin-only pool management. Creating a pool returns its agent token once, in cleartext — surfaced
+// in a dismissible banner the operator must copy now (it's hashed at rest and never shown again).
+function PoolsPanel() {
+  const qc = useQueryClient();
+  const { data } = useQuery({ queryKey: ["worker-pools"], queryFn: pools.list });
+  const [name, setName] = useState("");
+  const [created, setCreated] = useState<PoolCreated | null>(null);
+  const create = useMutation({
+    mutationFn: () => pools.create({ name }),
+    onSuccess: (p) => {
+      setCreated(p);
+      setName("");
+      qc.invalidateQueries({ queryKey: ["worker-pools"] });
+    },
+  });
+  const remove = useMutation({
+    mutationFn: (id: string) => pools.remove(id),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["worker-pools"] }),
+  });
+
+  return (
+    <Card>
+      <div className="mb-1 text-[13px] font-medium">Worker pools</div>
+      <div className="mb-2 text-[12px]" style={{ color: "var(--color-text-secondary)" }}>
+        A pool groups workers and carries the registration token agents authenticate with. Create one,
+        then start an agent with its token.
+      </div>
+
+      {created && (
+        <div
+          className="mb-3 rounded-base p-3"
+          style={{ border: "1px solid var(--color-accent)", backgroundColor: "var(--color-bg-base)" }}
+        >
+          <div className="mb-1 text-[12px] font-medium">
+            Agent token for “{created.name}” — copy it now, it won't be shown again.
+          </div>
+          <div className="flex items-center gap-2">
+            <code
+              className="font-data flex-1 truncate rounded-base px-2 py-1 text-[12px]"
+              style={{ border: "1px solid var(--color-border)" }}
+            >
+              {created.token}
+            </code>
+            <Button type="button" onClick={() => navigator.clipboard?.writeText(created.token)}>
+              Copy
+            </Button>
+            <Button type="button" onClick={() => setCreated(null)}>
+              Dismiss
+            </Button>
+          </div>
+        </div>
+      )}
+
+      <div className="flex flex-col gap-2">
+        {(data ?? []).map((p) => (
+          <div
+            key={p.id}
+            className="rounded-base flex items-center justify-between gap-3 p-3"
+            style={{ backgroundColor: "var(--color-bg-base)", border: "1px solid var(--color-border)" }}
+          >
+            <span className="text-[13px] font-medium">{p.name}</span>
+            <DeleteButton label={`Delete pool ${p.name}`} onClick={() => remove.mutate(p.id)} />
+          </div>
+        ))}
+        {data && data.length === 0 && (
+          <span className="font-data text-[12px]" style={{ color: "var(--color-text-secondary)" }}>
+            No pools yet.
+          </span>
+        )}
+      </div>
+
+      <form
+        className="mt-3 flex items-end gap-2"
+        onSubmit={(e) => {
+          e.preventDefault();
+          create.mutate();
+        }}
+      >
+        <Field label="Pool name">
+          <TextInput value={name} onChange={(e) => setName(e.target.value)} required />
+        </Field>
+        <Button type="submit" variant="accent" disabled={create.isPending || !name}>
+          Create pool
+        </Button>
+      </form>
+      {(create.isError || remove.isError) && (
+        <div className="mt-2 font-data text-[12px]" style={{ color: "var(--color-state-failed)" }}>
+          {((create.error ?? remove.error) as Error).message}
+        </div>
+      )}
+    </Card>
+  );
+}
+
 export function HealthPage() {
+  const isAdmin = useIsAdmin();
   const [logWorker, setLogWorker] = useState("");
   const [diagWorker, setDiagWorker] = useState<string | null>(null);
   const { data: h } = useQuery({
@@ -276,6 +372,7 @@ export function HealthPage() {
           </Card>
         </>
       )}
+      {isAdmin && <PoolsPanel />}
       {diagWorker && <DiagnosticsPanel workerId={diagWorker} onClose={() => setDiagWorker(null)} />}
       <LogsPanel workerId={logWorker} setWorkerId={setLogWorker} />
     </div>

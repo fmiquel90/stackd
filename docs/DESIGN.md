@@ -155,6 +155,7 @@ Absolute rule: these colors serve **only** state semantics. Never decorative blu
 - Node = minimal card: stack/env + mini-rail of the last run. Edge labeled with the number of output references; dashed purple edge if mocks are involved.
 - Run group view: same graph, the nodes color in real time during the cascade. No confetti at the end — a green `finished` state is enough.
 - **Mandatory accessible alternative**: a react-flow graph is not navigable by screen reader nor by keyboard alone. A systematic **"list view"** toggle = an adjacency table (`upstream env → downstream env · N references · MOCK?`) that is sortable, focusable, with the same filter. The graph is the default display; the list is the complete functional equivalent, not a stopgap. The graph nodes remain reachable via `Tab` (topological order) with an `aria-label` announcement of the last run's state.
+- **Auto-link by name**: a collapsible action wires two stacks in bulk — for every same-named env pair it links each matching upstream output to the downstream input of the same name (one POST instead of adding references one by one). Reports the count of references created.
 
 ### 5.5 `/queue` — the execution queue
 
@@ -177,6 +178,18 @@ The visual answer to "why isn't my run starting?".
 - Every technical name typed (stack, env, variable) is displayed in mono from the first keystroke.
 - Destructive actions require typing the name of the target (GitHub pattern) — not a plain "Are you sure?" modal.
 - Wizard: numbered steps because it is a real sequence; each step independently validatable (the repo check runs at step 1, not at the end).
+- **Config list items are uniform** (variables, hooks, notifications, secret sources): each is a bordered tile with metadata badges, an **edit** (pencil) and a **delete** (trash) affordance. Editing is in place — the tile becomes an inline form, no separate screen. A sensitive value is never pre-filled (write-only): its edit field stays blank with a "leave blank to keep" hint, so toggling `hcl`/`sensitive` never clobbers the stored secret. Secret sources expose **Rotate token** the same way (write-only new bootstrap credential).
+
+### 5.8 `/stacks/{id}` — stack & environment configuration
+
+- Two top tabs: **Environments** (operate) and **Settings** (configure the stack: general, variables, hooks, notifications, secret sources).
+- Each environment row folds its config behind a single **Configure** disclosure (progressive disclosure — one panel at a time), with the daily action (**Plan**) as the sole accent CTA and a discreet **refresh HEAD** icon (force a re-read of the tracked branch from the remote, updating the stale / `↑N` indicators without waiting for the poll).
+- The env **Inputs** tab has three sections: **Resolved** (read-only, every value with its provenance badge), **Environment overrides** (editable env-level variables that override the stack-level value of the same name, SPECS §3.4), and **Outputs** (what the env publishes after a successful apply — sensitive ones masked, never a reveal button).
+
+### 5.9 `/workers` — workers & pools
+
+- Workers grouped by pool (read): per-worker status, labels, last heartbeat, agent version, and Diagnostics / Logs actions.
+- **Pool management (admin)**: list, create and delete worker pools. Creating one mints the agent registration token, surfaced **once** in a dismissible banner with a copy action — it is hashed at rest and never retrievable again (so the empty-state hint "start an agent with a pool token" is now actionable from the UI).
 
 ---
 

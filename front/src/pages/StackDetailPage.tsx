@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useNavigate, useParams } from "react-router-dom";
-import { ChevronDown, ChevronRight } from "lucide-react";
+import { ChevronDown, ChevronRight, RefreshCw } from "lucide-react";
 import { environments, runs, stacks, tiers, type NewEnvironment } from "@/api/resources";
 import type { Environment } from "@/api/types";
 import { useIsAdmin } from "@/auth/session";
@@ -43,6 +43,62 @@ function ResolvedVariables({ envId }: { envId: string }) {
         ))}
       </tbody>
     </table>
+  );
+}
+
+// Outputs this environment publishes after a successful apply (sensitive ones masked). Feeds the
+// inputs of downstream environments via dependencies (SPECS §9.1).
+function EnvOutputs({ envId }: { envId: string }) {
+  const { data } = useQuery({ queryKey: ["env-outputs", envId], queryFn: () => environments.outputs(envId) });
+  if (!data || data.length === 0)
+    return (
+      <span className="font-data text-[12px]" style={{ color: "var(--color-text-secondary)" }}>
+        No outputs yet — they appear after a successful apply.
+      </span>
+    );
+  return (
+    <table className="w-full text-left">
+      <tbody>
+        {data.map((o) => (
+          <tr key={o.name}>
+            <td className="font-data py-1 pr-3 text-[12px]">{o.name}</td>
+            <td className="font-data py-1 text-[12px]" style={{ color: "var(--color-text-secondary)" }}>
+              {o.sensitive ? "•••" : (o.value ?? "")}
+            </td>
+          </tr>
+        ))}
+      </tbody>
+    </table>
+  );
+}
+
+// The Inputs tab: resolved values (read-only, with provenance), env-level overrides (editable), and
+// the env's published outputs. Env-level variables override the stack-level value of the same name.
+function EnvInputs({ envId }: { envId: string }) {
+  return (
+    <div className="flex flex-col gap-4">
+      <div>
+        <div className="mb-1 text-[13px] font-medium">Resolved</div>
+        <ResolvedVariables envId={envId} />
+      </div>
+      <div>
+        <div className="mb-1 text-[13px] font-medium">Environment overrides</div>
+        <div className="mb-2 text-[12px]" style={{ color: "var(--color-text-secondary)" }}>
+          Specific to this environment — overrides the stack-level variable of the same name.
+        </div>
+        <VariablesEditor
+          queryKey={["env-vars", envId]}
+          list={() => environments.variables(envId)}
+          add={(body) => environments.addVariable(envId, body)}
+          update={(varId, body) => environments.updateVariable(envId, varId, body)}
+          remove={(varId) => environments.removeVariable(envId, varId)}
+        />
+      </div>
+      <div>
+        <div className="mb-1 text-[13px] font-medium">Outputs</div>
+        <EnvOutputs envId={envId} />
+      </div>
+    </div>
   );
 }
 
@@ -129,6 +185,29 @@ function PlanButton({ envId }: { envId: string }) {
     <Button variant="accent" disabled={trigger.isPending} onClick={() => trigger.mutate()}>
       Plan
     </Button>
+  );
+}
+
+// Force the platform to re-read the tracked branch's remote HEAD (refreshes the stale/commits-ahead
+// indicators without waiting for the periodic poll). The API enforces writer rights.
+function RefreshHeadButton({ env }: { env: Environment }) {
+  const qc = useQueryClient();
+  const refresh = useMutation({
+    mutationFn: () => environments.refreshHead(env.id),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["environments", env.stack_id] }),
+  });
+  return (
+    <button
+      type="button"
+      aria-label="Refresh branch HEAD"
+      title="Refresh branch HEAD from the remote"
+      className="ui-btn rounded-base px-1.5 py-1 disabled:opacity-50"
+      onClick={() => refresh.mutate()}
+      disabled={refresh.isPending}
+      style={{ border: "1px solid var(--color-border)", color: "var(--color-text-secondary)" }}
+    >
+      <RefreshCw size={14} strokeWidth={1.75} aria-hidden className={refresh.isPending ? "animate-spin" : undefined} />
+    </button>
   );
 }
 
@@ -224,6 +303,7 @@ function EnvCard({ env, siblings }: { env: Environment; siblings: { id: string; 
           <LatestRunBadge envId={env.id} />
         </div>
         <div className="flex shrink-0 items-center gap-2">
+          <RefreshHeadButton env={env} />
           <PlanButton envId={env.id} />
           <Button onClick={() => setExpanded((v) => !v)} aria-expanded={expanded}>
             <span className="inline-flex items-center gap-1.5">
@@ -236,7 +316,7 @@ function EnvCard({ env, siblings }: { env: Environment; siblings: { id: string; 
       {expanded && (
         <div className="mt-3 flex flex-col gap-3">
           <Tabs tabs={tabs} active={tab} onChange={setTab} />
-          {tab === "inputs" && <ResolvedVariables envId={env.id} />}
+          {tab === "inputs" && <EnvInputs envId={env.id} />}
           {tab === "deps" && <DependenciesPanel envId={env.id} />}
           {tab === "hooks" && <HooksPanel scope="environments" id={env.id} />}
           {tab === "notify" && <NotificationsPanel scope="environments" id={env.id} />}
@@ -310,6 +390,7 @@ function SettingsTab({ stackId, spaceId }: { stackId: string; spaceId: string })
             queryKey={["stack-vars", stackId]}
             list={() => stacks.variables(stackId)}
             add={(body) => stacks.addVariable(stackId, body)}
+            update={(varId, body) => stacks.updateVariable(stackId, varId, body)}
             remove={(varId) => stacks.removeVariable(stackId, varId)}
           />
         </Card>

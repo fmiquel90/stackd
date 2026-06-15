@@ -1,27 +1,53 @@
 import { useState } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery } from "@tanstack/react-query";
 import { audit } from "@/api/resources";
-import { PageTitle, TextInput } from "@/components/ui";
+import { useIsAdmin } from "@/auth/session";
+import { Button, PageTitle, TextInput } from "@/components/ui";
 
 const STARRED = new Set(["run.confirmed", "run.applied"]);
 
 export function AuditPage() {
+  const isAdmin = useIsAdmin();
   const [action, setAction] = useState("");
   const { data } = useQuery({
     queryKey: ["audit", action],
     queryFn: () => audit.list(action ? { action } : {}),
   });
+  // CSV export (admin-only endpoint). Fetch the authenticated blob, then trigger a browser download.
+  const exportCsv = useMutation({
+    mutationFn: () => audit.exportCsv(action ? { action } : {}),
+    onSuccess: (blob) => {
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = "audit.csv";
+      a.click();
+      URL.revokeObjectURL(url);
+    },
+  });
 
   return (
     <div>
-      <div className="mb-4 flex items-center justify-between">
+      <div className="mb-4 flex items-center justify-between gap-3">
         <PageTitle>Audit</PageTitle>
-        <TextInput
-          placeholder="filter by action (e.g. run.applied)"
-          value={action}
-          onChange={(e) => setAction(e.target.value)}
-        />
+        <div className="flex items-center gap-2">
+          <TextInput
+            placeholder="filter by action (e.g. run.applied)"
+            value={action}
+            onChange={(e) => setAction(e.target.value)}
+          />
+          {isAdmin && (
+            <Button onClick={() => exportCsv.mutate()} disabled={exportCsv.isPending}>
+              Export CSV
+            </Button>
+          )}
+        </div>
       </div>
+      {exportCsv.isError && (
+        <div className="mb-3 font-data text-[12px]" style={{ color: "var(--color-state-failed)" }}>
+          {(exportCsv.error as Error).message}
+        </div>
+      )}
       <table className="w-full text-left font-data text-[12px]">
         <thead>
           <tr style={{ color: "var(--color-text-secondary)" }}>

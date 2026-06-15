@@ -36,6 +36,16 @@ export function SecretSourcesPanel({ spaceId }: { spaceId: string }) {
     mutationFn: (srcId: string) => secretSourcesApi.remove(spaceId, srcId),
     onSuccess: () => qc.invalidateQueries({ queryKey: key }),
   });
+  const [rotatingId, setRotatingId] = useState<string | null>(null);
+  const [newSecret, setNewSecret] = useState("");
+  const rotate = useMutation({
+    mutationFn: (srcId: string) => secretSourcesApi.rotate(spaceId, srcId, newSecret),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: key });
+      setRotatingId(null);
+      setNewSecret("");
+    },
+  });
 
   return (
     <Card>
@@ -55,8 +65,45 @@ export function SecretSourcesPanel({ spaceId }: { spaceId: string }) {
                 <span className="text-[13px] font-medium">{s.name}</span>
                 <Badge>{PROVIDERS[s.provider]?.label ?? s.provider}</Badge>
               </div>
-              <DeleteButton label={`Delete ${s.name}`} onClick={() => remove.mutate(s.id)} />
+              <div className="flex shrink-0 items-center gap-2">
+                <button
+                  type="button"
+                  className="ui-btn rounded-base px-2 py-1 text-[12px]"
+                  onClick={() => {
+                    setRotatingId((cur) => (cur === s.id ? null : s.id));
+                    setNewSecret("");
+                  }}
+                  style={{ border: "1px solid var(--color-border)", color: "var(--color-text-secondary)" }}
+                >
+                  Rotate token
+                </button>
+                <DeleteButton label={`Delete ${s.name}`} onClick={() => remove.mutate(s.id)} />
+              </div>
             </div>
+            {rotatingId === s.id && (
+              <form
+                className="mt-2 flex items-end gap-2"
+                onSubmit={(e) => {
+                  e.preventDefault();
+                  rotate.mutate(s.id);
+                }}
+              >
+                <Field label={`New ${PROVIDERS[s.provider]?.credential ?? "token"} (write-only)`}>
+                  <TextInput
+                    type="password"
+                    value={newSecret}
+                    onChange={(e) => setNewSecret(e.target.value)}
+                    required
+                  />
+                </Field>
+                <Button type="submit" variant="accent" disabled={rotate.isPending || !newSecret}>
+                  Save
+                </Button>
+                <Button type="button" onClick={() => setRotatingId(null)}>
+                  Cancel
+                </Button>
+              </form>
+            )}
           </ItemTile>
         ))}
         {!data && (
@@ -115,9 +162,9 @@ export function SecretSourcesPanel({ spaceId }: { spaceId: string }) {
         </Button>
       </form>
 
-      {(create.isError || remove.isError) && (
+      {(create.isError || remove.isError || rotate.isError) && (
         <div className="mt-2 font-data text-[12px]" style={{ color: "var(--color-state-failed)" }}>
-          {((create.error ?? remove.error) as Error).message}
+          {((create.error ?? remove.error ?? rotate.error) as Error).message}
         </div>
       )}
     </Card>

@@ -85,6 +85,7 @@ function SetCard({ id, name, autoAttach }: { id: string; name: string; autoAttac
             queryKey={["variable-set-vars", id]}
             list={() => variableSets.variables(id)}
             add={(body) => variableSets.addVariable(id, body)}
+            update={(varId, body) => variableSets.updateVariable(id, varId, body)}
             remove={(varId) => variableSets.removeVariable(id, varId)}
           />
         </div>
