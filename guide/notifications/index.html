@@ -748,6 +748,28 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#setting-up-slack" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Setting up Slack
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#setting-up-a-generic-webhook" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Setting up a generic webhook
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#ping-the-approver-when-a-prod-plan-is-waiting" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -1137,6 +1159,28 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#setting-up-slack" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Setting up Slack
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#setting-up-a-generic-webhook" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Setting up a generic webhook
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#ping-the-approver-when-a-prod-plan-is-waiting" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -1242,6 +1286,26 @@
 </tbody>
 </table>
 <p>Default <code>on_states</code> is <code>["unconfirmed", "failed"]</code>. Two kinds exist: <code>slack</code> posts <code>{"text": …}</code> to a Slack/Mattermost incoming webhook (with a deep link to the run), and <code>webhook</code> posts a structured JSON envelope (state, run id, stack/env, tier, commit, url). Deep links use <code>STACKD_APP_URL</code>, the SPA base.</p>
+<h2 id="setting-up-slack">Setting up Slack<a class="headerlink" href="#setting-up-slack" title="Permanent link">&para;</a></h2>
+<p>The <code>slack</code> kind posts to a <strong>Slack incoming webhook</strong> — a URL Slack gives you that drops a message into one channel. No bot token, no scopes.</p>
+<ol>
+<li>Go to <strong>api.slack.com/apps → Create New App → From scratch</strong>, pick your workspace.</li>
+<li>Open <strong>Incoming Webhooks</strong> and toggle it <strong>On</strong>.</li>
+<li><strong>Add New Webhook to Workspace</strong>, choose the target channel, <strong>Allow</strong>.</li>
+<li>Copy the URL — it looks like <code>https://hooks.slack.com/services/T000/B000/XXXX</code>. That's the <code>url</code> you give Stackd.</li>
+</ol>
+<p><a href="https://docs.mattermost.com/developer/webhooks-incoming.html">Mattermost</a> incoming webhooks accept the same <code>{"text": …}</code> payload — use the <code>slack</code> kind with the Mattermost URL.</p>
+<div class="admonition tip">
+<p class="admonition-title">Verify before you rely on it</p>
+<p>After creating a target, hit <strong>test</strong> (UI) or <code>POST …/notifications/{id}/test</code> (API). It delivers a message <strong>explicitly flagged as a test</strong> (<code>🧪 … (test)</code> for Slack, <code>{"event":"notification.test","test":true}</code> for a webhook), so you can confirm the URL works without waiting for a real run — and no one mistakes it for a real event.</p>
+</div>
+<h2 id="setting-up-a-generic-webhook">Setting up a generic webhook<a class="headerlink" href="#setting-up-a-generic-webhook" title="Permanent link">&para;</a></h2>
+<p>The <code>webhook</code> kind POSTs the JSON envelope (see <a href="#a-generic-webhook-target">below</a>) to any HTTPS endpoint you control (a CI bridge, a Lambda URL, an internal service).</p>
+<ul>
+<li><strong>Method/format</strong>: <code>POST</code>, <code>Content-Type: application/json</code>.</li>
+<li><strong>No signature</strong>: outbound notification webhooks are <strong>not</strong> HMAC-signed (unlike <em>inbound</em> GitHub webhooks, which use <code>stacks.webhook_secret</code>). Treat the URL itself as the secret — use an unguessable path or a token your receiver checks — and prefer an endpoint reachable only over TLS.</li>
+<li><strong>Idempotency</strong>: delivery is at-least-once (see <a href="#delivery-guarantees">Delivery guarantees</a>); key on <code>run_id</code> + <code>state</code> so a retry is a no-op.</li>
+</ul>
 <h2 id="ping-the-approver-when-a-prod-plan-is-waiting">Ping the approver when a prod plan is waiting<a class="headerlink" href="#ping-the-approver-when-a-prod-plan-is-waiting" title="Permanent link">&para;</a></h2>
 <p>Attach a Slack target to a production environment. It pings on <code>unconfirmed</code> (something to approve) and on <code>failed</code>:</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>curl<span class="w"> </span>-s<span class="w"> </span>-X<span class="w"> </span>POST<span class="w"> </span>localhost:8000/api/v1/environments/<span class="nv">$ENV_ID</span>/notifications<span class="w"> </span><span class="se">\</span>
