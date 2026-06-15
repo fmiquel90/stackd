@@ -4,10 +4,11 @@ FROM python:3.13-slim
 COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /bin/
 
 # git is required API-side for repo reachability checks (check_repo) and staleness polling
-# (ls_remote_sha, §9.6). safe.directory must live in system config — git ignores `-c` for it — so
-# the `file:///stackd-dev/repos/*` dev fixtures don't trip "detected dubious ownership".
+# (ls_remote_sha, §9.6); openssh-client so git can reach ssh:// / git@ repos (GIT_SSH_COMMAND).
+# safe.directory must live in system config — git ignores `-c` for it — so the
+# `file:///stackd-dev/repos/*` dev fixtures don't trip "detected dubious ownership".
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends git ca-certificates \
+    && apt-get install -y --no-install-recommends git openssh-client ca-certificates \
     && rm -rf /var/lib/apt/lists/* \
     && git config --system --add safe.directory '*'
 

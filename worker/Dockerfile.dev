@@ -4,7 +4,7 @@ FROM python:3.13-slim
 COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /bin/
 
 ARG OPENTOFU_VERSION=1.12.0
-RUN apt-get update && apt-get install -y --no-install-recommends git jq curl unzip ca-certificates \
+RUN apt-get update && apt-get install -y --no-install-recommends git openssh-client jq curl unzip ca-certificates \
     && curl -fsSL "https://github.com/opentofu/opentofu/releases/download/v${OPENTOFU_VERSION}/tofu_${OPENTOFU_VERSION}_linux_amd64.zip" -o /tmp/tofu.zip \
     && unzip /tmp/tofu.zip -d /usr/local/bin tofu && rm /tmp/tofu.zip \
     && rm -rf /var/lib/apt/lists/*

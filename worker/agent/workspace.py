@@ -25,7 +25,13 @@ class Workspace:
             ["git", "clone", "--depth", "1", repo_url, str(self.path / "repo")],
             capture_output=True,
             text=True,
-            env={**os.environ, "GIT_TERMINAL_PROMPT": "0"},
+            env={
+                **os.environ,
+                "GIT_TERMINAL_PROMPT": "0",
+                # ssh:// / git@ repos: never prompt, and trust a host key on first contact (TOFU)
+                # so a fresh worker can clone without a pre-seeded known_hosts.
+                "GIT_SSH_COMMAND": "ssh -o BatchMode=yes -o StrictHostKeyChecking=accept-new",
+            },
         )
         if result.returncode != 0:
             raise RuntimeError(

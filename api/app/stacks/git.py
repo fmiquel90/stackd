@@ -29,7 +29,10 @@ async def check_repo(
             url,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
-            env={"GIT_TERMINAL_PROMPT": "0", "GIT_SSH_COMMAND": "ssh -o BatchMode=yes"},
+            env={
+                "GIT_TERMINAL_PROMPT": "0",
+                "GIT_SSH_COMMAND": "ssh -o BatchMode=yes -o StrictHostKeyChecking=accept-new",
+            },
         )
         out, err = await asyncio.wait_for(proc.communicate(), timeout=15)
     except (TimeoutError, FileNotFoundError) as exc:
@@ -59,7 +62,10 @@ async def ls_remote_sha(
             f"refs/heads/{branch}",
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
-            env={"GIT_TERMINAL_PROMPT": "0", "GIT_SSH_COMMAND": "ssh -o BatchMode=yes"},
+            env={
+                "GIT_TERMINAL_PROMPT": "0",
+                "GIT_SSH_COMMAND": "ssh -o BatchMode=yes -o StrictHostKeyChecking=accept-new",
+            },
         )
         out, _ = await asyncio.wait_for(proc.communicate(), timeout=15)
     except (TimeoutError, FileNotFoundError):
