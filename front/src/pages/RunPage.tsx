@@ -1,13 +1,21 @@
-import { useState } from "react";
+import { Fragment, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useParams } from "react-router-dom";
 import { MessageSquarePlus, TriangleAlert } from "lucide-react";
 import { ApiError } from "@/api/client";
 import { comments, environments, runs, stacks, tiers } from "@/api/resources";
 import { useEntityStream } from "@/api/stream";
-import type { CommentAnchor, Run, RunState } from "@/api/types";
+import { useSession } from "@/auth/session";
+import type { CommentAnchor, Run, RunComment, RunState } from "@/api/types";
 import { AnsiText } from "@/components/ansi";
-import { CommentsPanel } from "@/components/CommentsPanel";
+import {
+  CommentComposer,
+  CommentsPanel,
+  CommentThread,
+  commentLineKey,
+  isRoot,
+  lineKey,
+} from "@/components/CommentsPanel";
 import { PhaseRail, type Phase, type PhaseStatus } from "@/components/PhaseRail";
 import { StateBadge } from "@/components/StateBadge";
 import { ProvenanceBadge, parseProvenance } from "@/components/ProvenanceBadge";
@@ -85,13 +93,20 @@ export function RunPage() {
     enabled: Boolean(env.data?.stack_id),
   });
   const catalog = useQuery({ queryKey: ["tiers"], queryFn: tiers.list });
+  const me = useSession().data;
   const commentList = useQuery({
     queryKey: ["run-comments", runId],
     queryFn: () => comments.list(runId),
   });
-  const openThreads = (commentList.data ?? []).filter(
-    (c) => c.parent_id == null && !c.resolved,
-  ).length;
+  const allComments = commentList.data ?? [];
+  const openThreads = allComments.filter((c) => c.parent_id == null && !c.resolved).length;
+  const repliesOf = (id: string) => allComments.filter((c) => c.parent_id === id);
+  // Anchored (plan_line) roots grouped by the log line they pin to, for inline rendering.
+  const threadsByLine = new Map<string, RunComment[]>();
+  for (const c of allComments) {
+    const k = isRoot(c) ? commentLineKey(c) : null;
+    if (k) threadsByLine.set(k, [...(threadsByLine.get(k) ?? []), c]);
+  }
   const [anchorDraft, setAnchorDraft] = useState<CommentAnchor | null>(null);
   const [confirming, setConfirming] = useState(false);
   const [typed, setTyped] = useState("");
@@ -245,36 +260,72 @@ export function RunPage() {
             style={{ backgroundColor: "var(--color-bg-base)", borderRadius: 4, lineHeight: 1.5 }}
           >
             {(logs.data ?? []).flatMap((chunk) =>
-              chunk.lines.map((l, i) => (
-                <div
-                  key={`${chunk.phase}-${chunk.seq}-${i}`}
-                  className="group flex items-start gap-2 whitespace-pre-wrap"
-                >
-                  {/* Hover affordance: anchor a comment to this plan line (SPECS §16.2). */}
-                  <button
-                    type="button"
-                    aria-label="Comment on this line"
-                    className="ui-btn shrink-0 opacity-0 group-hover:opacity-100"
-                    style={{ color: "var(--color-accent)" }}
-                    onClick={() =>
-                      setAnchorDraft({
-                        kind: "plan_line",
-                        phase: chunk.phase,
-                        seq: chunk.seq,
-                        line_start: i,
-                        line_end: i,
-                        snippet: l.msg.slice(0, 120),
-                      })
-                    }
-                  >
-                    <MessageSquarePlus size={13} strokeWidth={1.75} aria-hidden />
-                  </button>
-                  <span className="min-w-0">
-                    <span style={{ color: "var(--color-text-secondary)" }}>{chunk.section ?? chunk.phase} </span>
-                    <AnsiText text={l.msg} />
-                  </span>
-                </div>
-              )),
+              chunk.lines.map((l, i) => {
+                const key = lineKey(chunk.phase, chunk.seq, i);
+                const lineThreads = threadsByLine.get(key) ?? [];
+                const composingHere =
+                  anchorDraft?.kind === "plan_line" &&
+                  anchorDraft.phase === chunk.phase &&
+                  anchorDraft.seq === chunk.seq &&
+                  anchorDraft.line_start === i;
+                return (
+                  <Fragment key={`${chunk.phase}-${chunk.seq}-${i}`}>
+                    <div className="group flex items-start gap-2 whitespace-pre-wrap">
+                      {/* Hover affordance: anchor a comment to this plan line (SPECS §16.2). */}
+                      <button
+                        type="button"
+                        aria-label="Comment on this line"
+                        className="ui-btn shrink-0 opacity-0 group-hover:opacity-100"
+                        style={{ color: "var(--color-accent)" }}
+                        onClick={() =>
+                          setAnchorDraft({
+                            kind: "plan_line",
+                            phase: chunk.phase,
+                            seq: chunk.seq,
+                            line_start: i,
+                            line_end: i,
+                            snippet: l.msg.slice(0, 120),
+                          })
+                        }
+                      >
+                        <MessageSquarePlus size={13} strokeWidth={1.75} aria-hidden />
+                      </button>
+                      <span className="min-w-0">
+                        <span style={{ color: "var(--color-text-secondary)" }}>{chunk.section ?? chunk.phase} </span>
+                        <AnsiText text={l.msg} />
+                      </span>
+                    </div>
+                    {/* Inline, line-level review (progressive): anchored threads + composer here. */}
+                    {(lineThreads.length > 0 || composingHere) && (
+                      <div
+                        className="my-1 ml-6 flex flex-col gap-2 border-l-2 pl-3"
+                        style={{ borderColor: "var(--color-border)", whiteSpace: "normal" }}
+                      >
+                        {lineThreads.map((root) => (
+                          <CommentThread
+                            key={root.id}
+                            runId={runId}
+                            root={root}
+                            replies={repliesOf(root.id)}
+                            meId={me?.id}
+                            hideAnchor
+                          />
+                        ))}
+                        {composingHere && (
+                          <CommentComposer
+                            runId={runId}
+                            anchor={anchorDraft}
+                            placeholder="Comment on this line…"
+                            autoFocus
+                            onPosted={() => setAnchorDraft(null)}
+                            onCancel={() => setAnchorDraft(null)}
+                          />
+                        )}
+                      </div>
+                    )}
+                  </Fragment>
+                );
+              }),
             )}
             {logs.data && logs.data.length === 0 && (
               <span style={{ color: "var(--color-text-secondary)" }}>No logs yet.</span>
@@ -282,7 +333,7 @@ export function RunPage() {
           </div>
         </Card>
 
-        <CommentsPanel runId={runId} anchorDraft={anchorDraft} onClearDraft={() => setAnchorDraft(null)} />
+        <CommentsPanel runId={runId} />
       </div>
     </div>
   );

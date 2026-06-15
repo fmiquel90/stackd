@@ -1242,6 +1242,10 @@ so the anchor is stable for the life of the run. The `snippet` is copied from th
 (`run_logs.lines[].msg`), so an anchor can never carry a secret (invariant §13.3). `resource` anchors
 (v2) require serving the structured plan; the column is polymorphic so v2 needs no migration.
 
+**Rendering**: `plan_line` threads render **inline** in the log viewer, directly under their line
+(progressive, line-level review — like PR-review comments), with a hover affordance per line to open
+an inline composer. General (unanchored) and `resource` threads live in a separate Discussion panel.
+
 ### 16.3 API
 
 `/api/v1/runs/{run_id}/comments` — listing & posting are open to any authenticated user

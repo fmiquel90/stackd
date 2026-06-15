@@ -6,14 +6,24 @@ import type { CommentAnchor, RunComment } from "@/api/types";
 import { useSession } from "@/auth/session";
 import { Button, Card } from "@/components/ui";
 
-const isRoot = (c: RunComment) => c.parent_id == null;
+export const isRoot = (c: RunComment) => c.parent_id == null;
+
+// Stable key for a plan-line anchor: line index is chunk-relative, so phase+seq+line identifies it.
+export const lineKey = (phase: string, seq: number, line: number) => `${phase}|${seq}|${line}`;
+
+/** The line key a root comment is anchored to, or null if it's general / resource-anchored. */
+export function commentLineKey(c: RunComment): string | null {
+  const a = c.anchor;
+  if (!a || a.kind !== "plan_line" || a.phase == null || a.seq == null || a.line_start == null)
+    return null;
+  return lineKey(a.phase, a.seq, a.line_start);
+}
 
 function AnchorChip({ anchor }: { anchor: CommentAnchor }) {
   const label =
     anchor.kind === "resource"
       ? `${anchor.address}${anchor.action ? ` (${anchor.action})` : ""}`
-      : // include seq: line index is chunk-relative, so phase+seq disambiguates which block.
-        `${anchor.phase}#${anchor.seq} L${anchor.line_start}${
+      : `${anchor.phase}#${anchor.seq} L${anchor.line_start}${
           anchor.line_end && anchor.line_end !== anchor.line_start ? `–${anchor.line_end}` : ""
         }`;
   return (
@@ -30,18 +40,22 @@ function AnchorChip({ anchor }: { anchor: CommentAnchor }) {
   );
 }
 
-function Composer({
+export function CommentComposer({
   runId,
   parentId,
   anchor,
   placeholder,
+  autoFocus,
   onPosted,
+  onCancel,
 }: {
   runId: string;
   parentId?: string;
   anchor?: CommentAnchor | null;
   placeholder: string;
+  autoFocus?: boolean;
   onPosted?: () => void;
+  onCancel?: () => void;
 }) {
   const qc = useQueryClient();
   const [body, setBody] = useState("");
@@ -66,6 +80,7 @@ function Composer({
         onChange={(e) => setBody(e.target.value)}
         placeholder={placeholder}
         rows={parentId ? 1 : 2}
+        autoFocus={autoFocus}
         className="font-data flex-1 rounded-base px-2 py-1.5 text-[12px]"
         style={{
           border: "1px solid var(--color-border)",
@@ -76,20 +91,27 @@ function Composer({
       <Button type="submit" variant="accent" disabled={post.isPending || !body.trim()}>
         {parentId ? "Reply" : "Comment"}
       </Button>
+      {onCancel && (
+        <Button type="button" onClick={onCancel}>
+          Cancel
+        </Button>
+      )}
     </form>
   );
 }
 
-function Thread({
+export function CommentThread({
   runId,
   root,
   replies,
   meId,
+  hideAnchor,
 }: {
   runId: string;
   root: RunComment;
   replies: RunComment[];
   meId: string | undefined;
+  hideAnchor?: boolean;
 }) {
   const qc = useQueryClient();
   const invalidate = () => qc.invalidateQueries({ queryKey: ["run-comments", runId] });
@@ -129,9 +151,13 @@ function Thread({
   return (
     <div
       className="rounded-base p-2"
-      style={{ border: "1px solid var(--color-border)", opacity: root.resolved ? 0.6 : 1 }}
+      style={{
+        border: "1px solid var(--color-border)",
+        backgroundColor: "var(--color-bg-surface)",
+        opacity: root.resolved ? 0.6 : 1,
+      }}
     >
-      {root.anchor && <AnchorChip anchor={root.anchor} />}
+      {!hideAnchor && root.anchor && <AnchorChip anchor={root.anchor} />}
       <div className="flex items-center justify-between gap-2">
         {root.resolved && (
           <span
@@ -161,11 +187,13 @@ function Thread({
       </div>
       {replying ? (
         <div className="mt-2">
-          <Composer
+          <CommentComposer
             runId={runId}
             parentId={root.id}
             placeholder="Reply…"
+            autoFocus
             onPosted={() => setReplying(false)}
+            onCancel={() => setReplying(false)}
           />
         </div>
       ) : (
@@ -182,72 +210,31 @@ function Thread({
   );
 }
 
-export function CommentsPanel({
-  runId,
-  anchorDraft,
-  onClearDraft,
-}: {
-  runId: string;
-  anchorDraft: CommentAnchor | null;
-  onClearDraft: () => void;
-}) {
+// General (unanchored or resource-anchored) discussion. Plan-line threads render inline in the log
+// viewer (RunPage) for a progressive, line-level review; this panel holds the rest.
+export function CommentsPanel({ runId }: { runId: string }) {
   const me = useSession().data;
   const { data } = useQuery({ queryKey: ["run-comments", runId], queryFn: () => comments.list(runId) });
   const all = data ?? [];
-  const roots = all.filter(isRoot);
+  const general = all.filter((c) => isRoot(c) && commentLineKey(c) === null);
   const repliesOf = (id: string) => all.filter((c) => c.parent_id === id);
 
   return (
     <Card>
       <div className="mb-2 text-[13px] font-medium">Discussion</div>
-
-      {anchorDraft && (
-        <div className="mb-2">
-          <div className="mb-1 flex items-center justify-between">
-            <span className="text-[12px]" style={{ color: "var(--color-text-secondary)" }}>
-              Commenting on a plan selection
-            </span>
-            <button
-              type="button"
-              className="ui-btn text-[11px]"
-              style={{ color: "var(--color-text-secondary)" }}
-              onClick={onClearDraft}
-            >
-              Clear
-            </button>
-          </div>
-          <AnchorChip anchor={anchorDraft} />
-          <Composer
-            runId={runId}
-            anchor={anchorDraft}
-            placeholder="Comment on this part of the plan…"
-            onPosted={onClearDraft}
-          />
-        </div>
-      )}
-
       <div className="flex flex-col gap-2">
-        {roots.map((root) => (
-          <Thread
-            key={root.id}
-            runId={runId}
-            root={root}
-            replies={repliesOf(root.id)}
-            meId={me?.id}
-          />
+        {general.map((root) => (
+          <CommentThread key={root.id} runId={runId} root={root} replies={repliesOf(root.id)} meId={me?.id} />
         ))}
-        {roots.length === 0 && (
+        {general.length === 0 && (
           <span className="text-[12px]" style={{ color: "var(--color-text-secondary)" }}>
-            No comments yet. Select lines in the logs to comment on the plan, or start a thread below.
+            No general comments. Hover a line in the logs to comment on the plan itself.
           </span>
         )}
       </div>
-
-      {!anchorDraft && (
-        <div className="mt-2">
-          <Composer runId={runId} placeholder="Start a general thread…" />
-        </div>
-      )}
+      <div className="mt-2">
+        <CommentComposer runId={runId} placeholder="Start a general thread…" />
+      </div>
     </Card>
   );
 }
