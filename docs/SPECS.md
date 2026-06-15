@@ -1273,3 +1273,42 @@ env flag could make confirm require all threads resolved — deliberately deferr
 1. No run-state change — comments are a side record; `transition()` (invariant §4.2) is untouched.
 2. Snippets come from already-masked log lines, so no secret leaks (invariant §13.3).
 3. Live updates reuse `LISTEN/NOTIFY` (§5.3) — no new transport.
+
+---
+
+## 17. In-app notification center (post-MVP)
+
+> Status: **post-MVP**, additive. The **inbound** counterpart to the outbound Slack/webhook outbox
+> (§5/notifications): a per-user inbox surfaced as a bell in the UI. Side records only — no run-state
+> change (`transition()` untouched), live over the existing `LISTEN/NOTIFY` transport (§5.3).
+
+### 17.1 Model & events
+
+`user_notifications` (per user): `user_id`, `kind`, `run_id?`, `comment_id?`, `context jsonb`,
+`read_at?`, `created_at`. `kind ∈ approval_request | run_finished | run_failed | comment_reply |
+mention`. Each row is created **in the same transaction** as its trigger:
+
+- **`transition()`** (§4.2): `→ unconfirmed` fans out `approval_request` to every eligible approver
+  (role ∈ {approver, admin} AND `env.tier ∈ allowed_tiers`, excluding the triggerer); a terminal
+  state notifies the run's human triggerer (`run_finished` / `run_failed`).
+- **comment create** (§16): a reply notifies the root author; `@mention` tokens (matched against a
+  user's email local-part or full email) notify the mentioned users. Never the author.
+
+### 17.2 Live delivery — private per-user channel
+
+`notify()` emits `pg_notify('user_<uid>', …)` alongside the row. The WS hub maps a `user:<id>`
+subscription to `user_<id>` **only for the connecting user's own id** (`channel_for(sub, user_id)`,
+§5.3) — the feed is private; you cannot listen on someone else's signals. The bell subscribes to its
+own channel and invalidates the `["notifications"]` query on any signal (no payload trusted).
+
+### 17.3 API
+
+`GET /api/v1/notifications` (current user, newest first, capped) ; `POST /api/v1/notifications/read`
+(`{ids?}` — omit to mark all of the user's unread as read). Opening the bell marks all read.
+
+### 17.4 Invariants preserved
+
+1. No run-state change — notifications are a side record; `transition()` (invariant §4.2) untouched.
+2. Same-txn write (invariant §6.3 spirit): a rolled-back trigger emits no notification (NOTIFY is
+   transactional).
+3. The per-user channel is access-scoped to self; the WS payload is a content-free signal (§5.3).

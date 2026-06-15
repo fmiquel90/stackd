@@ -55,10 +55,14 @@ class NotifyHub:
             await self._conn.close()
 
 
-def channel_for(sub: str) -> str | None:
-    """Map a subscription to a NOTIFY channel: run:<id> → run_<id>, environment:<id> → env_<id>."""
+def channel_for(sub: str, user_id: str) -> str | None:
+    """Map a subscription to a NOTIFY channel: run:<id> → run_<id>, environment:<id> → env_<id>,
+    user:<id> → user_<id>. A `user:` channel is only granted for the connecting user's own id
+    (the in-app notification feed is private), so one can't listen on someone else's signals."""
     if sub.startswith("run:"):
         return f"run_{sub[4:]}"
     if sub.startswith("environment:"):
         return f"env_{sub[len('environment:') :]}"
+    if sub.startswith("user:"):
+        return f"user_{user_id}" if sub[len("user:") :] == user_id else None
     return None

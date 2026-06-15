@@ -133,6 +133,11 @@ async def transition(
     if to_state in NOTIFY_STATES:
         session.add(NotificationOutbox(run_id=run.id, to_state=to_state.value))
 
+    # In-app notification center (§17): fan out to approvers / the triggerer, same txn.
+    from app.inbox.service import enqueue_for_transition
+
+    await enqueue_for_transition(session, run, to_state)
+
     # Light WS fan-out signal in the same transaction (§5.3) — content is re-read by replicas.
     signal = json.dumps({"kind": "run_event", "run_id": str(run.id), "to_state": to_state.value})
     await session.execute(

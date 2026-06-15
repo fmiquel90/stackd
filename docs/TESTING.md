@@ -110,7 +110,7 @@ no DB, no network.
 
 ## 4. Test map (what each test asserts)
 
-### API — unit & integration (`api/tests/`, 84 tests)
+### API — unit & integration (`api/tests/`, 89 tests)
 
 **`test_auth.py` (5)** — auth flow & session security
 - `test_dev_login_personas` — persona login returns the user (role/tier) + a usable access token.
@@ -207,12 +207,19 @@ no DB, no network.
 - `test_delete_tier_strips_user_grants` — deleting a tier removes its name from every user's set (no resurrection).
 - `test_delete_tier_in_use_blocked` — deleting a tier an env references → 409.
 
-**`test_comments.py` (5)** — plan-review comments (§16)
+**`test_inbox.py` (4)** — in-app notification center (§17)
+- `test_approval_request_fans_out_to_approvers` — a run reaching `unconfirmed` notifies eligible approvers (not the triggerer).
+- `test_terminal_notifies_the_triggerer` — a finished run notifies its human triggerer.
+- `test_comment_reply_and_mention_notify` — a reply notifies the root author; an `@mention` notifies the mentioned user.
+- `test_feed_is_per_user_and_mark_read` — the feed is per-user; the triggerer isn't approval-notified for their own run; mark-read clears unread.
+
+**`test_comments.py` (6)** — plan-review comments (§16)
 - `test_comment_thread_and_anchor` — general + anchored (`plan_line`) comment + a reply; listed together.
 - `test_anchor_validation` — a `plan_line` anchor missing `phase`/`seq` → 422.
 - `test_no_nested_replies` — replying to a reply → 422 (threads stay one level deep).
 - `test_resolve_and_edit_permissions` — non-author can't edit the body; an approver may resolve; author edits own.
 - `test_delete_only_author_or_admin` — an approver ≠ author is refused (403); an admin can delete.
+- `test_delete_thread_with_replies_guarded` — a non-admin can't delete a root carrying others' replies (409); an admin can.
 
 **`test_notifications.py` (4)** — outbound notifications
 - `test_notification_target_crud` — create/list/patch/delete a target (default `on_states=[unconfirmed, failed]`); each mutation audited.
@@ -283,10 +290,10 @@ identity components are instead pinned by **Ladle stories** (the DESIGN §8 visu
 
 | Location | Files | Tests |
 |---|---|---|
-| `api/tests` | 22 | 84 |
+| `api/tests` | 23 | 89 |
 | `api/e2e` | 1 | 1 (multi-step scenario) |
 | `worker/tests` | 2 | 7 |
-| **Total** | **25** | **92** |
+| **Total** | **26** | **97** |
 
 ---
 

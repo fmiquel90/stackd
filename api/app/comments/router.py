@@ -58,12 +58,15 @@ async def list_comments(run_id: uuid.UUID, _: CurrentUser, session: DbSession) -
 async def create_comment(
     run_id: uuid.UUID, body: CommentCreate, user: CurrentUser, session: DbSession
 ) -> CommentOut:
-    if await session.get(Run, run_id) is None:
+    run = await session.get(Run, run_id)
+    if run is None:
         raise ProblemException(404, "Run not found", None)
+    parent_author_id = None
     if body.parent_id is not None:
         parent = await _get_comment(session, run_id, body.parent_id)  # must be on this run
         if parent.parent_id is not None:
             raise ProblemException(422, "Nested reply", "Reply to the root comment, not a reply.")
+        parent_author_id = parent.author_user_id
     comment = RunComment(
         run_id=run_id,
         parent_id=body.parent_id,
@@ -73,6 +76,17 @@ async def create_comment(
         anchor=body.anchor.model_dump(exclude_none=True) if body.anchor else None,
     )
     session.add(comment)
+    await session.flush()  # need comment.id is not required, but ensures ordering before notify
+    from app.inbox.service import enqueue_for_comment
+
+    await enqueue_for_comment(
+        session,
+        run,
+        author_id=user.id,
+        author_email=user.email,
+        body=body.body,
+        parent_author_id=parent_author_id,
+    )
     await _publish(session, run_id)
     await session.commit()
     await session.refresh(comment)

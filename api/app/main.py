@@ -18,6 +18,7 @@ from app.environments.router import router as environments_router
 from app.errors import register_error_handlers
 from app.hooks.router import router as hooks_router
 from app.ids import uuid7
+from app.inbox.router import router as inbox_router
 from app.logging import bind_context, configure_logging, get_logger, reset_context
 from app.notifications.router import router as notifications_router
 from app.observability.router import router as observability_router
@@ -147,6 +148,7 @@ def create_app() -> FastAPI:
     app.include_router(hooks_router)
     app.include_router(runs_router)
     app.include_router(comments_router)
+    app.include_router(inbox_router)
     app.include_router(worker_admin_router)
     app.include_router(worker_router)
     app.include_router(state_tf_router)

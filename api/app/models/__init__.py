@@ -13,6 +13,7 @@ from app.models.stack import Stack
 from app.models.state import StateLock, StateVersion
 from app.models.tier import Tier
 from app.models.user import RefreshToken, User
+from app.models.user_notification import UserNotification
 from app.models.variable import Variable
 from app.models.variable_set import VariableSet, VariableSetAttachment
 from app.models.worker import Worker, WorkerPool
@@ -41,6 +42,7 @@ __all__ = [
     "StateVersion",
     "Tier",
     "User",
+    "UserNotification",
     "Variable",
     "VariableSet",
     "VariableSetAttachment",

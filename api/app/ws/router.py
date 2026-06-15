@@ -17,10 +17,11 @@ async def ws_endpoint(websocket: WebSocket) -> None:
     # Access token in query string (browsers can't set WS headers). Validated before accept.
     token = websocket.query_params.get("token", "")
     try:
-        decode_access_token(token)
+        claims = decode_access_token(token)
     except jwt.PyJWTError:
         await websocket.close(code=4401)
         return
+    user_id = str(claims["sub"])
     await websocket.accept()
 
     out: asyncio.Queue[str] = asyncio.Queue()
@@ -38,7 +39,7 @@ async def ws_endpoint(websocket: WebSocket) -> None:
     try:
         while True:
             msg = await websocket.receive_json()
-            channel = channel_for(msg.get("sub", ""))
+            channel = channel_for(msg.get("sub", ""), user_id)
             if channel:
                 queue = await _hub.subscribe(channel)
                 subscriptions.append((channel, queue, asyncio.create_task(forward(channel, queue))))
