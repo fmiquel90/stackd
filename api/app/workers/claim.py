@@ -25,7 +25,7 @@ from app.models.stack import Stack
 from app.models.worker import Worker
 from app.runs.commands import is_mutating
 from app.runs.transition import transition
-from app.variables.resolution import provenance_snapshot, resolve_variables
+from app.variables.resolution import ResolvedVariable, provenance_snapshot, resolve_variables
 from app.workers.hooks import platform_hooks
 
 # Derived from ACTIVE_STATES so the claim guard can never drift from the one_active_run_per_env
@@ -91,6 +91,18 @@ async def claim_one(session: AsyncSession, worker: Worker, affinity_seconds: int
     return run
 
 
+def _tfvar_value(rv: ResolvedVariable) -> object:
+    """The value to put in the JSON tfvars file. An `hcl` variable carries a structured value
+    (list/map/number/bool) typed by the user as text — parse it so terraform sees the real type,
+    not a string. Falls back to the raw string if it isn't valid JSON."""
+    if rv.hcl and rv.value is not None:
+        try:
+            return json.loads(rv.value)
+        except (json.JSONDecodeError, ValueError):
+            return rv.value
+    return rv.value
+
+
 async def build_job_payload(session: AsyncSession, run: Run) -> dict:
     """Construct the claim payload (SPECS §7.2). Resolves variables with secrets revealed; the
     agent masks them in logs. Snapshots provenance onto the run."""
@@ -120,12 +132,12 @@ async def build_job_payload(session: AsyncSession, run: Run) -> dict:
 
         raise SecretUnavailable("secret_unavailable:fallback_apply_disabled")
 
-    tfvars_json: dict[str, str | None] = {}
+    tfvars_json: dict[str, object] = {}
     env_vars: dict[str, str | None] = {}
     sensitive_env: dict[str, str | None] = {}
     for rv in resolved:
         if rv.kind == VariableKind.terraform:
-            tfvars_json[rv.name] = rv.value
+            tfvars_json[rv.name] = _tfvar_value(rv)
         elif rv.sensitive:
             sensitive_env[rv.name] = rv.value
         else:
