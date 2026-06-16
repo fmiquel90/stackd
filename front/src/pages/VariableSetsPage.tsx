@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { ChevronDown, ChevronRight } from "lucide-react";
 import { graphApi, stacks, tiers, variableSets, type AttachmentTarget } from "@/api/resources";
 import type { VariableSet } from "@/api/types";
 import {
@@ -13,6 +14,7 @@ import {
   LabelsEditor,
   PageTitle,
   Select,
+  Tabs,
   TextInput,
 } from "@/components/ui";
 import { VariablesEditor } from "@/components/VariablesEditor";
@@ -218,18 +220,34 @@ function AttachmentsPanel({ setId }: { setId: string }) {
   );
 }
 
+type SetTab = "variables" | "attachments" | "settings";
+
+const SET_TABS: { key: SetTab; label: string }[] = [
+  { key: "variables", label: "Variables" },
+  { key: "attachments", label: "Attachments" },
+  { key: "settings", label: "Settings" },
+];
+
+// One set per row. Config is folded behind a single "Configure" disclosure that reveals a tab bar
+// (one panel at a time — progressive disclosure, mirroring the environment card). Collapsed, the row
+// stays glanceable: how the set reaches environments (auto-attach / selector rule) is shown as a badge.
 function SetCard({ set }: { set: VariableSet }) {
   const qc = useQueryClient();
   const [open, setOpen] = useState(false);
+  const [tab, setTab] = useState<SetTab>("variables");
+  const Chevron = open ? ChevronDown : ChevronRight;
   const remove = useMutation({
     mutationFn: () => variableSets.remove(set.id),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["variable-sets"] }),
   });
+  const rule = Object.entries(set.selector ?? {})
+    .map(([k, v]) => `${k}=${String(v)}`)
+    .join(", ");
 
   return (
     <Card>
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-3">
+      <div className="flex items-center justify-between gap-3">
+        <div className="flex min-w-0 flex-wrap items-center gap-2">
           <button
             type="button"
             onClick={() => setOpen((v) => !v)}
@@ -239,14 +257,16 @@ function SetCard({ set }: { set: VariableSet }) {
           >
             {set.name}
           </button>
-          {set.auto_attach && (
-            <span className="font-data text-[12px]" style={{ color: "var(--color-text-secondary)" }}>
-              auto-attach
-            </span>
-          )}
+          {set.auto_attach && <Badge>auto-attach</Badge>}
+          {rule && <Badge color="var(--color-accent)">rule: {rule}</Badge>}
         </div>
-        <div className="flex items-center gap-2">
-          <Button onClick={() => setOpen((v) => !v)}>{open ? "Hide" : "Configure"}</Button>
+        <div className="flex shrink-0 items-center gap-2">
+          <Button onClick={() => setOpen((v) => !v)} aria-expanded={open}>
+            <span className="inline-flex items-center gap-1.5">
+              <Chevron size={14} strokeWidth={1.75} aria-hidden />
+              Configure
+            </span>
+          </Button>
           <Button onClick={() => remove.mutate()} disabled={remove.isPending}>
             Delete
           </Button>
@@ -259,17 +279,9 @@ function SetCard({ set }: { set: VariableSet }) {
         </div>
       )}
       {open && (
-        <div className="mt-3 flex flex-col gap-4">
-          <div>
-            <div className="mb-1 text-[13px] font-medium">Settings</div>
-            <SetSettings set={set} />
-          </div>
-          <div>
-            <div className="mb-1 text-[13px] font-medium">Attachments</div>
-            <AttachmentsPanel setId={set.id} />
-          </div>
-          <div>
-            <div className="mb-1 text-[13px] font-medium">Variables</div>
+        <div className="mt-3 flex flex-col gap-3">
+          <Tabs tabs={SET_TABS} active={tab} onChange={setTab} />
+          {tab === "variables" && (
             <VariablesEditor
               queryKey={["variable-set-vars", set.id]}
               list={() => variableSets.variables(set.id)}
@@ -277,7 +289,9 @@ function SetCard({ set }: { set: VariableSet }) {
               update={(varId, body) => variableSets.updateVariable(set.id, varId, body)}
               remove={(varId) => variableSets.removeVariable(set.id, varId)}
             />
-          </div>
+          )}
+          {tab === "attachments" && <AttachmentsPanel setId={set.id} />}
+          {tab === "settings" && <SetSettings set={set} />}
         </div>
       )}
     </Card>
