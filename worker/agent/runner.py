@@ -44,10 +44,11 @@ def _stream_proc(
     section: str | None,
     streamer: LogStreamer,
     timeout: int,
-    transform: Callable[[str], str | None],
+    transform: Callable[[str], str | list[str] | None],
 ) -> int:
     """Run a command, applying `transform` to each output line before streaming it (return None to
-    skip a line). A watchdog kills the process past `timeout` (exit 124, like coreutils `timeout`)."""
+    skip a line, or a list to expand one line into several). A watchdog kills the process past
+    `timeout` (exit 124, like coreutils `timeout`)."""
     proc = subprocess.Popen(
         cmd,
         cwd=cwd,
@@ -70,10 +71,10 @@ def _stream_proc(
             raise RuntimeError("subprocess stdout pipe missing")
         buffer: list[str] = []
         for line in proc.stdout:
-            text = transform(line.rstrip("\n"))
-            if text is None:
+            out = transform(line.rstrip("\n"))
+            if out is None:
                 continue
-            buffer.append(text)
+            buffer.extend([out] if isinstance(out, str) else out)
             if len(buffer) >= 20:
                 streamer.emit(phase, buffer, section=section)
                 buffer = []
@@ -126,20 +127,33 @@ def stream_json_command(
 ) -> tuple[int, list[dict]]:
     """Run a `-json` tofu/terraform command (plan/apply): stream the human-readable `@message` of
     each event (masked) while collecting the structured events (`change_summary`, `diagnostic`, …)
-    for the caller. Non-JSON lines are streamed verbatim. Returns (exit_code, events)."""
+    for the caller. Diagnostics (errors/warnings) are expanded to their full detail + location —
+    the bare `@message` is just the headline ("Error: Invalid value for input variable"). Non-JSON
+    lines are streamed verbatim. Returns (exit_code, events)."""
     events: list[dict] = []
 
-    def _tx(line: str) -> str | None:
+    def _tx(line: str) -> str | list[str] | None:
         if not line:
             return None
         try:
             evt = json.loads(line)
         except json.JSONDecodeError:
             return line  # not a JSON event (e.g. a stray stderr line) — stream as-is
-        if isinstance(evt, dict) and "@message" in evt:
-            events.append(evt)
+        if not isinstance(evt, dict) or "@message" not in evt:
+            return line
+        events.append(evt)
+        diag = evt.get("diagnostic")
+        if not isinstance(diag, dict):
             return str(evt["@message"])
-        return line
+        # Reconstruct what `terraform plan` prints for a diagnostic: headline, location, detail.
+        out = [str(evt["@message"])]
+        rng = diag.get("range") or {}
+        if rng.get("filename"):
+            start = (rng.get("start") or {}).get("line")
+            out.append(f"  on {rng['filename']}" + (f", line {start}" if start else "") + ":")
+        if diag.get("detail"):
+            out += [f"  {dl}" for dl in str(diag["detail"]).splitlines()]
+        return out
 
     rc = _stream_proc(
         cmd,
