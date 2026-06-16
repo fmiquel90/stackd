@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import shutil
 import uuid
 from datetime import UTC, datetime
 from typing import Annotated
@@ -11,15 +12,17 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.audit import record_audit
 from app.auth.deps import CurrentUser, require_role
+from app.crypto import decrypt
 from app.db import get_session
-from app.enums import AuditActorKind, Role
+from app.enums import AuditActorKind, Role, VariableKind
 from app.environments.schemas import EnvironmentCreate, EnvironmentOut, EnvironmentUpdate
 from app.errors import ProblemException
 from app.models.environment import Environment
 from app.models.stack import Stack
 from app.models.tier import Tier
-from app.stacks.git import ls_remote_sha
+from app.stacks.git import clone_shallow, ls_remote_sha
 from app.variables.crud import create_variable, get_variable, update_variable, variables_for
+from app.variables.discovery import parse_inputs, placeholder
 from app.variables.resolution import resolve_variables
 from app.variables.schemas import (
     ResolvedVariableOut,
@@ -280,3 +283,55 @@ async def resolved_variables(
     env = await _get_env(session, env_id)
     resolved = await resolve_variables(session, env)
     return [ResolvedVariableOut.of(rv) for rv in resolved]
+
+
+@router.post("/environments/{env_id}/discover-inputs", dependencies=[Writer])
+async def discover_inputs(env_id: uuid.UUID, user: CurrentUser, session: DbSession) -> dict:
+    """Introspect the repo (shallow clone + HCL parse, no terraform run) and create the REQUIRED
+    root-module inputs that aren't already resolved, as env variables with empty placeholders."""
+    env = await _get_env(session, env_id)
+    stack = await session.get(Stack, env.stack_id)
+    assert stack is not None
+    secret = decrypt(stack.repo_secret_encrypted) if stack.repo_secret_encrypted else None
+    dest = await clone_shallow(stack.repo_url, stack.repo_auth_kind, secret, env.branch)
+    try:
+        root = (dest / stack.project_root).resolve()
+        if not str(root).startswith(str(dest.resolve())):  # project_root must stay inside the repo
+            raise ProblemException(400, "Invalid project root", None)
+        required = [i for i in parse_inputs(root) if i.required]
+        resolved = await resolve_variables(session, env)
+        present = {rv.name for rv in resolved if rv.kind == VariableKind.terraform}
+        created: list[str] = []
+        skipped: list[str] = []
+        for inp in required:
+            if inp.name in present:
+                skipped.append(inp.name)
+                continue
+            await create_variable(
+                session,
+                VariableCreate(
+                    kind=VariableKind.terraform,
+                    name=inp.name,
+                    value=placeholder(inp),
+                    sensitive=inp.sensitive,
+                    hcl=inp.hcl,
+                ),
+                stack_id=env.stack_id,
+                environment_id=env.id,
+            )
+            created.append(inp.name)
+        if created:
+            await record_audit(
+                session,
+                action="environment.inputs_discovered",
+                actor_kind=AuditActorKind.user,
+                actor_id=user.id,
+                actor_email=user.email,
+                target_kind="environment",
+                target_id=env.id,
+                context={"created": created, "skipped": skipped},
+            )
+        await session.commit()
+        return {"created": created, "skipped": skipped, "required_total": len(required)}
+    finally:
+        shutil.rmtree(dest, ignore_errors=True)

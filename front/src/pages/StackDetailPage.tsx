@@ -79,6 +79,38 @@ function EnvOutputs({ envId }: { envId: string }) {
   );
 }
 
+// Scaffold the repo's required root-module inputs as env variables (empty placeholders), so a fresh
+// env doesn't have to be filled in by hand. Already-provided inputs are skipped.
+function DiscoverInputsButton({ envId }: { envId: string }) {
+  const qc = useQueryClient();
+  const discover = useMutation({
+    mutationFn: () => environments.discoverInputs(envId),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["env-vars", envId] });
+      qc.invalidateQueries({ queryKey: ["resolved-variables", envId] });
+    },
+  });
+  const r = discover.data;
+  return (
+    <div className="flex items-center gap-2">
+      <Button onClick={() => discover.mutate()} disabled={discover.isPending}>
+        {discover.isPending ? "Discovering…" : "Discover inputs"}
+      </Button>
+      {r && (
+        <span className="font-data text-[12px]" style={{ color: "var(--color-text-secondary)" }}>
+          {r.created.length} created
+          {r.skipped.length ? `, ${r.skipped.length} already set` : ""} · {r.required_total} required
+        </span>
+      )}
+      {discover.isError && (
+        <span className="font-data text-[12px]" style={{ color: "var(--color-state-failed)" }}>
+          {(discover.error as Error).message}
+        </span>
+      )}
+    </div>
+  );
+}
+
 // The Inputs tab: resolved values (read-only, with provenance), env-level overrides (editable), and
 // the env's published outputs. Env-level variables override the stack-level value of the same name.
 function EnvInputs({ envId }: { envId: string }) {
@@ -89,9 +121,13 @@ function EnvInputs({ envId }: { envId: string }) {
         <ResolvedVariables envId={envId} />
       </div>
       <div>
-        <div className="mb-1 text-[13px] font-medium">Environment overrides</div>
+        <div className="mb-1 flex items-center justify-between gap-3">
+          <span className="text-[13px] font-medium">Environment overrides</span>
+          <DiscoverInputsButton envId={envId} />
+        </div>
         <div className="mb-2 text-[12px]" style={{ color: "var(--color-text-secondary)" }}>
           Specific to this environment — overrides the stack-level variable of the same name.
+          “Discover inputs” scaffolds the repo's required variables here with empty placeholders.
         </div>
         <VariablesEditor
           queryKey={["env-vars", envId]}

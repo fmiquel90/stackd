@@ -140,6 +140,12 @@ export const environments = {
   refreshHead: (id: string) =>
     api<Environment>(`/environments/${id}/refresh-head`, { method: "POST" }),
   outputs: (id: string) => api<EnvOutput[]>(`/environments/${id}/outputs`),
+  // Introspect the repo and create the required root-module inputs as env vars with placeholders.
+  discoverInputs: (id: string) =>
+    api<{ created: string[]; skipped: string[]; required_total: number }>(
+      `/environments/${id}/discover-inputs`,
+      { method: "POST" },
+    ),
   // Environment-level variables (override the stack-level value of the same name, SPECS §3.4).
   variables: (id: string) => api<Variable[]>(`/environments/${id}/variables`),
   addVariable: (id: string, body: NewVariable) =>

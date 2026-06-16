@@ -1,6 +1,43 @@
 from __future__ import annotations
 
+import os
+import pathlib
+import subprocess
+import tempfile
+
 import httpx
+
+
+def _make_repo(tf: str) -> str:
+    """A throwaway git repo (branch main) with a single main.tf — cloned by discover-inputs."""
+    d = tempfile.mkdtemp(prefix="stackd-test-repo-")
+    pathlib.Path(d, "main.tf").write_text(tf)
+    env = {
+        **os.environ,
+        "GIT_AUTHOR_NAME": "t",
+        "GIT_AUTHOR_EMAIL": "t@t",
+        "GIT_COMMITTER_NAME": "t",
+        "GIT_COMMITTER_EMAIL": "t@t",
+    }
+    subprocess.run(["git", "init", "-q", "-b", "main", d], check=True)
+    subprocess.run(["git", "-C", d, "add", "."], check=True)
+    subprocess.run(["git", "-C", d, "commit", "-q", "-m", "init"], env=env, check=True)
+    return d
+
+
+_TF = """
+variable "region" { type = string }
+variable "instance_count" { type = number }
+variable "tags" { type = map(string) }
+variable "db_password" {
+  type      = string
+  sensitive = true
+}
+variable "az" {
+  type    = string
+  default = "eu-west-1a"
+}
+"""
 
 
 async def _admin(client: httpx.AsyncClient) -> dict[str, str]:
@@ -247,6 +284,50 @@ async def test_attach_set_to_tier(client: httpx.AsyncClient) -> None:
         await client.get(f"/api/v1/environments/{dev_env}/resolved-variables", headers=h)
     ).json()
     assert "endpoint" not in {v["name"] for v in dev_vars}
+
+
+def test_parse_inputs_unit() -> None:
+    from app.variables.discovery import parse_inputs
+
+    d = pathlib.Path(_make_repo(_TF))
+    by_name = {i.name: i for i in parse_inputs(d)}
+    assert by_name["region"].required and not by_name["region"].hcl
+    assert by_name["tags"].required and by_name["tags"].hcl  # map(...) → injected as HCL
+    assert by_name["db_password"].sensitive
+    assert not by_name["az"].required  # has a default
+
+
+async def test_discover_inputs_creates_required(client: httpx.AsyncClient) -> None:
+    h = await _admin(client)
+    repo = _make_repo(_TF)
+    stack_id = (
+        await client.post(
+            "/api/v1/stacks",
+            headers=h,
+            json={"name": "discover-stack", "repo_url": f"file://{repo}", "tool_version": "1.12.0"},
+        )
+    ).json()["id"]
+    env_id = await _env(client, h, stack_id, "dev", "dev")
+
+    # `region` is already provided → must be skipped, not duplicated.
+    await client.post(
+        f"/api/v1/environments/{env_id}/variables",
+        headers=h,
+        json={"kind": "terraform", "name": "region", "value": "eu-west-1"},
+    )
+
+    r = await client.post(f"/api/v1/environments/{env_id}/discover-inputs", headers=h)
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["required_total"] == 4  # region, instance_count, tags, db_password (az has default)
+    assert "region" in body["skipped"]
+    assert set(body["created"]) == {"instance_count", "tags", "db_password"}
+
+    vars_ = (await client.get(f"/api/v1/environments/{env_id}/variables", headers=h)).json()
+    by_name = {v["name"]: v for v in vars_}
+    assert "az" not in by_name  # optional inputs are not created
+    assert by_name["tags"]["hcl"] is True
+    assert by_name["db_password"]["sensitive"] is True and by_name["db_password"]["value"] == "•••"
 
 
 async def test_protected_env_forces_no_autodeploy(client: httpx.AsyncClient) -> None:
