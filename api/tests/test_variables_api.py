@@ -215,6 +215,40 @@ async def test_selector_matches_env_label(client: httpx.AsyncClient) -> None:
     assert by_name["cdn"]["provenance"] == "set:edge-set"
 
 
+async def test_attach_set_to_tier(client: httpx.AsyncClient) -> None:
+    h = await _admin(client)
+    tiers = (await client.get("/api/v1/tiers", headers=h)).json()
+    prod = next(t for t in tiers if t["name"] == "prod")
+    stack_id = await _stack(client, h, "tier-attach-stack")
+    prod_env = await _env(client, h, stack_id, "prod", "prod")
+    dev_env = await _env(client, h, stack_id, "dev", "dev")
+
+    vset = (
+        await client.post("/api/v1/variable-sets", headers=h, json={"name": "prod-creds"})
+    ).json()
+    await client.post(
+        f"/api/v1/variable-sets/{vset['id']}/variables",
+        headers=h,
+        json={"kind": "terraform", "name": "endpoint", "value": "prod.internal"},
+    )
+    attach = await client.post(
+        f"/api/v1/variable-sets/{vset['id']}/attachments",
+        headers=h,
+        json={"target_kind": "tier", "target_id": prod["id"]},
+    )
+    assert attach.status_code == 201, attach.text
+
+    # The prod env (matching tier) gets the set; the dev env does not.
+    prod_vars = (
+        await client.get(f"/api/v1/environments/{prod_env}/resolved-variables", headers=h)
+    ).json()
+    assert {v["name"]: v["provenance"] for v in prod_vars}.get("endpoint") == "set:prod-creds"
+    dev_vars = (
+        await client.get(f"/api/v1/environments/{dev_env}/resolved-variables", headers=h)
+    ).json()
+    assert "endpoint" not in {v["name"] for v in dev_vars}
+
+
 async def test_protected_env_forces_no_autodeploy(client: httpx.AsyncClient) -> None:
     h = await _admin(client)
     stack_id = await _stack(client, h, "protected-stack")

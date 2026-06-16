@@ -15,6 +15,7 @@ from app.enums import AttachmentTarget, AuditActorKind, Role
 from app.errors import ProblemException
 from app.models.environment import Environment
 from app.models.stack import Stack
+from app.models.tier import Tier
 from app.models.variable_set import VariableSet, VariableSetAttachment
 from app.spaces import get_default_space
 from app.variable_sets.schemas import (
@@ -253,12 +254,12 @@ async def attach(
     set_id: uuid.UUID, body: AttachmentCreate, user: CurrentUser, session: DbSession
 ) -> VariableSetAttachment:
     await _get_set(session, set_id)
-    target = (
-        await session.get(Stack, body.target_id)
-        if body.target_kind == AttachmentTarget.stack
-        else await session.get(Environment, body.target_id)
-    )
-    if target is None:
+    target_model = {
+        AttachmentTarget.stack: Stack,
+        AttachmentTarget.environment: Environment,
+        AttachmentTarget.tier: Tier,
+    }[body.target_kind]
+    if await session.get(target_model, body.target_id) is None:
         raise ProblemException(404, "Attachment target not found", f"No {body.target_kind.value}.")
     attachment = VariableSetAttachment(
         variable_set_id=set_id,

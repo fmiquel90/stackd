@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { graphApi, stacks, variableSets, type AttachmentTarget } from "@/api/resources";
+import { graphApi, stacks, tiers, variableSets, type AttachmentTarget } from "@/api/resources";
 import type { VariableSet } from "@/api/types";
 import {
   Badge,
@@ -106,11 +106,13 @@ function AttachmentsPanel({ setId }: { setId: string }) {
   const { data } = useQuery({ queryKey: key, queryFn: () => variableSets.attachments(setId) });
   const stackList = useQuery({ queryKey: ["stacks"], queryFn: stacks.list });
   const graph = useQuery({ queryKey: ["graph"], queryFn: graphApi.get });
+  const tierList = useQuery({ queryKey: ["tiers"], queryFn: tiers.list });
 
   const [kind, setKind] = useState<AttachmentTarget>("environment");
   const [targetId, setTargetId] = useState("");
 
   const stackName = (sid: string) => stackList.data?.find((s) => s.id === sid)?.name ?? sid.slice(0, 6);
+  const tierName = (tid: string) => tierList.data?.find((t) => t.id === tid)?.name ?? tid.slice(0, 8);
   // Environments grouped under their stack — stacks are non-selectable <optgroup> headers, the
   // environments are the actual options (so the list reads as envs, not stacks).
   const envsByStack = (stackList.data ?? [])
@@ -124,7 +126,7 @@ function AttachmentsPanel({ setId }: { setId: string }) {
     return n ? `${stackName(n.stack_id)} / ${n.name}` : id.slice(0, 8);
   };
   const labelFor = (targetKind: AttachmentTarget, id: string) =>
-    targetKind === "stack" ? stackName(id) : envLabel(id);
+    targetKind === "stack" ? stackName(id) : targetKind === "tier" ? tierName(id) : envLabel(id);
 
   const attach = useMutation({
     mutationFn: () => variableSets.attach(setId, { target_kind: kind, target_id: targetId }),
@@ -173,26 +175,34 @@ function AttachmentsPanel({ setId }: { setId: string }) {
           >
             <option value="environment">environment</option>
             <option value="stack">stack</option>
+            <option value="tier">tier</option>
           </Select>
         </Field>
-        <Field label={kind === "stack" ? "Stack" : "Environment"}>
+        <Field label={kind === "stack" ? "Stack" : kind === "tier" ? "Tier" : "Environment"}>
           <Select value={targetId} onChange={(e) => setTargetId(e.target.value)} required>
             <option value="">select…</option>
-            {kind === "stack"
-              ? (stackList.data ?? []).map((s) => (
-                  <option key={s.id} value={s.id}>
-                    {s.name}
-                  </option>
-                ))
-              : envsByStack.map((g) => (
-                  <optgroup key={g.stack} label={g.stack}>
-                    {g.envs.map((e) => (
-                      <option key={e.id} value={e.id}>
-                        {e.name}
-                      </option>
-                    ))}
-                  </optgroup>
-                ))}
+            {kind === "stack" &&
+              (stackList.data ?? []).map((s) => (
+                <option key={s.id} value={s.id}>
+                  {s.name}
+                </option>
+              ))}
+            {kind === "tier" &&
+              (tierList.data ?? []).map((t) => (
+                <option key={t.id} value={t.id}>
+                  {t.name}
+                </option>
+              ))}
+            {kind === "environment" &&
+              envsByStack.map((g) => (
+                <optgroup key={g.stack} label={g.stack}>
+                  {g.envs.map((e) => (
+                    <option key={e.id} value={e.id}>
+                      {e.name}
+                    </option>
+                  ))}
+                </optgroup>
+              ))}
           </Select>
         </Field>
         <Button type="submit" disabled={attach.isPending || !targetId}>

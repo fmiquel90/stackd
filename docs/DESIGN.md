@@ -188,7 +188,7 @@ The visual answer to "why isn't my run starting?".
 - The env **Inputs** tab has three sections: **Resolved** (read-only, every value with its provenance badge), **Environment overrides** (editable env-level variables that override the stack-level value of the same name, SPECS §3.4), and **Outputs** (what the env publishes after a successful apply — sensitive ones masked, never a reveal button).
 - The env **Settings** tab edits the environment after creation: name, tier, branch, and the protection flags (`protected`, four-eyes, `autodeploy`, `managed_state`, `allow_mock_apply`, `allow_fallback_apply`).
 - The branch is **per-environment** (each env tracks its own), chosen from the repo's real branches at creation (defaults to `main`).
-- **Variable Sets** (`/variable-sets`): each set expands to Settings (rename, auto-attach), **Attachments** (bind the set to a stack or an environment, or detach), and its Variables. `auto-attach` applies the set to the whole space without an explicit attachment (SPECS §3.4).
+- **Variable Sets** (`/variable-sets`): each set expands to Settings (rename, auto-attach, and a **selector** — auto-attach to any stack/env whose labels match), **Attachments** (bind the set to a **stack**, an **environment**, or a **tier** — i.e. all envs of that tier — or detach), and its Variables. `auto-attach` applies the set to the whole space without an explicit attachment (SPECS §3.4).
 
 ### 5.9 `/workers` — workers & pools
 

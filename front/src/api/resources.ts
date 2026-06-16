@@ -168,7 +168,7 @@ export interface VariablePatch {
 
 // An attachment binds a set to a stack or an environment (SPECS §3.4). `priority` orders sets at
 // the same level. A set with no attachment (and auto_attach=false) applies nowhere.
-export type AttachmentTarget = "stack" | "environment";
+export type AttachmentTarget = "stack" | "environment" | "tier";
 
 export interface Attachment {
   id: string;

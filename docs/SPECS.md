@@ -196,8 +196,9 @@ variable_sets (
 variable_set_attachments (
   id uuid PK,
   variable_set_id FK,
-  target_kind enum('stack','environment'),
-  target_id uuid,                   -- stack → all its envs; environment → this env only
+  target_kind enum('stack','environment','tier'),
+  target_id uuid,                   -- stack → all its envs; tier → all envs of that tier
+                                    --   (target_id = tiers.id); environment → this env only
                                     -- polymorphic (stack OR env) → no DB FK; integrity is app-enforced
   priority int default 0,           -- orders the sets among themselves at resolution
   UNIQUE (variable_set_id, target_kind, target_id)
@@ -209,10 +210,11 @@ variable_set_attachments (
 ```
 1. variable sets that apply by rule      (auto_attach, or selector matching the env's
    effective labels) — weakest layer, ordered by name
-2. variable sets attached to the stack   (by increasing priority)
-3. variable sets attached to the env     (by increasing priority)
-4. stack variables (environment_id NULL)
-5. environment variables                 ← always wins
+2. variable sets attached to the tier    (all envs of the env's tier, by increasing priority)
+3. variable sets attached to the stack   (by increasing priority)
+4. variable sets attached to the env     (by increasing priority)
+5. stack variables (environment_id NULL)
+6. environment variables                 ← always wins
 ```
 
 A set's **selector** (`{label: value}`) auto-attaches it to every environment whose effective labels (`stack.labels` + `env.labels`, env wins on conflict) contain all of its key=value pairs — equality AND-match, no operators (deliberately not the deferred OPA engine, PLAN §7). It sits at the same weakest layer as `auto_attach`; explicit attachments remain stronger.

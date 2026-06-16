@@ -43,6 +43,7 @@ class VariableKind(enum.StrEnum):
 class AttachmentTarget(enum.StrEnum):
     stack = "stack"
     environment = "environment"
+    tier = "tier"  # → all environments of that tier (target_id = tiers.id)
 
 
 class RunType(enum.StrEnum):

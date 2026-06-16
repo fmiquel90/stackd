@@ -9,6 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.enums import AttachmentTarget, SecretFallback, VariableKind
 from app.models.environment import Environment
 from app.models.stack import Stack
+from app.models.tier import Tier
 from app.models.variable import Variable
 from app.models.variable_set import VariableSet, VariableSetAttachment
 from app.variables.values import reveal_value
@@ -76,11 +77,17 @@ async def _sets_for_env(
         if s.auto_attach or _selector_matches(s.selector, effective_labels)
     )
 
-    # 2. sets attached to the stack, then 3. sets attached to the env — each by priority asc.
-    for kind, target_id in (
-        (AttachmentTarget.stack, env.stack_id),
-        (AttachmentTarget.environment, env.id),
-    ):
+    # 2. explicit attachments, weakest→strongest: tier (all envs of the tier) < stack (all envs of
+    # the stack) < this env. Each ordered by priority asc.
+    tier_row = (
+        await session.execute(select(Tier).where(Tier.name == env.tier))
+    ).scalar_one_or_none()
+    targets: list[tuple[AttachmentTarget, uuid.UUID]] = []
+    if tier_row is not None:
+        targets.append((AttachmentTarget.tier, tier_row.id))
+    targets.append((AttachmentTarget.stack, env.stack_id))
+    targets.append((AttachmentTarget.environment, env.id))
+    for kind, target_id in targets:
         rows = (
             await session.execute(
                 select(VariableSet, VariableSetAttachment.priority)
