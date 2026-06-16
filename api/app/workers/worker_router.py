@@ -56,14 +56,24 @@ _PHASE_TO_STATE = {
 @router.post("/register", response_model=RegisterOut)
 async def register(body: RegisterIn, request: Request, session: DbSession) -> RegisterOut:
     pool = await pool_from_token(request, session)
-    worker = Worker(
-        pool_id=pool.id,
-        name=body.name,
-        labels=body.labels,
-        version=body.version,
-        last_heartbeat_at=datetime.now(UTC),
-    )
-    session.add(worker)
+    # Reuse the row for this (pool, name) if it exists: a worker that restarts/hot-reloads is the
+    # same worker — re-inserting would litter the list with stale offline duplicates. Most-recent
+    # wins if legacy duplicates predate this behaviour.
+    worker = (
+        await session.execute(
+            select(Worker)
+            .where(Worker.pool_id == pool.id, Worker.name == body.name)
+            .order_by(Worker.last_heartbeat_at.desc().nulls_last())
+            .limit(1)
+        )
+    ).scalar_one_or_none()
+    if worker is None:
+        worker = Worker(pool_id=pool.id, name=body.name)
+        session.add(worker)
+    worker.labels = body.labels
+    worker.version = body.version
+    worker.status = WorkerStatus.idle
+    worker.last_heartbeat_at = datetime.now(UTC)
     await session.commit()
     await session.refresh(worker)
     _log.info(
