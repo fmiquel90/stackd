@@ -18,6 +18,7 @@ class StackCreate(BaseModel):
     project_root: str = "."
     tool: Tool = Tool.opentofu
     tool_version: str
+    labels: dict | None = None
 
 
 class StackUpdate(BaseModel):
@@ -30,6 +31,7 @@ class StackUpdate(BaseModel):
     project_root: str | None = None
     tool: Tool | None = None
     tool_version: str | None = None
+    labels: dict | None = None
 
 
 class StackOut(BaseModel):
@@ -46,6 +48,7 @@ class StackOut(BaseModel):
     project_root: str
     tool: Tool
     tool_version: str
+    labels: dict | None
     created_at: datetime
     updated_at: datetime
 
@@ -63,6 +66,7 @@ class StackOut(BaseModel):
             project_root=s.project_root,
             tool=s.tool,
             tool_version=s.tool_version,
+            labels=s.labels,
             created_at=s.created_at,
             updated_at=s.updated_at,
         )

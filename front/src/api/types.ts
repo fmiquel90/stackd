@@ -56,6 +56,7 @@ export interface Stack {
   project_root: string;
   tool: Tool;
   tool_version: string;
+  labels: Record<string, unknown> | null;
   created_at: string;
   updated_at: string;
 }
@@ -97,6 +98,7 @@ export interface VariableSet {
   name: string;
   description: string | null;
   auto_attach: boolean;
+  selector: Record<string, unknown> | null;
 }
 
 export type SecretFallbackMode = "error" | "static" | "break_glass";

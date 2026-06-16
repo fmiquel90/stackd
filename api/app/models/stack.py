@@ -4,6 +4,7 @@ import uuid
 from datetime import datetime
 
 from sqlalchemy import Enum, ForeignKey, LargeBinary, String, UniqueConstraint
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.dialects.postgresql import UUID as PGUUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -34,6 +35,9 @@ class Stack(Base):
     project_root: Mapped[str] = mapped_column(String, default=".")
     tool: Mapped[Tool] = mapped_column(Enum(Tool, name="tool"), default=Tool.opentofu)
     tool_version: Mapped[str] = mapped_column(String)
+
+    # Org/selection tags (e.g. {"team": "payments"}), matched by a variable set's selector (§3.4).
+    labels: Mapped[dict | None] = mapped_column(JSONB(none_as_null=True), default=None)
 
     created_at: Mapped[datetime] = created_at_col()
     updated_at: Mapped[datetime] = updated_at_col()

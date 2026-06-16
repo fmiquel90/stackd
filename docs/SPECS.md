@@ -187,6 +187,9 @@ variable_sets (
   name text unique(space),          -- e.g. common-aws, datadog, prod-credentials
   description text,
   auto_attach bool default false,   -- true = attached to all stacks of the space
+  selector jsonb,                   -- {label: value} rule; attaches to any env whose effective
+                                    --   labels (stack.labels + env.labels) match all entries.
+                                    --   AND-equality only (NOT a policy engine — OPA is Phase 7)
   created_at, updated_at
 )
 
@@ -204,12 +207,15 @@ variable_set_attachments (
 **Final resolution of a variable at claim time** (from weakest to strongest):
 
 ```
-1. variable sets auto_attach            (by increasing priority)
-2. variable sets attached to the stack  (by increasing priority)
-3. variable sets attached to the env    (by increasing priority)
+1. variable sets that apply by rule      (auto_attach, or selector matching the env's
+   effective labels) — weakest layer, ordered by name
+2. variable sets attached to the stack   (by increasing priority)
+3. variable sets attached to the env     (by increasing priority)
 4. stack variables (environment_id NULL)
-5. environment variables                ← always wins
+5. environment variables                 ← always wins
 ```
+
+A set's **selector** (`{label: value}`) auto-attaches it to every environment whose effective labels (`stack.labels` + `env.labels`, env wins on conflict) contain all of its key=value pairs — equality AND-match, no operators (deliberately not the deferred OPA engine, PLAN §7). It sits at the same weakest layer as `auto_attach`; explicit attachments remain stronger.
 
 At equal name and kind, the upper layer overrides. Two sources outside resolution are added at claim time: upstream outputs (`dependency:`) and mocks (`mock`) — see §9. The snapshot of **provenances** (`{"TF_VAR_region": "set:common-aws", "TF_VAR_cidr": "env", "TF_VAR_vpc_id": "dependency:network/prod", "TF_VAR_nlb_dns": "mock"}`) is frozen in `runs.variable_provenance` for audit and the UI badge (DESIGN.md §5.2: "inherited from…", "overridden here", `MOCK`). Deleting an attached set → 409 with the list of attachments (explicit detachment required).
 

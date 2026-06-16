@@ -134,6 +134,87 @@ async def test_attached_set_delete_requires_detach(client: httpx.AsyncClient) ->
     ).status_code == 204
 
 
+async def test_selector_auto_attaches_by_stack_label(client: httpx.AsyncClient) -> None:
+    h = await _admin(client)
+    r = await client.post(
+        "/api/v1/stacks",
+        headers=h,
+        json={
+            "name": "selector-stack",
+            "repo_url": "file:///repos/x",
+            "tool_version": "1.12.0",
+            "labels": {"team": "payments"},
+        },
+    )
+    assert r.status_code == 201, r.text
+    assert r.json()["labels"] == {"team": "payments"}
+    stack_id = r.json()["id"]
+    env_id = await _env(client, h, stack_id, "dev", "dev")
+
+    # A set whose selector matches the stack label auto-attaches (no attachment row).
+    match = (
+        await client.post(
+            "/api/v1/variable-sets",
+            headers=h,
+            json={"name": "team-payments", "selector": {"team": "payments"}},
+        )
+    ).json()
+    assert match["selector"] == {"team": "payments"}
+    await client.post(
+        f"/api/v1/variable-sets/{match['id']}/variables",
+        headers=h,
+        json={"kind": "terraform", "name": "region", "value": "eu-west-1"},
+    )
+    # A non-matching selector must NOT apply.
+    other = (
+        await client.post(
+            "/api/v1/variable-sets",
+            headers=h,
+            json={"name": "team-billing", "selector": {"team": "billing"}},
+        )
+    ).json()
+    await client.post(
+        f"/api/v1/variable-sets/{other['id']}/variables",
+        headers=h,
+        json={"kind": "terraform", "name": "region", "value": "us-east-1"},
+    )
+
+    resolved = (
+        await client.get(f"/api/v1/environments/{env_id}/resolved-variables", headers=h)
+    ).json()
+    by_name = {v["name"]: v for v in resolved}
+    assert by_name["region"]["value"] == "eu-west-1"
+    assert by_name["region"]["provenance"] == "set:team-payments"
+
+
+async def test_selector_matches_env_label(client: httpx.AsyncClient) -> None:
+    h = await _admin(client)
+    stack_id = await _stack(client, h, "env-label-stack")
+    env_id = await _env(client, h, stack_id, "edge", "dev")
+    # Effective labels = stack + env, so a selector can target an env-level label too.
+    await client.patch(
+        f"/api/v1/environments/{env_id}", headers=h, json={"labels": {"zone": "edge"}}
+    )
+    s = (
+        await client.post(
+            "/api/v1/variable-sets",
+            headers=h,
+            json={"name": "edge-set", "selector": {"zone": "edge"}},
+        )
+    ).json()
+    await client.post(
+        f"/api/v1/variable-sets/{s['id']}/variables",
+        headers=h,
+        json={"kind": "terraform", "name": "cdn", "value": "on"},
+    )
+
+    resolved = (
+        await client.get(f"/api/v1/environments/{env_id}/resolved-variables", headers=h)
+    ).json()
+    by_name = {v["name"]: v for v in resolved}
+    assert by_name["cdn"]["provenance"] == "set:edge-set"
+
+
 async def test_protected_env_forces_no_autodeploy(client: httpx.AsyncClient) -> None:
     h = await _admin(client)
     stack_id = await _stack(client, h, "protected-stack")

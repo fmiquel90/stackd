@@ -10,6 +10,7 @@ import {
   DeleteButton,
   Field,
   ItemTile,
+  LabelsEditor,
   PageTitle,
   Select,
   TextInput,
@@ -54,31 +55,45 @@ function SetSettings({ set }: { set: VariableSet }) {
   const qc = useQueryClient();
   const [name, setName] = useState(set.name);
   const [autoAttach, setAutoAttach] = useState(set.auto_attach);
+  const [selector, setSelector] = useState<Record<string, string>>(
+    Object.fromEntries(Object.entries(set.selector ?? {}).map(([k, v]) => [k, String(v)])),
+  );
   const save = useMutation({
-    mutationFn: () => variableSets.update(set.id, { name, auto_attach: autoAttach }),
+    mutationFn: () =>
+      variableSets.update(set.id, {
+        name,
+        auto_attach: autoAttach,
+        selector: Object.keys(selector).length ? selector : null,
+      }),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["variable-sets"] }),
   });
-  const dirty = name !== set.name || autoAttach !== set.auto_attach;
   return (
     <form
-      className="flex flex-wrap items-end gap-2"
+      className="flex flex-col gap-3"
       onSubmit={(e) => {
         e.preventDefault();
         save.mutate();
       }}
     >
-      <Field label="Name">
-        <TextInput value={name} onChange={(e) => setName(e.target.value)} required />
+      <div className="flex flex-wrap items-end gap-2">
+        <Field label="Name">
+          <TextInput value={name} onChange={(e) => setName(e.target.value)} required />
+        </Field>
+        <Checkbox className="pb-1.5" checked={autoAttach} onChange={setAutoAttach} label="auto-attach (whole space)" />
+      </div>
+      <Field label="Selector — auto-attach to any stack/env whose labels match all of these">
+        <LabelsEditor value={selector} onChange={setSelector} keyPlaceholder="team" valuePlaceholder="payments" />
       </Field>
-      <Checkbox className="pb-1.5" checked={autoAttach} onChange={setAutoAttach} label="auto-attach" />
-      <Button type="submit" variant="accent" disabled={!dirty || save.isPending}>
-        Save
-      </Button>
-      {save.isError && (
-        <span className="font-data text-[12px]" style={{ color: "var(--color-state-failed)" }}>
-          {(save.error as Error).message}
-        </span>
-      )}
+      <div className="flex items-center gap-2">
+        <Button type="submit" variant="accent" disabled={save.isPending}>
+          Save
+        </Button>
+        {save.isError && (
+          <span className="font-data text-[12px]" style={{ color: "var(--color-state-failed)" }}>
+            {(save.error as Error).message}
+          </span>
+        )}
+      </div>
     </form>
   );
 }

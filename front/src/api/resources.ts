@@ -67,6 +67,7 @@ export interface StackPatch {
   project_root?: string;
   tool?: Tool;
   tool_version?: string;
+  labels?: Record<string, string> | null;
 }
 
 export interface CheckRepoResult {
@@ -125,6 +126,7 @@ export interface EnvironmentPatch {
   managed_state?: boolean;
   allow_mock_apply?: boolean;
   allow_fallback_apply?: boolean;
+  labels?: Record<string, string> | null;
 }
 
 export const environments = {
@@ -180,8 +182,15 @@ export const variableSets = {
   list: () => api<VariableSet[]>("/variable-sets"),
   create: (body: { name: string; description?: string; auto_attach?: boolean }) =>
     api<VariableSet>("/variable-sets", { body }),
-  update: (id: string, body: { name?: string; description?: string | null; auto_attach?: boolean }) =>
-    api<VariableSet>(`/variable-sets/${id}`, { method: "PATCH", body }),
+  update: (
+    id: string,
+    body: {
+      name?: string;
+      description?: string | null;
+      auto_attach?: boolean;
+      selector?: Record<string, string> | null;
+    },
+  ) => api<VariableSet>(`/variable-sets/${id}`, { method: "PATCH", body }),
   remove: (id: string) => api<void>(`/variable-sets/${id}`, { method: "DELETE" }),
   variables: (setId: string) => api<Variable[]>(`/variable-sets/${setId}/variables`),
   addVariable: (setId: string, body: NewVariable) =>

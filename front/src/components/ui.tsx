@@ -1,3 +1,4 @@
+import { useState } from "react";
 import type { ButtonHTMLAttributes, InputHTMLAttributes, ReactNode, SelectHTMLAttributes } from "react";
 import { Check, type LucideIcon, Trash2 } from "lucide-react";
 
@@ -101,6 +102,56 @@ export function Checkbox({
       </span>
       {label}
     </label>
+  );
+}
+
+// Controlled key=value map editor (stack/env labels, variable-set selector). Emits the full map on
+// every change; the parent owns persistence. Keys are set on add (re-add to rename).
+export function LabelsEditor({
+  value,
+  onChange,
+  keyPlaceholder = "key",
+  valuePlaceholder = "value",
+}: {
+  value: Record<string, unknown> | null;
+  onChange: (next: Record<string, string>) => void;
+  keyPlaceholder?: string;
+  valuePlaceholder?: string;
+}) {
+  const entries = Object.entries(value ?? {}).map(([k, v]) => [k, String(v)] as [string, string]);
+  const [k, setK] = useState("");
+  const [v, setV] = useState("");
+  const emit = (next: [string, string][]) => onChange(Object.fromEntries(next));
+  return (
+    <div className="flex flex-col gap-2">
+      {entries.map(([ek, ev]) => (
+        <div key={ek} className="flex items-center gap-2">
+          <span className="font-data text-[12px]" style={{ minWidth: 120 }}>
+            {ek}
+          </span>
+          <TextInput
+            value={ev}
+            onChange={(e) => emit(entries.map((p) => (p[0] === ek ? [ek, e.target.value] : p)))}
+          />
+          <DeleteButton label={`Remove ${ek}`} onClick={() => emit(entries.filter((p) => p[0] !== ek))} />
+        </div>
+      ))}
+      <div className="flex items-end gap-2">
+        <TextInput value={k} placeholder={keyPlaceholder} onChange={(e) => setK(e.target.value)} />
+        <TextInput value={v} placeholder={valuePlaceholder} onChange={(e) => setV(e.target.value)} />
+        <Button
+          type="button"
+          disabled={!k}
+          onClick={() => {
+            emit([...entries.filter((p) => p[0] !== k), [k, v]]);
+            setK("");
+            setV("");
+          }}
+        >
+          Add
+        </Button>
+      </div>
+    </div>
   );
 }
 

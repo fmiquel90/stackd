@@ -65,6 +65,7 @@ async def create_stack(
         project_root=body.project_root,
         tool=body.tool,
         tool_version=body.tool_version,
+        labels=body.labels,
     )
     if body.repo_auth_kind != RepoAuthKind.none and body.repo_secret:
         stack.repo_secret_encrypted = encrypt(body.repo_secret)

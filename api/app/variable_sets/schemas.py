@@ -12,12 +12,14 @@ class VariableSetCreate(BaseModel):
     name: str
     description: str | None = None
     auto_attach: bool = False
+    selector: dict | None = None
 
 
 class VariableSetUpdate(BaseModel):
     name: str | None = None
     description: str | None = None
     auto_attach: bool | None = None
+    selector: dict | None = None
 
 
 class VariableSetOut(BaseModel):
@@ -28,6 +30,7 @@ class VariableSetOut(BaseModel):
     name: str
     description: str | None
     auto_attach: bool
+    selector: dict | None
     created_at: datetime
     updated_at: datetime
 

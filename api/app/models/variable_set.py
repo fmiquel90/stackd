@@ -4,6 +4,7 @@ import uuid
 from datetime import datetime
 
 from sqlalchemy import Boolean, Enum, ForeignKey, Integer, String, UniqueConstraint
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.dialects.postgresql import UUID as PGUUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -24,6 +25,8 @@ class VariableSet(Base):
     name: Mapped[str] = mapped_column(String)
     description: Mapped[str | None] = mapped_column(String, default=None)
     auto_attach: Mapped[bool] = mapped_column(Boolean, default=False)  # → all stacks of the space
+    # Rule-based attach: {label: value} matched against an env's effective labels (stack + env).
+    selector: Mapped[dict | None] = mapped_column(JSONB(none_as_null=True), default=None)
     created_at: Mapped[datetime] = created_at_col()
     updated_at: Mapped[datetime] = updated_at_col()
 

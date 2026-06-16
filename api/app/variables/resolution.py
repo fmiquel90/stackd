@@ -42,25 +42,39 @@ def _key(var: Variable) -> tuple[VariableKind, str]:
     return (var.kind, var.name)
 
 
+def _selector_matches(selector: dict | None, labels: dict) -> bool:
+    """A selector matches when every key=value it lists is present in `labels` (AND-equality).
+    Empty/absent selector never matches via this path (use auto_attach for space-wide)."""
+    if not selector:
+        return False
+    return all(labels.get(k) == v for k, v in selector.items())
+
+
 async def _sets_for_env(
-    session: AsyncSession, env: Environment, space_id: uuid.UUID
+    session: AsyncSession, env: Environment, stack: Stack
 ) -> list[tuple[VariableSet, str]]:
     """Variable sets applicable to `env`, ordered weakest→strongest (SPECS §3.4 steps 1-3)."""
     ordered: list[tuple[VariableSet, str]] = []
 
-    # 1. auto_attach sets of the space (no attachment row → order by name for determinism)
-    auto = (
+    # 1. Space-wide sets that apply by rule: auto_attach (all), or a selector matching the env's
+    # effective labels (stack + env, env wins on conflict). Ordered by name for determinism.
+    effective_labels = {**(stack.labels or {}), **(env.labels or {})}
+    candidates = (
         (
             await session.execute(
                 select(VariableSet)
-                .where(VariableSet.space_id == space_id, VariableSet.auto_attach.is_(True))
+                .where(VariableSet.space_id == stack.space_id)
                 .order_by(VariableSet.name)
             )
         )
         .scalars()
         .all()
     )
-    ordered.extend((s, "auto") for s in auto)
+    ordered.extend(
+        (s, "auto")
+        for s in candidates
+        if s.auto_attach or _selector_matches(s.selector, effective_labels)
+    )
 
     # 2. sets attached to the stack, then 3. sets attached to the env — each by priority asc.
     for kind, target_id in (
@@ -113,7 +127,7 @@ async def resolve_variables(
         )
 
     # Layers 1-3: variable sets.
-    for vset, _ in await _sets_for_env(session, env, stack.space_id):
+    for vset, _ in await _sets_for_env(session, env, stack):
         set_vars = (
             (await session.execute(select(Variable).where(Variable.variable_set_id == vset.id)))
             .scalars()

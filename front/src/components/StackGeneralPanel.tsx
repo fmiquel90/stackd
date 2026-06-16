@@ -4,7 +4,7 @@ import { useNavigate } from "react-router-dom";
 import { type StackPatch, stacks } from "@/api/resources";
 import type { RepoAuthKind, Tool } from "@/api/types";
 import { useIsAdmin } from "@/auth/session";
-import { Button, Card, Field, Select, TextInput } from "@/components/ui";
+import { Button, Card, Field, LabelsEditor, Select, TextInput } from "@/components/ui";
 
 // Deleting a stack cascades its environments, runs and state — high impact, so we gate it behind a
 // type-the-name confirmation (friction proportional to risk, DESIGN §5.2).
@@ -61,6 +61,7 @@ interface FormState {
   repo_auth_kind: RepoAuthKind;
   repo_secret: string; // empty = leave the stored credential untouched
   webhook_secret: string; // empty = leave the stored HMAC secret untouched
+  labels: Record<string, string>;
 }
 
 // Edit a stack's identity & source: repo URL/auth, project root, and the IaC tool + version. The
@@ -84,6 +85,9 @@ export function StackGeneralPanel({ stackId }: { stackId: string }) {
       repo_auth_kind: stack.repo_auth_kind,
       repo_secret: "",
       webhook_secret: "",
+      labels: Object.fromEntries(
+        Object.entries(stack.labels ?? {}).map(([k, v]) => [k, String(v)]),
+      ),
     });
   }, [stack]);
 
@@ -108,6 +112,7 @@ export function StackGeneralPanel({ stackId }: { stackId: string }) {
       tool: form.tool,
       tool_version: form.tool_version,
       repo_auth_kind: form.repo_auth_kind,
+      labels: form.labels,
     };
     if (form.repo_secret) body.repo_secret = form.repo_secret; // omit → keep the stored secret
     if (isAdmin && form.webhook_secret) body.webhook_secret = form.webhook_secret;
@@ -143,6 +148,10 @@ export function StackGeneralPanel({ stackId }: { stackId: string }) {
 
         <Field label="Description">
           <TextInput value={form.description} onChange={(e) => set({ description: e.target.value })} />
+        </Field>
+
+        <Field label="Labels (matched by variable-set selectors, §3.4)">
+          <LabelsEditor value={form.labels} onChange={(labels) => set({ labels })} />
         </Field>
 
         <div className="flex flex-wrap items-end gap-3">

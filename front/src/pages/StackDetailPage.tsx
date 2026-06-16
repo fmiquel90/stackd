@@ -24,7 +24,7 @@ import { SecretSourcesPanel } from "@/components/SecretSourcesPanel";
 import { StackGeneralPanel } from "@/components/StackGeneralPanel";
 import { StatePanel } from "@/components/StatePanel";
 import { VariablesEditor } from "@/components/VariablesEditor";
-import { Button, Card, Checkbox, Field, PageTitle, Select, Tabs, TextInput } from "@/components/ui";
+import { Button, Card, Checkbox, Field, LabelsEditor, PageTitle, Select, Tabs, TextInput } from "@/components/ui";
 
 function ResolvedVariables({ envId }: { envId: string }) {
   const { data, isLoading } = useQuery({
@@ -293,6 +293,7 @@ function EnvSettingsPanel({ env }: { env: Environment }) {
     managed_state: env.managed_state,
     allow_mock_apply: env.allow_mock_apply,
     allow_fallback_apply: env.allow_fallback_apply,
+    labels: Object.fromEntries(Object.entries(env.labels ?? {}).map(([k, v]) => [k, String(v)])),
   });
   const save = useMutation({
     mutationFn: () => environments.update(env.id, form),
@@ -348,6 +349,11 @@ function EnvSettingsPanel({ env }: { env: Environment }) {
             onChange={(v) => set({ allow_fallback_apply: v })}
             label="allow fallback apply"
           />
+        </div>
+        <div className="mt-3">
+          <Field label="Labels (matched by variable-set selectors, §3.4)">
+            <LabelsEditor value={form.labels ?? {}} onChange={(labels) => set({ labels })} />
+          </Field>
         </div>
         <div className="mt-3 flex items-center gap-2">
           <Button type="submit" variant="accent" disabled={save.isPending}>
