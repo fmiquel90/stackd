@@ -114,10 +114,25 @@ export const stacks = {
     api<void>(`/stacks/${id}/variables/${varId}`, { method: "DELETE" }),
 };
 
+// Editable environment settings (PATCH) — all optional, omitted fields are left unchanged.
+export interface EnvironmentPatch {
+  name?: string;
+  tier?: Tier;
+  branch?: string;
+  protected?: boolean;
+  autodeploy?: boolean;
+  require_second_pair_of_eyes?: boolean;
+  managed_state?: boolean;
+  allow_mock_apply?: boolean;
+  allow_fallback_apply?: boolean;
+}
+
 export const environments = {
   get: (id: string) => api<Environment>(`/environments/${id}`),
   resolvedVariables: (id: string) =>
     api<ResolvedVariable[]>(`/environments/${id}/resolved-variables`),
+  update: (id: string, body: EnvironmentPatch) =>
+    api<Environment>(`/environments/${id}`, { method: "PATCH", body }),
   remove: (id: string) => api<void>(`/environments/${id}`, { method: "DELETE" }),
   // Force-refresh the tracked branch HEAD from the remote (returns the updated environment).
   refreshHead: (id: string) =>
@@ -149,10 +164,24 @@ export interface VariablePatch {
   hcl?: boolean;
 }
 
+// An attachment binds a set to a stack or an environment (SPECS §3.4). `priority` orders sets at
+// the same level. A set with no attachment (and auto_attach=false) applies nowhere.
+export type AttachmentTarget = "stack" | "environment";
+
+export interface Attachment {
+  id: string;
+  variable_set_id: string;
+  target_kind: AttachmentTarget;
+  target_id: string;
+  priority: number;
+}
+
 export const variableSets = {
   list: () => api<VariableSet[]>("/variable-sets"),
   create: (body: { name: string; description?: string; auto_attach?: boolean }) =>
     api<VariableSet>("/variable-sets", { body }),
+  update: (id: string, body: { name?: string; description?: string | null; auto_attach?: boolean }) =>
+    api<VariableSet>(`/variable-sets/${id}`, { method: "PATCH", body }),
   remove: (id: string) => api<void>(`/variable-sets/${id}`, { method: "DELETE" }),
   variables: (setId: string) => api<Variable[]>(`/variable-sets/${setId}/variables`),
   addVariable: (setId: string, body: NewVariable) =>
@@ -161,6 +190,11 @@ export const variableSets = {
     api<Variable>(`/variable-sets/${setId}/variables/${varId}`, { method: "PATCH", body }),
   removeVariable: (setId: string, varId: string) =>
     api<void>(`/variable-sets/${setId}/variables/${varId}`, { method: "DELETE" }),
+  attachments: (setId: string) => api<Attachment[]>(`/variable-sets/${setId}/attachments`),
+  attach: (setId: string, body: { target_kind: AttachmentTarget; target_id: string; priority?: number }) =>
+    api<Attachment>(`/variable-sets/${setId}/attachments`, { body }),
+  detach: (setId: string, attachmentId: string) =>
+    api<void>(`/variable-sets/${setId}/attachments/${attachmentId}`, { method: "DELETE" }),
 };
 
 export interface NewComment {

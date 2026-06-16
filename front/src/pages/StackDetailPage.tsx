@@ -2,7 +2,14 @@ import { useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { ChevronDown, ChevronRight, RefreshCw } from "lucide-react";
-import { environments, runs, stacks, tiers, type NewEnvironment } from "@/api/resources";
+import {
+  environments,
+  runs,
+  stacks,
+  tiers,
+  type EnvironmentPatch,
+  type NewEnvironment,
+} from "@/api/resources";
 import type { Environment } from "@/api/types";
 import { useIsAdmin } from "@/auth/session";
 import { StateBadge } from "@/components/StateBadge";
@@ -255,6 +262,7 @@ type EnvTab =
   | "state"
   | "command"
   | "promote"
+  | "settings"
   | "danger";
 
 const ENV_TABS: { key: EnvTab; label: string }[] = [
@@ -266,7 +274,95 @@ const ENV_TABS: { key: EnvTab; label: string }[] = [
   { key: "state", label: "State" },
   { key: "command", label: "Command" },
   { key: "promote", label: "Promote" },
+  { key: "settings", label: "Settings" },
 ];
+
+// Edit an environment's settings after creation (PATCH /environments/{id}) — the flags that govern
+// protection, autodeploy, four-eyes, managed state and mock/fallback apply, plus tier and branch.
+function EnvSettingsPanel({ env }: { env: Environment }) {
+  const qc = useQueryClient();
+  const catalog = useQuery({ queryKey: ["tiers"], queryFn: tiers.list });
+  const tierNames = (catalog.data ?? []).map((t) => t.name);
+  const [form, setForm] = useState<EnvironmentPatch>({
+    name: env.name,
+    tier: env.tier,
+    branch: env.branch,
+    protected: env.protected,
+    autodeploy: env.autodeploy,
+    require_second_pair_of_eyes: env.require_second_pair_of_eyes,
+    managed_state: env.managed_state,
+    allow_mock_apply: env.allow_mock_apply,
+    allow_fallback_apply: env.allow_fallback_apply,
+  });
+  const save = useMutation({
+    mutationFn: () => environments.update(env.id, form),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["environments", env.stack_id] }),
+  });
+  const set = (patch: Partial<EnvironmentPatch>) => setForm((f) => ({ ...f, ...patch }));
+
+  return (
+    <Card>
+      <form
+        onSubmit={(e) => {
+          e.preventDefault();
+          save.mutate();
+        }}
+      >
+        <div className="flex flex-wrap items-end gap-3">
+          <Field label="Name">
+            <TextInput value={form.name ?? ""} onChange={(e) => set({ name: e.target.value })} required />
+          </Field>
+          <Field label="Tier">
+            <Select value={form.tier ?? ""} onChange={(e) => set({ tier: e.target.value })}>
+              {tierNames.map((name) => (
+                <option key={name} value={name}>
+                  {name}
+                </option>
+              ))}
+            </Select>
+          </Field>
+          <Field label="Branch">
+            <TextInput value={form.branch ?? ""} onChange={(e) => set({ branch: e.target.value })} required />
+          </Field>
+        </div>
+        <div className="mt-3 flex flex-wrap gap-x-5 gap-y-2">
+          <Checkbox checked={form.protected ?? false} onChange={(v) => set({ protected: v })} label="protected" />
+          <Checkbox checked={form.autodeploy ?? false} onChange={(v) => set({ autodeploy: v })} label="autodeploy" />
+          <Checkbox
+            checked={form.require_second_pair_of_eyes ?? false}
+            onChange={(v) => set({ require_second_pair_of_eyes: v })}
+            label="four-eyes"
+          />
+          <Checkbox
+            checked={form.managed_state ?? false}
+            onChange={(v) => set({ managed_state: v })}
+            label="managed state"
+          />
+          <Checkbox
+            checked={form.allow_mock_apply ?? false}
+            onChange={(v) => set({ allow_mock_apply: v })}
+            label="allow mock apply"
+          />
+          <Checkbox
+            checked={form.allow_fallback_apply ?? false}
+            onChange={(v) => set({ allow_fallback_apply: v })}
+            label="allow fallback apply"
+          />
+        </div>
+        <div className="mt-3 flex items-center gap-2">
+          <Button type="submit" variant="accent" disabled={save.isPending}>
+            Save settings
+          </Button>
+          {save.isError && (
+            <span className="font-data text-[12px]" style={{ color: "var(--color-state-failed)" }}>
+              {(save.error as Error).message}
+            </span>
+          )}
+        </div>
+      </form>
+    </Card>
+  );
+}
 
 // Deleting an environment cascades its runs and state — type-the-name confirmation (DESIGN §5.2).
 function DeleteEnvPanel({ env }: { env: Environment }) {
@@ -359,6 +455,7 @@ function EnvCard({ env, siblings }: { env: Environment; siblings: { id: string; 
           {tab === "state" && <StatePanel envId={env.id} />}
           {tab === "command" && <CommandPanel envId={env.id} />}
           {tab === "promote" && <PromotePanel envId={env.id} siblings={siblings} />}
+          {tab === "settings" && <EnvSettingsPanel env={env} />}
           {tab === "danger" && isAdmin && <DeleteEnvPanel env={env} />}
         </div>
       )}
