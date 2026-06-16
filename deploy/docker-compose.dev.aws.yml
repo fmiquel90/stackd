@@ -1,0 +1,18 @@
+# Opt-in dev overlay — mount your local AWS profiles into the worker so a `terraform plan` can use
+# them. Named profiles in the provider block (profile = "...") resolve straight from ~/.aws; the
+# worker runs terraform with the container env, and _cloud_env only injects OIDC vars when an
+# environment has a cloud-integration — a plain dev env falls back to these credentials.
+#
+# DEV-ONLY. Never used by `task dev`, prod, or CI. Read-only mount; creds never leave your machine.
+# For SSO profiles, run `aws sso login` first (the cached token under ~/.aws is mounted too).
+#
+#   docker compose -f deploy/docker-compose.dev.yml -f deploy/docker-compose.dev.aws.yml up -d worker
+#
+# Default profile (optional): add AWS_PROFILE=<name> to your .env — otherwise rely on the provider's
+# own `profile = "..."`.
+services:
+  worker:
+    volumes:
+      - ${HOME}/.aws:/root/.aws:ro
+    environment:
+      AWS_SDK_LOAD_CONFIG: "1" # let the AWS SDK read named profiles from ~/.aws/config

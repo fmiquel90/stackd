@@ -1,12 +1,16 @@
-# Dev worker image: OpenTofu + git pre-installed, agent hot-reloaded via watchfiles (DEV §5).
+# Dev worker image: OpenTofu + Terraform + git pre-installed, agent hot-reloaded via watchfiles
+# (DEV §5). Terraform is a user option (BUSL — see PLAN §5); baked in here for local dev convenience.
 FROM python:3.13-slim
 
 COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /bin/
 
 ARG OPENTOFU_VERSION=1.12.0
+ARG TERRAFORM_VERSION=1.9.8
 RUN apt-get update && apt-get install -y --no-install-recommends git openssh-client jq curl unzip ca-certificates \
     && curl -fsSL "https://github.com/opentofu/opentofu/releases/download/v${OPENTOFU_VERSION}/tofu_${OPENTOFU_VERSION}_linux_amd64.zip" -o /tmp/tofu.zip \
     && unzip /tmp/tofu.zip -d /usr/local/bin tofu && rm /tmp/tofu.zip \
+    && curl -fsSL "https://releases.hashicorp.com/terraform/${TERRAFORM_VERSION}/terraform_${TERRAFORM_VERSION}_linux_amd64.zip" -o /tmp/tf.zip \
+    && unzip /tmp/tf.zip -d /usr/local/bin terraform && rm /tmp/tf.zip \
     && rm -rf /var/lib/apt/lists/*
 
 # Trust repos owned by another uid (CI bind-mounts the fixture repos as the runner user, while the
