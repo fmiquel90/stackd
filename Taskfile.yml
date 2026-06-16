@@ -39,6 +39,16 @@ tasks:
       - task: migrate
       - task: seed
 
+  dev-aws-creds:
+    desc: Dev stack with your local ~/.aws profiles mounted into the worker (real terraform plan)
+    deps: [env]
+    cmds:
+      # Adds the opt-in overlay so the worker keeps the ~/.aws mount across restarts — use this
+      # instead of `task dev` whenever you want to plan against real AWS with your named profiles.
+      - "{{.COMPOSE}} -f deploy/docker-compose.dev.aws.yml up -d --wait"
+      - task: migrate
+      - task: seed
+
   front-install:
     desc: Install front-end dependencies (idempotent)
     dir: front

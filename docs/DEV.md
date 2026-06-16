@@ -141,13 +141,13 @@ Safeguard: the prod build of the API image **removes the dev_auth module** (not 
 
 **`aws` profile (LocalStack)**: to test AWS-realistic stacks (S3, SQS, IAM...), `task dev-aws` + the seeded `localstack` variable set (endpoint overrides). Known limitations: LocalStack does not cover everything and **does not validate workload OIDC** (STS AssumeRoleWithWebIdentity is superficial there).
 
-**Your own AWS profiles (real `plan` against real AWS)**: to run a real `terraform plan` against your AWS account using your **named profiles** — without setting up the OIDC/STS integration — bring the worker up with the opt-in overlay:
+**Your own AWS profiles (real `plan` against real AWS)**: to run a real `terraform plan` against your AWS account using your **named profiles** — without setting up the OIDC/STS integration — bring the stack up with:
 
 ```
-docker compose -f deploy/docker-compose.dev.yml -f deploy/docker-compose.dev.aws.yml up -d worker
+task dev-aws-creds      # = docker compose -f docker-compose.dev.yml -f docker-compose.dev.aws.yml up
 ```
 
-It mounts `~/.aws` **read-only** into the worker. The provider's `profile = "..."` then resolves from your `~/.aws/{config,credentials}` (the worker runs terraform with the container env; `_cloud_env` only injects OIDC vars for environments that have a cloud-integration, so a plain dev env falls back to these creds). For SSO profiles, run `aws sso login` first (the cached token under `~/.aws` is mounted too); for a default profile, add `AWS_PROFILE=<name>` to `.env`. **Dev-only, never in prod or CI**; this tests your Terraform, not the platform's OIDC exchange.
+Use it **instead of `task dev`** whenever you want AWS creds in the worker — a plain `task dev` (or any `docker compose up` without the overlay) recreates the worker **without** the mount. It mounts `~/.aws` **read-only** into the worker. The provider's `profile = "..."` then resolves from your `~/.aws/{config,credentials}` (the worker runs terraform with the container env; `_cloud_env` only injects OIDC vars for environments that have a cloud-integration, so a plain dev env falls back to these creds). For SSO profiles, run `aws sso login` first (the cached token under `~/.aws` is mounted too); for a default profile, add `AWS_PROFILE=<name>` to `.env`. **Dev-only, never in prod or CI**; this tests your Terraform, not the platform's OIDC exchange.
 
 **Workload OIDC in dev**: the issuer runs (JWKS on `localhost:8000/oidc/jwks`, tokens signed per claim) — we test the **generation and claims** of the tokens (unit tests + `task show-token` which decodes the JWT of a run). The real STS exchange is tested against a real AWS sandbox account, not locally: documented as out of scope for dev mode.
 
