@@ -79,7 +79,12 @@ def _cloud_env(ws: Workspace, job: dict) -> dict[str, str]:
     return env
 
 
-def _init_cmd(tool: str, backend: dict | None, backend_config_file: str | None = None) -> list[str]:
+def _init_cmd(
+    tool: str,
+    backend: dict | None,
+    backend_config_file: str | None = None,
+    backend_config: dict | None = None,
+) -> list[str]:
     cmd = [tool, "init", "-input=false"]
     if backend:  # managed state: the platform's HTTP backend
         for k in (
@@ -93,8 +98,11 @@ def _init_cmd(tool: str, backend: dict | None, backend_config_file: str | None =
         ):
             if backend.get(k) is not None:
                 cmd.append(f"-backend-config={k}={backend[k]}")
-    elif backend_config_file:  # unmanaged: the repo's own partial backend, values in a file
-        cmd.append(f"-backend-config={backend_config_file}")
+    else:  # unmanaged: the repo's own partial backend — a .config file and/or inline key=value
+        if backend_config_file:
+            cmd.append(f"-backend-config={backend_config_file}")
+        for k, v in (backend_config or {}).items():
+            cmd.append(f"-backend-config={k}={v}")
     return cmd
 
 
@@ -151,7 +159,7 @@ def handle_plan(client: ApiClient, job: dict, settings: Settings) -> None:
             )
         if (
             run_command(
-                _init_cmd(tool, backend, job.get("backend_config_file")),
+                _init_cmd(tool, backend, job.get("backend_config_file"), job.get("backend_config")),
                 cwd,
                 platform_env,
                 phase="planning",
@@ -255,7 +263,7 @@ def handle_apply(client: ApiClient, job: dict, settings: Settings) -> None:
 
         if (
             run_command(
-                _init_cmd(tool, backend, job.get("backend_config_file")),
+                _init_cmd(tool, backend, job.get("backend_config_file"), job.get("backend_config")),
                 cwd,
                 platform_env,
                 phase="applying",
@@ -338,7 +346,7 @@ def handle_command_run(client: ApiClient, job: dict, settings: Settings) -> None
         client.event(job_id, "phase_started", phase="running")
         if (
             run_command(
-                _init_cmd(tool, backend, job.get("backend_config_file")),
+                _init_cmd(tool, backend, job.get("backend_config_file"), job.get("backend_config")),
                 cwd,
                 platform_env,
                 phase="running",

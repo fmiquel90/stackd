@@ -19,5 +19,19 @@ def test_init_managed_takes_precedence_over_file():
     assert "-backend-config=prod.config" not in cmd
 
 
+def test_init_unmanaged_with_inline_key_values():
+    cmd = _init_cmd("terraform", None, None, {"bucket": "tf-state", "key": "prod/app.tfstate"})
+    assert "-backend-config=bucket=tf-state" in cmd
+    assert "-backend-config=key=prod/app.tfstate" in cmd
+
+
+def test_init_unmanaged_file_and_inline_combined():
+    cmd = _init_cmd("terraform", None, "base.config", {"key": "staging/app.tfstate"})
+    # File first, then inline overrides (terraform: later -backend-config wins).
+    assert cmd.index("-backend-config=base.config") < cmd.index(
+        "-backend-config=key=staging/app.tfstate"
+    )
+
+
 def test_init_plain_when_nothing_set():
     assert _init_cmd("tofu", None) == ["tofu", "init", "-input=false"]

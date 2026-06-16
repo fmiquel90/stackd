@@ -228,8 +228,10 @@ async def build_job_payload(session: AsyncSession, run: Run) -> dict:
         "mask_values": mask_values,
         "hooks": await platform_hooks(session, stack_id=stack.id, env_id=env.id),
         "backend": backend,  # §11 — the managed HTTP backend (None when unmanaged)
-        # Unmanaged state only: a repo-relative file passed as `-backend-config=<file>` at init.
+        # Unmanaged state only: a repo-relative `-backend-config=<file>` and/or inline key=value
+        # `-backend-config` settings passed at init.
         "backend_config_file": None if env.managed_state else env.backend_config_file,
+        "backend_config": None if env.managed_state else env.backend_config,
         "cloud_credentials": cloud_credentials,
         "resolved_inputs": {f"TF_VAR_{k}": v for k, v in dep.resolved_inputs.items()},
         "mock_inputs": {f"TF_VAR_{k}": v for k, v in dep.mock_inputs.items()},

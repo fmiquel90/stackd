@@ -36,6 +36,9 @@ class Environment(Base):
     # managed_state=false only: repo-relative file passed as `-backend-config=<file>` at init,
     # for repos using a partial backend (bloc + values in a .config file).
     backend_config_file: Mapped[str | None] = mapped_column(String, default=None)
+    # managed_state=false only: inline `-backend-config=key=value` settings (bucket/key/region/
+    # dynamodb_table/use_lockfile…) for when there's no .config file. Applied after the file.
+    backend_config: Mapped[dict | None] = mapped_column(JSONB(none_as_null=True), default=None)
 
     # Git staleness (§9.6) — populated from Phase 5; columns exist now.
     head_sha: Mapped[str | None] = mapped_column(String, default=None)

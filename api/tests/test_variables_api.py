@@ -342,16 +342,24 @@ async def test_environment_backend_config_file_roundtrip(client: httpx.AsyncClie
             "branch": "main",
             "managed_state": False,
             "backend_config_file": "prod.config",
+            "backend_config": {"bucket": "tf-state", "key": "prod/app.tfstate"},
         },
     )
     assert r.status_code == 201, r.text
     assert r.json()["backend_config_file"] == "prod.config"
+    assert r.json()["backend_config"] == {"bucket": "tf-state", "key": "prod/app.tfstate"}
     env_id = r.json()["id"]
 
     upd = await client.patch(
-        f"/api/v1/environments/{env_id}", headers=h, json={"backend_config_file": "staging.config"}
+        f"/api/v1/environments/{env_id}",
+        headers=h,
+        json={
+            "backend_config_file": "staging.config",
+            "backend_config": {"key": "staging/app.tfstate"},
+        },
     )
     assert upd.json()["backend_config_file"] == "staging.config"
+    assert upd.json()["backend_config"] == {"key": "staging/app.tfstate"}
 
 
 async def test_protected_env_forces_no_autodeploy(client: httpx.AsyncClient) -> None:

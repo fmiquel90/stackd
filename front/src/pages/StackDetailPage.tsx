@@ -330,11 +330,18 @@ function EnvSettingsPanel({ env }: { env: Environment }) {
     allow_mock_apply: env.allow_mock_apply,
     allow_fallback_apply: env.allow_fallback_apply,
     backend_config_file: env.backend_config_file ?? "",
+    backend_config: Object.fromEntries(
+      Object.entries(env.backend_config ?? {}).map(([k, v]) => [k, String(v)]),
+    ),
     labels: Object.fromEntries(Object.entries(env.labels ?? {}).map(([k, v]) => [k, String(v)])),
   });
   const save = useMutation({
     mutationFn: () =>
-      environments.update(env.id, { ...form, backend_config_file: form.backend_config_file || null }),
+      environments.update(env.id, {
+        ...form,
+        backend_config_file: form.backend_config_file || null,
+        backend_config: Object.keys(form.backend_config ?? {}).length ? form.backend_config : null,
+      }),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["environments", env.stack_id] }),
   });
   const set = (patch: Partial<EnvironmentPatch>) => setForm((f) => ({ ...f, ...patch }));
@@ -365,12 +372,20 @@ function EnvSettingsPanel({ env }: { env: Environment }) {
           </Field>
         </div>
         {!form.managed_state && (
-          <div className="mt-3">
+          <div className="mt-3 flex flex-col gap-3">
             <Field label="Backend config file (passed as -backend-config at init)">
               <TextInput
                 value={form.backend_config_file ?? ""}
                 placeholder="e.g. prod.config (repo-relative, under the project root)"
                 onChange={(e) => set({ backend_config_file: e.target.value })}
+              />
+            </Field>
+            <Field label="Backend config values (each passed as -backend-config=key=value)">
+              <LabelsEditor
+                value={form.backend_config ?? {}}
+                onChange={(backend_config) => set({ backend_config })}
+                keyPlaceholder="key / bucket / region…"
+                valuePlaceholder="value"
               />
             </Field>
           </div>

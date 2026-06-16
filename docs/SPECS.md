@@ -896,7 +896,7 @@ s3://stackd-<org>/
   artifacts/{run_id}/plan.tfplan | plan.json | outputs.json
 ```
 
-`managed_state: false` → no HTTP backend injected, the repo keeps its own `backend` block. If that backend is **partial** (e.g. `backend "s3" {}` with values in a `.config`/`.tfbackend` file), set `environments.backend_config_file` to the repo-relative path and the worker runs `init -backend-config=<file>` (per-env: prod vs staging can point at different files). Mutually exclusive with the managed HTTP backend.
+`managed_state: false` → no HTTP backend injected, the repo keeps its own `backend` block. For a **partial** backend, set either/both (per-env, applied at init in this order — later `-backend-config` wins): `environments.backend_config_file` (repo-relative `.config`/`.tfbackend` path → `-backend-config=<file>`) and `environments.backend_config` (a `{key: value}` map → one `-backend-config=key=value` each, e.g. `bucket`/`key`/`region`/`dynamodb_table`/`use_lockfile`). The inline map is the way to onboard a new tier on shared code without a per-env `.config` file: set its own `key` so it doesn't collide with another env's state. Mutually exclusive with the managed HTTP backend.
 
 ### 11.4 Importing an existing stack
 
