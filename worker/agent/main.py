@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import os
 import subprocess
+import threading
 import time
 
 from agent.client import ApiClient
@@ -373,6 +374,21 @@ def _handle_command(client: ApiClient, cmd: dict, settings: Settings) -> None:
             client.command_result(cmd["id"], {"error": str(exc)}, status="failed")
 
 
+def _heartbeat_loop(client: ApiClient, settings: Settings) -> None:
+    """Beat on a fixed cadence, independent of the claim long-poll and of job execution — otherwise
+    a blocking claim (poll_wait) or a long plan/apply would starve the heartbeat and the worker would
+    be marked offline while it's actually fine. Downward commands are handled here too."""
+    while True:
+        try:
+            for cmd in client.heartbeat():
+                _handle_command(client, cmd, settings)
+        except Exception as exc:  # noqa: BLE001 — never let a transient API error kill the heartbeat
+            log.warning(
+                "heartbeat failed", extra={"event": "agent.heartbeat_error", "error": str(exc)}
+            )
+        time.sleep(settings.heartbeat_interval)
+
+
 def run() -> None:
     setup_logging()
     settings = Settings.from_env()
@@ -394,13 +410,11 @@ def run() -> None:
         },
     )
 
-    last_heartbeat = 0.0
+    # Heartbeat runs on its own daemon thread so neither the claim long-poll nor a long-running job
+    # can starve it (fixes the worker flickering offline between claims / during plan & apply).
+    threading.Thread(target=_heartbeat_loop, args=(client, settings), daemon=True).start()
+
     while True:
-        now = time.monotonic()
-        if now - last_heartbeat >= settings.heartbeat_interval:
-            for cmd in client.heartbeat():
-                _handle_command(client, cmd, settings)
-            last_heartbeat = now
         job = client.claim(wait=settings.poll_wait)
         if job is None:
             continue
