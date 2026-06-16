@@ -1404,7 +1404,7 @@
 <h2 id="5-worker-in-dev">5. Worker in dev<a class="headerlink" href="#5-worker-in-dev" title="Permanent link">&para;</a></h2>
 <ul>
 <li>Launched by compose with <code>STACKD_RUNNER=local</code>: terraform commands run directly inside the worker container (image including OpenTofu + jq + git). <strong>No Docker-in-Docker</strong> — the complexity of the <code>docker</code> runner is tested separately (<code>task test-runner-docker</code>, requires the socket).</li>
-<li>Tool binary: OpenTofu pre-installed in the dev image (no download on first run).</li>
+<li>Tool binaries: <strong>OpenTofu and Terraform</strong> pre-installed in the dev image (no download on first run). A stack's <code>tool</code> picks which one runs — no separate "terraform worker", any dev worker handles both.</li>
 <li>Agent hot reload (watchfiles): modifying <code>worker/</code> cleanly restarts the poll loop (the current job finishes).</li>
 <li>Multi-workers to test concurrency and affinity: <code>docker compose up --scale worker=3</code>.</li>
 </ul>
@@ -1412,31 +1412,35 @@
 <h2 id="6-terraform-without-aws-and-with-if-needed">6. Terraform without AWS (and with, if needed)<a class="headerlink" href="#6-terraform-without-aws-and-with-if-needed" title="Permanent link">&para;</a></h2>
 <p><strong>By default</strong>: the fixtures use only <code>random</code>, <code>null</code>, <code>local_file</code> and <code>time</code> — an apply creates files in the workspace, zero credentials, zero cost, execution in seconds. Enough to test <strong>the entire platform</strong> (the platform orchestrates terraform, it does not depend on what terraform creates).</p>
 <p><strong><code>aws</code> profile (LocalStack)</strong>: to test AWS-realistic stacks (S3, SQS, IAM...), <code>task dev-aws</code> + the seeded <code>localstack</code> variable set (endpoint overrides). Known limitations: LocalStack does not cover everything and <strong>does not validate workload OIDC</strong> (STS AssumeRoleWithWebIdentity is superficial there).</p>
+<p><strong>Your own AWS profiles (real <code>plan</code> against real AWS)</strong>: to run a real <code>terraform plan</code> against your AWS account using your <strong>named profiles</strong> — without setting up the OIDC/STS integration — bring the worker up with the opt-in overlay:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a>docker compose -f deploy/docker-compose.dev.yml -f deploy/docker-compose.dev.aws.yml up -d worker
+</code></pre></div>
+<p>It mounts <code>~/.aws</code> <strong>read-only</strong> into the worker. The provider's <code>profile = "..."</code> then resolves from your <code>~/.aws/{config,credentials}</code> (the worker runs terraform with the container env; <code>_cloud_env</code> only injects OIDC vars for environments that have a cloud-integration, so a plain dev env falls back to these creds). For SSO profiles, run <code>aws sso login</code> first (the cached token under <code>~/.aws</code> is mounted too); for a default profile, add <code>AWS_PROFILE=&lt;name&gt;</code> to <code>.env</code>. <strong>Dev-only, never in prod or CI</strong>; this tests your Terraform, not the platform's OIDC exchange.</p>
 <p><strong>Workload OIDC in dev</strong>: the issuer runs (JWKS on <code>localhost:8000/oidc/jwks</code>, tokens signed per claim) — we test the <strong>generation and claims</strong> of the tokens (unit tests + <code>task show-token</code> which decodes the JWT of a run). The real STS exchange is tested against a real AWS sandbox account, not locally: documented as out of scope for dev mode.</p>
 <hr />
 <h2 id="7-seed-and-demo-scenario">7. Seed and demo scenario<a class="headerlink" href="#7-seed-and-demo-scenario" title="Permanent link">&para;</a></h2>
 <p><code>task seed</code> creates (idempotent):</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a>space &quot;demo&quot;
-<a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a>├── variable set common        (TF_VAR_org=demo, auto_attach)
-<a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a>├── variable set region-local  (TF_VAR_region=local-1)
-<a id="__codelineno-5-4" name="__codelineno-5-4" href="#__codelineno-5-4"></a>├── stack demo-network  → envs: dev (tier dev), prod (tier prod, protected, 4-eyes)
-<a id="__codelineno-5-5" name="__codelineno-5-5" href="#__codelineno-5-5"></a>├── stack demo-app      → envs: dev (tier dev), prod (tier prod, protected)
-<a id="__codelineno-5-6" name="__codelineno-5-6" href="#__codelineno-5-6"></a>├── dependencies : network/dev → app/dev, network/prod → app/prod
-<a id="__codelineno-5-7" name="__codelineno-5-7" href="#__codelineno-5-7"></a>│     output_references: network_name → TF_VAR_network_name
-<a id="__codelineno-5-8" name="__codelineno-5-8" href="#__codelineno-5-8"></a>│                        (mock: &quot;mock-network&quot;)
-<a id="__codelineno-5-9" name="__codelineno-5-9" href="#__codelineno-5-9"></a>└── worker pool &quot;local&quot; (token written to .dev/, consumed by the compose worker)
+<div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a>space &quot;demo&quot;
+<a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a>├── variable set common        (TF_VAR_org=demo, auto_attach)
+<a id="__codelineno-6-3" name="__codelineno-6-3" href="#__codelineno-6-3"></a>├── variable set region-local  (TF_VAR_region=local-1)
+<a id="__codelineno-6-4" name="__codelineno-6-4" href="#__codelineno-6-4"></a>├── stack demo-network  → envs: dev (tier dev), prod (tier prod, protected, 4-eyes)
+<a id="__codelineno-6-5" name="__codelineno-6-5" href="#__codelineno-6-5"></a>├── stack demo-app      → envs: dev (tier dev), prod (tier prod, protected)
+<a id="__codelineno-6-6" name="__codelineno-6-6" href="#__codelineno-6-6"></a>├── dependencies : network/dev → app/dev, network/prod → app/prod
+<a id="__codelineno-6-7" name="__codelineno-6-7" href="#__codelineno-6-7"></a>│     output_references: network_name → TF_VAR_network_name
+<a id="__codelineno-6-8" name="__codelineno-6-8" href="#__codelineno-6-8"></a>│                        (mock: &quot;mock-network&quot;)
+<a id="__codelineno-6-9" name="__codelineno-6-9" href="#__codelineno-6-9"></a>└── worker pool &quot;local&quot; (token written to .dev/, consumed by the compose worker)
 </code></pre></div>
 <p><code>task e2e</code> replays the complete journey via API (and serves as a non-regression test):</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a> 1. login bob → trigger network/dev            → plan → unconfirmed
-<a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a> 2. bob confirms (tier dev, ok)                 → apply → finished
-<a id="__codelineno-6-3" name="__codelineno-6-3" href="#__codelineno-6-3"></a> 3. automatic cascade                           → app/dev plan (real input injected)
-<a id="__codelineno-6-4" name="__codelineno-6-4" href="#__codelineno-6-4"></a> 4. trigger app/prod BEFORE network/prod        → plan with MOCK (purple badge)
-<a id="__codelineno-6-5" name="__codelineno-6-5" href="#__codelineno-6-5"></a> 5. attempt to confirm the mocked run           → expected rejection (allow_mock_apply=false)
-<a id="__codelineno-6-6" name="__codelineno-6-6" href="#__codelineno-6-6"></a> 6. trigger network/prod (bob) → bob attempts to confirm → rejection (tier staging &lt; prod)
-<a id="__codelineno-6-7" name="__codelineno-6-7" href="#__codelineno-6-7"></a> 7. alice confirms network/prod (tier prod, 4-eyes ok) → cascade app/prod
-<a id="__codelineno-6-8" name="__codelineno-6-8" href="#__codelineno-6-8"></a> 8. task push-change                            → chip ↑1 within 15 s
-<a id="__codelineno-6-9" name="__codelineno-6-9" href="#__codelineno-6-9"></a> 9. verification of audit events                → triggered/confirmed/applied
-<a id="__codelineno-6-10" name="__codelineno-6-10" href="#__codelineno-6-10"></a>                                                   with the right actors and tiers
+<div class="highlight"><pre><span></span><code><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a> 1. login bob → trigger network/dev            → plan → unconfirmed
+<a id="__codelineno-7-2" name="__codelineno-7-2" href="#__codelineno-7-2"></a> 2. bob confirms (tier dev, ok)                 → apply → finished
+<a id="__codelineno-7-3" name="__codelineno-7-3" href="#__codelineno-7-3"></a> 3. automatic cascade                           → app/dev plan (real input injected)
+<a id="__codelineno-7-4" name="__codelineno-7-4" href="#__codelineno-7-4"></a> 4. trigger app/prod BEFORE network/prod        → plan with MOCK (purple badge)
+<a id="__codelineno-7-5" name="__codelineno-7-5" href="#__codelineno-7-5"></a> 5. attempt to confirm the mocked run           → expected rejection (allow_mock_apply=false)
+<a id="__codelineno-7-6" name="__codelineno-7-6" href="#__codelineno-7-6"></a> 6. trigger network/prod (bob) → bob attempts to confirm → rejection (tier staging &lt; prod)
+<a id="__codelineno-7-7" name="__codelineno-7-7" href="#__codelineno-7-7"></a> 7. alice confirms network/prod (tier prod, 4-eyes ok) → cascade app/prod
+<a id="__codelineno-7-8" name="__codelineno-7-8" href="#__codelineno-7-8"></a> 8. task push-change                            → chip ↑1 within 15 s
+<a id="__codelineno-7-9" name="__codelineno-7-9" href="#__codelineno-7-9"></a> 9. verification of audit events                → triggered/confirmed/applied
+<a id="__codelineno-7-10" name="__codelineno-7-10" href="#__codelineno-7-10"></a>                                                   with the right actors and tiers
 </code></pre></div>
 <p>If the 9 steps pass, the core of the product works. It is also the demo script to run through in front of someone.</p>
 <hr />
