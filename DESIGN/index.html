@@ -1727,7 +1727,7 @@
 </tr>
 </tbody>
 </table>
-<p><strong>Two accents, two jobs.</strong> The <strong>brand violet</strong> (from the StackD logo) is the structural accent — focus rings, active nav, links, primary CTAs, the wordmark's "D". <strong>Amber</strong> is reserved for the one moment that needs human judgment: the <strong>Confirm/apply</strong> button (and the <code>unconfirmed</code> state). Keeping them separate means amber <em>stands out from the violet chrome</em> — the most important button in the app is amber, not green ("your judgment is needed", not "all is well"). The green/red spectrum stays free for state semantics.</p>
+<p><strong>Two accents, two jobs.</strong> The <strong>brand violet</strong> (from the StackD logo) is the structural accent — focus rings, active nav, links, primary CTAs, the wordmark's "D". <strong>Amber means "needs a human"</strong> and nothing else: the <strong>Confirm/apply</strong> decision, the <code>unconfirmed</code> state, and review signals that ask for human judgment — <code>warn</code> checks/hooks, open discussion threads, a secret resolved via fallback. Keeping it narrow means amber <em>stands out from the violet chrome</em> — the most important button in the app is amber, not green ("your judgment is needed", not "all is well"). Amber is <strong>not</strong> used for technical telemetry (log severity, HTTP status, latency) — that surface only reddens genuine failures and stays neutral otherwise. Two established conventions are separate: the plan diff's <code>~ modified</code> (green/amber/red) and ANSI yellow in logs. The green/red spectrum stays free for state semantics.</p>
 <p>Light theme: same tokens (<code>bg-base #F7F9FB</code>, navy <code>#1B2733</code> for text — the logo's own colour, brand violet <code>#6D3FD4</code> and darkened amber <code>#A87A1F</code> for AA contrast).</p>
 <h3 id="32-state-colors-the-semantic-language-identical-in-both-themes">3.2 State colors (the semantic language, identical in both themes)<a class="headerlink" href="#32-state-colors-the-semantic-language-identical-in-both-themes" title="Permanent link">&para;</a></h3>
 <table>
@@ -1954,7 +1954,7 @@
 <h2 id="9-what-we-forbid-ourselves-reminder">9. What we forbid ourselves (reminder)<a class="headerlink" href="#9-what-we-forbid-ourselves-reminder" title="Permanent link">&para;</a></h2>
 <ul>
 <li>Drop shadows, gradients, glassmorphism, decorative illustrations, emojis in the UI.</li>
-<li>State colors used for anything other than state; brand violet used to carry state meaning; amber used for anything other than the decision moment + <code>unconfirmed</code>.</li>
+<li>State colors used for anything other than state; brand violet used to carry state meaning; amber used outside its meaning ("needs a human": decision, <code>unconfirmed</code>, warn/review signals) — e.g. for log severity or technical telemetry.</li>
 <li>An icon alone on a destructive action; confirmation without typing the name for deletions <strong>and for any <code>tier=prod</code> or <code>destroy</code> apply</strong> (§5.2).</li>
 <li>Toasts for background events; unsolicited animations beyond the rail's pulse.</li>
 <li>Hiding or collapsing a resource destruction in a plan.</li>
