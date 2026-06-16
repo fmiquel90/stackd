@@ -107,10 +107,25 @@ function CreateEnvForm({ stackId, onDone }: { stackId: string; onDone: () => voi
   const catalog = useQuery({ queryKey: ["tiers"], queryFn: tiers.list });
   const tierNames = (catalog.data ?? []).map((t) => t.name);
   const [form, setForm] = useState<NewEnvironment>({ name: "", tier: "", branch: "main", managed_state: true });
+  // Live list of the repo's branches so the branch is picked, not typed blind (falls back to a free
+  // text input when the repo can't be reached). git ls-remote on open — cached for a minute.
+  const repo = useQuery({
+    queryKey: ["repo-branches", stackId],
+    queryFn: () => stacks.checkRepo(stackId),
+    staleTime: 60_000,
+    retry: false,
+  });
+  const branches = repo.data?.ok ? repo.data.branches : [];
   // Default the tier to the first catalog entry once it loads.
   useEffect(() => {
     if (!form.tier && tierNames.length > 0) setForm((f) => ({ ...f, tier: tierNames[0] }));
   }, [tierNames, form.tier]);
+  // Once branches load, point the default at a real one (main if present, else the first).
+  useEffect(() => {
+    if (branches.length > 0 && !branches.includes(form.branch)) {
+      setForm((f) => ({ ...f, branch: branches.includes("main") ? "main" : branches[0] }));
+    }
+  }, [branches, form.branch]);
   const create = useMutation({
     mutationFn: () => stacks.createEnvironment(stackId, form),
     onSuccess: () => {
@@ -140,7 +155,17 @@ function CreateEnvForm({ stackId, onDone }: { stackId: string; onDone: () => voi
           </Select>
         </Field>
         <Field label="Branch">
-          <TextInput value={form.branch} onChange={(e) => setForm({ ...form, branch: e.target.value })} />
+          {branches.length > 0 ? (
+            <Select value={form.branch} onChange={(e) => setForm({ ...form, branch: e.target.value })}>
+              {branches.map((b) => (
+                <option key={b} value={b}>
+                  {b}
+                </option>
+              ))}
+            </Select>
+          ) : (
+            <TextInput value={form.branch} onChange={(e) => setForm({ ...form, branch: e.target.value })} />
+          )}
         </Field>
         <Checkbox
           className="pb-1.5"

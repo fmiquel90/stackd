@@ -23,6 +23,11 @@ def _safe_json(raw: str) -> dict:
         return {}
 
 
+def _repo_token(job: dict) -> str | None:
+    """The HTTPS clone token (repo_auth_kind=token); None for `none`/`deploy_key`."""
+    return (job.get("repo_credentials") or {}).get("token")
+
+
 def _merge_hooks(platform: dict, repo: dict) -> dict[str, list[dict]]:
     """Platform hooks first (non-bypassable), then repo hooks, per stage (§8.1)."""
     merged: dict[str, list[dict]] = {}
@@ -100,7 +105,10 @@ def handle_plan(client: ApiClient, job: dict, settings: Settings) -> None:
 
     try:
         cwd = ws.git_clone(
-            env_info["repo_url"], env_info.get("commit_sha"), env_info["project_root"]
+            env_info["repo_url"],
+            env_info.get("commit_sha"),
+            env_info["project_root"],
+            token=_repo_token(job),
         )
         ws.write_tfvars(cwd, job.get("tfvars_json", {}))
         backend = job.get("backend")
@@ -224,7 +232,10 @@ def handle_apply(client: ApiClient, job: dict, settings: Settings) -> None:
 
     try:
         cwd = ws.git_clone(
-            env_info["repo_url"], env_info.get("commit_sha"), env_info["project_root"]
+            env_info["repo_url"],
+            env_info.get("commit_sha"),
+            env_info["project_root"],
+            token=_repo_token(job),
         )
         ws.write_tfvars(cwd, job.get("tfvars_json", {}))
         backend = job.get("backend")
@@ -305,7 +316,10 @@ def handle_command_run(client: ApiClient, job: dict, settings: Settings) -> None
 
     try:
         cwd = ws.git_clone(
-            env_info["repo_url"], env_info.get("commit_sha"), env_info["project_root"]
+            env_info["repo_url"],
+            env_info.get("commit_sha"),
+            env_info["project_root"],
+            token=_repo_token(job),
         )
         ws.write_tfvars(cwd, job.get("tfvars_json", {}))
         backend = job.get("backend")

@@ -5,8 +5,22 @@ import os
 import shutil
 import subprocess
 from pathlib import Path
+from urllib.parse import urlsplit, urlunsplit
 
 import yaml
+
+
+def _authed_url(repo_url: str, token: str | None) -> str:
+    """Inject an HTTPS token credential the way the API does (x-access-token@). SSH / no-token URLs
+    pass through unchanged. Mirrors app.stacks.git._authed_url so the worker clones what the API
+    validated."""
+    if token and repo_url.startswith("http"):
+        parts = urlsplit(repo_url)
+        netloc = f"x-access-token:{token}@{parts.hostname}"
+        if parts.port:
+            netloc += f":{parts.port}"
+        return urlunsplit((parts.scheme, netloc, parts.path, parts.query, parts.fragment))
+    return repo_url
 
 
 class Workspace:
@@ -17,12 +31,16 @@ class Workspace:
         self.path.mkdir(parents=True, exist_ok=True)
         self.path.chmod(0o700)  # workspace holds secrets/tfvars — not world-readable
 
-    def git_clone(self, repo_url: str, commit_sha: str | None, project_root: str) -> Path:
+    def git_clone(
+        self, repo_url: str, commit_sha: str | None, project_root: str, token: str | None = None
+    ) -> Path:
         # A source repo may be owned by another uid (e.g. CI bind mounts); the worker image trusts
         # all repos via `git config --system safe.directory '*'` (a `-c` override is ignored by git).
+        # `token` (repo_auth_kind=token) is injected into the HTTPS URL so private repos can clone.
+        clone_url = _authed_url(repo_url, token)
         # Surface git's stderr so a clone failure isn't an opaque "exit status 128".
         result = subprocess.run(
-            ["git", "clone", "--depth", "1", repo_url, str(self.path / "repo")],
+            ["git", "clone", "--depth", "1", clone_url, str(self.path / "repo")],
             capture_output=True,
             text=True,
             env={
@@ -34,9 +52,12 @@ class Workspace:
             },
         )
         if result.returncode != 0:
-            raise RuntimeError(
-                f"git clone failed: {result.stderr.strip() or result.stdout.strip()}"
-            )
+            msg = result.stderr.strip() or result.stdout.strip()
+            # The error is reported via job_failed (not the log masker) — redact the token here so a
+            # failed authenticated clone can never leak it.
+            if token:
+                msg = msg.replace(token, "•••")
+            raise RuntimeError(f"git clone failed: {msg}")
         if commit_sha:
             subprocess.run(
                 ["git", "fetch", "--depth", "1", "origin", commit_sha],
