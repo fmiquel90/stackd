@@ -111,11 +111,20 @@ function AttachmentsPanel({ setId }: { setId: string }) {
   const [targetId, setTargetId] = useState("");
 
   const stackName = (sid: string) => stackList.data?.find((s) => s.id === sid)?.name ?? sid.slice(0, 6);
-  const envOptions = (graph.data?.nodes ?? []).map((n) => ({ id: n.id, label: `${stackName(n.stack_id)}/${n.name}` }));
-  const stackOptions = (stackList.data ?? []).map((s) => ({ id: s.id, label: s.name }));
-  const options = kind === "stack" ? stackOptions : envOptions;
+  // Environments grouped under their stack — stacks are non-selectable <optgroup> headers, the
+  // environments are the actual options (so the list reads as envs, not stacks).
+  const envsByStack = (stackList.data ?? [])
+    .map((s) => ({
+      stack: s.name,
+      envs: (graph.data?.nodes ?? []).filter((n) => n.stack_id === s.id),
+    }))
+    .filter((g) => g.envs.length > 0);
+  const envLabel = (id: string) => {
+    const n = (graph.data?.nodes ?? []).find((x) => x.id === id);
+    return n ? `${stackName(n.stack_id)} / ${n.name}` : id.slice(0, 8);
+  };
   const labelFor = (targetKind: AttachmentTarget, id: string) =>
-    targetKind === "stack" ? stackName(id) : (envOptions.find((o) => o.id === id)?.label ?? id.slice(0, 8));
+    targetKind === "stack" ? stackName(id) : envLabel(id);
 
   const attach = useMutation({
     mutationFn: () => variableSets.attach(setId, { target_kind: kind, target_id: targetId }),
@@ -169,11 +178,21 @@ function AttachmentsPanel({ setId }: { setId: string }) {
         <Field label={kind === "stack" ? "Stack" : "Environment"}>
           <Select value={targetId} onChange={(e) => setTargetId(e.target.value)} required>
             <option value="">select…</option>
-            {options.map((o) => (
-              <option key={o.id} value={o.id}>
-                {o.label}
-              </option>
-            ))}
+            {kind === "stack"
+              ? (stackList.data ?? []).map((s) => (
+                  <option key={s.id} value={s.id}>
+                    {s.name}
+                  </option>
+                ))
+              : envsByStack.map((g) => (
+                  <optgroup key={g.stack} label={g.stack}>
+                    {g.envs.map((e) => (
+                      <option key={e.id} value={e.id}>
+                        {e.name}
+                      </option>
+                    ))}
+                  </optgroup>
+                ))}
           </Select>
         </Field>
         <Button type="submit" disabled={attach.isPending || !targetId}>
