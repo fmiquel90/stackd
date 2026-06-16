@@ -193,6 +193,18 @@ def handle_plan(client: ApiClient, job: dict, settings: Settings) -> None:
         has_changes = code == 2
         summary = _summary_from_events(events)
 
+        # The -json events streamed above are terse ("Plan to create"); also stream the human-readable
+        # diff operators expect (the real `terraform plan` output), read from the saved plan file
+        # (fast — no refresh, no API calls). `-no-color` so the ANSI doesn't fight the log viewer.
+        run_command(
+            [tool, "show", "-no-color", "plan.tfplan"],
+            cwd,
+            platform_env,
+            phase="planning",
+            section="plan",
+            streamer=streamer,
+        )
+
         # plan.json artifact for after_plan hooks (infracost/jq); `show -json` is already machine-readable.
         show = subprocess.run(
             [tool, "show", "-json", "plan.tfplan"],
