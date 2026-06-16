@@ -329,10 +329,12 @@ function EnvSettingsPanel({ env }: { env: Environment }) {
     managed_state: env.managed_state,
     allow_mock_apply: env.allow_mock_apply,
     allow_fallback_apply: env.allow_fallback_apply,
+    backend_config_file: env.backend_config_file ?? "",
     labels: Object.fromEntries(Object.entries(env.labels ?? {}).map(([k, v]) => [k, String(v)])),
   });
   const save = useMutation({
-    mutationFn: () => environments.update(env.id, form),
+    mutationFn: () =>
+      environments.update(env.id, { ...form, backend_config_file: form.backend_config_file || null }),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["environments", env.stack_id] }),
   });
   const set = (patch: Partial<EnvironmentPatch>) => setForm((f) => ({ ...f, ...patch }));
@@ -362,6 +364,17 @@ function EnvSettingsPanel({ env }: { env: Environment }) {
             <TextInput value={form.branch ?? ""} onChange={(e) => set({ branch: e.target.value })} required />
           </Field>
         </div>
+        {!form.managed_state && (
+          <div className="mt-3">
+            <Field label="Backend config file (passed as -backend-config at init)">
+              <TextInput
+                value={form.backend_config_file ?? ""}
+                placeholder="e.g. prod.config (repo-relative, under the project root)"
+                onChange={(e) => set({ backend_config_file: e.target.value })}
+              />
+            </Field>
+          </div>
+        )}
         <div className="mt-3 flex flex-wrap gap-x-5 gap-y-2">
           <Checkbox checked={form.protected ?? false} onChange={(v) => set({ protected: v })} label="protected" />
           <Checkbox checked={form.autodeploy ?? false} onChange={(v) => set({ autodeploy: v })} label="autodeploy" />

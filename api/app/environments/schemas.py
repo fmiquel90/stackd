@@ -18,6 +18,7 @@ class EnvironmentCreate(BaseModel):
     managed_state: bool = True
     allow_mock_apply: bool = False
     allow_fallback_apply: bool = False
+    backend_config_file: str | None = None
     labels: dict | None = None
     position: int = 0
 
@@ -32,6 +33,7 @@ class EnvironmentUpdate(BaseModel):
     managed_state: bool | None = None
     allow_mock_apply: bool | None = None
     allow_fallback_apply: bool | None = None
+    backend_config_file: str | None = None
     labels: dict | None = None
     position: int | None = None
 
@@ -50,6 +52,7 @@ class EnvironmentOut(BaseModel):
     managed_state: bool
     allow_mock_apply: bool
     allow_fallback_apply: bool
+    backend_config_file: str | None
     head_sha: str | None
     commits_ahead: int | None
     affects_project_root: bool | None
@@ -76,6 +79,7 @@ class EnvironmentOut(BaseModel):
             managed_state=e.managed_state,
             allow_mock_apply=e.allow_mock_apply,
             allow_fallback_apply=e.allow_fallback_apply,
+            backend_config_file=e.backend_config_file,
             head_sha=e.head_sha,
             commits_ahead=e.commits_ahead,
             affects_project_root=e.affects_project_root,

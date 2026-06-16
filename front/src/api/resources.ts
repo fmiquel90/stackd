@@ -126,6 +126,7 @@ export interface EnvironmentPatch {
   managed_state?: boolean;
   allow_mock_apply?: boolean;
   allow_fallback_apply?: boolean;
+  backend_config_file?: string | null;
   labels?: Record<string, string> | null;
 }
 

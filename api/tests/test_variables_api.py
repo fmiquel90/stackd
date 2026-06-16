@@ -330,6 +330,30 @@ async def test_discover_inputs_creates_required(client: httpx.AsyncClient) -> No
     assert by_name["db_password"]["sensitive"] is True and by_name["db_password"]["value"] == "•••"
 
 
+async def test_environment_backend_config_file_roundtrip(client: httpx.AsyncClient) -> None:
+    h = await _admin(client)
+    stack_id = await _stack(client, h, "backend-cfg-stack")
+    r = await client.post(
+        f"/api/v1/stacks/{stack_id}/environments",
+        headers=h,
+        json={
+            "name": "prod",
+            "tier": "prod",
+            "branch": "main",
+            "managed_state": False,
+            "backend_config_file": "prod.config",
+        },
+    )
+    assert r.status_code == 201, r.text
+    assert r.json()["backend_config_file"] == "prod.config"
+    env_id = r.json()["id"]
+
+    upd = await client.patch(
+        f"/api/v1/environments/{env_id}", headers=h, json={"backend_config_file": "staging.config"}
+    )
+    assert upd.json()["backend_config_file"] == "staging.config"
+
+
 async def test_protected_env_forces_no_autodeploy(client: httpx.AsyncClient) -> None:
     h = await _admin(client)
     stack_id = await _stack(client, h, "protected-stack")

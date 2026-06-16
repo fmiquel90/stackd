@@ -896,7 +896,7 @@ s3://stackd-<org>/
   artifacts/{run_id}/plan.tfplan | plan.json | outputs.json
 ```
 
-`managed_state: false` → nothing injected, the repo keeps its `backend "s3"` block (existing CarCutter compat).
+`managed_state: false` → no HTTP backend injected, the repo keeps its own `backend` block. If that backend is **partial** (e.g. `backend "s3" {}` with values in a `.config`/`.tfbackend` file), set `environments.backend_config_file` to the repo-relative path and the worker runs `init -backend-config=<file>` (per-env: prod vs staging can point at different files). Mutually exclusive with the managed HTTP backend.
 
 ### 11.4 Importing an existing stack
 

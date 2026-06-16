@@ -33,6 +33,9 @@ class Environment(Base):
     managed_state: Mapped[bool] = mapped_column(Boolean, default=True)
     allow_mock_apply: Mapped[bool] = mapped_column(Boolean, default=False)  # §9.3
     allow_fallback_apply: Mapped[bool] = mapped_column(Boolean, default=False)  # §15.5
+    # managed_state=false only: repo-relative file passed as `-backend-config=<file>` at init,
+    # for repos using a partial backend (bloc + values in a .config file).
+    backend_config_file: Mapped[str | None] = mapped_column(String, default=None)
 
     # Git staleness (§9.6) — populated from Phase 5; columns exist now.
     head_sha: Mapped[str | None] = mapped_column(String, default=None)

@@ -73,6 +73,7 @@ export interface Environment {
   managed_state: boolean;
   allow_mock_apply: boolean;
   allow_fallback_apply: boolean;
+  backend_config_file: string | null;
   head_sha: string | null;
   commits_ahead: number | null;
   affects_project_root: boolean | null;
