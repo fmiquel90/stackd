@@ -51,7 +51,7 @@ The rail IS the product's pedagogy: it makes the state machine visible instead o
 | `accent` | `#8B6CF0` (brand violet) | structure: focus, active links/nav, primary CTAs, the mark |
 | `decision` | `#E8A838` (signal amber) | the human-decision moment only: Confirm / apply |
 
-**Two accents, two jobs.** The **brand violet** (from the StackD logo) is the structural accent — focus rings, active nav, links, primary CTAs, the wordmark's "D". **Amber** is reserved for the one moment that needs human judgment: the **Confirm/apply** button (and the `unconfirmed` state). Keeping them separate means amber *stands out from the violet chrome* — the most important button in the app is amber, not green ("your judgment is needed", not "all is well"). The green/red spectrum stays free for state semantics.
+**Two accents, two jobs.** The **brand violet** (from the StackD logo) is the structural accent — focus rings, active nav, links, primary CTAs, the wordmark's "D". **Amber means "needs a human"** and nothing else: the **Confirm/apply** decision, the `unconfirmed` state, and review signals that ask for human judgment — `warn` checks/hooks, open discussion threads, a secret resolved via fallback. Keeping it narrow means amber *stands out from the violet chrome* — the most important button in the app is amber, not green ("your judgment is needed", not "all is well"). Amber is **not** used for technical telemetry (log severity, HTTP status, latency) — that surface only reddens genuine failures and stays neutral otherwise. Two established conventions are separate: the plan diff's `~ modified` (green/amber/red) and ANSI yellow in logs. The green/red spectrum stays free for state semantics.
 
 Light theme: same tokens (`bg-base #F7F9FB`, navy `#1B2733` for text — the logo's own colour, brand violet `#6D3FD4` and darkened amber `#A87A1F` for AA contrast).
 
@@ -238,7 +238,7 @@ The visual answer to "why isn't my run starting?".
 ## 9. What we forbid ourselves (reminder)
 
 - Drop shadows, gradients, glassmorphism, decorative illustrations, emojis in the UI.
-- State colors used for anything other than state; brand violet used to carry state meaning; amber used for anything other than the decision moment + `unconfirmed`.
+- State colors used for anything other than state; brand violet used to carry state meaning; amber used outside its meaning ("needs a human": decision, `unconfirmed`, warn/review signals) — e.g. for log severity or technical telemetry.
 - An icon alone on a destructive action; confirmation without typing the name for deletions **and for any `tier=prod` or `destroy` apply** (§5.2).
 - Toasts for background events; unsolicited animations beyond the rail's pulse.
 - Hiding or collapsing a resource destruction in a plan.

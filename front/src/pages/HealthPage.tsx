@@ -18,17 +18,18 @@ function Metric({ label, value, tone }: { label: string; value: string | number;
   );
 }
 
+// Raw telemetry: only failures stand out (red). Other levels stay neutral — amber is reserved for
+// "needs a human" in the product surfaces, not log severity (DESIGN §3.2).
 const LEVEL_COLOR: Record<string, string> = {
   ERROR: "var(--color-state-failed)",
   CRITICAL: "var(--color-state-failed)",
-  WARNING: "var(--color-state-unconfirmed)",
-  INFO: "var(--color-state-running)",
+  WARNING: "var(--color-text-primary)",
+  INFO: "var(--color-text-secondary)",
   DEBUG: "var(--color-text-secondary)",
 };
 
 function statusColor(status: number): string {
   if (status >= 500) return "var(--color-state-failed)";
-  if (status >= 400) return "var(--color-state-unconfirmed)";
   if (status >= 200 && status < 300) return "var(--color-state-finished)";
   return "var(--color-text-secondary)";
 }
@@ -47,7 +48,7 @@ function HttpDetail({ e }: { e: LogEntry }) {
         <span style={{ color: statusColor(e.status) }}> → {e.status}</span>
       )}
       {e.duration_ms !== undefined && (
-        <span style={{ color: slow ? "var(--color-state-unconfirmed)" : "var(--color-text-secondary)" }}>
+        <span style={{ color: slow ? "var(--color-text-primary)" : "var(--color-text-secondary)" }}>
           {" "}
           · {e.duration_ms}ms{slow ? " (slow)" : ""}
         </span>
@@ -303,7 +304,7 @@ export function HealthPage() {
             <Metric label="Database" value={h.checks.database} tone={h.checks.database === "ok" ? "var(--color-state-finished)" : "var(--color-state-failed)"} />
             <Metric label="Workers online" value={`${h.workers.online}/${h.workers.total}`} />
             <Metric label="Runs active / queued" value={`${h.runs.active} / ${h.runs.queued}`} />
-            <Metric label="Warnings+errors" value={h.log_buffer.recent_warn_error} tone={h.log_buffer.recent_warn_error > 0 ? "var(--color-state-unconfirmed)" : undefined} />
+            <Metric label="Warnings+errors" value={h.log_buffer.recent_warn_error} />
           </div>
 
           <Card>
