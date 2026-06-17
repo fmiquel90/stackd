@@ -14,7 +14,7 @@ runs  (add)
   pr_number        int  null        -- the PR that spawned a `proposed` run
   vcs_provider     text null        -- 'github' (enum-by-string; gitlab/bitbucket later)
   vcs_comment_id   bigint null      -- the posted PR comment, for idempotent edit
-  vcs_head_sha     text null        -- commit the check is reported against (may differ from commit_sha)
+  vcs_head_sha     text null        -- PR head commit the check/status is reported against
 ```
 GitHub App credentials (space- or instance-level — instance-level for MVP):
 ```
@@ -31,19 +31,23 @@ On `pull_request` (`opened`/`synchronize`/`reopened`): create the `proposed` run
 persist `pr_number`, `vcs_provider='github'`, `vcs_head_sha = pr.head.sha`. On `closed`: best-effort
 discard the open proposed run for that PR.
 
-### Post-back (new `app/vcs/` module, driven by `transition()`)
-A transition hook (same place that publishes to WS / fires platform hooks, §4.2) on a run with
-`vcs_provider` set:
-- **Check / commit status** on `vcs_head_sha`: `queued|planning → pending`, `unconfirmed → success`
-  (neutral "plan ready, review"), `failed → failure`, `discarded/canceled → cancelled`.
-  Prefer the **Checks API** (`POST /repos/{o}/{r}/check-runs`, then PATCH) when on a GitHub App;
-  fall back to the **Status API** (`POST /repos/{o}/{r}/statuses/{sha}`) with a PAT.
+### Post-back (new `app/vcs/` module — transactional outbox, like notifications §17)
+**Enqueued on the run `transition()` in the SAME txn (no network I/O there — a rolled-back
+transition never posts); drained by the scheduler dispatcher** (best-effort, retried), exactly like
+`NotificationOutbox`. Only runs with `vcs_provider` set (PR-originated `proposed` runs) post back.
+
+A `proposed` run is **plan-only and terminal at `finished`** (`worker_router` routes a proposed run
+to `finished`, it never reaches `unconfirmed`/`confirmed`/`applying`). So the mapping is:
+- **Check / commit status** on `vcs_head_sha`: `queued|preparing|planning|checking → in_progress`;
+  `finished → success` (neutral "plan ready — review", `+a ~c −d` in the comment, or `neutral` if a
+  `warn` check fired); `failed → failure`; `canceled|discarded → cancelled`.
+  Prefer the **Checks API** (`POST /repos/{o}/{r}/check-runs`, then PATCH) on a GitHub App; fall back
+  to the **Status API** (`POST /repos/{o}/{r}/statuses/{sha}`) with a PAT.
 - **PR comment**: one comment per run, **edited in place** (`vcs_comment_id`): the `+a ~c −d`
-  summary, mocked/fallback badges, check results, and a deep link to `/runs/{id}`. Created on first
-  plan completion; updated on each subsequent transition.
+  summary, mocked/fallback badges, check results, deep link to `/runs/{id}`. Created on first plan
+  completion; updated on the terminal transition.
 - Auth: GitHub App → installation token (cached, 1h TTL) resolved from the repo owner; else the
-  stack PAT. All network calls are best-effort + retried; a VCS failure **never** fails the run
-  (logged + surfaced as a run warning).
+  stack PAT. A VCS failure **never** fails the run (logged + surfaced as a run warning).
 
 ### Endpoints
 - `POST /api/v1/webhooks/github` — unchanged contract, now also persists PR metadata.
@@ -83,8 +87,10 @@ for each `drift_check_enabled` env with no active run, enqueue a **read-only pro
 A successful **apply** sets `in_sync` and clears `drift_run_id`.
 
 ### Worker
-No new job type — reuse the `proposed` plan (`plan -refresh-only` or a normal plan; record only the
-summary). The drift run must not consume a worker slot ahead of user runs (lower claim priority).
+No new job type — a `proposed` run with **`plan -refresh-only`** (true drift = state vs reality, not
+state vs code); record only the summary, no artifacts needed. To keep drift runs behind user runs,
+the claim query (§7.2) needs a priority/order-by (e.g. a `priority` column or order user runs first)
+— a small but real change, not free with today's FIFO `SKIP LOCKED`.
 
 ### Front
 A `drift` chip on `/stacks` env cells and the env header (DESIGN §3.2 spectrum: neutral, with a
@@ -99,15 +105,17 @@ drift run is skipped if a run is active).
 ## §U3 — Security hardening (Phase C)
 
 ### Masking (`worker/agent/masking.py`, `claim.py`)
-- Feed the masker **all** sensitive values, including those routed to `sensitive_env` (env-kind
-  secrets) — today only tfvars/known mask_values are guaranteed; assert env secret values are in
-  `mask_values`.
-- **Cleartext tripwire**: after a phase, if a known sensitive value appears verbatim in an artifact
-  or output it shouldn't (e.g. a non-sensitive output echoing a secret), mark the run with a
-  `secret_leak_suspected` warning (don't hard-fail by default; configurable).
+- **Already covered, keep**: `mask_values` (claim.py) is built from *every* sensitive resolved value
+  (`rv.sensitive`, all kinds — incl. env-kind secrets) plus the backend password, OIDC token and
+  repo token. No gap there. The residual gap is a *transformed* secret (base64/substring) and a
+  non-sensitive output that echoes a secret.
+- **Cleartext tripwire** (the real add): after a phase, if a known sensitive value appears verbatim
+  where it shouldn't (e.g. a non-sensitive output, or `plan.json` outside an expected field), flag
+  the run with a `secret_leak_suspected` warning. Default = warn (configurable to hard-fail, §open
+  decisions).
 - Don't stream a raw `show` of sensitive attributes — rely on terraform's `(sensitive value)`.
-- Documented residual limit (kept): value-based masking can't catch a *transformed* secret
-  (base64/substring). The tripwire narrows, doesn't eliminate, this.
+- Documented residual limit (kept): value-based masking can't catch a *transformed* secret. The
+  tripwire narrows, doesn't eliminate, this.
 
 ### Runner trust model (`worker/agent/runner.py`, `main.py`, deploy)
 - **`docker` runner contract** (prod): one ephemeral container per job, image carries **no
@@ -124,13 +132,17 @@ Reinforces §13 (secrets) and §8.3 (hook isolation). No change to `can_apply`/f
 
 ## §U4 — HCL-syntax variables (Phase D)
 
-Builds on the shipped `_tfvar_value` (JSON parse of `hcl` values into `*.auto.tfvars.json`).
-- The claim payload tags which terraform vars are `hcl` (already known server-side).
-- **Worker**: for `hcl` vars, instead of JSON-encoding, write a generated **`zzz_stackd.auto.tfvars`
-  (HCL)** with `name = <raw value>` (verbatim), so real HCL syntax (`{ a = "b" }`, function calls)
-  parses natively. Non-hcl vars stay in `stackd.auto.tfvars.json`. Both files auto-load; HCL file
-  name sorts last so it wins ties deterministically.
+**Supersedes** the shipped `_tfvar_value` JSON-parse *for hcl vars*: an `hcl` var is written to the
+HCL file **only** and **excluded from `stackd.auto.tfvars.json`** — otherwise it would be defined
+twice (JSON + HCL) and terraform would error / last-wins non-deterministically.
+- The claim payload must carry per-var `hcl`-ness (today `tfvars_json` is a flat name→value dict; add
+  an `hcl_tfvars` map, or a `{value, hcl}` shape). Known server-side, just not yet in the payload.
+- **Worker**: write `hcl` vars to a generated **`zzz_stackd.auto.tfvars` (HCL)** as `name = <raw
+  value>` (verbatim) so real HCL syntax (`{ a = "b" }`, function calls) parses natively; write non-hcl
+  vars to `stackd.auto.tfvars.json` as today. Both auto-load.
 - Masking still applies to the HCL file content (sensitive hcl values).
+- Net: the JSON-parse `_tfvar_value` becomes a no-op for hcl vars (they leave the JSON path); keep it
+  only for any value that must remain JSON.
 
 ### Invariants
 Resolution order (§3.4) unchanged — this is purely *how* a resolved value is written to disk.
@@ -233,7 +245,8 @@ when the endpoint is unset.
 | 0022 | B | `environments.drift_status, last_drift_checked_at, drift_run_id, drift_check_enabled` |
 | 0023 | F | `space_memberships` table + backfill |
 
-(Phases C/D/E/G/H need no schema change.)
+(Phases C/D/E/G/H need no schema change. Head is currently **0020**; the numbers above assume the
+ship order A→B→F — renumber each to the next free revision when it actually lands.)
 
 ## Open decisions to confirm
 

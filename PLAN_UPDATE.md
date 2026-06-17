@@ -43,7 +43,8 @@ review loop. Reuses the existing `proposed` run created on `pull_request` (`webh
   `+a ~c −d` summary + run link and sets a commit **check/status**; idempotent comment update
   (one comment per run, edited on state change); GitHub App auth (install token) with PAT fallback.
 - **Out**: GitLab/Bitbucket (interface designed for it, GitHub first); inline plan-line comments.
-- **Touches**: `webhooks/`, `runs/` (transition hook on proposed runs), new `vcs/` module, config
+- **Touches**: `webhooks/`, `runs/` (enqueue the VCS post-back in the transition outbox), new
+  `vcs/` module, `scheduler/` (dispatch), config
   (GitHub App id/key), 1 migration (`runs.pr_number`, `runs.vcs_*`).
 - **Acceptance**: open a PR on a fixture repo → a check appears, a comment is posted, and it updates
   to finished/failed when the proposed run resolves. e2e extended with a mock VCS server.
@@ -62,10 +63,10 @@ review loop. Reuses the existing `proposed` run created on `pull_request` (`webh
 ### Phase C — Security hardening  (SPECS_UPDATE §U3)
 **Goal**: shrink the secret-leak surface and pin down the untrusted-code trust model.
 - **In**:
-  - **Masking**: keep value masking but (a) also feed env-var secret *values* to the masker,
-    (b) add a "suspicious cleartext" detector that fails/flags a run if a known sensitive value
-    appears un-transformed in an output it shouldn't, (c) prefer Terraform-native `sensitive`
-    (don't stream raw `show` of sensitive attributes).
+  - **Masking**: env-kind secret values are **already** masked (`mask_values` covers every sensitive
+    resolved value). The real adds: (a) a "suspicious cleartext" tripwire that flags a run if a known
+    sensitive value appears un-transformed where it shouldn't (non-sensitive output, plan.json),
+    (b) don't stream a raw `show` of sensitive attributes — rely on terraform's `(sensitive value)`.
   - **Runner trust**: formalize the `docker` runner contract — ephemeral per-job container, **no
     long-lived creds baked in**, OIDC token file mounted read-only and removed after, optional
     egress allowlist; document that repo hooks (`sh -c`) run untrusted and never receive
