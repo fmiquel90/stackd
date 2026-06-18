@@ -53,6 +53,8 @@ class Settings(BaseSettings):
     stackd_worker_lost_seconds: int = 120
     stackd_head_poll_interval: int = 900
     stackd_apply_affinity_seconds: int = 60
+    # Drift detection (§19): minimum spacing between read-only drift plans per environment.
+    stackd_drift_interval_seconds: int = 21600  # 6h
 
     # Background scheduler (§7.5) — disabled under tests so it can't fail runs mid-assertion.
     stackd_run_scheduler: bool = True

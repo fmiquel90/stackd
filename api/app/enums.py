@@ -90,6 +90,14 @@ class TriggeredBy(enum.StrEnum):
     webhook = "webhook"
     dependency = "dependency"
     api = "api"
+    schedule = "schedule"  # a scheduler-driven run (e.g. drift detection, §19)
+
+
+class DriftStatus(enum.StrEnum):
+    unknown = "unknown"  # never checked, or no applied state to compare against yet
+    in_sync = "in_sync"
+    drifted = "drifted"
+    error = "error"  # the drift plan itself failed
 
 
 class RunEventActor(enum.StrEnum):

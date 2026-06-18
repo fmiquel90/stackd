@@ -9,6 +9,7 @@ from sqlalchemy.dialects.postgresql import UUID as PGUUID
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db import Base, created_at_col, pk_uuid, updated_at_col
+from app.enums import DriftStatus
 
 
 class Environment(Base):
@@ -45,6 +46,14 @@ class Environment(Base):
     head_updated_at: Mapped[datetime | None] = mapped_column(default=None)
     commits_ahead: Mapped[int | None] = mapped_column(Integer, default=None)
     affects_project_root: Mapped[bool | None] = mapped_column(Boolean, default=None)
+
+    # Drift detection (§19): a periodic read-only `-refresh-only` plan records whether real infra
+    # diverged from the last applied state. `drift_run_id` points at the proposed run that detected
+    # it. Never auto-remediated.
+    drift_status: Mapped[str] = mapped_column(String, default=DriftStatus.unknown.value)
+    last_drift_checked_at: Mapped[datetime | None] = mapped_column(default=None)
+    drift_run_id: Mapped[uuid.UUID | None] = mapped_column(PGUUID(as_uuid=True), default=None)
+    drift_check_enabled: Mapped[bool] = mapped_column(Boolean, default=True)
 
     locked: Mapped[bool] = mapped_column(Boolean, default=False)
     labels: Mapped[dict | None] = mapped_column(JSONB(none_as_null=True), default=None)

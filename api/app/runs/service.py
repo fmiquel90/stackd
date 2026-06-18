@@ -32,6 +32,7 @@ async def trigger_run(
     commit_sha: str | None = None,
     group_root: bool = False,
     secret_overrides: dict[str, str] | None = None,
+    is_drift: bool = False,
 ) -> Run:
     """Create a run in `queued` (SPECS §4). A plan changes nothing, so any writer+ may trigger;
     a `destroy` additionally requires can_destroy (§2.4). `group_root` starts a cascade group.
@@ -57,6 +58,7 @@ async def trigger_run(
         trigger_user_id=user.id if (user and triggered_by == TriggeredBy.manual) else None,
         commit_sha=commit_sha,
         secret_overrides_encrypted=overrides_encrypted,
+        is_drift=is_drift,
     )
     session.add(run)
     await session.flush()

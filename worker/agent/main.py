@@ -174,9 +174,12 @@ def handle_plan(client: ApiClient, job: dict, settings: Settings) -> None:
 
         # `-json`: stream readable @message lines while collecting structured events (change_summary
         # for the counts, diagnostics for the real error message). detailed-exitcode: 0=no changes,
-        # 2=changes, 1=error.
+        # 2=changes, 1=error. `-refresh-only` (drift, §19): diff state against real infra only.
+        plan_cmd = [tool, "plan", "-input=false", "-json", "-detailed-exitcode", "-out=plan.tfplan"]
+        if job.get("refresh_only"):
+            plan_cmd.insert(2, "-refresh-only")
         code, events = stream_json_command(
-            [tool, "plan", "-input=false", "-json", "-detailed-exitcode", "-out=plan.tfplan"],
+            plan_cmd,
             cwd,
             platform_env,
             phase="planning",

@@ -14,8 +14,10 @@ from app.audit import record_audit
 from app.config import get_settings
 from app.db import get_session
 from app.dependencies.service import DependencyError, capture_outputs, cascade
+from app.drift.service import clear_drift, record_drift_result
 from app.enums import (
     AuditActorKind,
+    DriftStatus,
     RunEventActor,
     RunState,
     RunType,
@@ -200,6 +202,13 @@ async def _decide_after_plan(session: AsyncSession, worker: Worker, run: Run, re
             context={"checks": [c.get("name") for c in checks if c.get("status") == "warn"]},
         )
 
+    if run.is_drift:
+        # A drift plan (§19): record state-vs-reality on the env, then finish like any proposed run.
+        env = await session.get(Environment, run.environment_id)
+        assert env is not None
+        status = DriftStatus.drifted if result.get("has_changes", False) else DriftStatus.in_sync
+        await record_drift_result(session, run, env, status)
+
     if not result.get("has_changes", False) or run.type == RunType.proposed:
         # Empty diff, or a proposed (PR) run → plan-only, terminal. Terminal → audited (§4.2).
         await transition(
@@ -265,6 +274,10 @@ async def post_event(
             audit_action=action,
             audit_context={"phase": body.phase},
         )
+        if run.is_drift:
+            env = await session.get(Environment, run.environment_id)
+            if env is not None:
+                await record_drift_result(session, run, env, DriftStatus.error)
         await session.commit()
         return {"ok": True}
 
@@ -292,6 +305,10 @@ async def post_event(
                 audit_action="run.applied",
                 audit_context={"environment_id": str(run.environment_id), "commit": run.commit_sha},
             )
+            # A successful apply reconciles state with reality → clears any drift (§19).
+            env = await session.get(Environment, run.environment_id)
+            if env is not None:
+                await clear_drift(session, env, datetime.now(UTC))
             await cascade(session, run)
         else:
             await _decide_after_plan(session, worker, run, result)

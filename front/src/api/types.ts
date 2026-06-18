@@ -79,6 +79,10 @@ export interface Environment {
   commits_ahead: number | null;
   affects_project_root: boolean | null;
   stale: boolean;
+  drift_status: "unknown" | "in_sync" | "drifted" | "error";
+  last_drift_checked_at: string | null;
+  drift_run_id: string | null;
+  drift_check_enabled: boolean;
   locked: boolean;
   labels: Record<string, unknown> | null;
   position: number;

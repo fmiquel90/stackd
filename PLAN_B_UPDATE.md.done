@@ -1,7 +1,7 @@
 # PLAN_B_UPDATE.md — Phase B: Drift detection
 
-> Status: **todo** · Prio P1 · Effort S–M · Risk L. Spec: `SPECS_B_UPDATE.md`. Index: `PLAN_UPDATE.md`.
-> When shipped, rename to `PLAN_B_UPDATE.md.done` (+ `SPECS_B_UPDATE.md.done`).
+> Status: **shipped** · Prio P1 · Effort S–M · Risk L. Spec folded into `docs/SPECS.md §19`. Index:
+> `PLAN_UPDATE.md`.
 
 **Goal**: detect when real infrastructure diverges from the last applied state.
 

@@ -1382,3 +1382,54 @@ at-least-once with `attempts` cap). Only runs with `vcs_provider` set post back.
    run correct (mirrors §17.4).
 2. Same-txn enqueue (invariant §6.3 spirit): a rolled-back transition enqueues nothing.
 3. Sensitive plan values stay masked in the comment (reuse the artifact masking, §13).
+
+## 19. Drift detection (post-MVP)
+
+> Status: **shipped** (Phase B). Detects when real infrastructure diverged from the last applied
+> state, via a periodic **read-only** `-refresh-only` plan. **Never auto-remediated** — drift is
+> surfaced (env badge + inbox), the operator decides. Reuses the `proposed` run machinery; no new
+> job type.
+
+### 19.1 Model
+
+`environments` (add): `drift_status text default 'unknown'` (`unknown | in_sync | drifted | error`),
+`last_drift_checked_at timestamptz?`, `drift_run_id uuid?` (the proposed run that last detected
+drift), `drift_check_enabled bool default true`. `runs` (add): `is_drift bool default false`.
+Config: `STACKD_DRIFT_INTERVAL_SECONDS = 21600` (6h) — per-env minimum spacing. New trigger source
+`TriggeredBy.schedule`; new inbox kind `drift_detected`.
+
+### 19.2 Scheduler task (`detect_drift`, advisory-locked like the others, §7.5)
+
+On the 10s loop, gated on `last_drift_checked_at + interval`: for each `drift_check_enabled`,
+unlocked env with **no active run**, bump `last_drift_checked_at` (so a no-op env isn't retried
+every tick) and — if the env has an applied commit — enqueue a read-only `proposed` run pinned to
+that commit (`is_drift=true`, `triggered_by=schedule`). An env with nothing applied stays `unknown`.
+
+### 19.3 Worker & claim
+
+No new job type: the `proposed` plan runs with **`-refresh-only`** (true drift = state vs reality,
+not state vs code), signalled by `refresh_only` in the claim payload. To keep drift behind user
+work, the claim order-by (§7.2) sorts `is_drift` ascending — a queued user run is always claimed
+before a background drift run.
+
+### 19.4 Outcome (applied in the run's `transition()` txn)
+
+On the drift run completing: changes → `drifted` (set `drift_run_id`, audit `environment.drift_detected`
++ fan out `drift_detected` to eligible approvers, **once** per edge into drift — debounced while it
+stays drifted); no changes → `in_sync`; the plan itself failing → `error`. A successful **apply**
+on the env reconciles state with reality → back to `in_sync`, `drift_run_id` cleared
+(`environment.drift_cleared`).
+
+### 19.5 API / front
+
+`drift_check_enabled` is settable on env create/update; the env out carries `drift_status` +
+`last_drift_checked_at` + `drift_run_id`. Front: a neutral drift chip (icon + label, never colour
+alone — DESIGN §7) on the env header, and a "drifted only" filter on the env list.
+
+### 19.6 Invariants preserved
+
+1. Drift runs are **read-only** and **never auto-applied**.
+2. One active run per env unchanged (§3.5) — a drift run is skipped when a run is already active,
+   and yields to user runs at claim time.
+3. The env status change rides the run `transition()` txn — a rolled-back completion changes
+   nothing; the notification is same-txn (§17.4).

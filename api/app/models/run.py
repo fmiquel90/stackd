@@ -43,6 +43,10 @@ class Run(Base):
         PGUUID(as_uuid=True), default=None
     )
 
+    # A scheduler-spawned read-only drift plan (§19): proposed + `-refresh-only`, queued behind user
+    # runs in the claim, routes to a drift-status update instead of a normal proposed outcome.
+    is_drift: Mapped[bool] = mapped_column(Boolean, default=False)
+
     parent_run_id: Mapped[uuid.UUID | None] = mapped_column(PGUUID(as_uuid=True), default=None)
     run_group_id: Mapped[uuid.UUID | None] = mapped_column(PGUUID(as_uuid=True), default=None)
     worker_id: Mapped[uuid.UUID | None] = mapped_column(PGUUID(as_uuid=True), default=None)

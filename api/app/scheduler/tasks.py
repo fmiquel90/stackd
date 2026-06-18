@@ -8,6 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import get_settings
 from app.db import SessionLocal
+from app.drift.service import detect_drift
 from app.enums import ACTIVE_STATES, RunEventActor, RunState, WorkerStatus
 from app.logging import get_logger
 from app.models.run import Run
@@ -20,6 +21,7 @@ from app.vcs.dispatcher import dispatch_vcs
 _LOCK_WORKER_LOST = 74001
 _LOCK_NOTIFY = 74002
 _LOCK_VCS = 74003
+_LOCK_DRIFT = 74004
 _log = get_logger("stackd.scheduler")
 
 
@@ -99,6 +101,8 @@ async def scheduler_loop() -> None:
                 await _with_lock(session, _LOCK_NOTIFY, dispatch_pending)
             async with SessionLocal() as session:
                 await _with_lock(session, _LOCK_VCS, dispatch_vcs)
+            async with SessionLocal() as session:
+                await _with_lock(session, _LOCK_DRIFT, detect_drift)
         except Exception as exc:
             print(f"[scheduler] tick error: {exc}", flush=True)
         await asyncio.sleep(10)

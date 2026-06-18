@@ -53,7 +53,8 @@ _SELECT_CANDIDATE = text(
         WHERE o.environment_id = r.environment_id AND o.id <> r.id
           AND o.state IN ({_ACTIVE_SQL})
       )
-    ORDER BY (r.state = 'confirmed' AND r.worker_id = :wid) DESC, r.created_at
+    -- Affinity first, then user runs ahead of background drift plans (§19), then FIFO.
+    ORDER BY (r.state = 'confirmed' AND r.worker_id = :wid) DESC, r.is_drift, r.created_at
     FOR UPDATE OF e SKIP LOCKED
     LIMIT 1
     """
@@ -221,6 +222,7 @@ async def build_job_payload(session: AsyncSession, run: Run) -> dict:
     return {
         "job_id": str(run.id),
         "phase": phase.value,
+        "refresh_only": run.is_drift,  # §19: drift plan uses `-refresh-only` (state vs reality)
         "command": run.command,  # set only for RunType.command jobs
         "environment": {
             "id": str(env.id),

@@ -13,6 +13,7 @@ import {
 import type { Environment } from "@/api/types";
 import { useIsAdmin } from "@/auth/session";
 import { StateBadge } from "@/components/StateBadge";
+import { DriftChip } from "@/components/DriftChip";
 import { ProvenanceBadge, parseProvenance } from "@/components/ProvenanceBadge";
 import { CloudPanel } from "@/components/CloudPanel";
 import { DependenciesPanel } from "@/components/DependenciesPanel";
@@ -329,6 +330,7 @@ function EnvSettingsPanel({ env }: { env: Environment }) {
     managed_state: env.managed_state,
     allow_mock_apply: env.allow_mock_apply,
     allow_fallback_apply: env.allow_fallback_apply,
+    drift_check_enabled: env.drift_check_enabled,
     backend_config_file: env.backend_config_file ?? "",
     backend_config: Object.fromEntries(
       Object.entries(env.backend_config ?? {}).map(([k, v]) => [k, String(v)]),
@@ -412,6 +414,11 @@ function EnvSettingsPanel({ env }: { env: Environment }) {
             checked={form.allow_fallback_apply ?? false}
             onChange={(v) => set({ allow_fallback_apply: v })}
             label="allow fallback apply"
+          />
+          <Checkbox
+            checked={form.drift_check_enabled ?? true}
+            onChange={(v) => set({ drift_check_enabled: v })}
+            label="drift detection"
           />
         </div>
         <div className="mt-3">
@@ -502,6 +509,7 @@ function EnvCard({ env, siblings }: { env: Environment; siblings: { id: string; 
             {env.protected ? " · protected" : ""}
           </span>
           <LatestRunBadge envId={env.id} />
+          <DriftChip status={env.drift_status} />
         </div>
         <div className="flex shrink-0 items-center gap-2">
           <RefreshHeadButton env={env} />
@@ -546,18 +554,25 @@ const SETTING_TABS: { key: SettingTab; label: string }[] = [
 
 function EnvironmentsTab({ stackId }: { stackId: string }) {
   const [creating, setCreating] = useState(false);
+  const [driftedOnly, setDriftedOnly] = useState(false);
   const envs = useQuery({ queryKey: ["environments", stackId], queryFn: () => stacks.environments(stackId) });
+
+  const all = envs.data ?? [];
+  const visible = driftedOnly ? all.filter((e) => e.drift_status === "drifted") : all;
 
   return (
     <div className="flex flex-col gap-3">
       <div className="flex items-center justify-between">
         <h2 className="text-[15px] font-semibold">Environments</h2>
-        {!creating && <Button onClick={() => setCreating(true)}>Add environment</Button>}
+        <div className="flex items-center gap-3">
+          <Checkbox checked={driftedOnly} onChange={setDriftedOnly} label="drifted only" />
+          {!creating && <Button onClick={() => setCreating(true)}>Add environment</Button>}
+        </div>
       </div>
       {creating && <CreateEnvForm stackId={stackId} onDone={() => setCreating(false)} />}
 
       <div className="flex flex-col gap-2">
-        {(envs.data ?? []).map((env) => (
+        {visible.map((env) => (
           <EnvCard
             key={env.id}
             env={env}

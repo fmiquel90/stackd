@@ -18,6 +18,7 @@ class EnvironmentCreate(BaseModel):
     managed_state: bool = True
     allow_mock_apply: bool = False
     allow_fallback_apply: bool = False
+    drift_check_enabled: bool = True
     backend_config_file: str | None = None
     backend_config: dict | None = None
     labels: dict | None = None
@@ -34,6 +35,7 @@ class EnvironmentUpdate(BaseModel):
     managed_state: bool | None = None
     allow_mock_apply: bool | None = None
     allow_fallback_apply: bool | None = None
+    drift_check_enabled: bool | None = None
     backend_config_file: str | None = None
     backend_config: dict | None = None
     labels: dict | None = None
@@ -60,6 +62,10 @@ class EnvironmentOut(BaseModel):
     commits_ahead: int | None
     affects_project_root: bool | None
     stale: bool
+    drift_status: str
+    last_drift_checked_at: datetime | None
+    drift_run_id: uuid.UUID | None
+    drift_check_enabled: bool
     locked: bool
     labels: dict | None
     position: int
@@ -88,6 +94,10 @@ class EnvironmentOut(BaseModel):
             commits_ahead=e.commits_ahead,
             affects_project_root=e.affects_project_root,
             stale=stale,
+            drift_status=e.drift_status,
+            last_drift_checked_at=e.last_drift_checked_at,
+            drift_run_id=e.drift_run_id,
+            drift_check_enabled=e.drift_check_enabled,
             locked=e.locked,
             labels=e.labels,
             position=e.position,
