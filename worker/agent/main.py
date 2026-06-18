@@ -531,7 +531,19 @@ def run() -> None:
         settings = Settings.from_env()
 
     client = ApiClient(settings.api_url)
-    client.register(settings.pool_token, settings.worker_name)
+    # Registration must survive the API not being ready yet (boot order: the worker can come up
+    # before the API has migrated/seeded). Retry instead of crashing — otherwise the worker dies on
+    # the first 5xx and never comes back without a restart.
+    while True:
+        try:
+            client.register(settings.pool_token, settings.worker_name)
+            break
+        except Exception as exc:  # noqa: BLE001
+            log.warning(
+                "register failed, retrying",
+                extra={"event": "agent.register_error", "error": str(exc)},
+            )
+            time.sleep(settings.heartbeat_interval)
     log.info(
         "registered",
         extra={
