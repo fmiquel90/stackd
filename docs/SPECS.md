@@ -416,6 +416,7 @@ POST /worker/v1/jobs/{id}/logs
 - `section` distinguishes hooks from the terraform stream (dedicated sections in the viewer).
 - Agent buffer: 1 s / 32 KB. **Masking before sending of ALL the run's sensitive values** — `sensitive_env` *and* the `tfvars` marked `sensitive` (§3.3) — replaced with `***`. The agent builds the masking table from the claim payload, not only from `sensitive_env`.
 - **Residual leak via `plan.json`**: an `after_plan` hook (infracost, jq, script) reads `plan.json`, which contains the variable values. Terraform marks `sensitive` the values it knows as such, but a hook that dumps the raw JSON can re-print a sensitive value to its stdout (and thus to the logs). Mitigations: (a) the value-based masking above also applies to hook stdout; (b) a short or transformed secret (base64, substring) escapes value-based masking — a **documented** limit, do not put exploitable secrets in non-sensitive `tfvars`. The check tools (tfsec/checkov/infracost) do not print values by default.
+- **Cleartext tripwire (Phase C)**: after a phase, the agent scans the plan (`show -json`) and apply (`output -json`) for any value Stackd treats as sensitive appearing verbatim in a **non-sensitive** output — terraform only redacts outputs the *repo* marked `sensitive = true`, so a sensitive Stackd variable echoed by an unmarked output leaks. On plan it flags the run with a `secret_leak_suspected` **warn** check (config `STACKD_LEAK_TRIPWIRE=fail` aborts the run before any apply); on apply it is warn-only (a masked log line) since the infra has already changed. The tripwire **narrows, does not eliminate**, the leak surface — a transformed secret still escapes value-based detection. The human-readable `show` already relies on terraform's own `(sensitive value)` redaction; only the masked JSON artifact is uploaded.
 - ANSI sequences preserved (color rendering on the front side).
 
 ### 5.2 Two-tier storage
@@ -629,6 +630,8 @@ ws.cleanup()
 
 `docker` runner: each command (terraform AND hooks) runs in `stackd/runner:<tool>-<version>` (image including the common check tools: tfsec, checkov, infracost, jq).
 
+**Runner trust contract (Phase C).** The `docker` runner (prod) is the trust boundary: one **ephemeral** container per job; the image carries **no long-lived cloud creds**; the OIDC token is written to a `0600` file (`Workspace.write_secret`), exposed only to terraform via `AWS_WEB_IDENTITY_TOKEN_FILE`, and the whole workspace — token included — is removed in the `finally` `ws.cleanup()`; an optional egress allowlist is enforced via the run's network. Repo hooks run untrusted: `sh -c <repo command>` with a cloud-credential-stripped `repo_env` (§8.3). The `local` runner (dev) with a mounted `~/.aws` is **trusted-dev only** — never prod (`STACKD_ENV=production` is documented to require the `docker` runner).
+
 ### 7.5 Periodic tasks (internal scheduler, multi-replica)
 
 The scheduler module (PLAN §2.1) carries background tasks that must run **exactly once** even with several API replicas:
@@ -676,6 +679,7 @@ hooks:
 
 - Each hook: one shell command in the workspace (cwd = project_root), the run's env vars injected (except `sensitive_env` for **repo** hooks — opt-in per env, same logic as proposed runs).
 - **Cloud credentials (§10) not exported to repo hooks.** The `AWS_WEB_IDENTITY_TOKEN_FILE` / `AWS_ROLE_ARN` variables are injected only into the environment of **terraform** invocations, never into that of **repo** hooks by default (same reasons as `sensitive_env`: a `.stackd.yml` pushed via PR must not be able to assume the prod apply role and exfiltrate). Opt-in per env if a hook legitimately needs the cloud. **Platform** hooks (non-bypassable) have access to it.
+- **Repo-hook env is built from a stripped base (Phase C).** The agent's `repo_env` starts from the worker process environment **minus every cloud-credential family** (`AWS_*`, `GOOGLE_*`, `GCLOUD_*`, `GCP_*`, `AZURE_*`, `ARM_*`), then layers the run's non-sensitive `env`. The `docker` runner (prod) bakes no long-lived creds into the image; this stripping additionally protects the **trusted-dev** `local` runner, where a mounted `~/.aws` can export `AWS_*` into the worker process. A regression test asserts a repo hook sees neither cloud nor sensitive env.
 - **Repo hooks at the `*_apply` stages on tier=prod**: forbidden by default. On a `tier=prod` env, only **platform** hooks execute at `before_apply`/`after_apply`; a repo hook at these stages is ignored with a visible warning (it would run with the prod write role). The `*_init`/`*_plan` repo stages remain allowed (plan role = ReadOnly).
 - `plan.json` available for reading at the `after_plan` stage and beyond.
 - Timeout per hook: 10 min (configurable). Logs in a dedicated section of the viewer.

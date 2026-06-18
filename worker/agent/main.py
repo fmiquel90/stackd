@@ -24,6 +24,44 @@ def _safe_json(raw: str) -> dict:
         return {}
 
 
+# Cloud-credential env families an untrusted repo hook must never see (§8.3). The docker runner
+# bakes none of these in; this also protects the trusted-dev `local` runner where a mounted ~/.aws
+# can export AWS_* into the worker process.
+_CLOUD_ENV_PREFIXES = ("AWS_", "GOOGLE_", "GCLOUD_", "GCP_", "AZURE_", "ARM_")
+
+
+def _repo_environ() -> dict[str, str]:
+    """Base process env for repo hooks, stripped of cloud credentials (§8.3)."""
+    return {k: v for k, v in os.environ.items() if not k.startswith(_CLOUD_ENV_PREFIXES)}
+
+
+def _secret_leak_in_outputs(doc: str, masker: Masker) -> str | None:
+    """Cleartext tripwire (§5.1): a value Stackd treats as sensitive appearing verbatim in a
+    *non-sensitive* output. terraform only redacts outputs the repo marked `sensitive = true`, so a
+    sensitive Stackd variable echoed by an unmarked output leaks. Scans `tofu show -json` (plan) or
+    `tofu output -json` (apply). Returns a masked description, or None."""
+    try:
+        data = json.loads(doc)
+    except (json.JSONDecodeError, ValueError):
+        return None
+    # plan json nests outputs under planned_values.outputs; `output -json` is a flat name→obj map.
+    outputs = (
+        (data.get("planned_values") or {}).get("outputs") if "planned_values" in data else data
+    )
+    if not isinstance(outputs, dict):
+        return None
+    leaked = [
+        name
+        for name, meta in outputs.items()
+        if isinstance(meta, dict)
+        and not meta.get("sensitive")
+        and masker.scan(json.dumps(meta.get("value")))
+    ]
+    if leaked:
+        return f"sensitive value(s) appear in non-sensitive output(s): {', '.join(sorted(leaked))}"
+    return None
+
+
 def _repo_token(job: dict) -> str | None:
     """The HTTPS clone token (repo_auth_kind=token); None for `none`/`deploy_key`."""
     return (job.get("repo_credentials") or {}).get("token")
@@ -134,7 +172,7 @@ def handle_plan(client: ApiClient, job: dict, settings: Settings) -> None:
             **_cloud_env(ws, job),
         }
         repo_env = {
-            **os.environ,
+            **_repo_environ(),
             **job.get("env", {}),
         }  # no secrets / cloud creds to repo hooks (§8.3)
         checks: list[dict] = []
@@ -221,6 +259,19 @@ def handle_plan(client: ApiClient, job: dict, settings: Settings) -> None:
         # Mask the artifact too: plan.json can echo sensitive variable values (§8.3 leak note).
         client.upload_artifact(job_id, "plan.json", masker.mask(plan_doc).encode())
 
+        # Cleartext tripwire (§5.1): the artifact is masked, but a sensitive value surfacing in a
+        # non-sensitive output means the repo didn't mark it `sensitive` — flag (or fail) the run.
+        leak = _secret_leak_in_outputs(plan_doc, masker)
+        if leak:
+            if settings.leak_action == "fail":
+                return client.event(
+                    job_id,
+                    "job_failed",
+                    phase="plan",
+                    result={"error": f"secret_leak_suspected: {leak}"},
+                )
+            checks.append({"name": "secret_leak_suspected", "status": "warn", "detail": leak})
+
         if job.get("hooks", {}).get("after_plan") or ws.load_stackd_yml(cwd).get("after_plan"):
             client.event(job_id, "phase_started", phase="checking")
         results, aborted = run_hooks(
@@ -274,7 +325,7 @@ def handle_apply(client: ApiClient, job: dict, settings: Settings) -> None:
             **job.get("sensitive_env", {}),
             **_cloud_env(ws, job),
         }
-        repo_env = {**os.environ, **job.get("env", {})}
+        repo_env = {**_repo_environ(), **job.get("env", {})}
 
         if (
             run_command(
@@ -315,6 +366,11 @@ def handle_apply(client: ApiClient, job: dict, settings: Settings) -> None:
             [tool, "output", "-json"], cwd=cwd, env=platform_env, capture_output=True, text=True
         )
         client.upload_artifact(job_id, "outputs.json", masker.mask(out.stdout).encode())
+        # Tripwire on apply is warn-only: infra already changed, so failing the job here would
+        # misrepresent a successful apply (§5.1). Surface it as a masked log line.
+        leak = _secret_leak_in_outputs(out.stdout, masker)
+        if leak:
+            streamer.emit("applying", [f"[stackd] secret_leak_suspected: {leak}"])
         outputs = _safe_json(out.stdout) if out.returncode == 0 else {}
         run_hooks(
             hooks.get("after_apply", []),
