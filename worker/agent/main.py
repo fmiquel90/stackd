@@ -544,6 +544,9 @@ def run() -> None:
                 extra={"event": "agent.register_error", "error": str(exc)},
             )
             time.sleep(settings.heartbeat_interval)
+            # Re-read the token: the seed rotates the pool token on a reset (DB wiped → fresh token
+            # written to the shared file), so a token read at boot can be stale → 401.
+            settings = Settings.from_env()
     log.info(
         "registered",
         extra={
