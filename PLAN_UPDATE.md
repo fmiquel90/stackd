@@ -25,6 +25,10 @@ scale (per-stack RBAC, multi-space, observability).
 | H | Observability + API guardrails | P3 | M | L | **shipped** | `PLAN_H_UPDATE.md.done` · `SPECS_H_UPDATE.md.done` (folded into `docs/SPECS.md §20`) |
 | I | Later (registry, run-tasks, SSO, GitHub App) | P3 | L | — | backlog | `PLAN_I_UPDATE.md` (no spec yet) |
 
+**Status: A–H all shipped.** Only the Phase I backlog remains. Two Phase F residuals carried into
+the backlog: audit-event space scoping (needs a `space_id` denormalization migration) and WS
+`run:`/`environment:` subscription scoping (currently leaks existence/timing metadata only).
+
 Effort: S ≈ 1–2 d, M ≈ 3–5 d, L ≈ 1–2 wk (single dev).
 
 ## Recommended sequence

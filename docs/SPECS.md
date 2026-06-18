@@ -66,6 +66,11 @@ Triggering a plan ≠ confirming: any writer+ can **prepare** a plan on any env 
 The "apply everywhere except prod" need depends on the targeted environment, not just on the user. We express it through a **tier** on the environment and a **set of allowed tiers** on the user, rather than through a full policy system (sufficient for the vast majority of orgs; a full OPA-style policy engine remains Phase 7).
 
 > **Per-space RBAC (Phase F).** `users.role`/`allowed_tiers`/`can_destroy` are **instance defaults**. The effective permission is the caller's `space_memberships` row for the resource's space when present (`UNIQUE (space_id, user_id)`; columns `role`, `allowed_tiers text[]`, `can_destroy`). Every list/get/mutate resolves the space from the resource (stack→space, env→stack→space, run→env→…) and requires membership; an **instance admin** reaches every space. List endpoints are filtered to the caller's accessible spaces. `can_apply(user, env, membership)` uses the *effective* role/tiers/can_destroy. A migration backfills one membership per existing user × existing space (no behaviour change); a newly-provisioned user is enrolled into every existing space with their instance defaults. Spaces CRUD + membership management live under `/api/v1/spaces` (create = instance admin; member management = space admin or instance admin). Per-stack grants and the OPA engine stay Phase 7.
+> **Residual (Phase F)**: `GET /api/v1/audit` and the WS `run:`/`environment:` subscriptions remain
+> instance-wide — audit rows carry no `space_id` (proper scoping needs a denormalization migration)
+> and the WS leaks only run/env *existence + phase timing* (no secrets/logs; clients re-read over the
+> guarded REST). Both are tracked for a follow-up; everything that returns config/secret/output data
+> is membership-gated.
 
 > **Set-based, not linear** (evolved from the original MVP design): tiers are a **configurable catalog** (`tiers` table — `name` unique, `requires_four_eyes`, `position`), not a fixed `dev<staging<prod` enum, and a user carries a **set** of allowed tiers, not a single ceiling. This expresses custom tiers (`qa`, `preprod`, `sandbox`) and **non-contiguous** grants (e.g. `dev`+`prod` but not `staging`) that the old linear ceiling could not.
 
