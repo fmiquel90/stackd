@@ -14,10 +14,12 @@ from app.models.run import Run
 from app.models.worker import Worker
 from app.notifications.dispatcher import dispatch_pending
 from app.runs.transition import transition
+from app.vcs.dispatcher import dispatch_vcs
 
 # Distinct advisory-lock keys so each periodic task runs once across replicas (§7.5).
 _LOCK_WORKER_LOST = 74001
 _LOCK_NOTIFY = 74002
+_LOCK_VCS = 74003
 _log = get_logger("stackd.scheduler")
 
 
@@ -95,6 +97,8 @@ async def scheduler_loop() -> None:
                 await _with_lock(session, _LOCK_WORKER_LOST, detect_worker_lost)
             async with SessionLocal() as session:
                 await _with_lock(session, _LOCK_NOTIFY, dispatch_pending)
+            async with SessionLocal() as session:
+                await _with_lock(session, _LOCK_VCS, dispatch_vcs)
         except Exception as exc:
             print(f"[scheduler] tick error: {exc}", flush=True)
         await asyncio.sleep(10)

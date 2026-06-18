@@ -1323,3 +1323,62 @@ own channel and invalidates the `["notifications"]` query on any signal (no payl
 2. Same-txn write (invariant §6.3 spirit): a rolled-back trigger emits no notification (NOTIFY is
    transactional).
 3. The per-user channel is access-scoped to self; the WS payload is a content-free signal (§5.3).
+
+## 18. VCS feedback loop — PR comment + commit status (post-MVP)
+
+> Status: **shipped** (Phase A). Closes the review loop: a PR shows the plan result *in GitHub* — a
+> commit **status** + one PR comment edited in place. **Auth: PAT** (the stack's `repo_secret`), not
+> a GitHub App. A VCS post-back is a side-effect of `transition()`, never a source of truth: a VCS
+> outage leaves the run correct. GitHub App (bot identity + Checks API) is deferred to Phase I.
+
+### 18.1 Model
+
+`runs` (add): `pr_number int?` (the PR that spawned a `proposed` run), `vcs_provider text?`
+(`'github'` — enum-by-string, gitlab/bitbucket later), `vcs_comment_id bigint?` (the posted PR
+comment, for idempotent edit), `vcs_head_sha text?` (PR head commit the status reports against).
+`vcs_outbox` (transactional outbox, same shape as the notification outbox §17/§5): `id`, `run_id`,
+`to_state`, `attempts`, `created_at`, `sent_at?`, partial index `WHERE sent_at IS NULL`.
+
+### 18.2 Auth — PAT
+
+Reuse the stack's `repo_secret` (already used to clone). For post-back it must additionally carry
+**`pull_requests:write` + commit `statuses:write`** (classic `repo`, or a fine-grained PAT with
+those + `contents:read`). No GitHub App, no extra instance config — posts appear as the token's
+user. A `repo_secret` without write scope → post-back fails soft (run unaffected, logged).
+
+### 18.3 Webhook ingestion (`webhooks/router.py`)
+
+On `pull_request` (`opened`/`synchronize`/`reopened`): create the `proposed` run as today **and**
+persist `pr_number`, `vcs_provider='github'`, `vcs_head_sha = pr.head.sha`. On `closed`: best-effort
+`transition()` of the still-in-flight proposed runs for that PR to `canceled` (reason `pr_closed`).
+
+### 18.4 Post-back (`app/vcs/` — transactional outbox)
+
+Enqueued on the run `transition()` in the SAME txn (**no network I/O there** — a rolled-back
+transition never posts); drained by the scheduler dispatcher (`dispatch_vcs`, advisory-locked,
+at-least-once with `attempts` cap). Only runs with `vcs_provider` set post back. A `proposed` run is
+**plan-only and terminal at `finished`** (never `unconfirmed`). Enqueued on `planning`, `finished`,
+`failed`, `canceled`, `discarded` (intermediate states elided to avoid status churn).
+
+- **Commit status** (Status API — PAT-compatible) on `vcs_head_sha`: `planning → pending`;
+  `finished → success`; `failed → failure`; `canceled|discarded → error`.
+  `POST /repos/{o}/{r}/statuses/{sha}` with `{state, target_url=<ui>/runs/{id}, context="stackd/plan",
+  description="+a ~c -d"}`. (The richer **Checks API** is App-only → deferred.)
+- **PR comment**: one comment per run, **edited in place** (`vcs_comment_id`): the `+a ~c -d`
+  summary, a mocks-block-apply note, deep link to `/runs/{id}`. Created on first post
+  (`POST .../issues/{pr}/comments`), updated on later transitions (`PATCH .../issues/comments/{id}`);
+  the returned id is persisted back on the run for idempotent edits.
+- A VCS failure **never** fails the run (logged, retried up to the attempts cap).
+
+### 18.5 API
+
+- `POST /api/v1/webhooks/github` — unchanged contract, now also persists PR metadata.
+- `POST /api/v1/runs/{id}/vcs/resync` (writer) — re-enqueue the post-back for the run's current
+  state (manual recovery).
+
+### 18.6 Invariants preserved
+
+1. Post-back is a side-effect of `transition()`, never a source of truth; a VCS outage leaves the
+   run correct (mirrors §17.4).
+2. Same-txn enqueue (invariant §6.3 spirit): a rolled-back transition enqueues nothing.
+3. Sensitive plan values stay masked in the comment (reuse the artifact masking, §13).

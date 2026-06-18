@@ -14,6 +14,7 @@ from app.errors import ProblemException
 from app.models.environment import Environment
 from app.models.run import Run
 from app.models.run_log import RunLog
+from app.models.vcs import VcsOutbox
 from app.runs.schemas import CommandTriggerIn, LogChunkOut, PromoteIn, RunOut, TriggerRunIn
 from app.runs.service import (
     cancel_run,
@@ -136,6 +137,21 @@ async def discard(run_id: uuid.UUID, user: CurrentUser, session: DbSession) -> R
 )
 async def cancel(run_id: uuid.UUID, user: CurrentUser, session: DbSession) -> Run:
     return await cancel_run(session, await _get_run(session, run_id), user)
+
+
+@router.post(
+    "/runs/{run_id}/vcs/resync",
+    status_code=202,
+    dependencies=[Depends(require_role(Role.writer))],
+)
+async def vcs_resync(run_id: uuid.UUID, _: CurrentUser, session: DbSession) -> dict:
+    """Re-enqueue the VCS post-back for this run's current state (manual recovery, §18)."""
+    run = await _get_run(session, run_id)
+    if not run.vcs_provider:
+        raise ProblemException(400, "Not a VCS run", "This run has no linked pull request.")
+    session.add(VcsOutbox(run_id=run.id, to_state=run.state.value))
+    await session.commit()
+    return {"queued": True}
 
 
 @router.get("/runs/{run_id}/logs", response_model=list[LogChunkOut])

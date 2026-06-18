@@ -15,7 +15,7 @@ scale (per-stack RBAC, multi-space, observability).
 
 | Phase | Theme | Prio | Effort | Risk | Status | Files |
 |---|---|---|---|---|---|---|
-| A | VCS feedback (PR comment + commit status, **PAT**) | P1 | M | M | todo | `PLAN_A_UPDATE.md` · `SPECS_A_UPDATE.md` |
+| A | VCS feedback (PR comment + commit status, **PAT**) | P1 | M | M | **shipped** | `PLAN_A_UPDATE.md.done` · `SPECS_A_UPDATE.md.done` (folded into `docs/SPECS.md §18`) |
 | B | Drift detection | P1 | S–M | L | todo | `PLAN_B_UPDATE.md` · `SPECS_B_UPDATE.md` |
 | C | Security hardening (masking + runner trust) | P1 | M | M | todo | `PLAN_C_UPDATE.md` · `SPECS_C_UPDATE.md` |
 | D | HCL-syntax tfvars | P2 | S | L | todo | `PLAN_D_UPDATE.md` · `SPECS_D_UPDATE.md` |

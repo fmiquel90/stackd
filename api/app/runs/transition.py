@@ -15,6 +15,7 @@ from app.errors import ProblemException
 from app.logging import get_logger
 from app.models.notification import NotificationOutbox
 from app.models.run import Run, RunEvent
+from app.models.vcs import VcsOutbox
 
 _log = get_logger("stackd.runs")
 
@@ -22,6 +23,19 @@ _log = get_logger("stackd.runs")
 # or the run reached a terminal outcome. Per-target filtering happens in the dispatcher.
 NOTIFY_STATES: frozenset[RunState] = frozenset(
     {RunState.unconfirmed, RunState.finished, RunState.failed}
+)
+
+# States that post back to the VCS (Phase A / §18) for a PR-originated run: `planning` → a pending
+# status, then the terminal outcome. Intermediate queued/preparing/checking are elided to avoid
+# status churn. Only enqueued when the run carries `vcs_provider`.
+VCS_POST_STATES: frozenset[RunState] = frozenset(
+    {
+        RunState.planning,
+        RunState.finished,
+        RunState.failed,
+        RunState.canceled,
+        RunState.discarded,
+    }
 )
 
 # Legal state-machine edges (SPECS §4.1). `checking` is skipped when there are no after_plan hooks,
@@ -132,6 +146,10 @@ async def transition(
     # the scheduler drains it after commit, so a rolled-back transition never notifies.
     if to_state in NOTIFY_STATES:
         session.add(NotificationOutbox(run_id=run.id, to_state=to_state.value))
+
+    # VCS post-back outbox (§18): only for PR-originated runs; drained by the scheduler post-commit.
+    if locked.vcs_provider and to_state in VCS_POST_STATES:
+        session.add(VcsOutbox(run_id=run.id, to_state=to_state.value))
 
     # In-app notification center (§17): fan out to approvers / the triggerer, same txn.
     from app.inbox.service import enqueue_for_transition

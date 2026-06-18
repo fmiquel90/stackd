@@ -12,12 +12,14 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.crypto import decrypt
 from app.db import get_session
-from app.enums import RunType, TriggeredBy
+from app.enums import TERMINAL_STATES, RunEventActor, RunState, RunType, TriggeredBy
 from app.errors import ProblemException
 from app.logging import get_logger
 from app.models.environment import Environment
+from app.models.run import Run
 from app.models.stack import Stack
 from app.runs.service import trigger_run
+from app.runs.transition import transition
 
 router = APIRouter(prefix="/api/v1/webhooks", tags=["webhooks"])
 DbSession = Annotated[AsyncSession, Depends(get_session)]
@@ -119,8 +121,10 @@ async def github_webhook(
         await session.commit()
 
     elif x_github_event == "pull_request":
-        if payload.get("action") in ("opened", "synchronize", "reopened"):
-            pr = payload.get("pull_request", {})
+        action = payload.get("action")
+        pr = payload.get("pull_request", {})
+        pr_number = payload.get("number") or pr.get("number")
+        if action in ("opened", "synchronize", "reopened"):
             base_branch = pr.get("base", {}).get("ref")
             head_sha = pr.get("head", {}).get("sha")
             for stack in stacks:
@@ -136,15 +140,48 @@ async def github_webhook(
                     .all()
                 )
                 for env in envs:
-                    # PR → proposed (plan-only) run (§5 / §13).
-                    await trigger_run(
+                    # PR → proposed (plan-only) run (§5 / §13), tagged for VCS post-back (§18).
+                    run = await trigger_run(
                         session,
                         env,
                         run_type=RunType.proposed,
                         triggered_by=TriggeredBy.webhook,
                         commit_sha=head_sha,
                     )
+                    run.pr_number = pr_number
+                    run.vcs_provider = "github"
+                    run.vcs_head_sha = head_sha
                     triggered += 1
+            await session.commit()
+        elif action == "closed" and pr_number is not None:
+            # Best-effort: cancel still-in-flight proposed runs for this PR (§18).
+            stale = (
+                (
+                    await session.execute(
+                        select(Run).where(
+                            Run.pr_number == pr_number,
+                            Run.vcs_provider == "github",
+                            Run.type == RunType.proposed,
+                            Run.state.notin_(TERMINAL_STATES),
+                        )
+                    )
+                )
+                .scalars()
+                .all()
+            )
+            for run in stale:
+                try:
+                    await transition(
+                        session,
+                        run,
+                        RunState.canceled,
+                        actor=RunEventActor.system,
+                        audit_action="run.canceled",
+                        audit_context={"reason": "pr_closed"},
+                    )
+                except ProblemException:
+                    pass  # raced to terminal — fine
+            await session.commit()
 
     _log.info(
         "webhook processed",

@@ -37,6 +37,8 @@ class Settings(BaseSettings):
     # Base URL of the SPA, used to build deep links in outbound notifications. Defaults to the
     # public URL; in dev the front is served separately (http://localhost:5173).
     stackd_app_url: str | None = None
+    # GitHub API base for VCS post-back (§18); override for GitHub Enterprise.
+    stackd_github_api_url: str = "https://api.github.com"
 
     # Object storage
     s3_endpoint_url: str | None = None
