@@ -24,8 +24,12 @@ class ApiClient:
         assert self._worker_token is not None
         return {"Authorization": f"Bearer {self._worker_token}"}
 
-    def heartbeat(self) -> list[dict]:
-        resp = self._http.post("/worker/v1/heartbeat", headers=self._auth())
+    def heartbeat(self, in_flight: int = 0, capacity: int = 1) -> list[dict]:
+        resp = self._http.post(
+            "/worker/v1/heartbeat",
+            headers=self._auth(),
+            json={"in_flight": in_flight, "capacity": capacity},
+        )
         resp.raise_for_status()
         return resp.json().get("commands", [])
 

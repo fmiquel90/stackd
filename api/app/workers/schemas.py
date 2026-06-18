@@ -19,6 +19,13 @@ class RegisterOut(BaseModel):
     worker_token: str
 
 
+class HeartbeatIn(BaseModel):
+    # Reported by the worker (§7, Phase E). in_flight drives busy/idle; capacity is advertised for
+    # the scheduler to reason about (not persisted this phase — no schema change).
+    in_flight: int | None = None
+    capacity: int | None = None
+
+
 class HeartbeatOut(BaseModel):
     commands: list[dict] = []
 

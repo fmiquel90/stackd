@@ -5,6 +5,7 @@ import os
 import subprocess
 import threading
 import time
+from concurrent.futures import ThreadPoolExecutor
 
 from agent.client import ApiClient
 from agent.config import Settings
@@ -458,19 +459,65 @@ def _handle_command(client: ApiClient, cmd: dict, settings: Settings) -> None:
             client.command_result(cmd["id"], {"error": str(exc)}, status="failed")
 
 
-def _heartbeat_loop(client: ApiClient, settings: Settings) -> None:
+class _InFlight:
+    """Thread-safe count of jobs currently executing (§7, Phase E). Drives the heartbeat's
+    busy/idle and bounds the claim loop."""
+
+    def __init__(self) -> None:
+        self._n = 0
+        self._lock = threading.Lock()
+
+    def inc(self) -> None:
+        with self._lock:
+            self._n += 1
+
+    def dec(self) -> None:
+        with self._lock:
+            self._n -= 1
+
+    def count(self) -> int:
+        with self._lock:
+            return self._n
+
+
+def _heartbeat_loop(client: ApiClient, settings: Settings, inflight: _InFlight) -> None:
     """Beat on a fixed cadence, independent of the claim long-poll and of job execution — otherwise
     a blocking claim (poll_wait) or a long plan/apply would starve the heartbeat and the worker would
-    be marked offline while it's actually fine. Downward commands are handled here too."""
+    be marked offline while it's actually fine. Reports in-flight count (→ busy/idle) and capacity.
+    Downward commands are handled here too."""
     while True:
         try:
-            for cmd in client.heartbeat():
+            commands = client.heartbeat(
+                in_flight=inflight.count(), capacity=settings.max_concurrent_jobs
+            )
+            for cmd in commands:
                 _handle_command(client, cmd, settings)
         except Exception as exc:  # noqa: BLE001 — never let a transient API error kill the heartbeat
             log.warning(
                 "heartbeat failed", extra={"event": "agent.heartbeat_error", "error": str(exc)}
             )
         time.sleep(settings.heartbeat_interval)
+
+
+def _run_job(client: ApiClient, job: dict, settings: Settings) -> None:
+    """Execute one claimed job to completion, reporting a job_failed on any uncaught error."""
+    log.info(
+        "claimed job",
+        extra={"event": "agent.claimed", "run_id": job["job_id"], "phase": job["phase"]},
+    )
+    try:
+        if job["phase"] == "plan":
+            handle_plan(client, job, settings)
+        elif job["phase"] == "apply":
+            handle_apply(client, job, settings)
+        else:
+            handle_command_run(client, job, settings)
+        log.info("job done", extra={"event": "agent.done", "run_id": job["job_id"]})
+    except Exception as exc:  # noqa: BLE001 — report and keep polling
+        jid, jphase = job.get("job_id"), job.get("phase")
+        log.exception("job failed", extra={"event": "agent.failed", "run_id": jid})
+        if jid:
+            client.event(jid, "job_failed", phase=jphase, result={"error": str(exc)})
 
 
 def run() -> None:
@@ -494,31 +541,38 @@ def run() -> None:
         },
     )
 
+    inflight = _InFlight()
     # Heartbeat runs on its own daemon thread so neither the claim long-poll nor a long-running job
     # can starve it (fixes the worker flickering offline between claims / during plan & apply).
-    threading.Thread(target=_heartbeat_loop, args=(client, settings), daemon=True).start()
+    threading.Thread(target=_heartbeat_loop, args=(client, settings, inflight), daemon=True).start()
+
+    # Up to max_concurrent_jobs run at once, each on its own thread (§7, Phase E). The semaphore
+    # caps in-flight jobs; the API's SELECT … FOR UPDATE SKIP LOCKED + one-active-run-per-env index
+    # keep concurrent claims safe — concurrency is across *different* environments.
+    pool = ThreadPoolExecutor(max_workers=settings.max_concurrent_jobs)
+    slots = threading.Semaphore(settings.max_concurrent_jobs)
+
+    def _execute(job: dict) -> None:
+        try:
+            _run_job(client, job, settings)
+        finally:
+            inflight.dec()
+            slots.release()
 
     while True:
-        job = client.claim(wait=settings.poll_wait)
-        if job is None:
-            continue
-        log.info(
-            "claimed job",
-            extra={"event": "agent.claimed", "run_id": job["job_id"], "phase": job["phase"]},
-        )
+        slots.acquire()  # block until a slot frees up (serial when max_concurrent_jobs=1)
         try:
-            if job["phase"] == "plan":
-                handle_plan(client, job, settings)
-            elif job["phase"] == "apply":
-                handle_apply(client, job, settings)
-            else:
-                handle_command_run(client, job, settings)
-            log.info("job done", extra={"event": "agent.done", "run_id": job["job_id"]})
-        except Exception as exc:  # noqa: BLE001 — report and keep polling
-            jid, jphase = job.get("job_id"), job.get("phase")
-            log.exception("job failed", extra={"event": "agent.failed", "run_id": jid})
-            if jid:
-                client.event(jid, "job_failed", phase=jphase, result={"error": str(exc)})
+            job = client.claim(wait=settings.poll_wait)
+        except Exception as exc:  # noqa: BLE001 — a transient claim error must not kill the worker
+            log.warning("claim failed", extra={"event": "agent.claim_error", "error": str(exc)})
+            slots.release()
+            time.sleep(settings.heartbeat_interval)
+            continue
+        if job is None:
+            slots.release()
+            continue
+        inflight.inc()
+        pool.submit(_execute, job)
 
 
 if __name__ == "__main__":

@@ -37,6 +37,7 @@ from app.workers.claim import build_job_payload, claim_one
 from app.workers.schemas import (
     CommandResultIn,
     EventIn,
+    HeartbeatIn,
     HeartbeatOut,
     LogIn,
     RegisterIn,
@@ -91,9 +92,16 @@ async def register(body: RegisterIn, request: Request, session: DbSession) -> Re
 
 
 @router.post("/heartbeat", response_model=HeartbeatOut)
-async def heartbeat(worker: CurrentWorker, session: DbSession) -> HeartbeatOut:
+async def heartbeat(
+    worker: CurrentWorker, session: DbSession, body: HeartbeatIn | None = None
+) -> HeartbeatOut:
     worker.last_heartbeat_at = datetime.now(UTC)
-    if worker.status == WorkerStatus.offline:
+    # The worker is authoritative for busy/idle via its reported in-flight count (§7, Phase E): a
+    # multi-job worker stays busy while ≥1 job runs and flips to idle when all finish. A heartbeat
+    # without a body (or count) just means online.
+    if body is not None and body.in_flight is not None:
+        worker.status = WorkerStatus.busy if body.in_flight > 0 else WorkerStatus.idle
+    elif worker.status == WorkerStatus.offline:
         worker.status = WorkerStatus.idle
 
     # Deliver pending downward commands (diagnostics today; cancel_job later) and mark them sent.

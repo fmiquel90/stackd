@@ -14,6 +14,7 @@ class Settings:
     poll_wait: int
     workspace_root: str
     leak_action: str  # "warn" (default) | "fail" — cleartext-tripwire policy (§5.1, Phase C)
+    max_concurrent_jobs: int  # in-flight jobs across environments (§7, Phase E; default 1)
 
     @classmethod
     def from_env(cls) -> "Settings":
@@ -32,4 +33,5 @@ class Settings:
             leak_action="fail"
             if os.environ.get("STACKD_LEAK_TRIPWIRE", "warn") == "fail"
             else "warn",
+            max_concurrent_jobs=max(1, int(os.environ.get("STACKD_MAX_CONCURRENT_JOBS", "1"))),
         )

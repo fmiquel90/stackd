@@ -508,10 +508,12 @@ GET /api/v1/audit/export?format=csv          (admin)
 
 ```
 POST /worker/v1/register   (Bearer pool_token) → worker_id + worker_token
-POST /worker/v1/heartbeat  (20 s) → { "commands": [{"type":"cancel_job", ...}] }
+POST /worker/v1/heartbeat  (20 s) { "in_flight": N, "capacity": M } → { "commands": [{"type":"cancel_job", ...}] }
 ```
 
-Heartbeat = downstream command channel. No incoming connection.
+Heartbeat = downstream command channel. No incoming connection. **In-flight count (Phase E)**: the worker reports the number of jobs it is currently executing; the API sets `status = busy` when it is > 0, `idle` when 0 (the worker is authoritative, which also flips a finished worker back to idle). `capacity` (the worker's `STACKD_MAX_CONCURRENT_JOBS`) is advertised for the scheduler to reason about; not persisted this phase (no schema change). A heartbeat with no body is just a liveness ping.
+
+**Worker concurrency (Phase E).** `STACKD_MAX_CONCURRENT_JOBS` (default `1` = today's serial behaviour) bounds the in-flight jobs a single worker runs at once, each on its own thread (the heartbeat thread is already independent). The claim stays one-run-at-a-time on the wire; the API's `SELECT … FOR UPDATE SKIP LOCKED` (§7.2) and the one-active-run-per-env partial unique index (§3.5) keep concurrent claims safe — **concurrency is across different environments only**. Same-env races are still guarded by the state-backend lock (§11.2).
 
 ### 7.2 Claim (long-poll)
 
