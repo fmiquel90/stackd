@@ -1,4 +1,4 @@
-import type { ReactNode } from "react";
+import { lazy, Suspense, type ReactNode } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Link, NavLink, Navigate, Route, Routes, useLocation } from "react-router-dom";
 import {
@@ -15,16 +15,25 @@ import type { User } from "@/api/types";
 import { useLogout } from "@/auth/session";
 import { SpaceProvider, useSpaces } from "@/app/SpaceContext";
 import { NotificationBell } from "@/components/NotificationBell";
-import { AuditPage } from "@/pages/AuditPage";
-import { GraphPage } from "@/pages/GraphPage";
-import { HealthPage } from "@/pages/HealthPage";
-import { QueuePage } from "@/pages/QueuePage";
-import { RunPage } from "@/pages/RunPage";
-import { SettingsPage } from "@/pages/SettingsPage";
-import { StackDetailPage } from "@/pages/StackDetailPage";
 import { Brand } from "@/components/BrandMark";
-import { StacksPage } from "@/pages/StacksPage";
-import { VariableSetsPage } from "@/pages/VariableSetsPage";
+
+// Route-level code splitting (Phase G): each page is its own chunk, so the heavy /graph stack
+// (@xyflow + dagre) and per-page code load on navigation rather than in the initial bundle.
+const StacksPage = lazy(() => import("@/pages/StacksPage").then((m) => ({ default: m.StacksPage })));
+const StackDetailPage = lazy(() =>
+  import("@/pages/StackDetailPage").then((m) => ({ default: m.StackDetailPage })),
+);
+const RunPage = lazy(() => import("@/pages/RunPage").then((m) => ({ default: m.RunPage })));
+const QueuePage = lazy(() => import("@/pages/QueuePage").then((m) => ({ default: m.QueuePage })));
+const HealthPage = lazy(() => import("@/pages/HealthPage").then((m) => ({ default: m.HealthPage })));
+const AuditPage = lazy(() => import("@/pages/AuditPage").then((m) => ({ default: m.AuditPage })));
+const GraphPage = lazy(() => import("@/pages/GraphPage").then((m) => ({ default: m.GraphPage })));
+const SettingsPage = lazy(() =>
+  import("@/pages/SettingsPage").then((m) => ({ default: m.SettingsPage })),
+);
+const VariableSetsPage = lazy(() =>
+  import("@/pages/VariableSetsPage").then((m) => ({ default: m.VariableSetsPage })),
+);
 
 interface NavItem {
   to: string;
@@ -242,6 +251,16 @@ function AppShellInner({ user }: { user: User }) {
       <div className="flex min-w-0 flex-1 flex-col">
         <TopBar user={user} />
         <main className="mx-auto w-full max-w-[1440px] flex-1 overflow-auto p-6">
+          <Suspense
+            fallback={
+              <p
+                className="font-data text-[12px]"
+                style={{ color: "var(--color-text-secondary)" }}
+              >
+                Loading…
+              </p>
+            }
+          >
           <Routes>
             <Route path="/" element={<Navigate to="/stacks" replace />} />
             <Route path="/stacks" element={<StacksPage />} />
@@ -255,6 +274,7 @@ function AppShellInner({ user }: { user: User }) {
             <Route path="/settings" element={<SettingsPage />} />
             <Route path="*" element={<StacksPage />} />
           </Routes>
+          </Suspense>
         </main>
       </div>
     </div>

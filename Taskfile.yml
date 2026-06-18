@@ -93,8 +93,7 @@ tasks:
     desc: pytest + vitest
     cmds:
       - "{{.COMPOSE}} exec -T api uv run pytest"
-      - cmd: "cd front && pnpm test --run"
-        ignore_error: true
+      - "cd front && pnpm test"
 
   push-change:
     desc: Simulate a merge in demo-network (staleness test)
