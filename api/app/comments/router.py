@@ -16,11 +16,22 @@ from app.enums import Role
 from app.errors import ProblemException
 from app.models.run import Run
 from app.models.run_comment import RunComment
+from app.models.user import User
+from app.spaces import guard_run
 
 router = APIRouter(prefix="/api/v1/runs/{run_id}/comments", tags=["comments"])
 DbSession = Annotated[AsyncSession, Depends(get_session)]
 
 _APPROVERS = {Role.approver, Role.admin}
+
+
+async def _guarded_run(session: AsyncSession, user: User, run_id: uuid.UUID) -> Run:
+    """Load the run and gate on the caller's membership in its space (§6, Phase F)."""
+    run = await session.get(Run, run_id)
+    if run is None:
+        raise ProblemException(404, "Run not found", None)
+    await guard_run(session, user, run)
+    return run
 
 
 async def _publish(session: AsyncSession, run_id: uuid.UUID) -> None:
@@ -39,7 +50,10 @@ async def _get_comment(session: AsyncSession, run_id: uuid.UUID, cid: uuid.UUID)
 
 
 @router.get("", response_model=list[CommentOut])
-async def list_comments(run_id: uuid.UUID, _: CurrentUser, session: DbSession) -> list[CommentOut]:
+async def list_comments(
+    run_id: uuid.UUID, user: CurrentUser, session: DbSession
+) -> list[CommentOut]:
+    await _guarded_run(session, user, run_id)
     rows = (
         (
             await session.execute(
@@ -58,9 +72,7 @@ async def list_comments(run_id: uuid.UUID, _: CurrentUser, session: DbSession) -
 async def create_comment(
     run_id: uuid.UUID, body: CommentCreate, user: CurrentUser, session: DbSession
 ) -> CommentOut:
-    run = await session.get(Run, run_id)
-    if run is None:
-        raise ProblemException(404, "Run not found", None)
+    run = await _guarded_run(session, user, run_id)
     parent_author_id = None
     if body.parent_id is not None:
         parent = await _get_comment(session, run_id, body.parent_id)  # must be on this run
@@ -97,6 +109,7 @@ async def create_comment(
 async def update_comment(
     run_id: uuid.UUID, cid: uuid.UUID, body: CommentUpdate, user: CurrentUser, session: DbSession
 ) -> CommentOut:
+    await _guarded_run(session, user, run_id)
     comment = await _get_comment(session, run_id, cid)
     is_author = comment.author_user_id == user.id
     if body.body is not None:
@@ -123,6 +136,7 @@ async def update_comment(
 async def delete_comment(
     run_id: uuid.UUID, cid: uuid.UUID, user: CurrentUser, session: DbSession
 ) -> None:
+    await _guarded_run(session, user, run_id)
     comment = await _get_comment(session, run_id, cid)
     if comment.author_user_id != user.id and user.role != Role.admin:
         raise ProblemException(403, "Forbidden", "Only the author or an admin can delete.")

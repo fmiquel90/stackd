@@ -15,7 +15,13 @@ from app.db import get_session
 from app.enums import AuditActorKind, RepoAuthKind, Role
 from app.errors import ProblemException
 from app.models.stack import Stack
-from app.spaces import get_default_space
+from app.models.user import User
+from app.spaces import (
+    accessible_space_ids,
+    get_default_space,
+    guard_stack,
+    require_space_access,
+)
 from app.stacks.git import check_repo
 from app.stacks.schemas import CheckRepoResult, StackCreate, StackOut, StackUpdate
 from app.variables.crud import (
@@ -31,10 +37,13 @@ Writer = Depends(require_role(Role.writer))
 DbSession = Annotated[AsyncSession, Depends(get_session)]
 
 
-async def _get_stack(session: AsyncSession, stack_id: uuid.UUID) -> Stack:
+async def _get_stack(
+    session: AsyncSession, user: User, stack_id: uuid.UUID, *, min_role: Role = Role.reader
+) -> Stack:
     stack = await session.get(Stack, stack_id)
     if stack is None:
         raise ProblemException(404, "Stack not found", None)
+    await guard_stack(session, user, stack, min_role=min_role)
     return stack
 
 
@@ -46,8 +55,12 @@ def _client_ctx(request: Request) -> dict:
 
 
 @router.get("", response_model=list[StackOut])
-async def list_stacks(_: CurrentUser, session: DbSession) -> list[StackOut]:
-    rows = (await session.execute(select(Stack).order_by(Stack.name))).scalars().all()
+async def list_stacks(user: CurrentUser, session: DbSession) -> list[StackOut]:
+    q = select(Stack).order_by(Stack.name)
+    ids = await accessible_space_ids(session, user)  # None = instance admin (all spaces)
+    if ids is not None:
+        q = q.where(Stack.space_id.in_(ids))
+    rows = (await session.execute(q)).scalars().all()
     return [StackOut.of(s) for s in rows]
 
 
@@ -55,9 +68,12 @@ async def list_stacks(_: CurrentUser, session: DbSession) -> list[StackOut]:
 async def create_stack(
     body: StackCreate, user: CurrentUser, session: DbSession, request: Request
 ) -> StackOut:
-    space = await get_default_space(session)
+    # Target space: explicit space_id, else the default space (bootstrap fallback). Access is
+    # membership-gated either way (§6, Phase F) — writer+ required to create.
+    space_id = body.space_id or (await get_default_space(session)).id
+    await require_space_access(session, user, space_id, min_role=Role.writer)
     stack = Stack(
-        space_id=space.id,
+        space_id=space_id,
         name=body.name,
         description=body.description,
         repo_url=body.repo_url,
@@ -92,15 +108,15 @@ async def create_stack(
 
 
 @router.get("/{stack_id}", response_model=StackOut)
-async def get_stack(stack_id: uuid.UUID, _: CurrentUser, session: DbSession) -> StackOut:
-    return StackOut.of(await _get_stack(session, stack_id))
+async def get_stack(stack_id: uuid.UUID, user: CurrentUser, session: DbSession) -> StackOut:
+    return StackOut.of(await _get_stack(session, user, stack_id))
 
 
 @router.patch("/{stack_id}", response_model=StackOut, dependencies=[Writer])
 async def update_stack(
     stack_id: uuid.UUID, body: StackUpdate, user: CurrentUser, session: DbSession
 ) -> StackOut:
-    stack = await _get_stack(session, stack_id)
+    stack = await _get_stack(session, user, stack_id, min_role=Role.writer)
     changes = body.model_dump(exclude_unset=True)
     secret = changes.pop("repo_secret", None)
     webhook_secret = changes.pop("webhook_secret", None)
@@ -127,7 +143,7 @@ async def update_stack(
 
 @router.delete("/{stack_id}", status_code=204, dependencies=[Writer])
 async def delete_stack(stack_id: uuid.UUID, user: CurrentUser, session: DbSession) -> None:
-    stack = await _get_stack(session, stack_id)
+    stack = await _get_stack(session, user, stack_id, min_role=Role.writer)
     name = stack.name
     await session.delete(stack)
     await record_audit(
@@ -145,11 +161,11 @@ async def delete_stack(stack_id: uuid.UUID, user: CurrentUser, session: DbSessio
 
 @router.post("/{stack_id}/check-repo", response_model=CheckRepoResult, dependencies=[Writer])
 async def check_stack_repo(
-    stack_id: uuid.UUID, _: CurrentUser, session: DbSession
+    stack_id: uuid.UUID, user: CurrentUser, session: DbSession
 ) -> CheckRepoResult:
     from app.crypto import decrypt
 
-    stack = await _get_stack(session, stack_id)
+    stack = await _get_stack(session, user, stack_id, min_role=Role.writer)
     secret = decrypt(stack.repo_secret_encrypted) if stack.repo_secret_encrypted else None
     ok, branches, detail = await check_repo(stack.repo_url, stack.repo_auth_kind, secret)
     return CheckRepoResult(ok=ok, branches=branches, detail=detail)
@@ -160,9 +176,9 @@ async def check_stack_repo(
 
 @router.get("/{stack_id}/variables", response_model=list[VariableOut])
 async def list_stack_variables(
-    stack_id: uuid.UUID, _: CurrentUser, session: DbSession
+    stack_id: uuid.UUID, user: CurrentUser, session: DbSession
 ) -> list[VariableOut]:
-    await _get_stack(session, stack_id)
+    await _get_stack(session, user, stack_id)
     return [VariableOut.of(v) for v in await variables_for(session, stack_id=stack_id)]
 
 
@@ -172,7 +188,7 @@ async def list_stack_variables(
 async def create_stack_variable(
     stack_id: uuid.UUID, body: VariableCreate, user: CurrentUser, session: DbSession
 ) -> VariableOut:
-    await _get_stack(session, stack_id)
+    await _get_stack(session, user, stack_id, min_role=Role.writer)
     var = await create_variable(session, body, stack_id=stack_id)
     await record_audit(
         session,
@@ -202,6 +218,7 @@ async def update_stack_variable(
     user: CurrentUser,
     session: DbSession,
 ) -> VariableOut:
+    await _get_stack(session, user, stack_id, min_role=Role.writer)
     var = await get_variable(session, var_id)
     if var.stack_id != stack_id or var.environment_id is not None:
         raise ProblemException(404, "Variable not found", None)
@@ -225,6 +242,7 @@ async def update_stack_variable(
 async def delete_stack_variable(
     stack_id: uuid.UUID, var_id: uuid.UUID, user: CurrentUser, session: DbSession
 ) -> None:
+    await _get_stack(session, user, stack_id, min_role=Role.writer)
     var = await get_variable(session, var_id)
     if var.stack_id != stack_id or var.environment_id is not None:
         raise ProblemException(404, "Variable not found", None)

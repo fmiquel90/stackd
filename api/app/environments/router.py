@@ -20,6 +20,8 @@ from app.errors import ProblemException
 from app.models.environment import Environment
 from app.models.stack import Stack
 from app.models.tier import Tier
+from app.models.user import User
+from app.spaces import guard_env, require_space_access
 from app.stacks.git import clone_shallow, ls_remote_sha
 from app.variables.crud import create_variable, get_variable, update_variable, variables_for
 from app.variables.discovery import parse_inputs, placeholder
@@ -36,11 +38,24 @@ Writer = Depends(require_role(Role.writer))
 DbSession = Annotated[AsyncSession, Depends(get_session)]
 
 
-async def _get_env(session: AsyncSession, env_id: uuid.UUID) -> Environment:
+async def _get_env(
+    session: AsyncSession, user: User, env_id: uuid.UUID, *, min_role: Role = Role.reader
+) -> Environment:
     env = await session.get(Environment, env_id)
     if env is None:
         raise ProblemException(404, "Environment not found", None)
+    await guard_env(session, user, env, min_role=min_role)
     return env
+
+
+async def _guard_stack_id(
+    session: AsyncSession, user: User, stack_id: uuid.UUID, *, min_role: Role = Role.reader
+) -> Stack:
+    stack = await session.get(Stack, stack_id)
+    if stack is None:
+        raise ProblemException(404, "Stack not found", None)
+    await require_space_access(session, user, stack.space_id, min_role=min_role)
+    return stack
 
 
 def _env_audit_ctx(env: Environment) -> dict:
@@ -55,8 +70,9 @@ async def _require_tier(session: AsyncSession, name: str) -> None:
 
 @router.get("/stacks/{stack_id}/environments", response_model=list[EnvironmentOut])
 async def list_environments(
-    stack_id: uuid.UUID, _: CurrentUser, session: DbSession
+    stack_id: uuid.UUID, user: CurrentUser, session: DbSession
 ) -> list[EnvironmentOut]:
+    await _guard_stack_id(session, user, stack_id)
     rows = (
         (
             await session.execute(
@@ -80,8 +96,7 @@ async def list_environments(
 async def create_environment(
     stack_id: uuid.UUID, body: EnvironmentCreate, user: CurrentUser, session: DbSession
 ) -> EnvironmentOut:
-    if (await session.get(Stack, stack_id)) is None:
-        raise ProblemException(404, "Stack not found", None)
+    await _guard_stack_id(session, user, stack_id, min_role=Role.writer)
     await _require_tier(session, body.tier)
     env = Environment(stack_id=stack_id, **body.model_dump())
     if env.protected:
@@ -109,15 +124,17 @@ async def create_environment(
 
 
 @router.get("/environments/{env_id}", response_model=EnvironmentOut)
-async def get_environment(env_id: uuid.UUID, _: CurrentUser, session: DbSession) -> EnvironmentOut:
-    return EnvironmentOut.of(await _get_env(session, env_id))
+async def get_environment(
+    env_id: uuid.UUID, user: CurrentUser, session: DbSession
+) -> EnvironmentOut:
+    return EnvironmentOut.of(await _get_env(session, user, env_id))
 
 
 @router.patch("/environments/{env_id}", response_model=EnvironmentOut, dependencies=[Writer])
 async def update_environment(
     env_id: uuid.UUID, body: EnvironmentUpdate, user: CurrentUser, session: DbSession
 ) -> EnvironmentOut:
-    env = await _get_env(session, env_id)
+    env = await _get_env(session, user, env_id, min_role=Role.writer)
     changes = body.model_dump(exclude_unset=True)
     if "tier" in changes:
         await _require_tier(session, changes["tier"])
@@ -142,7 +159,7 @@ async def update_environment(
 
 @router.delete("/environments/{env_id}", status_code=204, dependencies=[Writer])
 async def delete_environment(env_id: uuid.UUID, user: CurrentUser, session: DbSession) -> None:
-    env = await _get_env(session, env_id)
+    env = await _get_env(session, user, env_id, min_role=Role.writer)
     ctx = _env_audit_ctx(env)
     await session.delete(env)
     await record_audit(
@@ -161,8 +178,8 @@ async def delete_environment(env_id: uuid.UUID, user: CurrentUser, session: DbSe
 @router.post(
     "/environments/{env_id}/refresh-head", response_model=EnvironmentOut, dependencies=[Writer]
 )
-async def refresh_head(env_id: uuid.UUID, _: CurrentUser, session: DbSession) -> EnvironmentOut:
-    env = await _get_env(session, env_id)
+async def refresh_head(env_id: uuid.UUID, user: CurrentUser, session: DbSession) -> EnvironmentOut:
+    env = await _get_env(session, user, env_id, min_role=Role.writer)
     stack = await session.get(Stack, env.stack_id)
     assert stack is not None
     from app.crypto import decrypt
@@ -183,9 +200,9 @@ async def refresh_head(env_id: uuid.UUID, _: CurrentUser, session: DbSession) ->
 
 @router.get("/environments/{env_id}/variables", response_model=list[VariableOut])
 async def list_env_variables(
-    env_id: uuid.UUID, _: CurrentUser, session: DbSession
+    env_id: uuid.UUID, user: CurrentUser, session: DbSession
 ) -> list[VariableOut]:
-    await _get_env(session, env_id)
+    await _get_env(session, user, env_id)
     return [VariableOut.of(v) for v in await variables_for(session, environment_id=env_id)]
 
 
@@ -198,7 +215,7 @@ async def list_env_variables(
 async def create_env_variable(
     env_id: uuid.UUID, body: VariableCreate, user: CurrentUser, session: DbSession
 ) -> VariableOut:
-    env = await _get_env(session, env_id)
+    env = await _get_env(session, user, env_id, min_role=Role.writer)
     var = await create_variable(session, body, stack_id=env.stack_id, environment_id=env.id)
     await record_audit(
         session,
@@ -230,6 +247,7 @@ async def update_env_variable(
     user: CurrentUser,
     session: DbSession,
 ) -> VariableOut:
+    await _get_env(session, user, env_id, min_role=Role.writer)
     var = await get_variable(session, var_id)
     if var.environment_id != env_id:
         raise ProblemException(404, "Variable not found", None)
@@ -258,6 +276,7 @@ async def update_env_variable(
 async def delete_env_variable(
     env_id: uuid.UUID, var_id: uuid.UUID, user: CurrentUser, session: DbSession
 ) -> None:
+    await _get_env(session, user, env_id, min_role=Role.writer)
     var = await get_variable(session, var_id)
     if var.environment_id != env_id:
         raise ProblemException(404, "Variable not found", None)
@@ -278,9 +297,9 @@ async def delete_env_variable(
 
 @router.get("/environments/{env_id}/resolved-variables", response_model=list[ResolvedVariableOut])
 async def resolved_variables(
-    env_id: uuid.UUID, _: CurrentUser, session: DbSession
+    env_id: uuid.UUID, user: CurrentUser, session: DbSession
 ) -> list[ResolvedVariableOut]:
-    env = await _get_env(session, env_id)
+    env = await _get_env(session, user, env_id)
     resolved = await resolve_variables(session, env)
     return [ResolvedVariableOut.of(rv) for rv in resolved]
 
@@ -289,7 +308,7 @@ async def resolved_variables(
 async def discover_inputs(env_id: uuid.UUID, user: CurrentUser, session: DbSession) -> dict:
     """Introspect the repo (shallow clone + HCL parse, no terraform run) and create the REQUIRED
     root-module inputs that aren't already resolved, as env variables with empty placeholders."""
-    env = await _get_env(session, env_id)
+    env = await _get_env(session, user, env_id, min_role=Role.writer)
     stack = await session.get(Stack, env.stack_id)
     assert stack is not None
     secret = decrypt(stack.repo_secret_encrypted) if stack.repo_secret_encrypted else None

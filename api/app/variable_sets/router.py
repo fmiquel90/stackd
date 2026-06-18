@@ -16,8 +16,13 @@ from app.errors import ProblemException
 from app.models.environment import Environment
 from app.models.stack import Stack
 from app.models.tier import Tier
+from app.models.user import User
 from app.models.variable_set import VariableSet, VariableSetAttachment
-from app.spaces import get_default_space
+from app.spaces import (
+    accessible_space_ids,
+    get_default_space,
+    require_space_access,
+)
 from app.variable_sets.schemas import (
     AttachmentCreate,
     AttachmentOut,
@@ -33,24 +38,31 @@ Writer = Depends(require_role(Role.writer))
 DbSession = Annotated[AsyncSession, Depends(get_session)]
 
 
-async def _get_set(session: AsyncSession, set_id: uuid.UUID) -> VariableSet:
+async def _get_set(
+    session: AsyncSession, user: User, set_id: uuid.UUID, *, min_role: Role = Role.reader
+) -> VariableSet:
     vset = await session.get(VariableSet, set_id)
     if vset is None:
         raise ProblemException(404, "Variable set not found", None)
+    await require_space_access(session, user, vset.space_id, min_role=min_role)
     return vset
 
 
 @router.get("", response_model=list[VariableSetOut])
-async def list_sets(_: CurrentUser, session: DbSession) -> list[VariableSet]:
-    return list(
-        (await session.execute(select(VariableSet).order_by(VariableSet.name))).scalars().all()
-    )
+async def list_sets(user: CurrentUser, session: DbSession) -> list[VariableSet]:
+    q = select(VariableSet).order_by(VariableSet.name)
+    ids = await accessible_space_ids(session, user)
+    if ids is not None:
+        q = q.where(VariableSet.space_id.in_(ids))
+    return list((await session.execute(q)).scalars().all())
 
 
 @router.post("", response_model=VariableSetOut, status_code=201, dependencies=[Writer])
 async def create_set(body: VariableSetCreate, user: CurrentUser, session: DbSession) -> VariableSet:
-    space = await get_default_space(session)
-    vset = VariableSet(space_id=space.id, **body.model_dump())
+    payload = body.model_dump()
+    space_id = payload.pop("space_id", None) or (await get_default_space(session)).id
+    await require_space_access(session, user, space_id, min_role=Role.writer)
+    vset = VariableSet(space_id=space_id, **payload)
     session.add(vset)
     try:
         await session.flush()
@@ -74,15 +86,15 @@ async def create_set(body: VariableSetCreate, user: CurrentUser, session: DbSess
 
 
 @router.get("/{set_id}", response_model=VariableSetOut)
-async def get_set(set_id: uuid.UUID, _: CurrentUser, session: DbSession) -> VariableSet:
-    return await _get_set(session, set_id)
+async def get_set(set_id: uuid.UUID, user: CurrentUser, session: DbSession) -> VariableSet:
+    return await _get_set(session, user, set_id)
 
 
 @router.patch("/{set_id}", response_model=VariableSetOut, dependencies=[Writer])
 async def update_set(
     set_id: uuid.UUID, body: VariableSetUpdate, user: CurrentUser, session: DbSession
 ) -> VariableSet:
-    vset = await _get_set(session, set_id)
+    vset = await _get_set(session, user, set_id, min_role=Role.writer)
     changes = body.model_dump(exclude_unset=True)
     for field, value in changes.items():
         setattr(vset, field, value)
@@ -103,7 +115,7 @@ async def update_set(
 
 @router.delete("/{set_id}", status_code=204, dependencies=[Writer])
 async def delete_set(set_id: uuid.UUID, user: CurrentUser, session: DbSession) -> None:
-    vset = await _get_set(session, set_id)
+    vset = await _get_set(session, user, set_id, min_role=Role.writer)
     attachments = (
         (
             await session.execute(
@@ -145,9 +157,9 @@ async def delete_set(set_id: uuid.UUID, user: CurrentUser, session: DbSession) -
 
 @router.get("/{set_id}/variables", response_model=list[VariableOut])
 async def list_set_variables(
-    set_id: uuid.UUID, _: CurrentUser, session: DbSession
+    set_id: uuid.UUID, user: CurrentUser, session: DbSession
 ) -> list[VariableOut]:
-    await _get_set(session, set_id)
+    await _get_set(session, user, set_id)
     return [VariableOut.of(v) for v in await variables_for(session, variable_set_id=set_id)]
 
 
@@ -157,7 +169,7 @@ async def list_set_variables(
 async def create_set_variable(
     set_id: uuid.UUID, body: VariableCreate, user: CurrentUser, session: DbSession
 ) -> VariableOut:
-    await _get_set(session, set_id)
+    await _get_set(session, user, set_id, min_role=Role.writer)
     var = await create_variable(session, body, variable_set_id=set_id)
     await record_audit(
         session,
@@ -233,9 +245,9 @@ async def delete_set_variable(
 
 @router.get("/{set_id}/attachments", response_model=list[AttachmentOut])
 async def list_attachments(
-    set_id: uuid.UUID, _: CurrentUser, session: DbSession
+    set_id: uuid.UUID, user: CurrentUser, session: DbSession
 ) -> list[VariableSetAttachment]:
-    await _get_set(session, set_id)
+    await _get_set(session, user, set_id)
     return list(
         (
             await session.execute(
@@ -253,7 +265,7 @@ async def list_attachments(
 async def attach(
     set_id: uuid.UUID, body: AttachmentCreate, user: CurrentUser, session: DbSession
 ) -> VariableSetAttachment:
-    await _get_set(session, set_id)
+    await _get_set(session, user, set_id, min_role=Role.writer)
     target_model = {
         AttachmentTarget.stack: Stack,
         AttachmentTarget.environment: Environment,
@@ -297,6 +309,7 @@ async def attach(
 async def detach(
     set_id: uuid.UUID, attachment_id: uuid.UUID, user: CurrentUser, session: DbSession
 ) -> None:
+    await _get_set(session, user, set_id, min_role=Role.writer)
     attachment = await session.get(VariableSetAttachment, attachment_id)
     if attachment is None or attachment.variable_set_id != set_id:
         raise ProblemException(404, "Attachment not found", None)

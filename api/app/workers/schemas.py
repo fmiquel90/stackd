@@ -50,6 +50,7 @@ class LogIn(BaseModel):
 
 
 class PoolCreate(BaseModel):
+    space_id: uuid.UUID | None = None  # target space (§6); defaults to the bootstrap space
     name: str
     labels: dict | None = None
 

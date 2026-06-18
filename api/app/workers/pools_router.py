@@ -17,7 +17,7 @@ from app.models.run import Run
 from app.models.worker import Worker, WorkerPool
 from app.models.worker_command import WorkerCommand
 from app.security import hash_token
-from app.spaces import get_default_space
+from app.spaces import get_default_space, require_space_access
 from app.workers.schemas import (
     PoolCreate,
     PoolCreated,
@@ -33,10 +33,11 @@ Admin = Depends(require_role(Role.admin))
 
 @router.post("/worker-pools", response_model=PoolCreated, status_code=201, dependencies=[Admin])
 async def create_pool(body: PoolCreate, user: CurrentUser, session: DbSession) -> PoolCreated:
-    space = await get_default_space(session)
+    space_id = body.space_id or (await get_default_space(session)).id
+    await require_space_access(session, user, space_id, min_role=Role.admin)
     token = secrets.token_urlsafe(32)
     pool = WorkerPool(
-        space_id=space.id, name=body.name, labels=body.labels, token_hash=hash_token(token)
+        space_id=space_id, name=body.name, labels=body.labels, token_hash=hash_token(token)
     )
     session.add(pool)
     await session.flush()

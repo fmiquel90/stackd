@@ -13,6 +13,7 @@ import {
 import { environments, observability, runs, stacks } from "@/api/resources";
 import type { User } from "@/api/types";
 import { useLogout } from "@/auth/session";
+import { SpaceProvider, useSpaces } from "@/app/SpaceContext";
 import { NotificationBell } from "@/components/NotificationBell";
 import { AuditPage } from "@/pages/AuditPage";
 import { GraphPage } from "@/pages/GraphPage";
@@ -86,6 +87,7 @@ function Crumb({ children }: { children: ReactNode }) {
 // run's real lineage instead — stack / env are the meaningful (and navigable) parents. Reuses the
 // same query keys as RunPage, so it reads from cache with no extra request.
 function RunBreadcrumb({ runId }: { runId: string }) {
+  const { current } = useSpaces();
   const run = useQuery({ queryKey: ["run", runId], queryFn: () => runs.get(runId) });
   const env = useQuery({
     queryKey: ["environment", run.data?.environment_id],
@@ -101,7 +103,7 @@ function RunBreadcrumb({ runId }: { runId: string }) {
   return (
     <div className="font-data flex items-center gap-1.5 text-[12px]" style={{ color: "var(--color-text-secondary)" }}>
       <Link to="/stacks" style={{ color: "var(--color-text-secondary)" }}>
-        default
+        {current?.name ?? "default"}
       </Link>
       <Crumb>
         {stack.data ? (
@@ -128,12 +130,13 @@ function RunBreadcrumb({ runId }: { runId: string }) {
 
 function Breadcrumb() {
   const { pathname } = useLocation();
+  const { current } = useSpaces();
   const segments = pathname.split("/").filter(Boolean);
   if (segments[0] === "runs" && segments[1]) return <RunBreadcrumb runId={segments[1]} />;
   return (
     <div className="font-data flex items-center gap-1.5 text-[12px]" style={{ color: "var(--color-text-secondary)" }}>
       <Link to="/stacks" style={{ color: "var(--color-text-secondary)" }}>
-        default
+        {current?.name ?? "default"}
       </Link>
       {segments.map((s, i) => {
         const path = "/" + segments.slice(0, i + 1).join("/");
@@ -175,6 +178,27 @@ function HealthDot() {
   );
 }
 
+// Space switcher (§6, Phase F). Hidden when the user can reach a single space — no choice to make.
+function SpaceSwitcher() {
+  const { list, current, setCurrentId } = useSpaces();
+  if (list.length <= 1) return null;
+  return (
+    <select
+      aria-label="Active space"
+      value={current?.id ?? ""}
+      onChange={(e) => setCurrentId(e.target.value)}
+      className="font-data rounded-base px-2 py-1 text-[12px]"
+      style={{ border: "1px solid var(--color-border)", backgroundColor: "var(--color-bg-raised)", color: "var(--color-text-primary)" }}
+    >
+      {list.map((s) => (
+        <option key={s.id} value={s.id}>
+          {s.name}
+        </option>
+      ))}
+    </select>
+  );
+}
+
 function TopBar({ user }: { user: User }) {
   const logout = useLogout();
   return (
@@ -184,6 +208,7 @@ function TopBar({ user }: { user: User }) {
     >
       <Breadcrumb />
       <div className="flex items-center gap-3">
+        <SpaceSwitcher />
         <HealthDot />
         <NotificationBell userId={user.id} />
         <span className="font-data text-[12px]" style={{ color: "var(--color-text-secondary)" }}>
@@ -203,6 +228,14 @@ function TopBar({ user }: { user: User }) {
 }
 
 export function AppShell({ user }: { user: User }) {
+  return (
+    <SpaceProvider>
+      <AppShellInner user={user} />
+    </SpaceProvider>
+  );
+}
+
+function AppShellInner({ user }: { user: User }) {
   return (
     <div className="flex h-full">
       <NavRail />

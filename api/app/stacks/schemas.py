@@ -10,6 +10,7 @@ from app.models.stack import Stack
 
 
 class StackCreate(BaseModel):
+    space_id: uuid.UUID | None = None  # target space (§6); defaults to the bootstrap space
     name: str
     description: str | None = None
     repo_url: str

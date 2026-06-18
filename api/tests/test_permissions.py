@@ -1,7 +1,10 @@
 from __future__ import annotations
 
+import uuid
+
 from app.enums import Role
 from app.models.environment import Environment
+from app.models.space_membership import SpaceMembership
 from app.models.user import User
 from app.permissions import can_apply
 
@@ -12,6 +15,16 @@ def _user(role: Role, allowed_tiers: list[str], can_destroy: bool = False) -> Us
         email="x@dev.local",
         role=role,
         allowed_tiers=allowed_tiers,
+        can_destroy=can_destroy,
+    )
+
+
+def _membership(role: Role, tiers: list[str], can_destroy: bool = False) -> SpaceMembership:
+    return SpaceMembership(
+        space_id=uuid.uuid4(),
+        user_id=uuid.uuid4(),
+        role=role,
+        allowed_tiers=tiers,
         can_destroy=can_destroy,
     )
 
@@ -45,6 +58,28 @@ def test_no_tiers_cannot_apply() -> None:
 
 def test_custom_tier() -> None:
     assert can_apply(_user(Role.approver, ["qa"]), _env("qa")).allowed
+
+
+def test_membership_overrides_instance_tiers() -> None:
+    # Instance defaults allow everything; the space membership narrows to dev only (§6, Phase F).
+    user = _user(Role.admin, ["dev", "staging", "prod"], can_destroy=True)
+    space = _membership(Role.approver, ["dev"])
+    assert can_apply(user, _env("dev"), space).allowed
+    refused = can_apply(user, _env("prod"), space)
+    assert not refused.allowed and "prod" in refused.reason
+
+
+def test_membership_role_can_downgrade() -> None:
+    # A reader membership cannot confirm even if the instance role is admin.
+    user = _user(Role.admin, ["prod"], can_destroy=True)
+    d = can_apply(user, _env("prod"), _membership(Role.reader, ["prod"]))
+    assert not d.allowed and "approver" in d.reason
+
+
+def test_membership_can_destroy_overrides_instance() -> None:
+    user = _user(Role.admin, ["prod"], can_destroy=True)  # instance allows destroy
+    space = _membership(Role.approver, ["prod"], can_destroy=False)  # space forbids it
+    assert not can_apply(user, _env("prod"), space, is_destroy=True).allowed
 
 
 def test_destroy_requires_can_destroy() -> None:

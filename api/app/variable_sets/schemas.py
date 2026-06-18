@@ -9,6 +9,7 @@ from app.enums import AttachmentTarget
 
 
 class VariableSetCreate(BaseModel):
+    space_id: uuid.UUID | None = None  # target space (§6); defaults to the bootstrap space
     name: str
     description: str | None = None
     auto_attach: bool = False

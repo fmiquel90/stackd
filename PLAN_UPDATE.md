@@ -20,7 +20,7 @@ scale (per-stack RBAC, multi-space, observability).
 | C | Security hardening (masking + runner trust) | P1 | M | M | **shipped** | `PLAN_C_UPDATE.md.done` · `SPECS_C_UPDATE.md.done` (folded into `docs/SPECS.md §5.1/§7.4/§8.3`) |
 | D | HCL-syntax tfvars | P2 | S | L | **shipped** | `PLAN_D_UPDATE.md.done` · `SPECS_D_UPDATE.md.done` (folded into `docs/SPECS.md §3.4`) |
 | E | Worker concurrency | P2 | M | M | **shipped** | `PLAN_E_UPDATE.md.done` · `SPECS_E_UPDATE.md.done` (folded into `docs/SPECS.md §7.1`) |
-| F | RBAC granularity + multi-space | P2 | L | M | todo | `PLAN_F_UPDATE.md` · `SPECS_F_UPDATE.md` |
+| F | RBAC granularity + multi-space | P2 | L | M | **shipped** | `PLAN_F_UPDATE.md.done` · `SPECS_F_UPDATE.md.done` (folded into `docs/SPECS.md §2.4`; per-space only, per-stack deferred) |
 | G | Front: splitting + tests | P2 | S–M | L | todo | `PLAN_G_UPDATE.md` · `SPECS_G_UPDATE.md` |
 | H | Observability + API guardrails | P3 | M | L | todo | `PLAN_H_UPDATE.md` · `SPECS_H_UPDATE.md` |
 | I | Later (registry, run-tasks, SSO, GitHub App) | P3 | L | — | backlog | `PLAN_I_UPDATE.md` (no spec yet) |
@@ -44,7 +44,9 @@ H     ongoing / before any real prod exposure
 - **Resolved — Phase A: one comment edited in place** (not append).
 - **Resolved — Phase C**: cleartext tripwire = **warn by default**, configurable to hard-fail via
   `STACKD_LEAK_TRIPWIRE=fail` (fail aborts on plan only; apply is always warn-only post-change).
-- **Open — Phase F**: per-stack grants now, or per-space only (per-stack later).
+- **Resolved — Phase F: per-space only** (per-stack grants deferred). An instance admin is a
+  cross-space superuser; everyone else is gated by `space_memberships`. Onboarding (new user → all
+  current spaces) preserves the pre-multi-space behaviour; tighter invite flows are future work.
 
 ## Cross-cutting rules
 - A migration per schema change (never edit a merged one); `task e2e` green when a phase touches

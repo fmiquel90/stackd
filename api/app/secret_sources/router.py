@@ -16,6 +16,7 @@ from app.errors import ProblemException
 from app.models.secret_source import SecretSource
 from app.models.space import Space
 from app.secret_sources.schemas import SecretSourceCreate, SecretSourceOut, SecretSourceUpdate
+from app.spaces import require_space_access
 
 router = APIRouter(prefix="/api/v1/spaces", tags=["secret-sources"])
 DbSession = Annotated[AsyncSession, Depends(get_session)]
@@ -33,8 +34,9 @@ async def _get_source(
 
 @router.get("/{space_id}/secret-sources", response_model=list[SecretSourceOut])
 async def list_sources(
-    space_id: uuid.UUID, _: CurrentUser, session: DbSession
+    space_id: uuid.UUID, user: CurrentUser, session: DbSession
 ) -> list[SecretSourceOut]:
+    await require_space_access(session, user, space_id)
     rows = (
         (
             await session.execute(

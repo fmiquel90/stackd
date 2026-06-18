@@ -4,10 +4,12 @@ import { Link } from "react-router-dom";
 import { ApiError } from "@/api/client";
 import { stacks, type NewStack } from "@/api/resources";
 import type { Tool } from "@/api/types";
+import { useSpaces } from "@/app/SpaceContext";
 import { Button, Card, Field, PageTitle, Select, TextInput } from "@/components/ui";
 
 function CreateStackForm({ onDone }: { onDone: () => void }) {
   const qc = useQueryClient();
+  const { current } = useSpaces();
   const [form, setForm] = useState<NewStack>({
     name: "",
     repo_url: "",
@@ -15,7 +17,8 @@ function CreateStackForm({ onDone }: { onDone: () => void }) {
     tool_version: "1.12.0",
   });
   const create = useMutation({
-    mutationFn: () => stacks.create(form),
+    // Create in the active space (§6, Phase F); the server defaults to the bootstrap space if unset.
+    mutationFn: () => stacks.create({ ...form, space_id: current?.id }),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["stacks"] });
       onDone();
@@ -73,7 +76,10 @@ function CreateStackForm({ onDone }: { onDone: () => void }) {
 
 export function StacksPage() {
   const [creating, setCreating] = useState(false);
-  const { data: list, isLoading } = useQuery({ queryKey: ["stacks"], queryFn: stacks.list });
+  const { current } = useSpaces();
+  const { data: all, isLoading } = useQuery({ queryKey: ["stacks"], queryFn: stacks.list });
+  // The server already returns only reachable stacks; narrow to the active space when one is chosen.
+  const list = current ? all?.filter((s) => s.space_id === current.id) : all;
 
   return (
     <div>

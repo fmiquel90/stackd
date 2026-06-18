@@ -44,6 +44,22 @@ export type RepoAuthKind = "none" | "token" | "deploy_key";
 export type Tool = "opentofu" | "terraform";
 export type VariableKind = "terraform" | "environment";
 
+export interface Space {
+  id: string;
+  name: string;
+  description: string | null;
+  created_at: string;
+}
+
+export interface SpaceMember {
+  user_id: string;
+  email: string;
+  display_name: string | null;
+  role: Role;
+  allowed_tiers: string[];
+  can_destroy: boolean;
+}
+
 export interface Stack {
   id: string;
   space_id: string;

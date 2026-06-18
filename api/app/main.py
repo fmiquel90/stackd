@@ -25,6 +25,7 @@ from app.observability.router import router as observability_router
 from app.oidc.router import cloud_router, issuer_router
 from app.runs.router import router as runs_router
 from app.secret_sources.router import router as secret_sources_router
+from app.spaces.router import router as spaces_router
 from app.stacks.router import router as stacks_router
 from app.statebackend.router import human_router as state_human_router
 from app.statebackend.router import tf_router as state_tf_router
@@ -140,6 +141,7 @@ def create_app() -> FastAPI:
 
     app.include_router(auth_router)
     app.include_router(users_router)
+    app.include_router(spaces_router)
     app.include_router(stacks_router)
     app.include_router(tiers_router)
     app.include_router(environments_router)

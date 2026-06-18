@@ -17,9 +17,21 @@ from app.enums import (
 from app.errors import ProblemException
 from app.models.environment import Environment
 from app.models.run import Run
+from app.models.stack import Stack
 from app.models.user import User
-from app.permissions import can_apply
+from app.permissions import can_apply, effective_can_destroy
 from app.runs.transition import transition
+from app.spaces.service import get_membership
+
+
+async def _env_membership(session: AsyncSession, user: User | None, env: Environment):  # type: ignore[no-untyped-def]
+    """The user's membership in the env's space (§6, Phase F) — drives the effective apply gate.
+    None for a system actor or an instance admin without an explicit membership."""
+    if user is None:
+        return None
+    stack = await session.get(Stack, env.stack_id)
+    assert stack is not None
+    return await get_membership(session, user.id, stack.space_id)
 
 
 async def trigger_run(
@@ -38,13 +50,16 @@ async def trigger_run(
     a `destroy` additionally requires can_destroy (§2.4). `group_root` starts a cascade group.
     `secret_overrides` is a break-glass map of variable→value used if the secret source is down
     (§15.4) — an apply-affecting bypass, so it requires can_apply and is sealed AES-GCM."""
-    if run_type == RunType.destroy and (user is None or not user.can_destroy):
+    membership = await _env_membership(session, user, env)
+    if run_type == RunType.destroy and (
+        user is None or not effective_can_destroy(user, membership)
+    ):
         raise ProblemException(403, "Forbidden", "destroy permission required.")
 
     overrides_encrypted = None
     if secret_overrides:
         is_destroy = run_type == RunType.destroy
-        if user is None or not can_apply(user, env, is_destroy=is_destroy).allowed:
+        if user is None or not can_apply(user, env, membership, is_destroy=is_destroy).allowed:
             raise ProblemException(
                 403, "Forbidden", "Supplying secret overrides requires apply permission."
             )
@@ -154,7 +169,6 @@ async def trigger_command_run(
 ) -> Run:
     """Create a one-off `command` run (an allowlisted tofu/terraform subcommand, §4.3). Read-only
     commands need only writer (the route gate); mutating ones require `can_apply`."""
-    from app.permissions import can_apply
     from app.runs.commands import ALLOWED_COMMANDS, is_mutating
 
     if command not in ALLOWED_COMMANDS:
@@ -162,7 +176,8 @@ async def trigger_command_run(
             400, "Command not allowed", f"'{command}' is not in the allowlist of runnable commands."
         )
     if is_mutating(command):
-        decision = can_apply(user, env)
+        membership = await _env_membership(session, user, env)
+        decision = can_apply(user, env, membership)
         if not decision.allowed:
             raise ProblemException(403, "Forbidden", decision.reason)
 
@@ -199,7 +214,8 @@ async def confirm_run(session: AsyncSession, run: Run, user: User) -> Run:
     env = await session.get(Environment, run.environment_id)
     assert env is not None
 
-    decision = can_apply(user, env, is_destroy=run.type == RunType.destroy)
+    membership = await _env_membership(session, user, env)
+    decision = can_apply(user, env, membership, is_destroy=run.type == RunType.destroy)
     if not decision.allowed:
         raise ProblemException(403, "Forbidden", decision.reason)
 
