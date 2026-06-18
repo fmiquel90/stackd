@@ -15,14 +15,34 @@ from app.errors import ProblemException
 from app.models.environment import Environment
 from app.models.notification import NotificationTarget
 from app.models.stack import Stack
+from app.models.user import User
 from app.notifications.dispatcher import deliver
 from app.notifications.schemas import NotificationCreate, NotificationOut, NotificationUpdate
+from app.spaces import guard_env, guard_stack
 
 # Outbound notification targets: where run events (awaiting-confirmation / finished / failed) are
 # delivered. Scoped to a stack or an environment, mirroring platform hooks.
 router = APIRouter(prefix="/api/v1", tags=["notifications"])
 DbSession = Annotated[AsyncSession, Depends(get_session)]
 Writer = Depends(require_role(Role.writer))
+
+
+async def _guard_stack_id(
+    session: AsyncSession, user: User, stack_id: uuid.UUID, *, min_role: Role = Role.reader
+) -> None:
+    stack = await session.get(Stack, stack_id)
+    if stack is None:
+        raise ProblemException(404, "Stack not found", None)
+    await guard_stack(session, user, stack, min_role=min_role)
+
+
+async def _guard_env_id(
+    session: AsyncSession, user: User, env_id: uuid.UUID, *, min_role: Role = Role.reader
+) -> None:
+    env = await session.get(Environment, env_id)
+    if env is None:
+        raise ProblemException(404, "Environment not found", None)
+    await guard_env(session, user, env, min_role=min_role)
 
 
 async def _list(
@@ -148,10 +168,9 @@ async def _send_test(t: NotificationTarget) -> dict:
 
 @router.get("/stacks/{stack_id}/notifications", response_model=list[NotificationOut])
 async def list_stack_notifications(
-    stack_id: uuid.UUID, _: CurrentUser, session: DbSession
+    stack_id: uuid.UUID, user: CurrentUser, session: DbSession
 ) -> list[NotificationOut]:
-    if await session.get(Stack, stack_id) is None:
-        raise ProblemException(404, "Stack not found", None)
+    await _guard_stack_id(session, user, stack_id)
     return [NotificationOut.of(t) for t in await _list(session, AttachmentTarget.stack, stack_id)]
 
 
@@ -164,8 +183,7 @@ async def list_stack_notifications(
 async def create_stack_notification(
     stack_id: uuid.UUID, body: NotificationCreate, user: CurrentUser, session: DbSession
 ) -> NotificationOut:
-    if await session.get(Stack, stack_id) is None:
-        raise ProblemException(404, "Stack not found", None)
+    await _guard_stack_id(session, user, stack_id, min_role=Role.writer)
     return NotificationOut.of(await _create(session, user, AttachmentTarget.stack, stack_id, body))
 
 
@@ -181,6 +199,7 @@ async def update_stack_notification(
     user: CurrentUser,
     session: DbSession,
 ) -> NotificationOut:
+    await _guard_stack_id(session, user, stack_id, min_role=Role.writer)
     t = await _get_owned(session, target_id, AttachmentTarget.stack, stack_id)
     return NotificationOut.of(await _update(session, user, t, body))
 
@@ -191,6 +210,7 @@ async def update_stack_notification(
 async def delete_stack_notification(
     stack_id: uuid.UUID, target_id: uuid.UUID, user: CurrentUser, session: DbSession
 ) -> None:
+    await _guard_stack_id(session, user, stack_id, min_role=Role.writer)
     await _delete(
         session, user, await _get_owned(session, target_id, AttachmentTarget.stack, stack_id)
     )
@@ -198,8 +218,9 @@ async def delete_stack_notification(
 
 @router.post("/stacks/{stack_id}/notifications/{target_id}/test", dependencies=[Writer])
 async def test_stack_notification(
-    stack_id: uuid.UUID, target_id: uuid.UUID, _: CurrentUser, session: DbSession
+    stack_id: uuid.UUID, target_id: uuid.UUID, user: CurrentUser, session: DbSession
 ) -> dict:
+    await _guard_stack_id(session, user, stack_id, min_role=Role.writer)
     return await _send_test(await _get_owned(session, target_id, AttachmentTarget.stack, stack_id))
 
 
@@ -208,10 +229,9 @@ async def test_stack_notification(
 
 @router.get("/environments/{env_id}/notifications", response_model=list[NotificationOut])
 async def list_env_notifications(
-    env_id: uuid.UUID, _: CurrentUser, session: DbSession
+    env_id: uuid.UUID, user: CurrentUser, session: DbSession
 ) -> list[NotificationOut]:
-    if await session.get(Environment, env_id) is None:
-        raise ProblemException(404, "Environment not found", None)
+    await _guard_env_id(session, user, env_id)
     return [
         NotificationOut.of(t) for t in await _list(session, AttachmentTarget.environment, env_id)
     ]
@@ -226,8 +246,7 @@ async def list_env_notifications(
 async def create_env_notification(
     env_id: uuid.UUID, body: NotificationCreate, user: CurrentUser, session: DbSession
 ) -> NotificationOut:
-    if await session.get(Environment, env_id) is None:
-        raise ProblemException(404, "Environment not found", None)
+    await _guard_env_id(session, user, env_id, min_role=Role.writer)
     return NotificationOut.of(
         await _create(session, user, AttachmentTarget.environment, env_id, body)
     )
@@ -245,6 +264,7 @@ async def update_env_notification(
     user: CurrentUser,
     session: DbSession,
 ) -> NotificationOut:
+    await _guard_env_id(session, user, env_id, min_role=Role.writer)
     t = await _get_owned(session, target_id, AttachmentTarget.environment, env_id)
     return NotificationOut.of(await _update(session, user, t, body))
 
@@ -255,6 +275,7 @@ async def update_env_notification(
 async def delete_env_notification(
     env_id: uuid.UUID, target_id: uuid.UUID, user: CurrentUser, session: DbSession
 ) -> None:
+    await _guard_env_id(session, user, env_id, min_role=Role.writer)
     await _delete(
         session,
         user,
@@ -264,8 +285,9 @@ async def delete_env_notification(
 
 @router.post("/environments/{env_id}/notifications/{target_id}/test", dependencies=[Writer])
 async def test_env_notification(
-    env_id: uuid.UUID, target_id: uuid.UUID, _: CurrentUser, session: DbSession
+    env_id: uuid.UUID, target_id: uuid.UUID, user: CurrentUser, session: DbSession
 ) -> dict:
+    await _guard_env_id(session, user, env_id, min_role=Role.writer)
     return await _send_test(
         await _get_owned(session, target_id, AttachmentTarget.environment, env_id)
     )

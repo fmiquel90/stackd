@@ -368,13 +368,15 @@ def handle_apply(client: ApiClient, job: dict, settings: Settings) -> None:
         out = subprocess.run(
             [tool, "output", "-json"], cwd=cwd, env=platform_env, capture_output=True, text=True
         )
-        client.upload_artifact(job_id, "outputs.json", masker.mask(out.stdout).encode())
-        # Tripwire on apply is warn-only: infra already changed, so failing the job here would
-        # misrepresent a successful apply (§5.1). Surface it as a masked log line.
-        leak = _secret_leak_in_outputs(out.stdout, masker)
-        if leak:
-            streamer.emit("applying", [f"[stackd] secret_leak_suspected: {leak}"])
-        outputs = _safe_json(out.stdout) if out.returncode == 0 else {}
+        ok_output = out.returncode == 0
+        if ok_output:
+            client.upload_artifact(job_id, "outputs.json", masker.mask(out.stdout).encode())
+            # Tripwire on apply is warn-only: infra already changed, so failing the job here would
+            # misrepresent a successful apply (§5.1). Surface it as a masked log line.
+            leak = _secret_leak_in_outputs(out.stdout, masker)
+            if leak:
+                streamer.emit("applying", [f"[stackd] secret_leak_suspected: {leak}"])
+        outputs = _safe_json(out.stdout) if ok_output else {}
         run_hooks(
             hooks.get("after_apply", []),
             cwd,

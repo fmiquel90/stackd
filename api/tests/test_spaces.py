@@ -31,6 +31,51 @@ async def _stack_in(client: httpx.AsyncClient, h: dict[str, str], space_id: str,
     return r.json()["id"]
 
 
+async def _env_in(client: httpx.AsyncClient, h: dict[str, str], stack_id: str, name: str) -> str:
+    r = await client.post(
+        f"/api/v1/stacks/{stack_id}/environments",
+        headers=h,
+        json={"name": name, "tier": "dev", "branch": "main"},
+    )
+    assert r.status_code == 201, r.text
+    return r.json()["id"]
+
+
+async def test_non_member_blocked_on_env_scoped_reads(client: httpx.AsyncClient) -> None:
+    # Closes the Phase F gaps: outputs / dependencies / cloud-integration / state-versions /
+    # notifications must all honour space membership, not just the stack/env routers.
+    admin = await login(client, "admin")
+    bob = await login(client, "bob")
+    space_id = await _create_space(client, admin, "teamq")
+    stack_id = await _stack_in(client, admin, space_id, "teamq-stack")
+    env_id = await _env_in(client, admin, stack_id, "dev")
+
+    for path in (
+        f"/api/v1/environments/{env_id}/outputs",
+        f"/api/v1/environments/{env_id}/dependencies",
+        f"/api/v1/environments/{env_id}/cloud-integration",
+        f"/api/v1/environments/{env_id}/state/versions",
+        f"/api/v1/stacks/{stack_id}/notifications",
+    ):
+        resp = await client.get(path, headers=bob)
+        assert resp.status_code == 403, f"{path} leaked to a non-member: {resp.status_code}"
+
+
+async def test_graph_is_space_scoped(client: httpx.AsyncClient) -> None:
+    admin = await login(client, "admin")
+    bob = await login(client, "bob")
+    space_id = await _create_space(client, admin, "teamg")
+    stack_id = await _stack_in(client, admin, space_id, "teamg-stack")
+    env_id = await _env_in(client, admin, stack_id, "dev")
+
+    bob_nodes = {n["id"] for n in (await client.get("/api/v1/graph", headers=bob)).json()["nodes"]}
+    assert env_id not in bob_nodes  # bob isn't a member of teamg
+    admin_nodes = {
+        n["id"] for n in (await client.get("/api/v1/graph", headers=admin)).json()["nodes"]
+    }
+    assert env_id in admin_nodes  # instance admin sees all
+
+
 async def test_non_member_cannot_see_or_get_other_space(client: httpx.AsyncClient) -> None:
     admin = await login(client, "admin")
     bob = await login(client, "bob")  # provisioned into the seed spaces, NOT into teamx
