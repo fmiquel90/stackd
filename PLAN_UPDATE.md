@@ -22,7 +22,7 @@ scale (per-stack RBAC, multi-space, observability).
 | E | Worker concurrency | P2 | M | M | **shipped** | `PLAN_E_UPDATE.md.done` · `SPECS_E_UPDATE.md.done` (folded into `docs/SPECS.md §7.1`) |
 | F | RBAC granularity + multi-space | P2 | L | M | **shipped** | `PLAN_F_UPDATE.md.done` · `SPECS_F_UPDATE.md.done` (folded into `docs/SPECS.md §2.4`; per-space only, per-stack deferred) |
 | G | Front: splitting + tests | P2 | S–M | L | **shipped** | `PLAN_G_UPDATE.md.done` · `SPECS_G_UPDATE.md.done` (folded into `docs/DESIGN.md §8`) |
-| H | Observability + API guardrails | P3 | M | L | todo | `PLAN_H_UPDATE.md` · `SPECS_H_UPDATE.md` |
+| H | Observability + API guardrails | P3 | M | L | **shipped** | `PLAN_H_UPDATE.md.done` · `SPECS_H_UPDATE.md.done` (folded into `docs/SPECS.md §20`) |
 | I | Later (registry, run-tasks, SSO, GitHub App) | P3 | L | — | backlog | `PLAN_I_UPDATE.md` (no spec yet) |
 
 Effort: S ≈ 1–2 d, M ≈ 3–5 d, L ≈ 1–2 wk (single dev).

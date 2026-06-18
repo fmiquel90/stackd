@@ -89,6 +89,10 @@ async def claim_one(session: AsyncSession, worker: Worker, affinity_seconds: int
         # Lost the race (another worker won, or one_active_run_per_env 23505) → nothing to claim.
         await session.rollback()
         return None
+    # Claim latency (§H): how long the run waited in queue before a worker picked it up.
+    from app.observability import metrics
+
+    metrics.claim_latency.observe((datetime.now(UTC) - run.created_at).total_seconds())
     return run
 
 

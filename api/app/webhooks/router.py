@@ -18,6 +18,8 @@ from app.logging import get_logger
 from app.models.environment import Environment
 from app.models.run import Run
 from app.models.stack import Stack
+from app.observability import metrics
+from app.ratelimit import rate_limit
 from app.runs.service import trigger_run
 from app.runs.transition import transition
 
@@ -66,7 +68,7 @@ def _touches_root(payload: dict, project_root: str) -> bool:
     return any(path.startswith(root) for path in changed)
 
 
-@router.post("/github")
+@router.post("/github", dependencies=[Depends(rate_limit("webhook", per_minute=120, burst=40))])
 async def github_webhook(
     request: Request,
     session: DbSession,
@@ -77,10 +79,12 @@ async def github_webhook(
     payload = json.loads(body)
     stacks = await _candidate_stacks(session, payload)
     if not stacks:
+        metrics.webhook_total.labels(result="no_match").inc()
         return {"matched": 0}
 
     secret = decrypt(stacks[0].webhook_secret_encrypted)  # shared per repo (§3.1)
     if not _verify(secret, body, x_hub_signature_256):
+        metrics.webhook_total.labels(result="rejected").inc()
         _log.warning(
             "webhook rejected",
             extra={"event": "webhook.rejected", "reason": "bad_hmac", "stacks": len(stacks)},
@@ -183,6 +187,7 @@ async def github_webhook(
                     pass  # raced to terminal — fine
             await session.commit()
 
+    metrics.webhook_total.labels(result="accepted").inc()
     _log.info(
         "webhook processed",
         extra={

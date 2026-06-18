@@ -1443,3 +1443,37 @@ alone — DESIGN §7) on the env header, and a "drifted only" filter on the env 
    and yields to user runs at claim time.
 3. The env status change rides the run `transition()` txn — a rolled-back completion changes
    nothing; the notification is same-txn (§17.4).
+
+---
+
+## 20. Observability & API guardrails (post-MVP, Phase H)
+
+### 20.1 Metrics — `GET /metrics` (Prometheus)
+Unauthenticated scrape endpoint (restrict at the network layer — it exposes only bounded counts,
+**never** secrets or tfvars). `prometheus-client`. Cardinality is bounded: labels are state/phase/
+result only, never a run id.
+- `stackd_runs_total{state}`, `stackd_queue_depth`, `stackd_workers_online` — gauges refreshed from
+  the DB at scrape time (cheap aggregate queries).
+- `stackd_claim_latency_seconds` — histogram, observed in `claim_one` (queue wait = now − created_at).
+- `stackd_run_duration_seconds{phase}` — histogram, observed at the terminal `transition()` (claim →
+  terminal); `phase` = `apply` if the run was confirmed, else `plan`.
+- `stackd_webhook_total{result}` — counter (`accepted`/`rejected`/`no_match`) in the webhook handler.
+
+### 20.2 Tracing (OpenTelemetry, OTLP)
+`setup_tracing(app)` wires FastAPI + SQLAlchemy instrumentation and a `BatchSpanProcessor` →
+`OTLPSpanExporter` **only when `STACKD_OTLP_ENDPOINT` is set**; a complete no-op otherwise (the OTel
+stack is imported lazily). Spans link an HTTP request → run `transition` → claim → worker events.
+
+### 20.3 Guardrails
+- **Rate limiting** (`app/ratelimit.py`): an in-process token bucket per (limiter, client IP),
+  per-replica (no Redis in the MVP). Applied to `auth/google/callback` + `auth/refresh` (30/min,
+  burst 15), `webhooks/github` (120/min, burst 40), and `discover-inputs` (10/min, burst 5). 429
+  problem+json when empty. `/me` is intentionally unthrottled (the UI polls it). Dev login is not
+  throttled (dev-only, dropped in prod).
+- **Discovery clone caps**: the input-discovery clone is already `--depth 1 --single-branch` +
+  30 s-bounded; Phase H adds a post-clone **size budget** (`STACKD_DISCOVERY_MAX_REPO_MB`, default
+  200 → 413) and a **`.tf` file cap** (`STACKD_DISCOVERY_MAX_TF_FILES`, default 500 → 413).
+
+### Invariants
+`/metrics` and traces never include secret values or tfvars; metrics are cardinality-bounded (label
+by state/phase/result, never by run id).

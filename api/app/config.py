@@ -59,6 +59,11 @@ class Settings(BaseSettings):
     # Background scheduler (§7.5) — disabled under tests so it can't fail runs mid-assertion.
     stackd_run_scheduler: bool = True
 
+    # Observability / guardrails (§H).
+    stackd_otlp_endpoint: str | None = None  # set → enable OpenTelemetry OTLP export (no-op unset)
+    stackd_discovery_max_repo_mb: int = 200  # reject input-discovery clones larger than this
+    stackd_discovery_max_tf_files: int = 500  # cap the .tf files parsed during discovery
+
     @field_validator("stackd_dev_auth")
     @classmethod
     def _no_dev_auth_in_prod(cls, v: bool, info) -> bool:  # type: ignore[no-untyped-def]

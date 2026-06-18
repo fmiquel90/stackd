@@ -118,6 +118,15 @@ async def transition(
         setattr(locked, key, value)
     if to_state in TERMINAL_STATES and locked.finished_at is None:
         locked.finished_at = datetime.now(UTC)
+        # Run duration histogram (§H): claim → terminal, labeled by job phase (a run with a
+        # confirmation went through apply, otherwise it was plan-only).
+        if locked.claimed_at is not None:
+            from app.observability import metrics
+
+            phase = "apply" if locked.confirmed_at is not None else "plan"
+            metrics.run_duration.labels(phase=phase).observe(
+                (locked.finished_at - locked.claimed_at).total_seconds()
+            )
 
     session.add(
         RunEvent(

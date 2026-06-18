@@ -21,6 +21,7 @@ from app.ids import uuid7
 from app.inbox.router import router as inbox_router
 from app.logging import bind_context, configure_logging, get_logger, reset_context
 from app.notifications.router import router as notifications_router
+from app.observability.router import metrics_router
 from app.observability.router import router as observability_router
 from app.oidc.router import cloud_router, issuer_router
 from app.runs.router import router as runs_router
@@ -162,6 +163,7 @@ def create_app() -> FastAPI:
     app.include_router(issuer_router)
     app.include_router(cloud_router)
     app.include_router(observability_router)
+    app.include_router(metrics_router)
     app.include_router(ws_router)
 
     # dev_auth is removed from the production image build (DEV §3); never mounted in prod.
@@ -170,6 +172,9 @@ def create_app() -> FastAPI:
 
         app.include_router(dev_router)
 
+    from app.observability.tracing import setup_tracing
+
+    setup_tracing(app)  # no-op unless STACKD_OTLP_ENDPOINT is set (§H)
     return app
 
 
