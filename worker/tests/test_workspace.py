@@ -1,4 +1,29 @@
-from agent.workspace import _authed_url
+import json
+from pathlib import Path
+
+from agent.workspace import Workspace, _authed_url
+
+
+def test_write_hcl_tfvars_verbatim(tmp_path: Path) -> None:
+    ws = Workspace(str(tmp_path), "job1")
+    cwd = tmp_path / "wd"
+    cwd.mkdir()
+    ws.write_tfvars(cwd, {"region": "eu-west-1"})
+    ws.write_hcl_tfvars(cwd, {"tags": '{ team = "infra" }', "azs": '["a", "b"]'})
+    hcl = (cwd / "zzz_stackd.auto.tfvars").read_text()
+    assert 'tags = { team = "infra" }' in hcl
+    assert 'azs = ["a", "b"]' in hcl
+    # hcl vars are excluded from the JSON tfvars (no double definition).
+    j = json.loads((cwd / "stackd.auto.tfvars.json").read_text())
+    assert j == {"region": "eu-west-1"}
+
+
+def test_write_hcl_tfvars_skips_when_empty(tmp_path: Path) -> None:
+    ws = Workspace(str(tmp_path), "job2")
+    cwd = tmp_path / "wd"
+    cwd.mkdir()
+    ws.write_hcl_tfvars(cwd, {})
+    assert not (cwd / "zzz_stackd.auto.tfvars").exists()
 
 
 def test_authed_url_injects_https_token():

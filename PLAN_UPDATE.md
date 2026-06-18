@@ -18,7 +18,7 @@ scale (per-stack RBAC, multi-space, observability).
 | A | VCS feedback (PR comment + commit status, **PAT**) | P1 | M | M | **shipped** | `PLAN_A_UPDATE.md.done` · `SPECS_A_UPDATE.md.done` (folded into `docs/SPECS.md §18`) |
 | B | Drift detection | P1 | S–M | L | **shipped** | `PLAN_B_UPDATE.md.done` · `SPECS_B_UPDATE.md.done` (folded into `docs/SPECS.md §19`) |
 | C | Security hardening (masking + runner trust) | P1 | M | M | **shipped** | `PLAN_C_UPDATE.md.done` · `SPECS_C_UPDATE.md.done` (folded into `docs/SPECS.md §5.1/§7.4/§8.3`) |
-| D | HCL-syntax tfvars | P2 | S | L | todo | `PLAN_D_UPDATE.md` · `SPECS_D_UPDATE.md` |
+| D | HCL-syntax tfvars | P2 | S | L | **shipped** | `PLAN_D_UPDATE.md.done` · `SPECS_D_UPDATE.md.done` (folded into `docs/SPECS.md §3.4`) |
 | E | Worker concurrency | P2 | M | M | todo | `PLAN_E_UPDATE.md` · `SPECS_E_UPDATE.md` |
 | F | RBAC granularity + multi-space | P2 | L | M | todo | `PLAN_F_UPDATE.md` · `SPECS_F_UPDATE.md` |
 | G | Front: splitting + tests | P2 | S–M | L | todo | `PLAN_G_UPDATE.md` · `SPECS_G_UPDATE.md` |

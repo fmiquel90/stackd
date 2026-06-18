@@ -83,6 +83,15 @@ class Workspace:
         # JSON tfvars are always valid HCL2 inputs; auto-loaded by terraform/tofu.
         (cwd / "stackd.auto.tfvars.json").write_text(json.dumps(tfvars))
 
+    def write_hcl_tfvars(self, cwd: Path, hcl_tfvars: dict) -> None:
+        # `hcl` vars are written verbatim (`name = <raw value>`) so real HCL syntax ({ a = "b" },
+        # function calls, expressions) parses natively. They are excluded from the JSON tfvars
+        # (§3.4) so a var is never defined twice. `zzz_` prefix → loads last among .auto.tfvars.
+        if not hcl_tfvars:
+            return
+        body = "".join(f"{name} = {value}\n" for name, value in hcl_tfvars.items())
+        (cwd / "zzz_stackd.auto.tfvars").write_text(body)
+
     def write_backend_override(self, cwd: Path) -> None:
         # Only for managed_state envs (§11.3): the repo declares no backend; we inject http.
         (cwd / "zzz_stackd_backend.tf").write_text('terraform {\n  backend "http" {}\n}\n')

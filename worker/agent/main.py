@@ -160,6 +160,7 @@ def handle_plan(client: ApiClient, job: dict, settings: Settings) -> None:
             token=_repo_token(job),
         )
         ws.write_tfvars(cwd, job.get("tfvars_json", {}))
+        ws.write_hcl_tfvars(cwd, job.get("hcl_tfvars", {}))
         backend = job.get("backend")
         if backend:
             ws.write_backend_override(cwd)
@@ -315,6 +316,7 @@ def handle_apply(client: ApiClient, job: dict, settings: Settings) -> None:
             token=_repo_token(job),
         )
         ws.write_tfvars(cwd, job.get("tfvars_json", {}))
+        ws.write_hcl_tfvars(cwd, job.get("hcl_tfvars", {}))
         backend = job.get("backend")
         if backend:
             ws.write_backend_override(cwd)
@@ -404,6 +406,7 @@ def handle_command_run(client: ApiClient, job: dict, settings: Settings) -> None
             token=_repo_token(job),
         )
         ws.write_tfvars(cwd, job.get("tfvars_json", {}))
+        ws.write_hcl_tfvars(cwd, job.get("hcl_tfvars", {}))
         backend = job.get("backend")
         if backend:
             ws.write_backend_override(cwd)

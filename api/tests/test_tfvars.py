@@ -2,13 +2,15 @@ from __future__ import annotations
 
 from app.enums import VariableKind
 from app.variables.resolution import ResolvedVariable
-from app.workers.claim import _tfvar_value
+from app.workers.claim import _is_hcl_tfvar
 
 
-def _rv(value: str | None, hcl: bool) -> ResolvedVariable:
+def _rv(
+    value: str | None, hcl: bool, kind: VariableKind = VariableKind.terraform
+) -> ResolvedVariable:
     return ResolvedVariable(
         name="v",
-        kind=VariableKind.terraform,
+        kind=kind,
         sensitive=False,
         hcl=hcl,
         provenance="env",
@@ -16,25 +18,20 @@ def _rv(value: str | None, hcl: bool) -> ResolvedVariable:
     )
 
 
-def test_hcl_list_becomes_real_list():
-    assert _tfvar_value(_rv('["a", "b"]', True)) == ["a", "b"]
+def test_hcl_var_with_value_routes_to_hcl_file():
+    # An hcl var with a value is written verbatim to the HCL tfvars file, not the JSON one.
+    assert _is_hcl_tfvar(_rv('{ a = "b" }', True)) is True
+    assert _is_hcl_tfvar(_rv('["a", "b"]', True)) is True
 
 
-def test_hcl_map_and_scalars():
-    assert _tfvar_value(_rv('{"a": "b"}', True)) == {"a": "b"}
-    assert _tfvar_value(_rv("42", True)) == 42
-    assert _tfvar_value(_rv("true", True)) is True
+def test_non_hcl_var_stays_json():
+    assert _is_hcl_tfvar(_rv('["a", "b"]', False)) is False
 
 
-def test_non_hcl_keeps_string():
-    # Without the hcl flag the value is a plain string, even if it looks like a list.
-    assert _tfvar_value(_rv('["a", "b"]', False)) == '["a", "b"]'
+def test_hcl_var_without_value_stays_json():
+    # No raw value → nothing to write verbatim; falls back to the JSON path (null).
+    assert _is_hcl_tfvar(_rv(None, True)) is False
 
 
-def test_hcl_invalid_json_falls_back_to_string():
-    # HCL-only syntax that isn't valid JSON is left as-is rather than crashing the claim.
-    assert _tfvar_value(_rv("{ a = b }", True)) == "{ a = b }"
-
-
-def test_none_value_passes_through():
-    assert _tfvar_value(_rv(None, True)) is None
+def test_env_var_is_never_hcl_tfvar():
+    assert _is_hcl_tfvar(_rv("x", True, kind=VariableKind.environment)) is False

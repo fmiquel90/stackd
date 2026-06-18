@@ -92,16 +92,11 @@ async def claim_one(session: AsyncSession, worker: Worker, affinity_seconds: int
     return run
 
 
-def _tfvar_value(rv: ResolvedVariable) -> object:
-    """The value to put in the JSON tfvars file. An `hcl` variable carries a structured value
-    (list/map/number/bool) typed by the user as text — parse it so terraform sees the real type,
-    not a string. Falls back to the raw string if it isn't valid JSON."""
-    if rv.hcl and rv.value is not None:
-        try:
-            return json.loads(rv.value)
-        except (json.JSONDecodeError, ValueError):
-            return rv.value
-    return rv.value
+def _is_hcl_tfvar(rv: ResolvedVariable) -> bool:
+    """True when a terraform var must be written verbatim to the HCL tfvars file (§3.4, Phase D): an
+    `hcl`-typed var with a value. It is then excluded from the JSON tfvars to avoid a double
+    definition. Everything else (plain strings, dependency outputs) stays JSON-typed."""
+    return rv.kind == VariableKind.terraform and rv.hcl and rv.value is not None
 
 
 async def build_job_payload(session: AsyncSession, run: Run) -> dict:
@@ -134,11 +129,15 @@ async def build_job_payload(session: AsyncSession, run: Run) -> dict:
         raise SecretUnavailable("secret_unavailable:fallback_apply_disabled")
 
     tfvars_json: dict[str, object] = {}
+    hcl_tfvars: dict[str, str] = {}  # §3.4: written verbatim to a generated HCL .auto.tfvars
     env_vars: dict[str, str | None] = {}
     sensitive_env: dict[str, str | None] = {}
     for rv in resolved:
-        if rv.kind == VariableKind.terraform:
-            tfvars_json[rv.name] = _tfvar_value(rv)
+        if _is_hcl_tfvar(rv):
+            assert rv.value is not None
+            hcl_tfvars[rv.name] = rv.value
+        elif rv.kind == VariableKind.terraform:
+            tfvars_json[rv.name] = rv.value
         elif rv.sensitive:
             sensitive_env[rv.name] = rv.value
         else:
@@ -239,6 +238,7 @@ async def build_job_payload(session: AsyncSession, run: Run) -> dict:
         "env": env_vars,
         "sensitive_env": sensitive_env,
         "tfvars_json": tfvars_json,
+        "hcl_tfvars": hcl_tfvars,  # §3.4 — verbatim HCL values, written to a separate .auto.tfvars
         "mask_values": mask_values,
         "hooks": await platform_hooks(session, stack_id=stack.id, env_id=env.id),
         "backend": backend,  # §11 — the managed HTTP backend (None when unmanaged)
