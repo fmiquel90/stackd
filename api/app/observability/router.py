@@ -1,9 +1,9 @@
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Annotated
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Response
 from sqlalchemy import func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -14,9 +14,46 @@ from app.enums import ACTIVE_STATES, Role, RunState, WorkerStatus
 from app.logging import ring_buffer
 from app.models.run import Run
 from app.models.worker import Worker, WorkerPool
+from app.observability import metrics
 
 router = APIRouter(prefix="/api/v1", tags=["observability"])
+# Prometheus scrapes `GET /metrics` (no prefix, unauthenticated — restrict at the network layer; it
+# exposes only bounded counts, never secrets or tfvars). Kept separate from the /api/v1 router.
+metrics_router = APIRouter(tags=["observability"])
 DbSession = Annotated[AsyncSession, Depends(get_session)]
+
+
+@metrics_router.get("/metrics")
+async def prometheus_metrics(session: DbSession) -> Response:
+    # Refresh the gauges from the DB at scrape time (cheap aggregate queries); counters/histograms
+    # are kept up to date at their code points.
+    by_state = (await session.execute(select(Run.state, func.count()).group_by(Run.state))).all()
+    counts = {state.value: int(n) for state, n in by_state}
+    for st in RunState:
+        metrics.runs_total.labels(state=st.value).set(counts.get(st.value, 0))
+
+    waiting = (
+        await session.execute(
+            select(func.count())
+            .select_from(Run)
+            .where(Run.state.in_([RunState.queued, RunState.confirmed]))
+        )
+    ).scalar_one()
+    metrics.queue_depth.set(int(waiting))
+
+    settings = get_settings()
+    cutoff = datetime.now(UTC) - timedelta(seconds=settings.stackd_worker_offline_seconds)
+    online = (
+        await session.execute(
+            select(func.count())
+            .select_from(Worker)
+            .where(Worker.last_heartbeat_at.is_not(None), Worker.last_heartbeat_at >= cutoff)
+        )
+    ).scalar_one()
+    metrics.workers_online.set(int(online))
+
+    body, content_type = metrics.render()
+    return Response(content=body, media_type=content_type)
 
 
 @router.get("/health")

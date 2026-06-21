@@ -60,6 +60,23 @@ async def clone_shallow(
     return dest
 
 
+def enforce_clone_budget(dest: Path, *, max_mb: int) -> None:
+    """Reject a clone whose on-disk size exceeds the discovery budget (§H). The clone is already
+    `--depth 1 --single-branch` (and 30s-bounded), so this only catches a single oversized commit;
+    the caller cleans up `dest`."""
+    total = 0
+    cap = max_mb * 1024 * 1024
+    for f in dest.rglob("*"):
+        if f.is_file() and not f.is_symlink():
+            total += f.stat().st_size
+            if total > cap:
+                raise ProblemException(
+                    413,
+                    "Repository too large",
+                    f"Discovery clone exceeds the {max_mb} MB budget.",
+                )
+
+
 async def check_repo(
     repo_url: str, auth_kind: RepoAuthKind, secret: str | None
 ) -> tuple[bool, list[str], str | None]:

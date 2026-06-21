@@ -17,3 +17,10 @@ class Masker:
             if secret in text:
                 text = text.replace(secret, "***")
         return text
+
+    def scan(self, text: str) -> bool:
+        """Cleartext tripwire (§5.1): True if any known secret appears verbatim in `text`. Used to
+        flag a run when a sensitive value leaks into a place terraform should have redacted (a
+        non-sensitive output, plan.json). Narrows — does not eliminate — the leak surface: a
+        transformed secret (base64/substring) still escapes value-based detection."""
+        return any(secret in text for secret in self._secrets)

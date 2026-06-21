@@ -27,9 +27,13 @@ from app.db import get_session
 from app.enums import AuditActorKind
 from app.errors import ProblemException
 from app.models.user import User
+from app.ratelimit import rate_limit
 from app.security import csrf_matches
 
 router = APIRouter(prefix="/api/v1/auth", tags=["auth"])
+# Per-IP throttle on the credential-bearing endpoints (login callback + refresh) — blunts
+# brute-force / token-replay attempts (SPECS §H). /me is intentionally not limited (UI polls it).
+_AuthLimit = Depends(rate_limit("auth", per_minute=30, burst=15))
 
 OAUTH_COOKIE = "stackd_oauth"
 OAUTH_PATH = "/api/v1/auth/google"
@@ -71,7 +75,7 @@ async def google_start() -> RedirectResponse:
     return response
 
 
-@router.get("/google/callback")
+@router.get("/google/callback", dependencies=[_AuthLimit])
 async def google_callback(
     state: str,
     code: str,
@@ -131,7 +135,7 @@ def _require_csrf(request: Request) -> None:
         raise ProblemException(403, "CSRF check failed", "Missing or mismatched CSRF token.")
 
 
-@router.post("/refresh", response_model=SessionOut)
+@router.post("/refresh", response_model=SessionOut, dependencies=[_AuthLimit])
 async def refresh(
     request: Request,
     response: Response,

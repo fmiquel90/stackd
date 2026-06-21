@@ -232,7 +232,8 @@ The visual answer to "why isn't my run starting?".
 - Storybook (or Ladle) from Phase 0 for these components: it is the visual contract that Claude Code must respect when building the pages.
 - Self-hosted fonts (IBM Plex Sans, JetBrains Mono) — the app can run on a private network without an external CDN. `font-display: swap`, preload of only the critical weights (Sans 400/600, Mono 400), fallback metrics (`size-adjust`/`ascent-override`) to avoid CLS on load.
 - **Theme preference without browser storage** (product invariant: neither localStorage nor sessionStorage). Consequence: the theme follows `prefers-color-scheme` by default; a manual override lives **in memory** (lost on reload) and, if per-user persistence is desired, it is **stored server-side** on the profile (`GET /me`), never in the browser. To be settled when building the topbar (theme toggle).
-- Graphs: react-flow + dagre. Logs: react-virtuoso + anser (ANSI). Dates: native `Intl`, relative format < 24 h then absolute local ISO.
+- Graphs: react-flow + dagre. Logs: ANSI rendering (`anser` planned; current `LogViewer` renders without `react-virtuoso`). Dates: native `Intl`, relative format < 24 h then absolute local ISO.
+- **Bundle & tests (Phase G)**: route-level `React.lazy`/`Suspense` per page + Vite `manualChunks` isolating the graph stack (`@xyflow/react` + `dagre` + `d3`, deferred to `/graph`) and a long-cached `react-vendor` chunk. Initial JS ≈ 95 KB gz (index + react-vendor), well under the 250 KB target; the ~90 KB-gz graph chunk loads only on `/graph`. Testing: **vitest** (`pnpm test` = `vitest run`, jsdom) for the identity components (`StateBadge`, `ProvenanceBadge`) and pure logic (`parseProvenance`); one **Playwright** happy path (`pnpm e2e`: dev-login → Stacks) as a CI job against `task dev`. `task test` now actually runs the front unit tests (the prior `--run` flag was silently swallowed).
 
 ---
 

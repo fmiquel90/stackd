@@ -132,6 +132,11 @@ async def delete_tier(tier_id: uuid.UUID, user: CurrentUser, session: DbSession)
             name=name
         )
     )
+    await session.execute(
+        text(
+            "UPDATE space_memberships SET allowed_tiers = array_remove(allowed_tiers, :name)"
+        ).bindparams(name=name)
+    )
     await session.delete(tier)
     await record_audit(
         session,

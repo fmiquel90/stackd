@@ -13,11 +13,13 @@ from app.auth.deps import CurrentUser, require_role
 from app.db import get_session
 from app.enums import ACTIVE_STATES, AuditActorKind, Role, RunState
 from app.errors import ProblemException
+from app.models.environment import Environment
 from app.models.run import Run
+from app.models.stack import Stack
 from app.models.worker import Worker, WorkerPool
 from app.models.worker_command import WorkerCommand
 from app.security import hash_token
-from app.spaces import get_default_space
+from app.spaces import accessible_space_ids, get_default_space, require_space_access
 from app.workers.schemas import (
     PoolCreate,
     PoolCreated,
@@ -33,10 +35,11 @@ Admin = Depends(require_role(Role.admin))
 
 @router.post("/worker-pools", response_model=PoolCreated, status_code=201, dependencies=[Admin])
 async def create_pool(body: PoolCreate, user: CurrentUser, session: DbSession) -> PoolCreated:
-    space = await get_default_space(session)
+    space_id = body.space_id or (await get_default_space(session)).id
+    await require_space_access(session, user, space_id, min_role=Role.admin)
     token = secrets.token_urlsafe(32)
     pool = WorkerPool(
-        space_id=space.id, name=body.name, labels=body.labels, token_hash=hash_token(token)
+        space_id=space_id, name=body.name, labels=body.labels, token_hash=hash_token(token)
     )
     session.add(pool)
     await session.flush()
@@ -84,10 +87,12 @@ async def delete_pool(pool_id: uuid.UUID, user: CurrentUser, session: DbSession)
 
 
 @router.get("/workers", response_model=list[WorkerOut])
-async def list_workers(_: CurrentUser, session: DbSession) -> list[Worker]:
-    return list(
-        (await session.execute(select(Worker).order_by(Worker.registered_at))).scalars().all()
-    )
+async def list_workers(user: CurrentUser, session: DbSession) -> list[Worker]:
+    q = select(Worker).order_by(Worker.registered_at)
+    ids = await accessible_space_ids(session, user)  # None = instance admin → all pools
+    if ids is not None:
+        q = q.join(WorkerPool, WorkerPool.id == Worker.pool_id).where(WorkerPool.space_id.in_(ids))
+    return list((await session.execute(q)).scalars().all())
 
 
 @router.post("/workers/{worker_id}/diagnostics", status_code=202, dependencies=[Admin])
@@ -144,19 +149,17 @@ def _blocking_reason(run: Run, active_by_env: dict[uuid.UUID, int], env_locked: 
 
 
 @router.get("/queue", response_model=list[QueueEntry])
-async def queue(_: CurrentUser, session: DbSession) -> list[QueueEntry]:
+async def queue(user: CurrentUser, session: DbSession) -> list[QueueEntry]:
     # Runs in progress (claimed/active) + waiting (queued/confirmed, unclaimed) with a reason.
-    runs = (
-        (
-            await session.execute(
-                select(Run)
-                .where(Run.state.in_([*ACTIVE_STATES, RunState.queued]))
-                .order_by(Run.created_at)
-            )
+    q = select(Run).where(Run.state.in_([*ACTIVE_STATES, RunState.queued])).order_by(Run.created_at)
+    ids = await accessible_space_ids(session, user)  # None = instance admin → all spaces
+    if ids is not None:
+        q = (
+            q.join(Environment, Environment.id == Run.environment_id)
+            .join(Stack, Stack.id == Environment.stack_id)
+            .where(Stack.space_id.in_(ids))
         )
-        .scalars()
-        .all()
-    )
+    runs = (await session.execute(q)).scalars().all()
 
     # Count OTHER active runs per env (to flag a waiting run blocked by an active one).
     active_by_env: dict[uuid.UUID, int] = {}

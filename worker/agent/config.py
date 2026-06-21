@@ -13,6 +13,8 @@ class Settings:
     heartbeat_interval: int
     poll_wait: int
     workspace_root: str
+    leak_action: str  # "warn" (default) | "fail" — cleartext-tripwire policy (§5.1, Phase C)
+    max_concurrent_jobs: int  # in-flight jobs across environments (§7, Phase E; default 1)
 
     @classmethod
     def from_env(cls) -> "Settings":
@@ -28,4 +30,8 @@ class Settings:
             heartbeat_interval=int(os.environ.get("STACKD_HEARTBEAT_INTERVAL", "20")),
             poll_wait=int(os.environ.get("STACKD_POLL_WAIT", "25")),
             workspace_root=os.environ.get("STACKD_WORKSPACE_ROOT", "/tmp/stackd-ws"),
+            leak_action="fail"
+            if os.environ.get("STACKD_LEAK_TRIPWIRE", "warn") == "fail"
+            else "warn",
+            max_concurrent_jobs=max(1, int(os.environ.get("STACKD_MAX_CONCURRENT_JOBS", "1"))),
         )

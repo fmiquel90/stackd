@@ -7,6 +7,7 @@ from sqlalchemy import text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.config import get_settings
 from app.crypto import decrypt
 from app.enums import (
     ACTIVE_STATES,
@@ -53,7 +54,8 @@ _SELECT_CANDIDATE = text(
         WHERE o.environment_id = r.environment_id AND o.id <> r.id
           AND o.state IN ({_ACTIVE_SQL})
       )
-    ORDER BY (r.state = 'confirmed' AND r.worker_id = :wid) DESC, r.created_at
+    -- Affinity first, then user runs ahead of background drift plans (§19), then FIFO.
+    ORDER BY (r.state = 'confirmed' AND r.worker_id = :wid) DESC, r.is_drift, r.created_at
     FOR UPDATE OF e SKIP LOCKED
     LIMIT 1
     """
@@ -88,19 +90,18 @@ async def claim_one(session: AsyncSession, worker: Worker, affinity_seconds: int
         # Lost the race (another worker won, or one_active_run_per_env 23505) → nothing to claim.
         await session.rollback()
         return None
+    # Claim latency (§H): how long the run waited in queue before a worker picked it up.
+    from app.observability import metrics
+
+    metrics.claim_latency.observe((datetime.now(UTC) - run.created_at).total_seconds())
     return run
 
 
-def _tfvar_value(rv: ResolvedVariable) -> object:
-    """The value to put in the JSON tfvars file. An `hcl` variable carries a structured value
-    (list/map/number/bool) typed by the user as text — parse it so terraform sees the real type,
-    not a string. Falls back to the raw string if it isn't valid JSON."""
-    if rv.hcl and rv.value is not None:
-        try:
-            return json.loads(rv.value)
-        except (json.JSONDecodeError, ValueError):
-            return rv.value
-    return rv.value
+def _is_hcl_tfvar(rv: ResolvedVariable) -> bool:
+    """True when a terraform var must be written verbatim to the HCL tfvars file (§3.4, Phase D): an
+    `hcl`-typed var with a value. It is then excluded from the JSON tfvars to avoid a double
+    definition. Everything else (plain strings, dependency outputs) stays JSON-typed."""
+    return rv.kind == VariableKind.terraform and rv.hcl and rv.value is not None
 
 
 async def build_job_payload(session: AsyncSession, run: Run) -> dict:
@@ -133,11 +134,15 @@ async def build_job_payload(session: AsyncSession, run: Run) -> dict:
         raise SecretUnavailable("secret_unavailable:fallback_apply_disabled")
 
     tfvars_json: dict[str, object] = {}
+    hcl_tfvars: dict[str, str] = {}  # §3.4: written verbatim to a generated HCL .auto.tfvars
     env_vars: dict[str, str | None] = {}
     sensitive_env: dict[str, str | None] = {}
     for rv in resolved:
-        if rv.kind == VariableKind.terraform:
-            tfvars_json[rv.name] = _tfvar_value(rv)
+        if _is_hcl_tfvar(rv):
+            assert rv.value is not None
+            hcl_tfvars[rv.name] = rv.value
+        elif rv.kind == VariableKind.terraform:
+            tfvars_json[rv.name] = rv.value
         elif rv.sensitive:
             sensitive_env[rv.name] = rv.value
         else:
@@ -145,13 +150,20 @@ async def build_job_payload(session: AsyncSession, run: Run) -> dict:
 
     # Inject upstream dependency outputs / mocks (§9.3): real value > mock > error.
     from app.audit import record_audit
-    from app.dependencies.service import resolve_dependency_inputs
+    from app.dependencies.service import DependencyError, resolve_dependency_inputs
 
     dep = await resolve_dependency_inputs(session, env)
     for name, value in {**dep.resolved_inputs, **dep.mock_inputs}.items():
         tfvars_json[name] = value
     run.used_mocks = dep.used_mocks
     run.resolved_inputs = dep.resolved_inputs
+
+    # §9.3: re-enforce the mock-apply gate at the apply claim, mirroring the secret-fallback gate
+    # above. The confirm-time gate checked the plan-time resolution; if a dependency input newly
+    # falls back to a mock between confirm and apply (the upstream output expired or its env was
+    # destroyed), a non-real value must not slip into an apply.
+    if run.state == RunState.applying and dep.used_mocks and not env.allow_mock_apply:
+        raise DependencyError("dependency_mock:mock_apply_disabled")
     if dep.consumed_mocks:
         await record_audit(
             session,
@@ -183,15 +195,23 @@ async def build_job_payload(session: AsyncSession, run: Run) -> dict:
         cred_phase = phase
 
     # Managed state (§11): hand the worker a scoped HTTP backend (RO for proposed runs).
+    settings = get_settings()
     backend = None
     if env.managed_state:
-        from app.config import get_settings
         from app.statebackend.tokens import mint_state_token
 
         scope = "ro" if run.type == RunType.proposed else "rw"
-        base = get_settings().internal_url.rstrip("/")  # worker-reachable, not the public URL
+        base = settings.internal_url.rstrip("/")  # worker-reachable, not the public URL
+        # An apply's state token lives only for the apply budget + grace so a reaped/partitioned
+        # worker loses state-write access shortly after the API reclaims its run (§4.2). Plan/RO
+        # tokens keep the generous window.
+        state_ttl = (
+            settings.stackd_apply_timeout_seconds + settings.stackd_apply_lost_grace_seconds
+            if run.state == RunState.applying
+            else 6 * 3600
+        )
         token = mint_state_token(
-            environment_id=env.id, run_id=run.id, scope=scope, ttl_seconds=6 * 3600
+            environment_id=env.id, run_id=run.id, scope=scope, ttl_seconds=state_ttl
         )
         addr = f"{base}/state/v1/{env.id}"
         backend = {
@@ -221,6 +241,10 @@ async def build_job_payload(session: AsyncSession, run: Run) -> dict:
     return {
         "job_id": str(run.id),
         "phase": phase.value,
+        # Hard apply budget (§4.2): the worker kills `apply` past this. API-owned so the cap and the
+        # worker-lost reclaim window can never drift apart.
+        "apply_timeout_seconds": settings.stackd_apply_timeout_seconds,
+        "refresh_only": run.is_drift,  # §19: drift plan uses `-refresh-only` (state vs reality)
         "command": run.command,  # set only for RunType.command jobs
         "environment": {
             "id": str(env.id),
@@ -237,6 +261,7 @@ async def build_job_payload(session: AsyncSession, run: Run) -> dict:
         "env": env_vars,
         "sensitive_env": sensitive_env,
         "tfvars_json": tfvars_json,
+        "hcl_tfvars": hcl_tfvars,  # §3.4 — verbatim HCL values, written to a separate .auto.tfvars
         "mask_values": mask_values,
         "hooks": await platform_hooks(session, stack_id=stack.id, env_id=env.id),
         "backend": backend,  # §11 — the managed HTTP backend (None when unmanaged)

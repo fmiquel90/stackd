@@ -63,7 +63,14 @@ Triggering a plan ≠ confirming: any writer+ can **prepare** a plan on any env 
 
 ### 2.4 Per-environment permissions — tier & destroy
 
-The "apply everywhere except prod" need depends on the targeted environment, not just on the user. We express it through a **tier** on the environment and a **set of allowed tiers** on the user, rather than through a full policy system (sufficient for the vast majority of orgs; per-space RBAC remains Phase 7).
+The "apply everywhere except prod" need depends on the targeted environment, not just on the user. We express it through a **tier** on the environment and a **set of allowed tiers** on the user, rather than through a full policy system (sufficient for the vast majority of orgs; a full OPA-style policy engine remains Phase 7).
+
+> **Per-space RBAC (Phase F).** `users.role`/`allowed_tiers`/`can_destroy` are **instance defaults**. The effective permission is the caller's `space_memberships` row for the resource's space when present (`UNIQUE (space_id, user_id)`; columns `role`, `allowed_tiers text[]`, `can_destroy`). Every list/get/mutate resolves the space from the resource (stack→space, env→stack→space, run→env→…) and requires membership; an **instance admin** reaches every space. List endpoints are filtered to the caller's accessible spaces. `can_apply(user, env, membership)` uses the *effective* role/tiers/can_destroy. A migration backfills one membership per existing user × existing space (no behaviour change); a newly-provisioned user is enrolled into every existing space with their instance defaults. Spaces CRUD + membership management live under `/api/v1/spaces` (create = instance admin; member management = space admin or instance admin). Per-stack grants and the OPA engine stay Phase 7.
+> **Residual (Phase F)**: `GET /api/v1/audit` and the WS `run:`/`environment:` subscriptions remain
+> instance-wide — audit rows carry no `space_id` (proper scoping needs a denormalization migration)
+> and the WS leaks only run/env *existence + phase timing* (no secrets/logs; clients re-read over the
+> guarded REST). Both are tracked for a follow-up; everything that returns config/secret/output data
+> is membership-gated.
 
 > **Set-based, not linear** (evolved from the original MVP design): tiers are a **configurable catalog** (`tiers` table — `name` unique, `requires_four_eyes`, `position`), not a fixed `dev<staging<prod` enum, and a user carries a **set** of allowed tiers, not a single ceiling. This expresses custom tiers (`qa`, `preprod`, `sandbox`) and **non-contiguous** grants (e.g. `dev`+`prod` but not `staging`) that the old linear ceiling could not.
 
@@ -219,7 +226,9 @@ variable_set_attachments (
 
 A set's **selector** (`{label: value}`) auto-attaches it to every environment whose effective labels (`stack.labels` + `env.labels`, env wins on conflict) contain all of its key=value pairs — equality AND-match, no operators (deliberately not the deferred OPA engine, PLAN §7). It sits at the same weakest layer as `auto_attach`; explicit attachments remain stronger.
 
-At equal name and kind, the upper layer overrides. Two sources outside resolution are added at claim time: upstream outputs (`dependency:`) and mocks (`mock`) — see §9. The snapshot of **provenances** (`{"TF_VAR_region": "set:common-aws", "TF_VAR_cidr": "env", "TF_VAR_vpc_id": "dependency:network/prod", "TF_VAR_nlb_dns": "mock"}`) is frozen in `runs.variable_provenance` for audit and the UI badge (DESIGN.md §5.2: "inherited from…", "overridden here", `MOCK`). Deleting an attached set → 409 with the list of attachments (explicit detachment required).
+At equal name and kind, the upper layer overrides. Two sources outside resolution are added at claim time: upstream outputs (`dependency:`) and mocks (`mock`) — see §9.
+
+**Writing a resolved value to disk (Phase D).** Resolution order above is unchanged — this is purely *how* the winning value reaches terraform. A terraform var with the **`hcl`** flag and a value is written **verbatim** (`name = <raw value>`) to a generated `zzz_stackd.auto.tfvars` (HCL), so real HCL syntax (`{ a = "b" }`, `["a","b"]`, function calls, expressions) parses with its native type; it is **excluded** from `stackd.auto.tfvars.json` so it is never defined twice. Every other terraform var (plain strings, and the dependency outputs / mocks added at claim — already typed JSONB) goes to `stackd.auto.tfvars.json`. Both files auto-load. The claim payload carries the split (`tfvars_json` + `hcl_tfvars`); sensitive hcl values remain in the masking table (§5.1). The snapshot of **provenances** (`{"TF_VAR_region": "set:common-aws", "TF_VAR_cidr": "env", "TF_VAR_vpc_id": "dependency:network/prod", "TF_VAR_nlb_dns": "mock"}`) is frozen in `runs.variable_provenance` for audit and the UI badge (DESIGN.md §5.2: "inherited from…", "overridden here", `MOCK`). Deleting an attached set → 409 with the list of attachments (explicit detachment required).
 
 ### 3.5 `runs`
 
@@ -262,7 +271,7 @@ workers: id, pool_id, name, status(idle|busy|offline), labels jsonb,
          version, last_heartbeat_at, registered_at
 ```
 
-`offline` if heartbeat > 60 s; run in progress on an offline worker → `failed (worker_lost)` after 120 s. Targeting by labels (dedicated prod pool recommended).
+`offline` if heartbeat > 60 s; run in progress on an offline worker → `failed (worker_lost)` after 120 s — **except an `applying` run**, reclaimed only after the apply budget + grace (`stackd_apply_timeout_seconds` + `stackd_apply_lost_grace_seconds`, default 15 min + 5 min) so a healthy long apply is never failed mid-flight and two workers can't apply the same env concurrently (§4.2). Targeting by labels (dedicated prod pool recommended).
 
 ### 3.8 Dependencies, outputs and mocks
 
@@ -390,9 +399,9 @@ Terminal: `finished`, `failed`, `discarded`, `canceled`. `canceled`: user on `qu
 | `checking → confirmed` | system | all checks OK, non-empty diff, `autodeploy=true`, env not protected, `used_mocks=false` |
 | `planning/checking → finished` | worker | empty diff (outputs captured after refresh) |
 | `unconfirmed → confirmed` | user | `can_apply(user, env)` = role∈{approver,admin} AND `env.tier ∈ allowed_tiers` (§2.4); ≠ triggerer if the tier requires four-eyes or 4-eyes; for a `destroy` run: `can_destroy` required; **blocked if `used_mocks` and `allow_mock_apply=false`** |
-| `confirmed → applying` | worker | resume of the workspace (TTL 24 h), otherwise re-plan |
+| `confirmed → applying` | worker | resume of the workspace (TTL 24 h), otherwise re-plan; re-checks `allow_mock_apply` and the secret-fallback gate against the apply-time resolution (§9.3/§15.5) |
 | `applying → finished` | worker | apply exit 0 + outputs uploaded |
-| `* → failed` | worker/system | exit ≠ 0, hook `fail`, timeouts (prepare 10 / plan 30 / apply 60 min) |
+| `* → failed` | worker/system | exit ≠ 0, hook `fail`, timeouts (prepare 10 / plan 30 / apply 15 min, configurable via `stackd_apply_timeout_seconds`) — the worker hard-kills the process past its budget |
 
 Single function `transition(run, to_state, actor, payload)`: legality, atomic update guarded on `from_state`, `run_event`, audit event if the action is human or terminal, WS publication, scheduler hooks. The guarded UPDATE uses `RETURNING` (PG18: old + new tuple) to produce the `from→to` `run_event` without a re-read, in the same transaction.
 
@@ -416,6 +425,7 @@ POST /worker/v1/jobs/{id}/logs
 - `section` distinguishes hooks from the terraform stream (dedicated sections in the viewer).
 - Agent buffer: 1 s / 32 KB. **Masking before sending of ALL the run's sensitive values** — `sensitive_env` *and* the `tfvars` marked `sensitive` (§3.3) — replaced with `***`. The agent builds the masking table from the claim payload, not only from `sensitive_env`.
 - **Residual leak via `plan.json`**: an `after_plan` hook (infracost, jq, script) reads `plan.json`, which contains the variable values. Terraform marks `sensitive` the values it knows as such, but a hook that dumps the raw JSON can re-print a sensitive value to its stdout (and thus to the logs). Mitigations: (a) the value-based masking above also applies to hook stdout; (b) a short or transformed secret (base64, substring) escapes value-based masking — a **documented** limit, do not put exploitable secrets in non-sensitive `tfvars`. The check tools (tfsec/checkov/infracost) do not print values by default.
+- **Cleartext tripwire (Phase C)**: after a phase, the agent scans the plan (`show -json`) and apply (`output -json`) for any value Stackd treats as sensitive appearing verbatim in a **non-sensitive** output — terraform only redacts outputs the *repo* marked `sensitive = true`, so a sensitive Stackd variable echoed by an unmarked output leaks. On plan it flags the run with a `secret_leak_suspected` **warn** check (config `STACKD_LEAK_TRIPWIRE=fail` aborts the run before any apply); on apply it is warn-only (a masked log line) since the infra has already changed. The tripwire **narrows, does not eliminate**, the leak surface — a transformed secret still escapes value-based detection. The human-readable `show` already relies on terraform's own `(sensitive value)` redaction; only the masked JSON artifact is uploaded.
 - ANSI sequences preserved (color rendering on the front side).
 
 ### 5.2 Two-tier storage
@@ -505,10 +515,12 @@ GET /api/v1/audit/export?format=csv          (admin)
 
 ```
 POST /worker/v1/register   (Bearer pool_token) → worker_id + worker_token
-POST /worker/v1/heartbeat  (20 s) → { "commands": [{"type":"cancel_job", ...}] }
+POST /worker/v1/heartbeat  (20 s) { "in_flight": N, "capacity": M } → { "commands": [{"type":"cancel_job", ...}] }
 ```
 
-Heartbeat = downstream command channel. No incoming connection.
+Heartbeat = downstream command channel. No incoming connection. **In-flight count (Phase E)**: the worker reports the number of jobs it is currently executing; the API sets `status = busy` when it is > 0, `idle` when 0 (the worker is authoritative, which also flips a finished worker back to idle). `capacity` (the worker's `STACKD_MAX_CONCURRENT_JOBS`) is advertised for the scheduler to reason about; not persisted this phase (no schema change). A heartbeat with no body is just a liveness ping.
+
+**Worker concurrency (Phase E).** `STACKD_MAX_CONCURRENT_JOBS` (default `1` = today's serial behaviour) bounds the in-flight jobs a single worker runs at once, each on its own thread (the heartbeat thread is already independent). The claim stays one-run-at-a-time on the wire; the API's `SELECT … FOR UPDATE SKIP LOCKED` (§7.2) and the one-active-run-per-env partial unique index (§3.5) keep concurrent claims safe — **concurrency is across different environments only**. Same-env races are still guarded by the state-backend lock (§11.2).
 
 ### 7.2 Claim (long-poll)
 
@@ -629,13 +641,15 @@ ws.cleanup()
 
 `docker` runner: each command (terraform AND hooks) runs in `stackd/runner:<tool>-<version>` (image including the common check tools: tfsec, checkov, infracost, jq).
 
+**Runner trust contract (Phase C).** The `docker` runner (prod) is the trust boundary: one **ephemeral** container per job; the image carries **no long-lived cloud creds**; the OIDC token is written to a `0600` file (`Workspace.write_secret`), exposed only to terraform via `AWS_WEB_IDENTITY_TOKEN_FILE`, and the whole workspace — token included — is removed in the `finally` `ws.cleanup()`; an optional egress allowlist is enforced via the run's network. Repo hooks run untrusted: `sh -c <repo command>` with a cloud-credential-stripped `repo_env` (§8.3). The `local` runner (dev) with a mounted `~/.aws` is **trusted-dev only** — never prod (`STACKD_ENV=production` is documented to require the `docker` runner).
+
 ### 7.5 Periodic tasks (internal scheduler, multi-replica)
 
 The scheduler module (PLAN §2.1) carries background tasks that must run **exactly once** even with several API replicas:
 
 | Task | Frequency | Effect |
 |---|---|---|
-| `worker_lost` detection | 30 s | heartbeat > 60 s → `offline`; active run on a worker offline for > 120 s → `failed (worker_lost)` (§3.7) |
+| `worker_lost` detection | 30 s | heartbeat > 60 s → `offline`; active run on a worker offline for > 120 s → `failed (worker_lost)`; an `applying` run only after the apply budget + grace (§3.7/§4.2) |
 | Git staleness polling | 15 min | `git ls-remote` per (repo, branch), dedup by repo → update `head_sha` (§9.6) |
 | Cold log archiving | end of run | `run_logs` → S3 gz, purge hot > 7 d (§5.2) |
 | Refresh token / audit purge | daily | expired families (§2.5), audit > 2 years (§6.1, audited purge) |
@@ -676,6 +690,7 @@ hooks:
 
 - Each hook: one shell command in the workspace (cwd = project_root), the run's env vars injected (except `sensitive_env` for **repo** hooks — opt-in per env, same logic as proposed runs).
 - **Cloud credentials (§10) not exported to repo hooks.** The `AWS_WEB_IDENTITY_TOKEN_FILE` / `AWS_ROLE_ARN` variables are injected only into the environment of **terraform** invocations, never into that of **repo** hooks by default (same reasons as `sensitive_env`: a `.stackd.yml` pushed via PR must not be able to assume the prod apply role and exfiltrate). Opt-in per env if a hook legitimately needs the cloud. **Platform** hooks (non-bypassable) have access to it.
+- **Repo-hook env is built from a stripped base (Phase C).** The agent's `repo_env` starts from the worker process environment **minus every cloud-credential family** (`AWS_*`, `GOOGLE_*`, `GCLOUD_*`, `GCP_*`, `AZURE_*`, `ARM_*`), then layers the run's non-sensitive `env`. The `docker` runner (prod) bakes no long-lived creds into the image; this stripping additionally protects the **trusted-dev** `local` runner, where a mounted `~/.aws` can export `AWS_*` into the worker process. A regression test asserts a repo hook sees neither cloud nor sensitive env.
 - **Repo hooks at the `*_apply` stages on tier=prod**: forbidden by default. On a `tier=prod` env, only **platform** hooks execute at `before_apply`/`after_apply`; a repo hook at these stages is ignored with a visible warning (it would run with the prod write role). The `*_init`/`*_plan` repo stages remain allowed (plan role = ReadOnly).
 - `plan.json` available for reading at the `after_plan` stage and beyond.
 - Timeout per hook: 10 min (configurable). Logs in a dedicated section of the viewer.
@@ -1323,3 +1338,147 @@ own channel and invalidates the `["notifications"]` query on any signal (no payl
 2. Same-txn write (invariant §6.3 spirit): a rolled-back trigger emits no notification (NOTIFY is
    transactional).
 3. The per-user channel is access-scoped to self; the WS payload is a content-free signal (§5.3).
+
+## 18. VCS feedback loop — PR comment + commit status (post-MVP)
+
+> Status: **shipped** (Phase A). Closes the review loop: a PR shows the plan result *in GitHub* — a
+> commit **status** + one PR comment edited in place. **Auth: PAT** (the stack's `repo_secret`), not
+> a GitHub App. A VCS post-back is a side-effect of `transition()`, never a source of truth: a VCS
+> outage leaves the run correct. GitHub App (bot identity + Checks API) is deferred to Phase I.
+
+### 18.1 Model
+
+`runs` (add): `pr_number int?` (the PR that spawned a `proposed` run), `vcs_provider text?`
+(`'github'` — enum-by-string, gitlab/bitbucket later), `vcs_comment_id bigint?` (the posted PR
+comment, for idempotent edit), `vcs_head_sha text?` (PR head commit the status reports against).
+`vcs_outbox` (transactional outbox, same shape as the notification outbox §17/§5): `id`, `run_id`,
+`to_state`, `attempts`, `created_at`, `sent_at?`, partial index `WHERE sent_at IS NULL`.
+
+### 18.2 Auth — PAT
+
+Reuse the stack's `repo_secret` (already used to clone). For post-back it must additionally carry
+**`pull_requests:write` + commit `statuses:write`** (classic `repo`, or a fine-grained PAT with
+those + `contents:read`). No GitHub App, no extra instance config — posts appear as the token's
+user. A `repo_secret` without write scope → post-back fails soft (run unaffected, logged).
+
+### 18.3 Webhook ingestion (`webhooks/router.py`)
+
+On `pull_request` (`opened`/`synchronize`/`reopened`): create the `proposed` run as today **and**
+persist `pr_number`, `vcs_provider='github'`, `vcs_head_sha = pr.head.sha`. On `closed`: best-effort
+`transition()` of the still-in-flight proposed runs for that PR to `canceled` (reason `pr_closed`).
+
+### 18.4 Post-back (`app/vcs/` — transactional outbox)
+
+Enqueued on the run `transition()` in the SAME txn (**no network I/O there** — a rolled-back
+transition never posts); drained by the scheduler dispatcher (`dispatch_vcs`, advisory-locked,
+at-least-once with `attempts` cap). Only runs with `vcs_provider` set post back. A `proposed` run is
+**plan-only and terminal at `finished`** (never `unconfirmed`). Enqueued on `planning`, `finished`,
+`failed`, `canceled`, `discarded` (intermediate states elided to avoid status churn).
+
+- **Commit status** (Status API — PAT-compatible) on `vcs_head_sha`: `planning → pending`;
+  `finished → success`; `failed → failure`; `canceled|discarded → error`.
+  `POST /repos/{o}/{r}/statuses/{sha}` with `{state, target_url=<ui>/runs/{id}, context="stackd/plan",
+  description="+a ~c -d"}`. (The richer **Checks API** is App-only → deferred.)
+- **PR comment**: one comment per run, **edited in place** (`vcs_comment_id`): the `+a ~c -d`
+  summary, a mocks-block-apply note, deep link to `/runs/{id}`. Created on first post
+  (`POST .../issues/{pr}/comments`), updated on later transitions (`PATCH .../issues/comments/{id}`);
+  the returned id is persisted back on the run for idempotent edits.
+- A VCS failure **never** fails the run (logged, retried up to the attempts cap).
+
+### 18.5 API
+
+- `POST /api/v1/webhooks/github` — unchanged contract, now also persists PR metadata.
+- `POST /api/v1/runs/{id}/vcs/resync` (writer) — re-enqueue the post-back for the run's current
+  state (manual recovery).
+
+### 18.6 Invariants preserved
+
+1. Post-back is a side-effect of `transition()`, never a source of truth; a VCS outage leaves the
+   run correct (mirrors §17.4).
+2. Same-txn enqueue (invariant §6.3 spirit): a rolled-back transition enqueues nothing.
+3. Sensitive plan values stay masked in the comment (reuse the artifact masking, §13).
+
+## 19. Drift detection (post-MVP)
+
+> Status: **shipped** (Phase B). Detects when real infrastructure diverged from the last applied
+> state, via a periodic **read-only** `-refresh-only` plan. **Never auto-remediated** — drift is
+> surfaced (env badge + inbox), the operator decides. Reuses the `proposed` run machinery; no new
+> job type.
+
+### 19.1 Model
+
+`environments` (add): `drift_status text default 'unknown'` (`unknown | in_sync | drifted | error`),
+`last_drift_checked_at timestamptz?`, `drift_run_id uuid?` (the proposed run that last detected
+drift), `drift_check_enabled bool default true`. `runs` (add): `is_drift bool default false`.
+Config: `STACKD_DRIFT_INTERVAL_SECONDS = 21600` (6h) — per-env minimum spacing. New trigger source
+`TriggeredBy.schedule`; new inbox kind `drift_detected`.
+
+### 19.2 Scheduler task (`detect_drift`, advisory-locked like the others, §7.5)
+
+On the 10s loop, gated on `last_drift_checked_at + interval`: for each `drift_check_enabled`,
+unlocked env with **no active run**, bump `last_drift_checked_at` (so a no-op env isn't retried
+every tick) and — if the env has an applied commit — enqueue a read-only `proposed` run pinned to
+that commit (`is_drift=true`, `triggered_by=schedule`). An env with nothing applied stays `unknown`.
+
+### 19.3 Worker & claim
+
+No new job type: the `proposed` plan runs with **`-refresh-only`** (true drift = state vs reality,
+not state vs code), signalled by `refresh_only` in the claim payload. To keep drift behind user
+work, the claim order-by (§7.2) sorts `is_drift` ascending — a queued user run is always claimed
+before a background drift run.
+
+### 19.4 Outcome (applied in the run's `transition()` txn)
+
+On the drift run completing: changes → `drifted` (set `drift_run_id`, audit `environment.drift_detected`
++ fan out `drift_detected` to eligible approvers, **once** per edge into drift — debounced while it
+stays drifted); no changes → `in_sync`; the plan itself failing → `error`. A successful **apply**
+on the env reconciles state with reality → back to `in_sync`, `drift_run_id` cleared
+(`environment.drift_cleared`).
+
+### 19.5 API / front
+
+`drift_check_enabled` is settable on env create/update; the env out carries `drift_status` +
+`last_drift_checked_at` + `drift_run_id`. Front: a neutral drift chip (icon + label, never colour
+alone — DESIGN §7) on the env header, and a "drifted only" filter on the env list.
+
+### 19.6 Invariants preserved
+
+1. Drift runs are **read-only** and **never auto-applied**.
+2. One active run per env unchanged (§3.5) — a drift run is skipped when a run is already active,
+   and yields to user runs at claim time.
+3. The env status change rides the run `transition()` txn — a rolled-back completion changes
+   nothing; the notification is same-txn (§17.4).
+
+---
+
+## 20. Observability & API guardrails (post-MVP, Phase H)
+
+### 20.1 Metrics — `GET /metrics` (Prometheus)
+Unauthenticated scrape endpoint (restrict at the network layer — it exposes only bounded counts,
+**never** secrets or tfvars). `prometheus-client`. Cardinality is bounded: labels are state/phase/
+result only, never a run id.
+- `stackd_runs_total{state}`, `stackd_queue_depth`, `stackd_workers_online` — gauges refreshed from
+  the DB at scrape time (cheap aggregate queries).
+- `stackd_claim_latency_seconds` — histogram, observed in `claim_one` (queue wait = now − created_at).
+- `stackd_run_duration_seconds{phase}` — histogram, observed at the terminal `transition()` (claim →
+  terminal); `phase` = `apply` if the run was confirmed, else `plan`.
+- `stackd_webhook_total{result}` — counter (`accepted`/`rejected`/`no_match`) in the webhook handler.
+
+### 20.2 Tracing (OpenTelemetry, OTLP)
+`setup_tracing(app)` wires FastAPI + SQLAlchemy instrumentation and a `BatchSpanProcessor` →
+`OTLPSpanExporter` **only when `STACKD_OTLP_ENDPOINT` is set**; a complete no-op otherwise (the OTel
+stack is imported lazily). Spans link an HTTP request → run `transition` → claim → worker events.
+
+### 20.3 Guardrails
+- **Rate limiting** (`app/ratelimit.py`): an in-process token bucket per (limiter, client IP),
+  per-replica (no Redis in the MVP). Applied to `auth/google/callback` + `auth/refresh` (30/min,
+  burst 15), `webhooks/github` (120/min, burst 40), and `discover-inputs` (10/min, burst 5). 429
+  problem+json when empty. `/me` is intentionally unthrottled (the UI polls it). Dev login is not
+  throttled (dev-only, dropped in prod).
+- **Discovery clone caps**: the input-discovery clone is already `--depth 1 --single-branch` +
+  30 s-bounded; Phase H adds a post-clone **size budget** (`STACKD_DISCOVERY_MAX_REPO_MB`, default
+  200 → 413) and a **`.tf` file cap** (`STACKD_DISCOVERY_MAX_TF_FILES`, default 500 → 413).
+
+### Invariants
+`/metrics` and traces never include secret values or tfvars; metrics are cardinality-bounded (label
+by state/phase/result, never by run id).

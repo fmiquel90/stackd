@@ -3,21 +3,25 @@ from __future__ import annotations
 import asyncio
 from datetime import UTC, datetime, timedelta
 
-from sqlalchemy import select, text, update
+from sqlalchemy import and_, or_, select, text, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import get_settings
 from app.db import SessionLocal
+from app.drift.service import detect_drift
 from app.enums import ACTIVE_STATES, RunEventActor, RunState, WorkerStatus
 from app.logging import get_logger
 from app.models.run import Run
 from app.models.worker import Worker
 from app.notifications.dispatcher import dispatch_pending
 from app.runs.transition import transition
+from app.vcs.dispatcher import dispatch_vcs
 
 # Distinct advisory-lock keys so each periodic task runs once across replicas (§7.5).
 _LOCK_WORKER_LOST = 74001
 _LOCK_NOTIFY = 74002
+_LOCK_VCS = 74003
+_LOCK_DRIFT = 74004
 _log = get_logger("stackd.scheduler")
 
 
@@ -42,13 +46,24 @@ async def detect_worker_lost(session: AsyncSession, now: datetime) -> int:
         return 0
 
     lost_cutoff = now - timedelta(seconds=settings.stackd_worker_lost_seconds)
+    # An applying run carries a hard budget (§4.2) the worker enforces by killing tofu. Don't
+    # reclaim a still-applying run before that budget + grace — failing a healthy long apply
+    # mid-flight would let a second worker claim the env and apply concurrently (split-brain). By
+    # the time this cutoff passes, the worker has self-terminated and its state/OIDC tokens have
+    # expired, so a reclaimed apply can no longer write state.
+    apply_cutoff = now - timedelta(
+        seconds=settings.stackd_apply_timeout_seconds + settings.stackd_apply_lost_grace_seconds
+    )
+    non_applying = [s for s in ACTIVE_STATES if s != RunState.applying]
     runs = (
         (
             await session.execute(
                 select(Run).where(
-                    Run.state.in_(list(ACTIVE_STATES)),
                     Run.worker_id.in_(offline_ids),
-                    Run.claimed_at < lost_cutoff,
+                    or_(
+                        and_(Run.state == RunState.applying, Run.claimed_at < apply_cutoff),
+                        and_(Run.state.in_(non_applying), Run.claimed_at < lost_cutoff),
+                    ),
                 )
             )
         )
@@ -95,6 +110,10 @@ async def scheduler_loop() -> None:
                 await _with_lock(session, _LOCK_WORKER_LOST, detect_worker_lost)
             async with SessionLocal() as session:
                 await _with_lock(session, _LOCK_NOTIFY, dispatch_pending)
+            async with SessionLocal() as session:
+                await _with_lock(session, _LOCK_VCS, dispatch_vcs)
+            async with SessionLocal() as session:
+                await _with_lock(session, _LOCK_DRIFT, detect_drift)
         except Exception as exc:
             print(f"[scheduler] tick error: {exc}", flush=True)
         await asyncio.sleep(10)

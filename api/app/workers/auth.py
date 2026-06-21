@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import uuid
+from datetime import UTC, datetime, timedelta
 from typing import Annotated
 
 import jwt
@@ -16,8 +17,17 @@ from app.security import hash_token
 
 
 def mint_worker_token(worker_id: uuid.UUID, pool_id: uuid.UUID) -> str:
+    now = datetime.now(UTC)
     return jwt.encode(
-        {"sub": str(worker_id), "pool": str(pool_id), "typ": "worker"},
+        {
+            "sub": str(worker_id),
+            "pool": str(pool_id),
+            "typ": "worker",
+            "iat": int(now.timestamp()),
+            "exp": int(
+                (now + timedelta(seconds=get_settings().worker_token_ttl_seconds)).timestamp()
+            ),
+        },
         get_settings().stackd_jwt_secret,
         algorithm="HS256",
     )
@@ -45,7 +55,10 @@ async def get_current_worker(
 ) -> Worker:
     try:
         claims = jwt.decode(
-            _bearer(request), get_settings().stackd_jwt_secret, algorithms=["HS256"]
+            _bearer(request),
+            get_settings().stackd_jwt_secret,
+            algorithms=["HS256"],
+            options={"require": ["exp", "typ"]},
         )
         if claims.get("typ") != "worker":
             raise jwt.InvalidTokenError("not a worker token")

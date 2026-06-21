@@ -4,6 +4,8 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.enums import Role
+from app.models.space import Space
+from app.models.space_membership import SpaceMembership
 from app.models.user import User
 
 
@@ -41,6 +43,21 @@ async def upsert_user(
             can_destroy=can_destroy if can_destroy is not None else False,
         )
         session.add(user)
+        await session.flush()
+        # Phase F: seed a membership in every existing space mirroring the user's instance
+        # defaults, preserving the pre-multi-space behaviour (a new user reaches the current
+        # spaces). Admins can then scope access per space via the spaces members API.
+        space_ids = (await session.execute(select(Space.id))).scalars().all()
+        for sid in space_ids:
+            session.add(
+                SpaceMembership(
+                    space_id=sid,
+                    user_id=user.id,
+                    role=user.role,
+                    allowed_tiers=list(user.allowed_tiers or []),
+                    can_destroy=user.can_destroy,
+                )
+            )
         await session.flush()
         return user
 

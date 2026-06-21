@@ -20,6 +20,7 @@ from app.models.oidc import CloudIntegration
 from app.models.run import Run
 from app.models.stack import Stack
 from app.oidc.issuer import ensure_active_key, jwks, openid_configuration, sign_workload_token
+from app.spaces import guard_env
 
 issuer_router = APIRouter(tags=["oidc"])
 cloud_router = APIRouter(prefix="/api/v1/environments", tags=["cloud-integration"])
@@ -58,9 +59,13 @@ def _out(ci: CloudIntegration) -> dict:
 
 
 @cloud_router.get("/{env_id}/cloud-integration")
-async def get_integration(env_id: uuid.UUID, _: CurrentUser, session: DbSession) -> dict:
+async def get_integration(env_id: uuid.UUID, user: CurrentUser, session: DbSession) -> dict:
     from sqlalchemy import select
 
+    env = await session.get(Environment, env_id)
+    if env is None:
+        raise ProblemException(404, "Environment not found", None)
+    await guard_env(session, user, env)
     ci = (
         await session.execute(
             select(CloudIntegration).where(CloudIntegration.environment_id == env_id)

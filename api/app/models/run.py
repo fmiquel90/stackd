@@ -3,7 +3,7 @@ from __future__ import annotations
 import uuid
 from datetime import datetime
 
-from sqlalchemy import Boolean, Enum, ForeignKey, LargeBinary, String
+from sqlalchemy import BigInteger, Boolean, Enum, ForeignKey, Integer, LargeBinary, String
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.dialects.postgresql import UUID as PGUUID
 from sqlalchemy.orm import Mapped, mapped_column
@@ -30,11 +30,22 @@ class Run(Base):
     commit_message: Mapped[str | None] = mapped_column(String, default=None)
     commit_author: Mapped[str | None] = mapped_column(String, default=None)
 
+    # VCS feedback (§18/Phase A): set on a `proposed` run spawned by a PR. The post-back (commit
+    # status + one edited PR comment) is driven off `transition()` via the vcs_outbox.
+    pr_number: Mapped[int | None] = mapped_column(Integer, default=None)
+    vcs_provider: Mapped[str | None] = mapped_column(String, default=None)  # 'github'
+    vcs_comment_id: Mapped[int | None] = mapped_column(BigInteger, default=None)
+    vcs_head_sha: Mapped[str | None] = mapped_column(String, default=None)
+
     triggered_by: Mapped[TriggeredBy] = mapped_column(Enum(TriggeredBy, name="triggered_by"))
     trigger_user_id: Mapped[uuid.UUID | None] = mapped_column(PGUUID(as_uuid=True), default=None)
     confirmed_by_user_id: Mapped[uuid.UUID | None] = mapped_column(
         PGUUID(as_uuid=True), default=None
     )
+
+    # A scheduler-spawned read-only drift plan (§19): proposed + `-refresh-only`, queued behind user
+    # runs in the claim, routes to a drift-status update instead of a normal proposed outcome.
+    is_drift: Mapped[bool] = mapped_column(Boolean, default=False)
 
     parent_run_id: Mapped[uuid.UUID | None] = mapped_column(PGUUID(as_uuid=True), default=None)
     run_group_id: Mapped[uuid.UUID | None] = mapped_column(PGUUID(as_uuid=True), default=None)

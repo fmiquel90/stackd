@@ -16,6 +16,27 @@ from app.hooks.schemas import HookCreate, HookOut, HookUpdate
 from app.models.environment import Environment
 from app.models.hook import Hook
 from app.models.stack import Stack
+from app.models.user import User
+from app.spaces import guard_env, guard_stack
+
+
+async def _guard_stack_id(
+    session: AsyncSession, user: User, stack_id: uuid.UUID, *, min_role: Role = Role.reader
+) -> None:
+    stack = await session.get(Stack, stack_id)
+    if stack is None:
+        raise ProblemException(404, "Stack not found", None)
+    await guard_stack(session, user, stack, min_role=min_role)
+
+
+async def _guard_env_id(
+    session: AsyncSession, user: User, env_id: uuid.UUID, *, min_role: Role = Role.reader
+) -> None:
+    env = await session.get(Environment, env_id)
+    if env is None:
+        raise ProblemException(404, "Environment not found", None)
+    await guard_env(session, user, env, min_role=min_role)
+
 
 # Platform hooks (SPECS §8.1): UI/API-defined governance, non-bypassable by a PR. The agent merges
 # them ahead of repo (.stackd.yml) hooks at claim time (see app/workers/hooks.py).
@@ -120,10 +141,9 @@ async def _delete(session: AsyncSession, user: CurrentUser, hook: Hook) -> None:
 
 @router.get("/stacks/{stack_id}/hooks", response_model=list[HookOut])
 async def list_stack_hooks(
-    stack_id: uuid.UUID, _: CurrentUser, session: DbSession
+    stack_id: uuid.UUID, user: CurrentUser, session: DbSession
 ) -> list[HookOut]:
-    if await session.get(Stack, stack_id) is None:
-        raise ProblemException(404, "Stack not found", None)
+    await _guard_stack_id(session, user, stack_id)
     return [HookOut.of(h) for h in await _list(session, AttachmentTarget.stack, stack_id)]
 
 
@@ -133,8 +153,7 @@ async def list_stack_hooks(
 async def create_stack_hook(
     stack_id: uuid.UUID, body: HookCreate, user: CurrentUser, session: DbSession
 ) -> HookOut:
-    if await session.get(Stack, stack_id) is None:
-        raise ProblemException(404, "Stack not found", None)
+    await _guard_stack_id(session, user, stack_id, min_role=Role.writer)
     return HookOut.of(await _create(session, user, AttachmentTarget.stack, stack_id, body))
 
 
@@ -142,6 +161,7 @@ async def create_stack_hook(
 async def update_stack_hook(
     stack_id: uuid.UUID, hook_id: uuid.UUID, body: HookUpdate, user: CurrentUser, session: DbSession
 ) -> HookOut:
+    await _guard_stack_id(session, user, stack_id, min_role=Role.writer)
     hook = await _get_owned(session, hook_id, AttachmentTarget.stack, stack_id)
     return HookOut.of(await _update(session, user, hook, body))
 
@@ -150,6 +170,7 @@ async def update_stack_hook(
 async def delete_stack_hook(
     stack_id: uuid.UUID, hook_id: uuid.UUID, user: CurrentUser, session: DbSession
 ) -> None:
+    await _guard_stack_id(session, user, stack_id, min_role=Role.writer)
     await _delete(
         session, user, await _get_owned(session, hook_id, AttachmentTarget.stack, stack_id)
     )
@@ -159,9 +180,8 @@ async def delete_stack_hook(
 
 
 @router.get("/environments/{env_id}/hooks", response_model=list[HookOut])
-async def list_env_hooks(env_id: uuid.UUID, _: CurrentUser, session: DbSession) -> list[HookOut]:
-    if await session.get(Environment, env_id) is None:
-        raise ProblemException(404, "Environment not found", None)
+async def list_env_hooks(env_id: uuid.UUID, user: CurrentUser, session: DbSession) -> list[HookOut]:
+    await _guard_env_id(session, user, env_id)
     return [HookOut.of(h) for h in await _list(session, AttachmentTarget.environment, env_id)]
 
 
@@ -171,8 +191,7 @@ async def list_env_hooks(env_id: uuid.UUID, _: CurrentUser, session: DbSession) 
 async def create_env_hook(
     env_id: uuid.UUID, body: HookCreate, user: CurrentUser, session: DbSession
 ) -> HookOut:
-    if await session.get(Environment, env_id) is None:
-        raise ProblemException(404, "Environment not found", None)
+    await _guard_env_id(session, user, env_id, min_role=Role.writer)
     return HookOut.of(await _create(session, user, AttachmentTarget.environment, env_id, body))
 
 
@@ -182,6 +201,7 @@ async def create_env_hook(
 async def update_env_hook(
     env_id: uuid.UUID, hook_id: uuid.UUID, body: HookUpdate, user: CurrentUser, session: DbSession
 ) -> HookOut:
+    await _guard_env_id(session, user, env_id, min_role=Role.writer)
     hook = await _get_owned(session, hook_id, AttachmentTarget.environment, env_id)
     return HookOut.of(await _update(session, user, hook, body))
 
@@ -190,6 +210,7 @@ async def update_env_hook(
 async def delete_env_hook(
     env_id: uuid.UUID, hook_id: uuid.UUID, user: CurrentUser, session: DbSession
 ) -> None:
+    await _guard_env_id(session, user, env_id, min_role=Role.writer)
     await _delete(
         session, user, await _get_owned(session, hook_id, AttachmentTarget.environment, env_id)
     )

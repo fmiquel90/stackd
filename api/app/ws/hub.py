@@ -1,10 +1,17 @@
 from __future__ import annotations
 
 import asyncio
+import uuid
 
 import asyncpg
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import get_settings
+from app.errors import ProblemException
+from app.models.environment import Environment
+from app.models.run import Run
+from app.models.user import User
+from app.spaces import guard_env, guard_run
 
 
 class NotifyHub:
@@ -55,14 +62,39 @@ class NotifyHub:
             await self._conn.close()
 
 
-def channel_for(sub: str, user_id: str) -> str | None:
+async def channel_for(sub: str, user: User, session: AsyncSession) -> str | None:
     """Map a subscription to a NOTIFY channel: run:<id> → run_<id>, environment:<id> → env_<id>,
     user:<id> → user_<id>. A `user:` channel is only granted for the connecting user's own id
-    (the in-app notification feed is private), so one can't listen on someone else's signals."""
+    (the in-app notification feed is private), so one can't listen on someone else's signals.
+    `run:`/`environment:` subscriptions are membership-gated the same way the REST routes are
+    (§2/§6): the target must exist and the user must have at least reader access to its space,
+    otherwise the subscription is denied (None)."""
     if sub.startswith("run:"):
-        return f"run_{sub[4:]}"
+        run = await _resolve(session, Run, sub[4:])
+        if run is None:
+            return None
+        try:
+            await guard_run(session, user, run)
+        except ProblemException:
+            return None
+        return f"run_{run.id}"
     if sub.startswith("environment:"):
-        return f"env_{sub[len('environment:') :]}"
+        env = await _resolve(session, Environment, sub[len("environment:") :])
+        if env is None:
+            return None
+        try:
+            await guard_env(session, user, env)
+        except ProblemException:
+            return None
+        return f"env_{env.id}"
     if sub.startswith("user:"):
-        return f"user_{user_id}" if sub[len("user:") :] == user_id else None
+        return f"user_{user.id}" if sub[len("user:") :] == str(user.id) else None
     return None
+
+
+async def _resolve(session: AsyncSession, model: type, raw_id: str):  # type: ignore[no-untyped-def]
+    try:
+        target_id = uuid.UUID(raw_id)
+    except ValueError:
+        return None
+    return await session.get(model, target_id)

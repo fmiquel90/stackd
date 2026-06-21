@@ -15,6 +15,8 @@ import type {
   ResolvedVariable,
   Role,
   Run,
+  Space,
+  SpaceMember,
   Stack,
   Tier,
   TierDef,
@@ -77,6 +79,7 @@ export interface CheckRepoResult {
 }
 
 export interface NewStack {
+  space_id?: string; // target space (§6); omit to use the bootstrap space
   name: string;
   repo_url: string;
   tool: Tool;
@@ -84,6 +87,24 @@ export interface NewStack {
   project_root?: string;
   description?: string;
 }
+
+// Spaces & per-space RBAC (§2/§6, Phase F).
+export interface NewSpaceMember {
+  user_id: string;
+  role: Role;
+  allowed_tiers: string[];
+  can_destroy: boolean;
+}
+
+export const spaces = {
+  list: () => api<Space[]>("/spaces"),
+  create: (body: { name: string; description?: string }) => api<Space>("/spaces", { body }),
+  members: (id: string) => api<SpaceMember[]>(`/spaces/${id}/members`),
+  setMember: (id: string, body: NewSpaceMember) =>
+    api<SpaceMember>(`/spaces/${id}/members`, { method: "PUT", body }),
+  removeMember: (id: string, userId: string) =>
+    api<void>(`/spaces/${id}/members/${userId}`, { method: "DELETE" }),
+};
 
 export interface NewEnvironment {
   name: string;
@@ -126,6 +147,7 @@ export interface EnvironmentPatch {
   managed_state?: boolean;
   allow_mock_apply?: boolean;
   allow_fallback_apply?: boolean;
+  drift_check_enabled?: boolean;
   backend_config_file?: string | null;
   backend_config?: Record<string, string> | null;
   labels?: Record<string, string> | null;

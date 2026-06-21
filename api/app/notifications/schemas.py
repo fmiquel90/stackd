@@ -7,6 +7,7 @@ from pydantic import BaseModel, field_validator
 
 from app.enums import AttachmentTarget, NotificationKind
 from app.models.notification import NotificationTarget
+from app.notifications.dispatcher import assert_safe_url
 
 # The only states that ever fire (transition() enqueues exactly these — see NOTIFY_STATES).
 ALLOWED_STATES = {"unconfirmed", "finished", "failed"}
@@ -30,6 +31,12 @@ class NotificationCreate(BaseModel):
             raise ValueError("on_states must list at least one state")
         return v
 
+    @field_validator("url")
+    @classmethod
+    def _safe_url(cls, v: str) -> str:
+        assert_safe_url(v)
+        return v
+
 
 class NotificationUpdate(BaseModel):
     name: str | None = None
@@ -43,6 +50,14 @@ class NotificationUpdate(BaseModel):
         if v is None:
             return v
         return NotificationCreate._valid_states(v)
+
+    @field_validator("url")
+    @classmethod
+    def _safe_url(cls, v: str | None) -> str | None:
+        if v is None:
+            return v
+        assert_safe_url(v)
+        return v
 
 
 class NotificationOut(BaseModel):

@@ -1,7 +1,7 @@
 # PLAN_A_UPDATE.md — Phase A: VCS feedback loop (PR comment + commit status)
 
-> Status: **todo** · Prio P1 · Effort M · Risk M. Spec: `SPECS_A_UPDATE.md`. Index: `PLAN_UPDATE.md`.
-> When shipped, rename this file to `PLAN_A_UPDATE.md.done` (and `SPECS_A_UPDATE.md.done`).
+> Status: **shipped** · Prio P1 · Effort M · Risk M. Spec folded into `docs/SPECS.md §18`. Index:
+> `PLAN_UPDATE.md`.
 
 **Goal**: a PR shows the plan result *in GitHub* — a commit **status** + a PR comment — closing the
 review loop. Reuses the `proposed` run created on `pull_request` (`webhooks/router.py`).

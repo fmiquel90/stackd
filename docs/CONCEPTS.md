@@ -262,7 +262,7 @@ register (pool token) → heartbeat (every ~20s) → claim (long-poll)
 - **Labels** target work to pools (e.g. a dedicated `prod` pool).
 - **Apply affinity**: the worker that produced a plan is preferred for the apply for ~60s (it still
   has the workspace); otherwise any compatible worker re-plans then applies.
-- A worker silent > 60s → `offline`; an active run on a dead worker → `failed (worker_lost)`.
+- A worker silent > 60s → `offline`; an active run on a dead worker → `failed (worker_lost)` (an `applying` run only after the apply budget + grace, so a long apply isn't failed mid-flight).
 - **Command channel.** The heartbeat response is also the *downward* channel (still no inbound to
   the worker). Today it carries **diagnostics**: an admin clicks a button, a `pending` command is
   queued, the worker picks it up on its next heartbeat, runs a **read-only** bundle (versions, disk,

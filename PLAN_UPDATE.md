@@ -15,15 +15,19 @@ scale (per-stack RBAC, multi-space, observability).
 
 | Phase | Theme | Prio | Effort | Risk | Status | Files |
 |---|---|---|---|---|---|---|
-| A | VCS feedback (PR comment + commit status, **PAT**) | P1 | M | M | todo | `PLAN_A_UPDATE.md` · `SPECS_A_UPDATE.md` |
-| B | Drift detection | P1 | S–M | L | todo | `PLAN_B_UPDATE.md` · `SPECS_B_UPDATE.md` |
-| C | Security hardening (masking + runner trust) | P1 | M | M | todo | `PLAN_C_UPDATE.md` · `SPECS_C_UPDATE.md` |
-| D | HCL-syntax tfvars | P2 | S | L | todo | `PLAN_D_UPDATE.md` · `SPECS_D_UPDATE.md` |
-| E | Worker concurrency | P2 | M | M | todo | `PLAN_E_UPDATE.md` · `SPECS_E_UPDATE.md` |
-| F | RBAC granularity + multi-space | P2 | L | M | todo | `PLAN_F_UPDATE.md` · `SPECS_F_UPDATE.md` |
-| G | Front: splitting + tests | P2 | S–M | L | todo | `PLAN_G_UPDATE.md` · `SPECS_G_UPDATE.md` |
-| H | Observability + API guardrails | P3 | M | L | todo | `PLAN_H_UPDATE.md` · `SPECS_H_UPDATE.md` |
+| A | VCS feedback (PR comment + commit status, **PAT**) | P1 | M | M | **shipped** | `PLAN_A_UPDATE.md.done` · `SPECS_A_UPDATE.md.done` (folded into `docs/SPECS.md §18`) |
+| B | Drift detection | P1 | S–M | L | **shipped** | `PLAN_B_UPDATE.md.done` · `SPECS_B_UPDATE.md.done` (folded into `docs/SPECS.md §19`) |
+| C | Security hardening (masking + runner trust) | P1 | M | M | **shipped** | `PLAN_C_UPDATE.md.done` · `SPECS_C_UPDATE.md.done` (folded into `docs/SPECS.md §5.1/§7.4/§8.3`) |
+| D | HCL-syntax tfvars | P2 | S | L | **shipped** | `PLAN_D_UPDATE.md.done` · `SPECS_D_UPDATE.md.done` (folded into `docs/SPECS.md §3.4`) |
+| E | Worker concurrency | P2 | M | M | **shipped** | `PLAN_E_UPDATE.md.done` · `SPECS_E_UPDATE.md.done` (folded into `docs/SPECS.md §7.1`) |
+| F | RBAC granularity + multi-space | P2 | L | M | **shipped** | `PLAN_F_UPDATE.md.done` · `SPECS_F_UPDATE.md.done` (folded into `docs/SPECS.md §2.4`; per-space only, per-stack deferred) |
+| G | Front: splitting + tests | P2 | S–M | L | **shipped** | `PLAN_G_UPDATE.md.done` · `SPECS_G_UPDATE.md.done` (folded into `docs/DESIGN.md §8`) |
+| H | Observability + API guardrails | P3 | M | L | **shipped** | `PLAN_H_UPDATE.md.done` · `SPECS_H_UPDATE.md.done` (folded into `docs/SPECS.md §20`) |
 | I | Later (registry, run-tasks, SSO, GitHub App) | P3 | L | — | backlog | `PLAN_I_UPDATE.md` (no spec yet) |
+
+**Status: A–H all shipped.** Only the Phase I backlog remains. Two Phase F residuals carried into
+the backlog: audit-event space scoping (needs a `space_id` denormalization migration) and WS
+`run:`/`environment:` subscription scoping (currently leaks existence/timing metadata only).
 
 Effort: S ≈ 1–2 d, M ≈ 3–5 d, L ≈ 1–2 wk (single dev).
 
@@ -42,8 +46,11 @@ H     ongoing / before any real prod exposure
 - **Resolved — Phase A: PAT** (the stack's `repo_secret`), commit Status API + PR comment. GitHub
   App (bot identity + Checks API) deferred to Phase I.
 - **Resolved — Phase A: one comment edited in place** (not append).
-- **Open — Phase C**: cleartext tripwire = warn (default) vs hard-fail.
-- **Open — Phase F**: per-stack grants now, or per-space only (per-stack later).
+- **Resolved — Phase C**: cleartext tripwire = **warn by default**, configurable to hard-fail via
+  `STACKD_LEAK_TRIPWIRE=fail` (fail aborts on plan only; apply is always warn-only post-change).
+- **Resolved — Phase F: per-space only** (per-stack grants deferred). An instance admin is a
+  cross-space superuser; everyone else is gated by `space_memberships`. Onboarding (new user → all
+  current spaces) preserves the pre-multi-space behaviour; tighter invite flows are future work.
 
 ## Cross-cutting rules
 - A migration per schema change (never edit a merged one); `task e2e` green when a phase touches

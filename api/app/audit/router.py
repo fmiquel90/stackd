@@ -11,7 +11,7 @@ from fastapi.responses import StreamingResponse
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.auth.deps import CurrentUser, require_role
+from app.auth.deps import require_role
 from app.db import get_session
 from app.enums import Role
 from app.models.audit import AuditEvent
@@ -45,9 +45,8 @@ def _filtered(
     return stmt.order_by(AuditEvent.created_at.desc())
 
 
-@router.get("")
+@router.get("", dependencies=[Depends(require_role(Role.admin))])
 async def list_audit(
-    _: CurrentUser,
     session: DbSession,
     actor: uuid.UUID | None = None,
     action: str | None = None,
