@@ -199,6 +199,7 @@ async def update_set_variable(
     user: CurrentUser,
     session: DbSession,
 ) -> VariableOut:
+    await _get_set(session, user, set_id, min_role=Role.writer)
     var = await get_variable(session, var_id)
     if var.variable_set_id != set_id:
         raise ProblemException(404, "Variable not found", None)
@@ -222,6 +223,7 @@ async def update_set_variable(
 async def delete_set_variable(
     set_id: uuid.UUID, var_id: uuid.UUID, user: CurrentUser, session: DbSession
 ) -> None:
+    await _get_set(session, user, set_id, min_role=Role.writer)
     var = await get_variable(session, var_id)
     if var.variable_set_id != set_id:
         raise ProblemException(404, "Variable not found", None)

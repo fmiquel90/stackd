@@ -28,18 +28,25 @@ export function useEntityStreams(subs: string[], keys: QueryKey[]): void {
     let stopped = false;
     let ws: WebSocket | null = null;
     let retry: ReturnType<typeof setTimeout> | undefined;
+    let healthy: ReturnType<typeof setTimeout> | undefined;
     let attempts = 0;
 
     const connect = () => {
       const token = getAccessToken(); // fresh token on every (re)connect → survives expiry
       if (stopped || !token) return;
       const proto = window.location.protocol === "https:" ? "wss" : "ws";
-      ws = new WebSocket(
-        `${proto}://${window.location.host}/api/v1/ws?token=${token}`,
-      );
+      // Token sent out-of-band as the first message (never in the URL — it would leak to
+      // proxy/LB logs, history, Referer). The server authenticates synchronously on this first
+      // message, so subscriptions can follow immediately.
+      ws = new WebSocket(`${proto}://${window.location.host}/api/v1/ws`);
       ws.onopen = () => {
-        attempts = 0; // healthy connection resets the backoff
+        ws?.send(JSON.stringify({ type: "auth", token }));
         for (const sub of subs) ws?.send(JSON.stringify({ sub }));
+        // Only reset the backoff once the socket has *stayed* open: an open-then-immediate-close
+        // (auth/permission reject) must keep backing off instead of looping every ~2s forever.
+        healthy = setTimeout(() => {
+          attempts = 0;
+        }, 5_000);
       };
       ws.onmessage = () => {
         for (const key of keys) qc.invalidateQueries({ queryKey: key });
@@ -48,6 +55,7 @@ export function useEntityStreams(subs: string[], keys: QueryKey[]): void {
       // server that keeps rejecting can't cause a tight reconnect loop. The query poll is the
       // fallback in the meantime.
       ws.onclose = () => {
+        if (healthy) clearTimeout(healthy);
         if (stopped) return;
         attempts += 1;
         const delay = Math.min(30_000, 1_000 * 2 ** Math.min(attempts, 5));
@@ -59,6 +67,7 @@ export function useEntityStreams(subs: string[], keys: QueryKey[]): void {
     return () => {
       stopped = true;
       if (retry) clearTimeout(retry);
+      if (healthy) clearTimeout(healthy);
       ws?.close();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps

@@ -175,6 +175,14 @@ async def trigger_command_run(
         raise ProblemException(
             400, "Command not allowed", f"'{command}' is not in the allowlist of runnable commands."
         )
+    # Args are passed verbatim to `<tool> <command> <args...>`. None of the allowlisted commands
+    # need option flags, and a leading-`-` arg (e.g. -chdir, -state, -backend) would widen what a
+    # command run can touch beyond its gate. Reject them.
+    bad_args = [a for a in args if a.startswith("-")]
+    if bad_args:
+        raise ProblemException(
+            400, "Argument not allowed", f"Command arguments must not start with '-': {bad_args}"
+        )
     if is_mutating(command):
         membership = await _env_membership(session, user, env)
         decision = can_apply(user, env, membership)

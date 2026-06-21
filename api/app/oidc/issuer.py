@@ -109,7 +109,14 @@ async def sign_workload_token(
     key = await ensure_active_key(session)
     private_pem = decrypt(key.private_key_encrypted)
     now = datetime.now(UTC)
-    exp = now + timedelta(seconds=min(ttl, PHASE_MAX_SECONDS[phase]))
+    # The apply cap follows the configured apply budget + grace so cloud credentials never outlive
+    # the apply they were minted for (§4.2/§13); plan keeps the static cap.
+    if phase == JobPhase.apply:
+        s = get_settings()
+        phase_cap = s.stackd_apply_timeout_seconds + s.stackd_apply_lost_grace_seconds
+    else:
+        phase_cap = PHASE_MAX_SECONDS[phase]
+    exp = now + timedelta(seconds=min(ttl, phase_cap))
     payload = {
         "iss": get_settings().stackd_public_url.rstrip("/"),
         "sub": f"run:{env.tier}:{stack.name}:{phase.value}",

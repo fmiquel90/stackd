@@ -76,18 +76,27 @@ async def github_webhook(
     x_hub_signature_256: Annotated[str | None, Header()] = None,
 ) -> dict:
     body = await request.body()
-    payload = json.loads(body)
-    stacks = await _candidate_stacks(session, payload)
-    if not stacks:
+    try:
+        payload = json.loads(body)
+    except json.JSONDecodeError as exc:
+        raise ProblemException(400, "Bad request", "Body is not valid JSON.") from exc
+    candidates = await _candidate_stacks(session, payload)
+    if not candidates:
         metrics.webhook_total.labels(result="no_match").inc()
         return {"matched": 0}
 
-    secret = decrypt(stacks[0].webhook_secret_encrypted)  # shared per repo (§3.1)
-    if not _verify(secret, body, x_hub_signature_256):
+    # Each stack owns its secret (§3.1): verify per stack and act only on those that authenticate,
+    # never trusting one stack's signature for another (cross-space trigger).
+    stacks = [
+        s
+        for s in candidates
+        if _verify(decrypt(s.webhook_secret_encrypted), body, x_hub_signature_256)
+    ]
+    if not stacks:
         metrics.webhook_total.labels(result="rejected").inc()
         _log.warning(
             "webhook rejected",
-            extra={"event": "webhook.rejected", "reason": "bad_hmac", "stacks": len(stacks)},
+            extra={"event": "webhook.rejected", "reason": "bad_hmac", "stacks": len(candidates)},
         )
         raise ProblemException(
             401, "Webhook rejected", "Invalid HMAC signature. Check the secret in Settings."

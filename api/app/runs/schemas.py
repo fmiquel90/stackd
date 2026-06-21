@@ -1,11 +1,22 @@
 from __future__ import annotations
 
+import re
 import uuid
 from datetime import datetime
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, field_validator
 
 from app.enums import RunState, RunType, TriggeredBy
+
+# A git ref/SHA must start alphanumeric (so it can never be parsed as a git `-option`) and stay
+# within a safe charset — blocks argument injection into the worker's git fetch/checkout.
+_SAFE_REF = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._/-]{0,255}$")
+
+
+def _validate_commit_sha(v: str | None) -> str | None:
+    if v is not None and not _SAFE_REF.match(v):
+        raise ValueError("commit_sha contains invalid characters")
+    return v
 
 
 class TriggerRunIn(BaseModel):
@@ -15,11 +26,15 @@ class TriggerRunIn(BaseModel):
     # Break-glass overrides for down secret sources (§15.4): variable name → value. Requires apply.
     secret_overrides: dict[str, str] | None = None
 
+    _check_sha = field_validator("commit_sha")(_validate_commit_sha)
+
 
 class CommandTriggerIn(BaseModel):
     command: str  # one of the allowlisted subcommands (app.runs.commands.ALLOWED_COMMANDS)
     args: list[str] = []
     commit_sha: str | None = None
+
+    _check_sha = field_validator("commit_sha")(_validate_commit_sha)
 
 
 class PromoteIn(BaseModel):

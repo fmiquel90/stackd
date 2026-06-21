@@ -7,6 +7,7 @@ from sqlalchemy import text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.config import get_settings
 from app.crypto import decrypt
 from app.enums import (
     ACTIVE_STATES,
@@ -149,13 +150,20 @@ async def build_job_payload(session: AsyncSession, run: Run) -> dict:
 
     # Inject upstream dependency outputs / mocks (§9.3): real value > mock > error.
     from app.audit import record_audit
-    from app.dependencies.service import resolve_dependency_inputs
+    from app.dependencies.service import DependencyError, resolve_dependency_inputs
 
     dep = await resolve_dependency_inputs(session, env)
     for name, value in {**dep.resolved_inputs, **dep.mock_inputs}.items():
         tfvars_json[name] = value
     run.used_mocks = dep.used_mocks
     run.resolved_inputs = dep.resolved_inputs
+
+    # §9.3: re-enforce the mock-apply gate at the apply claim, mirroring the secret-fallback gate
+    # above. The confirm-time gate checked the plan-time resolution; if a dependency input newly
+    # falls back to a mock between confirm and apply (the upstream output expired or its env was
+    # destroyed), a non-real value must not slip into an apply.
+    if run.state == RunState.applying and dep.used_mocks and not env.allow_mock_apply:
+        raise DependencyError("dependency_mock:mock_apply_disabled")
     if dep.consumed_mocks:
         await record_audit(
             session,
@@ -187,15 +195,23 @@ async def build_job_payload(session: AsyncSession, run: Run) -> dict:
         cred_phase = phase
 
     # Managed state (§11): hand the worker a scoped HTTP backend (RO for proposed runs).
+    settings = get_settings()
     backend = None
     if env.managed_state:
-        from app.config import get_settings
         from app.statebackend.tokens import mint_state_token
 
         scope = "ro" if run.type == RunType.proposed else "rw"
-        base = get_settings().internal_url.rstrip("/")  # worker-reachable, not the public URL
+        base = settings.internal_url.rstrip("/")  # worker-reachable, not the public URL
+        # An apply's state token lives only for the apply budget + grace so a reaped/partitioned
+        # worker loses state-write access shortly after the API reclaims its run (§4.2). Plan/RO
+        # tokens keep the generous window.
+        state_ttl = (
+            settings.stackd_apply_timeout_seconds + settings.stackd_apply_lost_grace_seconds
+            if run.state == RunState.applying
+            else 6 * 3600
+        )
         token = mint_state_token(
-            environment_id=env.id, run_id=run.id, scope=scope, ttl_seconds=6 * 3600
+            environment_id=env.id, run_id=run.id, scope=scope, ttl_seconds=state_ttl
         )
         addr = f"{base}/state/v1/{env.id}"
         backend = {
@@ -225,6 +241,9 @@ async def build_job_payload(session: AsyncSession, run: Run) -> dict:
     return {
         "job_id": str(run.id),
         "phase": phase.value,
+        # Hard apply budget (§4.2): the worker kills `apply` past this. API-owned so the cap and the
+        # worker-lost reclaim window can never drift apart.
+        "apply_timeout_seconds": settings.stackd_apply_timeout_seconds,
         "refresh_only": run.is_drift,  # §19: drift plan uses `-refresh-only` (state vs reality)
         "command": run.command,  # set only for RunType.command jobs
         "environment": {

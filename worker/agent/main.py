@@ -11,7 +11,13 @@ from agent.client import ApiClient
 from agent.config import Settings
 from agent.logging import get_logger, setup as setup_logging
 from agent.masking import Masker
-from agent.runner import LogStreamer, run_command, run_hooks, stream_json_command
+from agent.runner import (
+    _DEFAULT_TIMEOUT_SECONDS,
+    LogStreamer,
+    run_command,
+    run_hooks,
+    stream_json_command,
+)
 from agent.workspace import Workspace
 
 log = get_logger()
@@ -231,7 +237,8 @@ def handle_plan(client: ApiClient, job: dict, settings: Settings) -> None:
                 job_id,
                 "job_failed",
                 phase="plan",
-                result={"error": _first_error(events) or "plan failed"},
+                # Mask: a tofu diagnostic can echo a sensitive variable value verbatim (§5.1).
+                result={"error": masker.mask(_first_error(events) or "plan failed")},
             )
         has_changes = code == 2
         summary = _summary_from_events(events)
@@ -350,6 +357,9 @@ def handle_apply(client: ApiClient, job: dict, settings: Settings) -> None:
             phase="applying",
             streamer=streamer,
         )
+        # Hard apply budget (§4.2): the API caps an apply's wall-clock; the watchdog kills tofu past
+        # it (exit 124) so a hung apply can't pin the worker or outlive its short-lived credentials.
+        apply_timeout = job.get("apply_timeout_seconds") or _DEFAULT_TIMEOUT_SECONDS
         code, events = stream_json_command(
             [tool, "apply", "-input=false", "-json", "-auto-approve"],
             cwd,
@@ -357,13 +367,20 @@ def handle_apply(client: ApiClient, job: dict, settings: Settings) -> None:
             phase="applying",
             section=None,
             streamer=streamer,
+            timeout=apply_timeout,
         )
         if code != 0:
+            error = (
+                f"apply exceeded the {apply_timeout}s time budget and was terminated"
+                if code == 124
+                else (_first_error(events) or "apply failed")
+            )
             return client.event(
                 job_id,
                 "job_failed",
                 phase="apply",
-                result={"error": _first_error(events) or "apply failed"},
+                # Mask: a tofu diagnostic can echo a sensitive variable value verbatim (§5.1).
+                result={"error": masker.mask(error)},
             )
         out = subprocess.run(
             [tool, "output", "-json"], cwd=cwd, env=platform_env, capture_output=True, text=True
@@ -517,9 +534,12 @@ def _run_job(client: ApiClient, job: dict, settings: Settings) -> None:
         log.info("job done", extra={"event": "agent.done", "run_id": job["job_id"]})
     except Exception as exc:  # noqa: BLE001 — report and keep polling
         jid, jphase = job.get("job_id"), job.get("phase")
-        log.exception("job failed", extra={"event": "agent.failed", "run_id": jid})
+        # The exception message can carry secrets (e.g. a clone URL with the repo token, a tofu
+        # error echoing a sensitive value). Mask before logging or reporting it to the API (§5.1).
+        detail = Masker(job.get("mask_values", [])).mask(str(exc))
+        log.error("job failed", extra={"event": "agent.failed", "run_id": jid, "error": detail})
         if jid:
-            client.event(jid, "job_failed", phase=jphase, result={"error": str(exc)})
+            client.event(jid, "job_failed", phase=jphase, result={"error": detail})
 
 
 def run() -> None:

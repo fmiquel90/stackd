@@ -24,6 +24,9 @@ class Settings(BaseSettings):
 
     access_token_ttl_seconds: int = 15 * 60
     refresh_token_ttl_seconds: int = 14 * 24 * 3600
+    # Worker JWTs expire so a leaked token can't claim jobs forever; the agent re-registers on 401
+    # to refresh (and re-create its row if a pool reset wiped it).
+    worker_token_ttl_seconds: int = 24 * 3600
 
     # Auth
     stackd_dev_auth: bool = False
@@ -51,6 +54,12 @@ class Settings(BaseSettings):
     stackd_heartbeat_interval: int = 20
     stackd_worker_offline_seconds: int = 60
     stackd_worker_lost_seconds: int = 120
+    # Hard budget for an apply (§4.2): the worker kills tofu/terraform `apply` past this, and the
+    # API only reclaims an applying run from a lost worker after the budget + grace. Keeping the
+    # reclaim window above the budget means a healthy long apply is never failed mid-flight;
+    # scoping the OIDC/state tokens to budget + grace means a reaped worker can no longer write.
+    stackd_apply_timeout_seconds: int = 15 * 60
+    stackd_apply_lost_grace_seconds: int = 5 * 60
     stackd_head_poll_interval: int = 900
     stackd_apply_affinity_seconds: int = 60
     # Drift detection (§19): minimum spacing between read-only drift plans per environment.

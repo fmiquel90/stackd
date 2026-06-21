@@ -3,7 +3,7 @@ from __future__ import annotations
 import asyncio
 from datetime import UTC, datetime, timedelta
 
-from sqlalchemy import select, text, update
+from sqlalchemy import and_, or_, select, text, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import get_settings
@@ -46,13 +46,24 @@ async def detect_worker_lost(session: AsyncSession, now: datetime) -> int:
         return 0
 
     lost_cutoff = now - timedelta(seconds=settings.stackd_worker_lost_seconds)
+    # An applying run carries a hard budget (§4.2) the worker enforces by killing tofu. Don't
+    # reclaim a still-applying run before that budget + grace — failing a healthy long apply
+    # mid-flight would let a second worker claim the env and apply concurrently (split-brain). By
+    # the time this cutoff passes, the worker has self-terminated and its state/OIDC tokens have
+    # expired, so a reclaimed apply can no longer write state.
+    apply_cutoff = now - timedelta(
+        seconds=settings.stackd_apply_timeout_seconds + settings.stackd_apply_lost_grace_seconds
+    )
+    non_applying = [s for s in ACTIVE_STATES if s != RunState.applying]
     runs = (
         (
             await session.execute(
                 select(Run).where(
-                    Run.state.in_(list(ACTIVE_STATES)),
                     Run.worker_id.in_(offline_ids),
-                    Run.claimed_at < lost_cutoff,
+                    or_(
+                        and_(Run.state == RunState.applying, Run.claimed_at < apply_cutoff),
+                        and_(Run.state.in_(non_applying), Run.claimed_at < lost_cutoff),
+                    ),
                 )
             )
         )

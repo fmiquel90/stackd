@@ -1,7 +1,10 @@
 from __future__ import annotations
 
+import ipaddress
+import socket
 import uuid
 from datetime import datetime
+from urllib.parse import urlsplit
 
 import httpx
 from sqlalchemy import select, update
@@ -19,6 +22,61 @@ _log = get_logger("stackd.notifications")
 
 _MAX_ATTEMPTS = 5  # after this, the row is dead-lettered (left unsent, excluded from the poll)
 _HTTP_TIMEOUT = 5.0
+
+# SSRF guard: notification targets are operator-supplied URLs we POST to from inside the cluster,
+# so they must point at a public host over TLS. We reject non-https schemes and any host that
+# resolves to a private / loopback / link-local / reserved / multicast address — link-local also
+# covers the cloud metadata endpoint (169.254.169.254), which we name explicitly for clarity.
+_METADATA_IP = ipaddress.ip_address("169.254.169.254")
+
+
+def _ip_is_blocked(ip: ipaddress.IPv4Address | ipaddress.IPv6Address) -> bool:
+    return (
+        ip == _METADATA_IP
+        or ip.is_private
+        or ip.is_loopback
+        or ip.is_link_local
+        or ip.is_reserved
+        or ip.is_multicast
+        or ip.is_unspecified
+    )
+
+
+def _assert_public_host(host: str) -> None:
+    """Raise ValueError if `host` is, or resolves to, a non-public address.
+
+    A literal IP is checked directly. A hostname is resolved via getaddrinfo and every returned
+    address is checked. Resolution failure is *not* an error here — an unresolvable host can't reach
+    an internal target, and surfacing DNS state as a validation error would leak resolver behaviour;
+    the actual HTTP attempt fails harmlessly instead.
+    """
+    try:
+        literal = ipaddress.ip_address(host)
+    except ValueError:
+        literal = None
+    if literal is not None:
+        if _ip_is_blocked(literal):
+            raise ValueError(f"url host {host!r} resolves to a non-public address")
+        return
+    try:
+        infos = socket.getaddrinfo(host, None)
+    except socket.gaierror:
+        return
+    for info in infos:
+        addr = info[4][0]
+        if _ip_is_blocked(ipaddress.ip_address(addr)):
+            raise ValueError(f"url host {host!r} resolves to a non-public address ({addr})")
+
+
+def assert_safe_url(url: str) -> None:
+    """Validate a notification target URL: https scheme + public host. Raises ValueError."""
+    parts = urlsplit(url)
+    if parts.scheme != "https":
+        raise ValueError("url must use the https scheme")
+    if not parts.hostname:
+        raise ValueError("url must include a host")
+    _assert_public_host(parts.hostname)
+
 
 # Short human label per state for the message subject line.
 _LABEL = {
@@ -85,7 +143,11 @@ async def _matching_targets(
 
 
 async def deliver(target: NotificationTarget, body: dict) -> bool:
-    async with httpx.AsyncClient(timeout=_HTTP_TIMEOUT) as http:
+    # Re-validate at request time: DNS can change between create-time validation and now
+    # (rebinding), so the stored URL is not trusted on its own. follow_redirects stays off so a
+    # public URL can't 302 us onto an internal host.
+    assert_safe_url(target.url)
+    async with httpx.AsyncClient(timeout=_HTTP_TIMEOUT, follow_redirects=False) as http:
         resp = await http.post(target.url, json=body)
         resp.raise_for_status()
     return True
