@@ -1295,7 +1295,7 @@
 <h2 id="the-pull-model">The pull model<a class="headerlink" href="#the-pull-model" title="Permanent link">&para;</a></h2>
 <p>A worker has <strong>no inbound ports</strong>. The API never connects out to it. Instead the worker drives everything:</p>
 <ol>
-<li><strong>Register</strong> to a pool with the pool token → it gets a <code>worker_id</code> and a per-worker token.</li>
+<li><strong>Register</strong> to a pool with the pool token → it gets a <code>worker_id</code> and a per-worker token. The token expires (default 24h); the worker re-registers automatically on a <code>401</code> to refresh it.</li>
 <li><strong>Heartbeat</strong> every ~20s. The heartbeat response is the only <em>downward</em> channel (e.g. diagnostics, and later <code>cancel_job</code>).</li>
 <li><strong>Claim</strong> a job via long-poll (<code>POST /worker/v1/jobs/claim?wait=25</code>), returning <code>204</code> when there is nothing to do.</li>
 <li><strong>Run</strong> the job: clone the repo, set up the tool (checksum-verified), run hooks + <code>init</code>/<code>plan</code>/<code>apply</code>, stream logs, report results and upload artifacts.</li>
@@ -1321,6 +1321,7 @@
 <p>After a plan, the originating worker is <strong>preferred</strong> for the matching apply for ~60s — it still has the workspace, so the apply reuses it. Past that delay (a dead or saturated worker), any compatible worker takes the run and does an <strong>automatic re-plan</strong> before applying.</p>
 <h3 id="worker-loss">Worker loss<a class="headerlink" href="#worker-loss" title="Permanent link">&para;</a></h3>
 <p>A worker silent for &gt; 60s is marked <code>offline</code>. An active run on a worker offline for &gt; 120s is transitioned to <code>failed (worker_lost)</code> by the scheduler's periodic detection task. No human action required.</p>
+<p>An <strong><code>applying</code> run is the exception</strong>: it is reclaimed only after the apply budget plus a grace period (<code>stackd_apply_timeout_seconds</code> + <code>stackd_apply_lost_grace_seconds</code>, default 15 min + 5 min). This keeps a healthy long apply from being failed mid-flight, and — since the worker hard-kills its own <code>apply</code> at the budget and its cloud/state tokens are scoped to budget + grace — guarantees a reclaimed env can't be applied by two workers at once.</p>
 <h2 id="create-a-pool">Create a pool<a class="headerlink" href="#create-a-pool" title="Permanent link">&para;</a></h2>
 <p>Workers register to a <strong>pool</strong>, scoped to a space. The pool token is shown once at creation and stored <strong>hashed</strong> — rotate it if leaked.</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="nv">AUTH</span><span class="o">=</span><span class="s2">&quot;Authorization: Bearer </span><span class="nv">$TOKEN</span><span class="s2">&quot;</span>

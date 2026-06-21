@@ -1805,7 +1805,7 @@ out to them.</p>
 <li><strong>Labels</strong> target work to pools (e.g. a dedicated <code>prod</code> pool).</li>
 <li><strong>Apply affinity</strong>: the worker that produced a plan is preferred for the apply for ~60s (it still
   has the workspace); otherwise any compatible worker re-plans then applies.</li>
-<li>A worker silent &gt; 60s → <code>offline</code>; an active run on a dead worker → <code>failed (worker_lost)</code>.</li>
+<li>A worker silent &gt; 60s → <code>offline</code>; an active run on a dead worker → <code>failed (worker_lost)</code> (an <code>applying</code> run only after the apply budget + grace, so a long apply isn't failed mid-flight).</li>
 <li><strong>Command channel.</strong> The heartbeat response is also the <em>downward</em> channel (still no inbound to
   the worker). Today it carries <strong>diagnostics</strong>: an admin clicks a button, a <code>pending</code> command is
   queued, the worker picks it up on its next heartbeat, runs a <strong>read-only</strong> bundle (versions, disk,
