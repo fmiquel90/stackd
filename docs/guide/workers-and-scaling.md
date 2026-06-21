@@ -8,7 +8,7 @@ This page covers how the pull model works, how to run workers, and how to scale 
 
 A worker has **no inbound ports**. The API never connects out to it. Instead the worker drives everything:
 
-1. **Register** to a pool with the pool token → it gets a `worker_id` and a per-worker token.
+1. **Register** to a pool with the pool token → it gets a `worker_id` and a per-worker token. The token expires (default 24h); the worker re-registers automatically on a `401` to refresh it.
 2. **Heartbeat** every ~20s. The heartbeat response is the only *downward* channel (e.g. diagnostics, and later `cancel_job`).
 3. **Claim** a job via long-poll (`POST /worker/v1/jobs/claim?wait=25`), returning `204` when there is nothing to do.
 4. **Run** the job: clone the repo, set up the tool (checksum-verified), run hooks + `init`/`plan`/`apply`, stream logs, report results and upload artifacts.
@@ -44,6 +44,8 @@ After a plan, the originating worker is **preferred** for the matching apply for
 ### Worker loss
 
 A worker silent for > 60s is marked `offline`. An active run on a worker offline for > 120s is transitioned to `failed (worker_lost)` by the scheduler's periodic detection task. No human action required.
+
+An **`applying` run is the exception**: it is reclaimed only after the apply budget plus a grace period (`stackd_apply_timeout_seconds` + `stackd_apply_lost_grace_seconds`, default 15 min + 5 min). This keeps a healthy long apply from being failed mid-flight, and — since the worker hard-kills its own `apply` at the budget and its cloud/state tokens are scoped to budget + grace — guarantees a reclaimed env can't be applied by two workers at once.
 
 ## Create a pool
 

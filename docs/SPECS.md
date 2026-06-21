@@ -271,7 +271,7 @@ workers: id, pool_id, name, status(idle|busy|offline), labels jsonb,
          version, last_heartbeat_at, registered_at
 ```
 
-`offline` if heartbeat > 60 s; run in progress on an offline worker → `failed (worker_lost)` after 120 s. Targeting by labels (dedicated prod pool recommended).
+`offline` if heartbeat > 60 s; run in progress on an offline worker → `failed (worker_lost)` after 120 s — **except an `applying` run**, reclaimed only after the apply budget + grace (`stackd_apply_timeout_seconds` + `stackd_apply_lost_grace_seconds`, default 15 min + 5 min) so a healthy long apply is never failed mid-flight and two workers can't apply the same env concurrently (§4.2). Targeting by labels (dedicated prod pool recommended).
 
 ### 3.8 Dependencies, outputs and mocks
 
@@ -399,9 +399,9 @@ Terminal: `finished`, `failed`, `discarded`, `canceled`. `canceled`: user on `qu
 | `checking → confirmed` | system | all checks OK, non-empty diff, `autodeploy=true`, env not protected, `used_mocks=false` |
 | `planning/checking → finished` | worker | empty diff (outputs captured after refresh) |
 | `unconfirmed → confirmed` | user | `can_apply(user, env)` = role∈{approver,admin} AND `env.tier ∈ allowed_tiers` (§2.4); ≠ triggerer if the tier requires four-eyes or 4-eyes; for a `destroy` run: `can_destroy` required; **blocked if `used_mocks` and `allow_mock_apply=false`** |
-| `confirmed → applying` | worker | resume of the workspace (TTL 24 h), otherwise re-plan |
+| `confirmed → applying` | worker | resume of the workspace (TTL 24 h), otherwise re-plan; re-checks `allow_mock_apply` and the secret-fallback gate against the apply-time resolution (§9.3/§15.5) |
 | `applying → finished` | worker | apply exit 0 + outputs uploaded |
-| `* → failed` | worker/system | exit ≠ 0, hook `fail`, timeouts (prepare 10 / plan 30 / apply 60 min) |
+| `* → failed` | worker/system | exit ≠ 0, hook `fail`, timeouts (prepare 10 / plan 30 / apply 15 min, configurable via `stackd_apply_timeout_seconds`) — the worker hard-kills the process past its budget |
 
 Single function `transition(run, to_state, actor, payload)`: legality, atomic update guarded on `from_state`, `run_event`, audit event if the action is human or terminal, WS publication, scheduler hooks. The guarded UPDATE uses `RETURNING` (PG18: old + new tuple) to produce the `from→to` `run_event` without a re-read, in the same transaction.
 
@@ -649,7 +649,7 @@ The scheduler module (PLAN §2.1) carries background tasks that must run **exact
 
 | Task | Frequency | Effect |
 |---|---|---|
-| `worker_lost` detection | 30 s | heartbeat > 60 s → `offline`; active run on a worker offline for > 120 s → `failed (worker_lost)` (§3.7) |
+| `worker_lost` detection | 30 s | heartbeat > 60 s → `offline`; active run on a worker offline for > 120 s → `failed (worker_lost)`; an `applying` run only after the apply budget + grace (§3.7/§4.2) |
 | Git staleness polling | 15 min | `git ls-remote` per (repo, branch), dedup by repo → update `head_sha` (§9.6) |
 | Cold log archiving | end of run | `run_logs` → S3 gz, purge hot > 7 d (§5.2) |
 | Refresh token / audit purge | daily | expired families (§2.5), audit > 2 years (§6.1, audited purge) |
