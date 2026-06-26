@@ -361,10 +361,37 @@ The source markdown also reads fine on GitHub:
 api/      FastAPI (Python 3.13, uv) — REST + worker API, auth, audit, OIDC issuer, state backend
 worker/   Pull-model agent (Python)
 front/    React 19 + Vite 7 + TypeScript (pnpm)
-deploy/   docker-compose.dev.yml, Garage config
+deploy/
+  docker-compose.dev.yml          local dev stack
+  terraform/                      production AWS deployment (see below)
+    modules/  kms · network · database · storage · secrets · ecr · iam · api · worker · cdn
+    examples/ minimal · production
 docs/     PLAN · SPECS · DESIGN · DEV · CONCEPTS · TESTING
 Taskfile.yml
 ```
+
+## ☁️ Deploying to AWS
+
+`deploy/terraform/` contains production-ready OpenTofu/Terraform for AWS. Architecture: ECS Fargate
+(API + workers) · RDS PostgreSQL · S3 · internal ALB · CloudFront VPC Origin.
+
+```bash
+cd deploy/terraform/examples/minimal
+cp terraform.tfvars.example terraform.tfvars
+# fill in aws_region at minimum
+tofu init && tofu apply
+```
+
+**Bootstrap sequence** (first deploy):
+
+1. `tofu apply` — creates infrastructure. ECS tasks fail to start (no images yet).
+2. Push images to the ECR URLs from `output.ecr_api_repository_url` / `ecr_worker_repository_url`.
+3. `tofu apply -var api_image=<url>:TAG -var worker_image=<url>:TAG` — tasks start.
+4. Open `output.public_url`, log in, create a worker pool, copy the token.
+5. If Google OIDC: register `output.google_oauth_redirect_uri` in your Google Cloud Console app.
+6. `tofu apply -var worker_pool_token=wpt_... -var google_client_id=... -var google_client_secret=...`
+
+See [`deploy/terraform/examples/`](deploy/terraform/examples/) for full variable reference.
 
 ---
 
