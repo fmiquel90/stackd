@@ -75,3 +75,34 @@ resource "aws_ecs_service" "worker" {
     ignore_changes = [desired_count]
   }
 }
+
+# ── Autoscaling ────────────────────────────────────────────────────────────────
+
+resource "aws_appautoscaling_target" "worker" {
+  count = var.autoscaling_enabled ? 1 : 0
+
+  service_namespace  = "ecs"
+  resource_id        = "service/${var.cluster_name}/${aws_ecs_service.worker.name}"
+  scalable_dimension = "ecs:service:DesiredCount"
+  min_capacity       = var.autoscaling_min_count
+  max_capacity       = var.autoscaling_max_count
+}
+
+resource "aws_appautoscaling_policy" "worker_cpu" {
+  count = var.autoscaling_enabled ? 1 : 0
+
+  name               = "${var.name}-worker-cpu"
+  policy_type        = "TargetTrackingScaling"
+  service_namespace  = aws_appautoscaling_target.worker[0].service_namespace
+  resource_id        = aws_appautoscaling_target.worker[0].resource_id
+  scalable_dimension = aws_appautoscaling_target.worker[0].scalable_dimension
+
+  target_tracking_scaling_policy_configuration {
+    predefined_metric_specification {
+      predefined_metric_type = "ECSServiceAverageCPUUtilization"
+    }
+    target_value       = var.autoscaling_cpu_target
+    scale_out_cooldown = 60   # fast scale-out to avoid job queue build-up
+    scale_in_cooldown  = 300  # conservative scale-in to avoid thrashing
+  }
+}

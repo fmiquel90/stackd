@@ -154,6 +154,32 @@ variable "certificate_arn" {
   default     = null
 }
 
+# ── Worker autoscaling ─────────────────────────────────────────────────────────
+
+variable "worker_autoscaling_enabled" {
+  description = "Enable Application Auto Scaling for workers (scales on CPU utilization)"
+  type        = bool
+  default     = false
+}
+
+variable "worker_autoscaling_min_count" {
+  description = "Minimum worker task count when autoscaling is enabled"
+  type        = number
+  default     = 1
+}
+
+variable "worker_autoscaling_max_count" {
+  description = "Maximum worker task count when autoscaling is enabled"
+  type        = number
+  default     = 10
+}
+
+variable "worker_autoscaling_cpu_target" {
+  description = "CPU utilization % target for the worker autoscaling policy"
+  type        = number
+  default     = 70
+}
+
 # ── Workers ────────────────────────────────────────────────────────────────────
 
 variable "worker_pool_token" {

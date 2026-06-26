@@ -15,6 +15,10 @@ variable "cluster_arn" {
   type = string
 }
 
+variable "cluster_name" {
+  type = string
+}
+
 variable "execution_role_arn" {
   type = string
 }
@@ -55,4 +59,30 @@ variable "secrets" {
   type      = map(string)
   default   = {}
   sensitive = true
+}
+
+# ── Autoscaling ────────────────────────────────────────────────────────────────
+
+variable "autoscaling_enabled" {
+  description = "Enable Application Auto Scaling for workers based on CPU utilization"
+  type        = bool
+  default     = false
+}
+
+variable "autoscaling_min_count" {
+  description = "Minimum number of worker tasks when autoscaling is enabled"
+  type        = number
+  default     = 1
+}
+
+variable "autoscaling_max_count" {
+  description = "Maximum number of worker tasks when autoscaling is enabled"
+  type        = number
+  default     = 10
+}
+
+variable "autoscaling_cpu_target" {
+  description = "Target CPU utilization percentage (0–100) for the target-tracking policy"
+  type        = number
+  default     = 70
 }

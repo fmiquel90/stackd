@@ -138,6 +138,7 @@ module "worker" {
   aws_region = var.aws_region
 
   cluster_arn        = module.api.cluster_arn
+  cluster_name       = module.api.cluster_name
   execution_role_arn = module.iam.execution_role_arn
   task_role_arn      = module.iam.worker_task_role_arn
 
@@ -155,12 +156,20 @@ module "worker" {
   secrets = {
     STACKD_POOL_TOKEN = module.secrets.worker_pool_token_secret_arn
   }
+
+  autoscaling_enabled    = var.worker_autoscaling_enabled
+  autoscaling_min_count  = var.worker_autoscaling_min_count
+  autoscaling_max_count  = var.worker_autoscaling_max_count
+  autoscaling_cpu_target = var.worker_autoscaling_cpu_target
 }
 
 # ── Cross-module wiring (avoid putting these inside modules to prevent cycles) ─
 
 # ALB ingress from private subnets — covers both CloudFront VPC Origin ENIs and worker tasks.
-# Workers connect via this ALB; CloudFront VPC Origin creates ENIs in these same subnets.
+# The AWS CloudFront API does not return the SG ID it assigns to VPC Origin ENIs (verified against
+# provider v6 and the CloudFront API spec), so we cannot reference it directly. Restricting to
+# private subnet CIDRs is equivalent in practice: the ALB is internal and only reachable from
+# within the VPC; CloudFront ENIs and worker tasks are both in these private subnets.
 resource "aws_vpc_security_group_ingress_rule" "alb_from_private_subnets" {
   for_each = toset(module.network.private_subnet_cidrs)
 

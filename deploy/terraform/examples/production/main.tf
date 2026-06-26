@@ -56,7 +56,12 @@ module "stackd" {
 
   worker_cpu           = 2048
   worker_memory        = 4096
-  worker_desired_count = 3
+  worker_desired_count = 2
+
+  worker_autoscaling_enabled    = true
+  worker_autoscaling_min_count  = 2
+  worker_autoscaling_max_count  = 20
+  worker_autoscaling_cpu_target = 70
 
   google_client_id       = var.google_client_id
   google_client_secret   = var.google_client_secret
