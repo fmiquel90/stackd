@@ -149,7 +149,7 @@ module "worker" {
 
   environment_variables = {
     STACKD_API_URL = local.internal_url
-    STACKD_RUNNER  = "docker"
+    STACKD_RUNNER  = "local"  # Fargate has no Docker daemon; use the local runner (tools bundled in the worker image)
     AWS_REGION     = var.aws_region
   }
 

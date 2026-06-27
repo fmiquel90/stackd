@@ -69,6 +69,7 @@ task psql · task logs · task lint · task docs
 - [Variables & secrets](variables.md) — configuration in layers.
 - [Cloud credentials (OIDC)](cloud-credentials.md) — wire up real cloud access.
 - [Importing an existing stack](importing-existing-state.md) — bring your existing state in.
+- [Deploying to AWS](deploying-to-aws.md) — go to production on ECS + RDS + CloudFront.
 
 ## See also
 

@@ -92,7 +92,31 @@ This is the recommended isolation for sensitive environments: combine it with pr
 
 Because the environment is the unit of parallelism, **throughput ≈ min(workers, environments with queued work)**. Adding workers beyond the number of environments that currently have queued runs buys nothing; they will idle on `204`.
 
-There is **no built-in autoscaler**, but the signals you need are exposed:
+### Autoscaling on AWS
+
+The [AWS Terraform module](deploying-to-aws.md) includes an optional Application Auto Scaling
+policy. Enable it with:
+
+```hcl
+worker_autoscaling_enabled    = true
+worker_autoscaling_min_count  = 2
+worker_autoscaling_max_count  = 20
+worker_autoscaling_cpu_target = 70
+```
+
+The policy uses `ECSServiceAverageCPUUtilization` as its metric (scale-out cooldown 60s, scale-in
+cooldown 300s). CPU is a reasonable proxy for load because each worker task pegs one core while
+`tofu plan` or `apply` is running.
+
+!!! note
+    CPU autoscaling has a blind spot: idle workers waiting for a job show low CPU even when the
+    queue is long. If your workloads are bursty (many short plans), consider also monitoring
+    `GET /api/v1/queue` and driving a step-scaling policy from queue depth via a custom CloudWatch
+    metric. For most teams the CPU policy is sufficient.
+
+### Monitoring signals
+
+Regardless of autoscaling strategy, these endpoints expose the right signals:
 
 - `GET /api/v1/health` — DB, workers (online/total + last heartbeat), runs active/queued, recent errors.
 - `GET /api/v1/queue` — waiting runs and *why* they wait (`active_run` | `env_locked` | `no_compatible_worker` | `apply_affinity_hold`).
