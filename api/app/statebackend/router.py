@@ -19,7 +19,7 @@ from app.errors import ProblemException
 from app.ids import uuid7
 from app.models.environment import Environment
 from app.models.state import StateLock, StateVersion
-from app.spaces import guard_env
+from app.spaces import guard_env_id
 from app.statebackend.store import get_object, put_object, state_key
 from app.statebackend.tokens import decode_state_token, mint_state_token
 
@@ -154,10 +154,7 @@ human_router = APIRouter(prefix="/api/v1/environments", tags=["state"])
 
 @human_router.get("/{env_id}/state/versions")
 async def list_versions(env_id: uuid.UUID, user: CurrentUser, session: DbSession) -> list[dict]:
-    env = await session.get(Environment, env_id)
-    if env is None:
-        raise ProblemException(404, "Environment not found", None)
-    await guard_env(session, user, env)
+    await guard_env_id(session, user, env_id)
     rows = (
         (
             await session.execute(

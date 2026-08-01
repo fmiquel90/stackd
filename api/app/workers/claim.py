@@ -206,9 +206,7 @@ async def build_job_payload(session: AsyncSession, run: Run) -> dict:
         # worker loses state-write access shortly after the API reclaims its run (§4.2). Plan/RO
         # tokens keep the generous window.
         state_ttl = (
-            settings.stackd_apply_timeout_seconds + settings.stackd_apply_lost_grace_seconds
-            if run.state == RunState.applying
-            else 6 * 3600
+            settings.apply_reclaim_window_seconds if run.state == RunState.applying else 6 * 3600
         )
         token = mint_state_token(
             environment_id=env.id, run_id=run.id, scope=scope, ttl_seconds=state_ttl

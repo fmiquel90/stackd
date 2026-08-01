@@ -10,18 +10,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.audit import record_audit
 from app.auth.deps import CurrentUser, require_role
-from app.crypto import encrypt
+from app.crypto import decrypt, encrypt
 from app.db import get_session
 from app.enums import AuditActorKind, RepoAuthKind, Role
 from app.errors import ProblemException
 from app.models.stack import Stack
-from app.models.user import User
-from app.spaces import (
-    accessible_space_ids,
-    get_default_space,
-    guard_stack,
-    require_space_access,
-)
+from app.spaces import accessible_space_ids, guard_stack_id, resolve_target_space
 from app.stacks.git import check_repo
 from app.stacks.schemas import CheckRepoResult, StackCreate, StackOut, StackUpdate
 from app.variables.crud import (
@@ -35,16 +29,6 @@ from app.variables.schemas import VariableCreate, VariableOut, VariableUpdate
 router = APIRouter(prefix="/api/v1/stacks", tags=["stacks"])
 Writer = Depends(require_role(Role.writer))
 DbSession = Annotated[AsyncSession, Depends(get_session)]
-
-
-async def _get_stack(
-    session: AsyncSession, user: User, stack_id: uuid.UUID, *, min_role: Role = Role.reader
-) -> Stack:
-    stack = await session.get(Stack, stack_id)
-    if stack is None:
-        raise ProblemException(404, "Stack not found", None)
-    await guard_stack(session, user, stack, min_role=min_role)
-    return stack
 
 
 def _client_ctx(request: Request) -> dict:
@@ -70,8 +54,7 @@ async def create_stack(
 ) -> StackOut:
     # Target space: explicit space_id, else the default space (bootstrap fallback). Access is
     # membership-gated either way (§6, Phase F) — writer+ required to create.
-    space_id = body.space_id or (await get_default_space(session)).id
-    await require_space_access(session, user, space_id, min_role=Role.writer)
+    space_id = await resolve_target_space(session, user, body.space_id, min_role=Role.writer)
     stack = Stack(
         space_id=space_id,
         name=body.name,
@@ -109,14 +92,14 @@ async def create_stack(
 
 @router.get("/{stack_id}", response_model=StackOut)
 async def get_stack(stack_id: uuid.UUID, user: CurrentUser, session: DbSession) -> StackOut:
-    return StackOut.of(await _get_stack(session, user, stack_id))
+    return StackOut.of(await guard_stack_id(session, user, stack_id))
 
 
 @router.patch("/{stack_id}", response_model=StackOut, dependencies=[Writer])
 async def update_stack(
     stack_id: uuid.UUID, body: StackUpdate, user: CurrentUser, session: DbSession
 ) -> StackOut:
-    stack = await _get_stack(session, user, stack_id, min_role=Role.writer)
+    stack = await guard_stack_id(session, user, stack_id, min_role=Role.writer)
     changes = body.model_dump(exclude_unset=True)
     secret = changes.pop("repo_secret", None)
     webhook_secret = changes.pop("webhook_secret", None)
@@ -143,7 +126,7 @@ async def update_stack(
 
 @router.delete("/{stack_id}", status_code=204, dependencies=[Writer])
 async def delete_stack(stack_id: uuid.UUID, user: CurrentUser, session: DbSession) -> None:
-    stack = await _get_stack(session, user, stack_id, min_role=Role.writer)
+    stack = await guard_stack_id(session, user, stack_id, min_role=Role.writer)
     name = stack.name
     await session.delete(stack)
     await record_audit(
@@ -163,9 +146,7 @@ async def delete_stack(stack_id: uuid.UUID, user: CurrentUser, session: DbSessio
 async def check_stack_repo(
     stack_id: uuid.UUID, user: CurrentUser, session: DbSession
 ) -> CheckRepoResult:
-    from app.crypto import decrypt
-
-    stack = await _get_stack(session, user, stack_id, min_role=Role.writer)
+    stack = await guard_stack_id(session, user, stack_id, min_role=Role.writer)
     secret = decrypt(stack.repo_secret_encrypted) if stack.repo_secret_encrypted else None
     ok, branches, detail = await check_repo(stack.repo_url, stack.repo_auth_kind, secret)
     return CheckRepoResult(ok=ok, branches=branches, detail=detail)
@@ -178,7 +159,7 @@ async def check_stack_repo(
 async def list_stack_variables(
     stack_id: uuid.UUID, user: CurrentUser, session: DbSession
 ) -> list[VariableOut]:
-    await _get_stack(session, user, stack_id)
+    await guard_stack_id(session, user, stack_id)
     return [VariableOut.of(v) for v in await variables_for(session, stack_id=stack_id)]
 
 
@@ -188,7 +169,7 @@ async def list_stack_variables(
 async def create_stack_variable(
     stack_id: uuid.UUID, body: VariableCreate, user: CurrentUser, session: DbSession
 ) -> VariableOut:
-    await _get_stack(session, user, stack_id, min_role=Role.writer)
+    await guard_stack_id(session, user, stack_id, min_role=Role.writer)
     var = await create_variable(session, body, stack_id=stack_id)
     await record_audit(
         session,
@@ -218,7 +199,7 @@ async def update_stack_variable(
     user: CurrentUser,
     session: DbSession,
 ) -> VariableOut:
-    await _get_stack(session, user, stack_id, min_role=Role.writer)
+    await guard_stack_id(session, user, stack_id, min_role=Role.writer)
     var = await get_variable(session, var_id)
     if var.stack_id != stack_id or var.environment_id is not None:
         raise ProblemException(404, "Variable not found", None)
@@ -242,7 +223,7 @@ async def update_stack_variable(
 async def delete_stack_variable(
     stack_id: uuid.UUID, var_id: uuid.UUID, user: CurrentUser, session: DbSession
 ) -> None:
-    await _get_stack(session, user, stack_id, min_role=Role.writer)
+    await guard_stack_id(session, user, stack_id, min_role=Role.writer)
     var = await get_variable(session, var_id)
     if var.stack_id != stack_id or var.environment_id is not None:
         raise ProblemException(404, "Variable not found", None)

@@ -82,6 +82,13 @@ class Settings(BaseSettings):
         return v
 
     @property
+    def apply_reclaim_window_seconds(self) -> int:
+        """Apply budget + grace (§4.2) — the ONE definition of the reclaim window. Used for the
+        apply OIDC token TTL, the apply state-token TTL, and the worker-lost reclaim cutoff, so
+        the three can never drift apart."""
+        return self.stackd_apply_timeout_seconds + self.stackd_apply_lost_grace_seconds
+
+    @property
     def is_production(self) -> bool:
         return self.stackd_env == "production"
 

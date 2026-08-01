@@ -18,7 +18,12 @@ from app.errors import ProblemException
 from app.models.space import Space
 from app.models.space_membership import SpaceMembership
 from app.models.user import User
-from app.spaces.service import accessible_space_ids, get_membership, require_space_access
+from app.spaces.service import (
+    accessible_space_ids,
+    get_membership,
+    membership_from_defaults,
+    require_space_access,
+)
 
 router = APIRouter(prefix="/api/v1/spaces", tags=["spaces"])
 DbSession = Annotated[AsyncSession, Depends(get_session)]
@@ -75,15 +80,7 @@ async def create_space(body: SpaceCreate, user: CurrentUser, session: DbSession)
         await session.rollback()
         raise ProblemException(409, "Space exists", f"A space named '{body.name}' exists.") from exc
     # The creator becomes a space admin so the space isn't immediately unreachable.
-    session.add(
-        SpaceMembership(
-            space_id=space.id,
-            user_id=user.id,
-            role=Role.admin,
-            allowed_tiers=list(user.allowed_tiers or []),
-            can_destroy=user.can_destroy,
-        )
-    )
+    session.add(membership_from_defaults(space.id, user, role=Role.admin))
     await record_audit(
         session,
         action="space.created",

@@ -7,6 +7,7 @@ from typing import Annotated
 import boto3
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.audit import record_audit
@@ -20,7 +21,7 @@ from app.models.oidc import CloudIntegration
 from app.models.run import Run
 from app.models.stack import Stack
 from app.oidc.issuer import ensure_active_key, jwks, openid_configuration, sign_workload_token
-from app.spaces import guard_env
+from app.spaces import guard_env_id
 
 issuer_router = APIRouter(tags=["oidc"])
 cloud_router = APIRouter(prefix="/api/v1/environments", tags=["cloud-integration"])
@@ -60,12 +61,7 @@ def _out(ci: CloudIntegration) -> dict:
 
 @cloud_router.get("/{env_id}/cloud-integration")
 async def get_integration(env_id: uuid.UUID, user: CurrentUser, session: DbSession) -> dict:
-    from sqlalchemy import select
-
-    env = await session.get(Environment, env_id)
-    if env is None:
-        raise ProblemException(404, "Environment not found", None)
-    await guard_env(session, user, env)
+    await guard_env_id(session, user, env_id)
     ci = (
         await session.execute(
             select(CloudIntegration).where(CloudIntegration.environment_id == env_id)
@@ -80,8 +76,6 @@ async def get_integration(env_id: uuid.UUID, user: CurrentUser, session: DbSessi
 async def put_integration(
     env_id: uuid.UUID, body: CloudIntegrationIn, user: CurrentUser, session: DbSession
 ) -> dict:
-    from sqlalchemy import select
-
     if await session.get(Environment, env_id) is None:
         raise ProblemException(404, "Environment not found", None)
     ci = (
@@ -114,8 +108,6 @@ async def put_integration(
 
 @cloud_router.delete("/{env_id}/cloud-integration", status_code=204, dependencies=[Admin])
 async def delete_integration(env_id: uuid.UUID, user: CurrentUser, session: DbSession) -> None:
-    from sqlalchemy import select
-
     ci = (
         await session.execute(
             select(CloudIntegration).where(CloudIntegration.environment_id == env_id)
@@ -138,8 +130,6 @@ async def delete_integration(env_id: uuid.UUID, user: CurrentUser, session: DbSe
 @cloud_router.post("/{env_id}/cloud-integration/test", dependencies=[Admin])
 async def test_assume_role(env_id: uuid.UUID, _: CurrentUser, session: DbSession) -> dict:
     """Verify the plan role is assumable with a freshly signed workload token (§10.4)."""
-    from sqlalchemy import select
-
     env = await session.get(Environment, env_id)
     ci = (
         await session.execute(
