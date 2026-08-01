@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import asyncio
 import shutil
 import uuid
 from datetime import UTC, datetime
+from pathlib import Path
 from typing import Annotated
 
 from fastapi import APIRouter, Depends
@@ -21,12 +23,11 @@ from app.errors import ProblemException
 from app.models.environment import Environment
 from app.models.stack import Stack
 from app.models.tier import Tier
-from app.models.user import User
 from app.ratelimit import rate_limit
-from app.spaces import guard_env, require_space_access
+from app.spaces import guard_env_id, guard_stack_id
 from app.stacks.git import clone_shallow, enforce_clone_budget, ls_remote_sha
 from app.variables.crud import create_variable, get_variable, update_variable, variables_for
-from app.variables.discovery import parse_inputs, placeholder
+from app.variables.discovery import DiscoveredInput, parse_inputs, placeholder
 from app.variables.resolution import resolve_variables
 from app.variables.schemas import (
     ResolvedVariableOut,
@@ -40,28 +41,27 @@ Writer = Depends(require_role(Role.writer))
 DbSession = Annotated[AsyncSession, Depends(get_session)]
 
 
-async def _get_env(
-    session: AsyncSession, user: User, env_id: uuid.UUID, *, min_role: Role = Role.reader
-) -> Environment:
-    env = await session.get(Environment, env_id)
-    if env is None:
-        raise ProblemException(404, "Environment not found", None)
-    await guard_env(session, user, env, min_role=min_role)
-    return env
-
-
-async def _guard_stack_id(
-    session: AsyncSession, user: User, stack_id: uuid.UUID, *, min_role: Role = Role.reader
-) -> Stack:
-    stack = await session.get(Stack, stack_id)
-    if stack is None:
-        raise ProblemException(404, "Stack not found", None)
-    await require_space_access(session, user, stack.space_id, min_role=min_role)
-    return stack
-
-
 def _env_audit_ctx(env: Environment) -> dict:
     return {"name": env.name, "tier": env.tier}
+
+
+def _scan_clone(
+    dest: Path, project_root: str, *, max_mb: int, max_tf_files: int
+) -> list[DiscoveredInput]:
+    """Size-cap the clone (§H), locate the project root and parse its REQUIRED inputs. Synchronous
+    filesystem work — run via asyncio.to_thread, never directly on the event loop."""
+    enforce_clone_budget(dest, max_mb=max_mb)
+    root = (dest / project_root).resolve()
+    if not str(root).startswith(str(dest.resolve())):  # project_root must stay inside the repo
+        raise ProblemException(400, "Invalid project root", None)
+    tf_count = sum(1 for _ in root.glob("*.tf"))
+    if tf_count > max_tf_files:
+        raise ProblemException(
+            413,
+            "Too many Terraform files",
+            f"{tf_count} .tf files exceed the discovery cap ({max_tf_files}).",
+        )
+    return [i for i in parse_inputs(root) if i.required]
 
 
 async def _require_tier(session: AsyncSession, name: str) -> None:
@@ -74,7 +74,7 @@ async def _require_tier(session: AsyncSession, name: str) -> None:
 async def list_environments(
     stack_id: uuid.UUID, user: CurrentUser, session: DbSession
 ) -> list[EnvironmentOut]:
-    await _guard_stack_id(session, user, stack_id)
+    await guard_stack_id(session, user, stack_id)
     rows = (
         (
             await session.execute(
@@ -98,7 +98,7 @@ async def list_environments(
 async def create_environment(
     stack_id: uuid.UUID, body: EnvironmentCreate, user: CurrentUser, session: DbSession
 ) -> EnvironmentOut:
-    await _guard_stack_id(session, user, stack_id, min_role=Role.writer)
+    await guard_stack_id(session, user, stack_id, min_role=Role.writer)
     await _require_tier(session, body.tier)
     env = Environment(stack_id=stack_id, **body.model_dump())
     if env.protected:
@@ -129,14 +129,14 @@ async def create_environment(
 async def get_environment(
     env_id: uuid.UUID, user: CurrentUser, session: DbSession
 ) -> EnvironmentOut:
-    return EnvironmentOut.of(await _get_env(session, user, env_id))
+    return EnvironmentOut.of(await guard_env_id(session, user, env_id))
 
 
 @router.patch("/environments/{env_id}", response_model=EnvironmentOut, dependencies=[Writer])
 async def update_environment(
     env_id: uuid.UUID, body: EnvironmentUpdate, user: CurrentUser, session: DbSession
 ) -> EnvironmentOut:
-    env = await _get_env(session, user, env_id, min_role=Role.writer)
+    env = await guard_env_id(session, user, env_id, min_role=Role.writer)
     changes = body.model_dump(exclude_unset=True)
     if "tier" in changes:
         await _require_tier(session, changes["tier"])
@@ -161,7 +161,7 @@ async def update_environment(
 
 @router.delete("/environments/{env_id}", status_code=204, dependencies=[Writer])
 async def delete_environment(env_id: uuid.UUID, user: CurrentUser, session: DbSession) -> None:
-    env = await _get_env(session, user, env_id, min_role=Role.writer)
+    env = await guard_env_id(session, user, env_id, min_role=Role.writer)
     ctx = _env_audit_ctx(env)
     await session.delete(env)
     await record_audit(
@@ -181,11 +181,9 @@ async def delete_environment(env_id: uuid.UUID, user: CurrentUser, session: DbSe
     "/environments/{env_id}/refresh-head", response_model=EnvironmentOut, dependencies=[Writer]
 )
 async def refresh_head(env_id: uuid.UUID, user: CurrentUser, session: DbSession) -> EnvironmentOut:
-    env = await _get_env(session, user, env_id, min_role=Role.writer)
+    env = await guard_env_id(session, user, env_id, min_role=Role.writer)
     stack = await session.get(Stack, env.stack_id)
     assert stack is not None
-    from app.crypto import decrypt
-
     secret = decrypt(stack.repo_secret_encrypted) if stack.repo_secret_encrypted else None
     sha = await ls_remote_sha(stack.repo_url, stack.repo_auth_kind, secret, env.branch)
     if sha is None:
@@ -204,7 +202,7 @@ async def refresh_head(env_id: uuid.UUID, user: CurrentUser, session: DbSession)
 async def list_env_variables(
     env_id: uuid.UUID, user: CurrentUser, session: DbSession
 ) -> list[VariableOut]:
-    await _get_env(session, user, env_id)
+    await guard_env_id(session, user, env_id)
     return [VariableOut.of(v) for v in await variables_for(session, environment_id=env_id)]
 
 
@@ -217,7 +215,7 @@ async def list_env_variables(
 async def create_env_variable(
     env_id: uuid.UUID, body: VariableCreate, user: CurrentUser, session: DbSession
 ) -> VariableOut:
-    env = await _get_env(session, user, env_id, min_role=Role.writer)
+    env = await guard_env_id(session, user, env_id, min_role=Role.writer)
     var = await create_variable(session, body, stack_id=env.stack_id, environment_id=env.id)
     await record_audit(
         session,
@@ -249,7 +247,7 @@ async def update_env_variable(
     user: CurrentUser,
     session: DbSession,
 ) -> VariableOut:
-    await _get_env(session, user, env_id, min_role=Role.writer)
+    await guard_env_id(session, user, env_id, min_role=Role.writer)
     var = await get_variable(session, var_id)
     if var.environment_id != env_id:
         raise ProblemException(404, "Variable not found", None)
@@ -278,7 +276,7 @@ async def update_env_variable(
 async def delete_env_variable(
     env_id: uuid.UUID, var_id: uuid.UUID, user: CurrentUser, session: DbSession
 ) -> None:
-    await _get_env(session, user, env_id, min_role=Role.writer)
+    await guard_env_id(session, user, env_id, min_role=Role.writer)
     var = await get_variable(session, var_id)
     if var.environment_id != env_id:
         raise ProblemException(404, "Variable not found", None)
@@ -301,7 +299,7 @@ async def delete_env_variable(
 async def resolved_variables(
     env_id: uuid.UUID, user: CurrentUser, session: DbSession
 ) -> list[ResolvedVariableOut]:
-    env = await _get_env(session, user, env_id)
+    env = await guard_env_id(session, user, env_id)
     resolved = await resolve_variables(session, env)
     return [ResolvedVariableOut.of(rv) for rv in resolved]
 
@@ -313,26 +311,21 @@ async def resolved_variables(
 async def discover_inputs(env_id: uuid.UUID, user: CurrentUser, session: DbSession) -> dict:
     """Introspect the repo (shallow clone + HCL parse, no terraform run) and create the REQUIRED
     root-module inputs that aren't already resolved, as env variables with empty placeholders."""
-    env = await _get_env(session, user, env_id, min_role=Role.writer)
+    env = await guard_env_id(session, user, env_id, min_role=Role.writer)
     stack = await session.get(Stack, env.stack_id)
     assert stack is not None
     settings = get_settings()
     secret = decrypt(stack.repo_secret_encrypted) if stack.repo_secret_encrypted else None
     dest = await clone_shallow(stack.repo_url, stack.repo_auth_kind, secret, env.branch)
     try:
-        enforce_clone_budget(dest, max_mb=settings.stackd_discovery_max_repo_mb)  # §H size cap
-        root = (dest / stack.project_root).resolve()
-        if not str(root).startswith(str(dest.resolve())):  # project_root must stay inside the repo
-            raise ProblemException(400, "Invalid project root", None)
-        tf_count = sum(1 for _ in root.glob("*.tf"))
-        if tf_count > settings.stackd_discovery_max_tf_files:
-            raise ProblemException(
-                413,
-                "Too many Terraform files",
-                f"{tf_count} .tf files exceed the discovery cap "
-                f"({settings.stackd_discovery_max_tf_files}).",
-            )
-        required = [i for i in parse_inputs(root) if i.required]
+        # The full-clone walk + HCL parse are synchronous filesystem work — off the event loop.
+        required = await asyncio.to_thread(
+            _scan_clone,
+            dest,
+            stack.project_root,
+            max_mb=settings.stackd_discovery_max_repo_mb,
+            max_tf_files=settings.stackd_discovery_max_tf_files,
+        )
         resolved = await resolve_variables(session, env)
         present = {rv.name for rv in resolved if rv.kind == VariableKind.terraform}
         created: list[str] = []

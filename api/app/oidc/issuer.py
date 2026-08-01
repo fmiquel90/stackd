@@ -112,8 +112,7 @@ async def sign_workload_token(
     # The apply cap follows the configured apply budget + grace so cloud credentials never outlive
     # the apply they were minted for (§4.2/§13); plan keeps the static cap.
     if phase == JobPhase.apply:
-        s = get_settings()
-        phase_cap = s.stackd_apply_timeout_seconds + s.stackd_apply_lost_grace_seconds
+        phase_cap = get_settings().apply_reclaim_window_seconds
     else:
         phase_cap = PHASE_MAX_SECONDS[phase]
     exp = now + timedelta(seconds=min(ttl, phase_cap))

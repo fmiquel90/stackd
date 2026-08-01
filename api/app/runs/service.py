@@ -50,7 +50,11 @@ async def trigger_run(
     a `destroy` additionally requires can_destroy (§2.4). `group_root` starts a cascade group.
     `secret_overrides` is a break-glass map of variable→value used if the secret source is down
     (§15.4) — an apply-affecting bypass, so it requires can_apply and is sealed AES-GCM."""
-    membership = await _env_membership(session, user, env)
+    # The membership only feeds the destroy / secret-override gates — don't query it for the
+    # common plain trigger.
+    membership = None
+    if run_type == RunType.destroy or secret_overrides:
+        membership = await _env_membership(session, user, env)
     if run_type == RunType.destroy and (
         user is None or not effective_can_destroy(user, membership)
     ):

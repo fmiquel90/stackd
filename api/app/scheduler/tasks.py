@@ -51,9 +51,7 @@ async def detect_worker_lost(session: AsyncSession, now: datetime) -> int:
     # mid-flight would let a second worker claim the env and apply concurrently (split-brain). By
     # the time this cutoff passes, the worker has self-terminated and its state/OIDC tokens have
     # expired, so a reclaimed apply can no longer write state.
-    apply_cutoff = now - timedelta(
-        seconds=settings.stackd_apply_timeout_seconds + settings.stackd_apply_lost_grace_seconds
-    )
+    apply_cutoff = now - timedelta(seconds=settings.apply_reclaim_window_seconds)
     non_applying = [s for s in ACTIVE_STATES if s != RunState.applying]
     runs = (
         (

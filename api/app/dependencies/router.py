@@ -17,22 +17,11 @@ from app.errors import ProblemException
 from app.models.dependency import EnvDependency, EnvOutput, OutputReference
 from app.models.environment import Environment
 from app.models.stack import Stack
-from app.models.user import User
-from app.spaces import accessible_space_ids, guard_env, guard_stack
+from app.spaces import accessible_space_ids, guard_env_id, guard_stack_id
 
 router = APIRouter(prefix="/api/v1", tags=["dependencies"])
 DbSession = Annotated[AsyncSession, Depends(get_session)]
 Writer = Depends(require_role(Role.writer))
-
-
-async def _guard_env_id(
-    session: AsyncSession, user: User, env_id: uuid.UUID, *, min_role: Role = Role.reader
-) -> Environment:
-    env = await session.get(Environment, env_id)
-    if env is None:
-        raise ProblemException(404, "Environment not found", None)
-    await guard_env(session, user, env, min_role=min_role)
-    return env
 
 
 async def _creates_cycle(session: AsyncSession, upstream: uuid.UUID, downstream: uuid.UUID) -> bool:
@@ -86,8 +75,8 @@ async def create_dependency(
     env_id: uuid.UUID, body: DependencyCreate, user: CurrentUser, session: DbSession
 ) -> dict:
     # Both ends must be in spaces the user can write — prevents wiring a cross-space dependency.
-    await _guard_env_id(session, user, env_id, min_role=Role.writer)
-    await _guard_env_id(session, user, body.upstream_env_id, min_role=Role.writer)
+    await guard_env_id(session, user, env_id, min_role=Role.writer)
+    await guard_env_id(session, user, body.upstream_env_id, min_role=Role.writer)
     dep = await _create_edge(
         session, env_id, body.upstream_env_id, body.trigger_policy, body.references
     )
@@ -107,7 +96,7 @@ async def create_dependency(
 
 @router.get("/environments/{env_id}/dependencies")
 async def list_dependencies(env_id: uuid.UUID, user: CurrentUser, session: DbSession) -> list[dict]:
-    await _guard_env_id(session, user, env_id)
+    await guard_env_id(session, user, env_id)
     deps = (
         (
             await session.execute(
@@ -151,7 +140,7 @@ async def delete_dependency(dep_id: uuid.UUID, user: CurrentUser, session: DbSes
     dep = await session.get(EnvDependency, dep_id)
     if dep is None:
         raise ProblemException(404, "Dependency not found", None)
-    await _guard_env_id(session, user, dep.downstream_env_id, min_role=Role.writer)
+    await guard_env_id(session, user, dep.downstream_env_id, min_role=Role.writer)
     await session.delete(dep)
     await record_audit(
         session,
@@ -171,10 +160,7 @@ async def link_by_name(
 ) -> dict:
     """Create edges between homonymous environments of two stacks (SPECS §3.8)."""
     for sid in (stack_id, body.upstream_stack_id):
-        stack = await session.get(Stack, sid)
-        if stack is None:
-            raise ProblemException(404, "Stack not found", None)
-        await guard_stack(session, user, stack, min_role=Role.writer)
+        await guard_stack_id(session, user, sid, min_role=Role.writer)
     downstream_envs = {
         e.name: e
         for e in (
@@ -219,7 +205,7 @@ async def link_by_name(
 
 @router.get("/environments/{env_id}/outputs")
 async def list_outputs(env_id: uuid.UUID, user: CurrentUser, session: DbSession) -> list[dict]:
-    await _guard_env_id(session, user, env_id)
+    await guard_env_id(session, user, env_id)
     rows = (
         (await session.execute(select(EnvOutput).where(EnvOutput.environment_id == env_id)))
         .scalars()
@@ -233,18 +219,14 @@ async def list_outputs(env_id: uuid.UUID, user: CurrentUser, session: DbSession)
 
 @router.get("/graph")
 async def graph(user: CurrentUser, session: DbSession) -> dict:
-    envs = list((await session.execute(select(Environment))).scalars().all())
     # Scope to the caller's spaces (None = instance admin → all). An edge survives only if both of
     # its envs are visible, so the graph never reveals a cross-space dependency the user can't see.
     ids = await accessible_space_ids(session, user)
+    q = select(Environment)
     if ids is not None:
-        space_of = {
-            s.id: s.space_id for s in (await session.execute(select(Stack))).scalars().all()
-        }
-        visible = {e.id for e in envs if space_of.get(e.stack_id) in ids}
-        envs = [e for e in envs if e.id in visible]
-    else:
-        visible = {e.id for e in envs}
+        q = q.join(Stack, Stack.id == Environment.stack_id).where(Stack.space_id.in_(ids))
+    envs = list((await session.execute(q)).scalars().all())
+    visible = {e.id for e in envs}
     edges = [
         e
         for e in (await session.execute(select(EnvDependency))).scalars().all()

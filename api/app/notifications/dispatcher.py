@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import ipaddress
 import socket
 import uuid
@@ -86,7 +87,9 @@ _LABEL = {
 }
 
 
-def _run_url(run_id: str) -> str | None:
+def run_url(run_id: object) -> str | None:
+    """Deep link to the SPA run page — the one place the /runs/{id} route is spelled out. Used by
+    outbound notifications and the VCS post-back alike."""
     settings = get_settings()
     base = settings.stackd_app_url or settings.stackd_public_url
     return f"{base.rstrip('/')}/runs/{run_id}" if base else None
@@ -97,7 +100,7 @@ def _render(
 ) -> dict:
     label = _LABEL.get(to_state, to_state)
     scope = f"{stack.name}/{env.name}"
-    url = _run_url(str(run.id))
+    url = run_url(run.id)
     if target.kind.value == "slack":
         line = f"*{scope}* — {label} ({to_state})"
         if url:
@@ -145,8 +148,9 @@ async def _matching_targets(
 async def deliver(target: NotificationTarget, body: dict) -> bool:
     # Re-validate at request time: DNS can change between create-time validation and now
     # (rebinding), so the stored URL is not trusted on its own. follow_redirects stays off so a
-    # public URL can't 302 us onto an internal host.
-    assert_safe_url(target.url)
+    # public URL can't 302 us onto an internal host. The check resolves DNS synchronously
+    # (getaddrinfo), so run it in a thread to keep a slow resolver off the event loop.
+    await asyncio.to_thread(assert_safe_url, target.url)
     async with httpx.AsyncClient(timeout=_HTTP_TIMEOUT, follow_redirects=False) as http:
         resp = await http.post(target.url, json=body)
         resp.raise_for_status()

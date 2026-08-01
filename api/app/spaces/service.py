@@ -5,7 +5,7 @@ import uuid
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.enums import Role
+from app.enums import ROLE_RANK, Role
 from app.errors import ProblemException
 from app.models.environment import Environment
 from app.models.run import Run
@@ -13,8 +13,6 @@ from app.models.space import Space
 from app.models.space_membership import SpaceMembership
 from app.models.stack import Stack
 from app.models.user import User
-
-_ROLE_RANK = {Role.reader: 0, Role.writer: 1, Role.approver: 2, Role.admin: 3}
 
 
 async def get_default_space(session: AsyncSession) -> Space:
@@ -64,7 +62,7 @@ async def require_space_access(
         return membership
     if membership is None:
         raise ProblemException(403, "Forbidden", "You are not a member of this space.")
-    if _ROLE_RANK[membership.role] < _ROLE_RANK[min_role]:
+    if ROLE_RANK[membership.role] < ROLE_RANK[min_role]:
         raise ProblemException(403, "Forbidden", f"Requires space role {min_role.value} or higher.")
     return membership
 
@@ -89,3 +87,61 @@ async def guard_run(
     env = await session.get(Environment, run.environment_id)
     assert env is not None
     return await guard_env(session, user, env, min_role=min_role)
+
+
+# Load-by-id variants of the guards above: fetch, 404 if missing, gate on space membership, return
+# the entity. Routers use these instead of re-implementing the fetch-404-guard shell locally.
+
+
+async def guard_stack_id(
+    session: AsyncSession, user: User, stack_id: uuid.UUID, *, min_role: Role = Role.reader
+) -> Stack:
+    stack = await session.get(Stack, stack_id)
+    if stack is None:
+        raise ProblemException(404, "Stack not found", None)
+    await guard_stack(session, user, stack, min_role=min_role)
+    return stack
+
+
+async def guard_env_id(
+    session: AsyncSession, user: User, env_id: uuid.UUID, *, min_role: Role = Role.reader
+) -> Environment:
+    env = await session.get(Environment, env_id)
+    if env is None:
+        raise ProblemException(404, "Environment not found", None)
+    await guard_env(session, user, env, min_role=min_role)
+    return env
+
+
+async def guard_run_id(
+    session: AsyncSession, user: User, run_id: uuid.UUID, *, min_role: Role = Role.reader
+) -> Run:
+    run = await session.get(Run, run_id)
+    if run is None:
+        raise ProblemException(404, "Run not found", None)
+    await guard_run(session, user, run, min_role=min_role)
+    return run
+
+
+async def resolve_target_space(
+    session: AsyncSession, user: User, space_id: uuid.UUID | None, *, min_role: Role = Role.reader
+) -> uuid.UUID:
+    """Resolve the target space of a create request (explicit space_id or the bootstrap default,
+    SPECS §3.0) and gate the caller's membership on it in one step."""
+    resolved = space_id or (await get_default_space(session)).id
+    await require_space_access(session, user, resolved, min_role=min_role)
+    return resolved
+
+
+def membership_from_defaults(
+    space_id: uuid.UUID, user: User, *, role: Role | None = None
+) -> SpaceMembership:
+    """A membership mirroring the user's instance-level defaults (Phase F seeding rule): same tiers
+    and destroy grant, role overridable (e.g. admin for a space's creator)."""
+    return SpaceMembership(
+        space_id=space_id,
+        user_id=user.id,
+        role=role or user.role,
+        allowed_tiers=list(user.allowed_tiers or []),
+        can_destroy=user.can_destroy,
+    )

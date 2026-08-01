@@ -124,10 +124,12 @@ async def test_dispatch_posts_status_and_comment(
     statuses: list[tuple] = []
     comments: list[tuple] = []
 
-    async def fake_set_status(token, owner, repo, sha, *, state, target_url, context, description):  # type: ignore[no-untyped-def]
+    async def fake_set_status(
+        token, owner, repo, sha, *, state, target_url, context, description, http
+    ):  # type: ignore[no-untyped-def]
         statuses.append((owner, repo, sha, state, context))
 
-    async def fake_upsert(token, owner, repo, pr_number, body, comment_id):  # type: ignore[no-untyped-def]
+    async def fake_upsert(token, owner, repo, pr_number, body, comment_id, *, http):  # type: ignore[no-untyped-def]
         comments.append((pr_number, body, comment_id))
         return 555
 

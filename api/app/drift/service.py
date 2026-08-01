@@ -3,7 +3,7 @@ from __future__ import annotations
 import uuid
 from datetime import datetime, timedelta
 
-from sqlalchemy import select, text
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.audit import record_audit
@@ -12,19 +12,16 @@ from app.enums import (
     ACTIVE_STATES,
     AuditActorKind,
     DriftStatus,
-    Role,
     RunState,
     RunType,
     TriggeredBy,
 )
-from app.inbox.service import notify
+from app.inbox.service import eligible_approver_ids, notify
 from app.logging import get_logger
 from app.models.environment import Environment
 from app.models.run import Run
-from app.models.user import User
 
 _log = get_logger("stackd.drift")
-_APPROVERS = (Role.approver, Role.admin)
 
 
 async def _last_applied_sha(session: AsyncSession, env_id: uuid.UUID) -> str | None:
@@ -101,20 +98,7 @@ async def _notify_drift(session: AsyncSession, env: Environment, run: Run) -> No
     """In-app notification to every eligible approver for the env's tier (§17), like an approval
     request. Fired once per transition into drift (the caller debounces)."""
     ctx = {"environment_id": str(env.id), "environment": env.name, "tier": env.tier}
-    approvers = (
-        (
-            await session.execute(
-                select(User.id).where(
-                    User.role.in_(_APPROVERS),
-                    User.disabled.is_(False),
-                    text(":tier = ANY(allowed_tiers)").bindparams(tier=env.tier),
-                )
-            )
-        )
-        .scalars()
-        .all()
-    )
-    for uid in approvers:
+    for uid in await eligible_approver_ids(session, env.tier):
         await notify(session, uid, "drift_detected", run_id=run.id, context=ctx)
 
 

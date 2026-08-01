@@ -21,6 +21,11 @@ class _Bucket:
 
 
 _buckets: dict[tuple[str, str], _Bucket] = {}
+# The webhook limiter is on an unauthenticated route, so distinct source IPs grow the dict without
+# bound. Past this size, buckets idle longer than _IDLE_SECONDS are evicted — after that long any
+# configured bucket has refilled to capacity, so dropping one never changes a rate decision.
+_MAX_BUCKETS = 10_000
+_IDLE_SECONDS = 15 * 60
 
 
 def _reset() -> None:
@@ -40,6 +45,10 @@ def rate_limit(name: str, per_minute: int, burst: int | None = None) -> Callable
         now = time.monotonic()
         bucket = _buckets.get(key)
         if bucket is None:
+            if len(_buckets) >= _MAX_BUCKETS:
+                stale = [k for k, b in _buckets.items() if now - b.updated >= _IDLE_SECONDS]
+                for k in stale:
+                    del _buckets[k]
             bucket = _Bucket(capacity, now)
             _buckets[key] = bucket
         bucket.tokens = min(capacity, bucket.tokens + (now - bucket.updated) * refill_per_sec)

@@ -32,14 +32,10 @@ async def prometheus_metrics(session: DbSession) -> Response:
     for st in RunState:
         metrics.runs_total.labels(state=st.value).set(counts.get(st.value, 0))
 
-    waiting = (
-        await session.execute(
-            select(func.count())
-            .select_from(Run)
-            .where(Run.state.in_([RunState.queued, RunState.confirmed]))
-        )
-    ).scalar_one()
-    metrics.queue_depth.set(int(waiting))
+    # queued + confirmed are already in the per-state counts — no second aggregate needed.
+    metrics.queue_depth.set(
+        counts.get(RunState.queued.value, 0) + counts.get(RunState.confirmed.value, 0)
+    )
 
     settings = get_settings()
     cutoff = datetime.now(UTC) - timedelta(seconds=settings.stackd_worker_offline_seconds)

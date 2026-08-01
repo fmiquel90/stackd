@@ -5,8 +5,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.enums import Role
 from app.models.space import Space
-from app.models.space_membership import SpaceMembership
 from app.models.user import User
+from app.spaces.service import membership_from_defaults
 
 
 async def upsert_user(
@@ -49,15 +49,7 @@ async def upsert_user(
         # spaces). Admins can then scope access per space via the spaces members API.
         space_ids = (await session.execute(select(Space.id))).scalars().all()
         for sid in space_ids:
-            session.add(
-                SpaceMembership(
-                    space_id=sid,
-                    user_id=user.id,
-                    role=user.role,
-                    allowed_tiers=list(user.allowed_tiers or []),
-                    can_destroy=user.can_destroy,
-                )
-            )
+            session.add(membership_from_defaults(sid, user))
         await session.flush()
         return user
 

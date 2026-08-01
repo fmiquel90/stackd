@@ -18,11 +18,7 @@ from app.models.stack import Stack
 from app.models.tier import Tier
 from app.models.user import User
 from app.models.variable_set import VariableSet, VariableSetAttachment
-from app.spaces import (
-    accessible_space_ids,
-    get_default_space,
-    require_space_access,
-)
+from app.spaces import accessible_space_ids, require_space_access, resolve_target_space
 from app.variable_sets.schemas import (
     AttachmentCreate,
     AttachmentOut,
@@ -60,8 +56,9 @@ async def list_sets(user: CurrentUser, session: DbSession) -> list[VariableSet]:
 @router.post("", response_model=VariableSetOut, status_code=201, dependencies=[Writer])
 async def create_set(body: VariableSetCreate, user: CurrentUser, session: DbSession) -> VariableSet:
     payload = body.model_dump()
-    space_id = payload.pop("space_id", None) or (await get_default_space(session)).id
-    await require_space_access(session, user, space_id, min_role=Role.writer)
+    space_id = await resolve_target_space(
+        session, user, payload.pop("space_id", None), min_role=Role.writer
+    )
     vset = VariableSet(space_id=space_id, **payload)
     session.add(vset)
     try:

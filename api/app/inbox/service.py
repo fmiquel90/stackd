@@ -40,6 +40,22 @@ async def notify(
     )
 
 
+async def eligible_approver_ids(session: AsyncSession, tier: str) -> list[uuid.UUID]:
+    """Users who may approve for this tier: enabled, approver/admin role, tier in their allowed
+    set (§2.4). The single who-may-approve fan-out query — approval requests and drift alerts both
+    use it, so a future membership-aware rewrite lands in one place."""
+    rows = (
+        await session.execute(
+            select(User.id).where(
+                User.role.in_(_APPROVERS),
+                User.disabled.is_(False),
+                text(":tier = ANY(allowed_tiers)").bindparams(tier=tier),
+            )
+        )
+    ).scalars()
+    return list(rows)
+
+
 async def enqueue_for_transition(session: AsyncSession, run: Run, to_state: RunState) -> None:
     """Feed the in-app inbox off a run transition (called from transition(), §4.2):
     `unconfirmed` → fan out an approval request to every eligible approver; a terminal state →
@@ -49,20 +65,7 @@ async def enqueue_for_transition(session: AsyncSession, run: Run, to_state: RunS
         if env is None:
             return
         ctx = {"environment_id": str(env.id), "environment": env.name, "tier": env.tier}
-        approvers = (
-            (
-                await session.execute(
-                    select(User.id).where(
-                        User.role.in_(_APPROVERS),
-                        User.disabled.is_(False),
-                        text(":tier = ANY(allowed_tiers)").bindparams(tier=env.tier),
-                    )
-                )
-            )
-            .scalars()
-            .all()
-        )
-        for uid in approvers:
+        for uid in await eligible_approver_ids(session, env.tier):
             if uid == run.trigger_user_id:
                 continue  # the triggerer already knows; avoids "approve your own" noise
             await notify(session, uid, "approval_request", run_id=run.id, context=ctx)
