@@ -5,6 +5,7 @@ for real (`sh -c`); tofu is faked."""
 
 from __future__ import annotations
 
+import json
 import subprocess
 from pathlib import Path
 from types import SimpleNamespace
@@ -16,6 +17,8 @@ import agent.main as main
 from agent.client import ApiClient
 from agent.config import Settings
 from agent.workspace import Workspace
+
+OUTPUTS = {"vpc_id": {"sensitive": False, "type": "string", "value": "vpc-0abc"}}
 
 # stage → (handler, the tofu subcommands that ran before the job failed there)
 _STAGES = {
@@ -80,7 +83,8 @@ def _run(
 
     def fake_subprocess_run(cmd: list[str], **kw: Any) -> subprocess.CompletedProcess[str]:
         tofu.append(cmd[1])
-        return subprocess.CompletedProcess(cmd, 0, "{}", "")
+        stdout = json.dumps(OUTPUTS) if cmd[1] == "output" else "{}"
+        return subprocess.CompletedProcess(cmd, 0, stdout, "")
 
     monkeypatch.setattr(main, "Workspace", _Workspace)
 
@@ -121,7 +125,10 @@ def test_a_failing_hook_fails_the_job_at_its_stage(
 ) -> None:
     client, tofu = _run(monkeypatch, tmp_path, stage, source, on_failure="fail")
     failed = {"name": "check", "status": "fail", "detail": "exit 3"}
-    assert client.events[-1] == ("job_failed", {"phase": stage, "result": {"checks": [failed]}})
+    # After the apply, the infra has changed: its outputs are reported with the failure.
+    outputs = {"outputs": OUTPUTS} if stage == "after_apply" else {}
+    expected = {"phase": stage, "result": {"checks": [failed], **outputs}}
+    assert client.events[-1] == ("job_failed", expected)
     assert tofu == _STAGES[stage][1]  # nothing ran past the failing stage
 
 

@@ -566,11 +566,15 @@ def handle_apply(client: ApiClient, job: dict, settings: Settings) -> None:
             if leak:
                 streamer.emit("applying", [f"[stackd] secret_leak_suspected: {leak}"])
         outputs = _safe_json(out.stdout) if ok_output else {}
-        # The infra has changed already, but a failing after_apply hook still fails the run, like
-        # at any stage (§8.3): its outputs are not recorded and nothing cascades from it.
+        # A failing after_apply hook still fails the run, like at any stage (§8.3), and nothing
+        # cascades from it. But the infra has changed: its outputs, read before the hooks ran,
+        # are reported so the API records them (§9.1).
         if stage("after_apply"):
             return client.event(
-                job_id, "job_failed", phase="after_apply", result={"checks": checks}
+                job_id,
+                "job_failed",
+                phase="after_apply",
+                result={"checks": checks, "outputs": outputs},
             )
         client.event(job_id, "phase_finished", result={"outputs": outputs, "checks": checks})
     finally:

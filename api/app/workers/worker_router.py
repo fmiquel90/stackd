@@ -332,6 +332,10 @@ async def post_event(
         return {"ok": True}
 
     if body.event == "job_failed":
+        if run.state == RunState.applying and body.phase == "after_apply":
+            # The apply succeeded, an after_apply hook failed (§8.3): the run fails and nothing
+            # cascades, but the infra has changed, so its outputs are recorded (§9.1).
+            await capture_outputs(session, run, result.get("outputs") or {})
         failed_check = any(c.get("status") == "fail" for c in result.get("checks", []))
         action = "run.check_failed" if failed_check else "run.apply_failed"
         await transition(
