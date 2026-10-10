@@ -57,9 +57,9 @@ curl -s -X POST localhost:8000/api/v1/stacks/$STACK/environments \
 - **`tier`** (a configurable catalog, e.g. `dev`/`staging`/`prod`/`qa`) — carries apply/destroy permissions: `can_apply` requires `env.tier ∈ user.allowed_tiers`. See [Runs & approvals](runs-and-approvals.md).
 - **`branch`** — the branch this environment tracks for staleness and webhook-driven runs.
 - **`protected`** — forces confirmation and 4-eyes; it is **not** the access control (that is `tier`).
-- **`require_second_pair_of_eyes`** — the triggerer cannot confirm (already implied for `tier=prod`; useful on staging).
-- **`managed_state`** — when true, Terraform talks to Stackd's HTTP backend (state bytes in S3). Set `false` to keep your own `backend "s3"`. See [Concepts §7](../CONCEPTS.md).
-- **`allow_mock_apply`** — allow applying a run that consumed mock outputs (default `false`). See [Variables](variables.md).
+- **`require_second_pair_of_eyes`** — the triggerer cannot confirm (already implied on a tier flagged `requires_four_eyes`, like the seeded `prod`; useful on staging).
+- **`managed_state`** — when true, Terraform talks to Stackd's HTTP backend (state bytes in S3) and the repo must declare **no** `backend` block: the worker adds `backend "http" {}` itself. Set `false` to keep your own `backend "s3"`. See [Concepts §8](../CONCEPTS.md#8-managed-state-s3-behind-an-http-backend).
+- **`allow_mock_apply`** — allow applying a run that consumed mock outputs (default `false`). See [Dependencies & mocks](dependencies-and-mocks.md).
 - **`labels`** — JSON tags used to target a worker pool.
 
 !!! warning "Why not Terraform workspaces"
@@ -67,14 +67,32 @@ curl -s -X POST localhost:8000/api/v1/stacks/$STACK/environments \
 
 ### Refreshing the tracked head
 
-Staleness compares the last applied commit to the branch head. `head_sha` updates via push webhook or 15-min polling; force it manually:
+Staleness compares the commit of the last finished tracked run (every run is pinned to the commit it planned) to the branch head. `head_sha` updates via the push webhook or the 15-min `git ls-remote` polling; force it manually (audited `environment.head_refreshed`):
 
 ```bash
 curl -s -X POST localhost:8000/api/v1/environments/$ENV/refresh-head \
   -H "Authorization: Bearer $TOKEN"
 ```
 
-`GET /api/v1/environments/{id}` then exposes `head_sha`, `commits_ahead`, `affects_project_root` and `stale`. See [SPECS §9.6](../SPECS.md).
+`GET /api/v1/environments/{id}` then exposes `head_sha`, `commits_ahead`, `affects_project_root` and `stale`. An environment with nothing applied yet is never `stale`. Changing an environment's `branch` clears its recorded head until the next poll, and a push that deletes the branch clears it too. See [SPECS §9.6](../SPECS.md).
+
+## Deleting a stack or an environment
+
+`DELETE /api/v1/stacks/{id}` and `DELETE /api/v1/environments/{id}` are **refused with `409 Active
+run`** while one of the environments involved has a run in an active state (`preparing` through
+`applying`, or a command `running`); the problem body names the `run_id`. Cancel or discard it, or
+let it finish, then retry. Queued runs are deleted with their environment.
+
+The deletion also removes, in the same transaction and each audited with the reason
+(`stack_deleted` or `environment_deleted`), everything that points at the stack or its
+environments:
+
+- variable-set attachments (`variable_set.detached`) — the set itself stays;
+- platform hooks (`hook.deleted`);
+- notification targets (`notification_target.deleted`).
+
+An attach racing the deletion either fails with `404` or is removed with the rest: no orphan is
+left behind.
 
 ## See also
 

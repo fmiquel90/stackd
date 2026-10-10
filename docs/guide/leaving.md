@@ -18,7 +18,7 @@ how to leave and get everything back.
 ## What lives only in Stackd (but is exportable)
 
 - **Orchestration config** — stacks, environments, tiers, dependencies, variable sets. Exportable
-  via the API (`GET /stacks`, `/environments/{id}`, `/dependencies/graph`,
+  via the API (`GET /stacks`, `/environments/{id}`, `/graph`,
   `/environments/{id}/resolved-variables`). Re-creatable; it isn't infrastructure.
 - **History** — runs, logs, audit. The audit trail exports to CSV (`GET /api/v1/audit/export`).
 - **Sensitive variable values** — write-only by design (AES-GCM, never returned in clear). Keep

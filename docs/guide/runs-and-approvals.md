@@ -9,15 +9,39 @@ A **run** is one execution against one environment. It always pauses for a human
 queued → preparing → planning → [checking] → unconfirmed → confirmed → applying → finished
 ```
 
-A worker claims a `queued` run, clones the repo at the pinned commit, runs hooks + `plan`, and
-reports back. With a non-empty diff the run stops at **`unconfirmed`** and waits for a human. After
-**confirm**, a worker claims the apply and drives it to **`finished`**. An empty diff goes straight
-to `finished`; a failure to `failed`; a human can `discard` or `cancel`.
+A worker claims a `queued` run, clones the repo, runs hooks + `plan`, and reports back. With a
+non-empty diff the run stops at **`unconfirmed`** and waits for a human. After **confirm**, a worker
+claims the apply and drives it to **`finished`**. An empty diff goes straight to `finished`; a
+failure to `failed`. A human can `discard` an `unconfirmed` run, or `cancel` a `queued` or
+`unconfirmed` one (stopping a run a worker is executing is not supported yet).
 
 !!! note
     State only ever changes through one function (`transition()`), which records a `run_event` and
     — for human/terminal actions — an `audit_event` in the **same transaction**. Nothing changes a
     run's state out of band.
+
+## What gets applied is what was reviewed
+
+Two guarantees tie the apply to the plan a human approved:
+
+- **The run is pinned to a commit.** A run triggered without a commit (a click, a cascade) plans
+  the head of the environment's branch, and the plan job reports the exact commit it checked out:
+  the run is pinned to it. A run triggered on a branch or tag name is pinned to the commit that name
+  resolved to; a run triggered on a full SHA must check out exactly that commit, or it fails
+  (`commit_mismatch`). The apply clones exactly the pinned commit, so its hooks and `output -json`
+  run on the reviewed code too, and [staleness](stacks-and-environments.md#refreshing-the-tracked-head)
+  knows what was applied.
+- **The apply runs the saved plan.** For a tracked or destroy run with changes, the plan job uploads
+  its `plan.tfplan` before any `after_plan` hook runs. The API encrypts it and keeps it in S3 while
+  the run can still be applied. The apply job downloads it and runs `tofu apply plan.tfplan` — it
+  never re-plans. If the saved plan is missing or unreadable, the run fails before the
+  `before_apply` hooks (`saved plan unavailable, not applied`). If the state or an input changed
+  since the plan, tofu refuses the stale plan and the run fails with tofu's reason. In both cases,
+  **trigger a new plan**. The saved plan is deleted as soon as the run ends, whatever the outcome.
+
+A plan file holds the run's variable values, sensitive ones included: it is encrypted with the
+API's key on top of the bucket's encryption, written `0600` on the apply worker, and removed right
+after the apply (the `after_apply` hooks never see it).
 
 ## Who can approve — `can_apply`
 
@@ -31,21 +55,26 @@ Confirming an apply requires **both**:
 A `destroy` run additionally requires the `can_destroy` permission. A tier flagged
 `requires_four_eyes` (e.g. `prod`) also forces the triggerer ≠ the confirmer.
 
+These are your **effective** permissions in the environment's space: a space membership can set a
+different role, tier set or destroy right than your instance defaults.
+
 | Persona | Can trigger a plan | Can approve dev/staging | Can approve prod |
 |---|---|---|---|
 | writer (`bob`) | ✅ | ❌ (needs approver) | ❌ |
-| approver capped staging | ✅ | ✅ | ❌ (tier) |
-| approver/admin, prod ceiling (`alice`) | ✅ | ✅ | ✅ |
+| approver with `{dev, staging}` | ✅ | ✅ | ❌ (tier) |
+| approver/admin with `prod` in their set (`alice`, `admin`) | ✅ | ✅ | ✅ |
 
-## Four-eyes on prod
+## Four-eyes
 
-On a `prod` environment (or any env with `require_second_pair_of_eyes`), the person who **triggered**
-the run cannot be the one who **confirms** it — a second approver is required.
+On an environment whose tier is flagged `requires_four_eyes` (the seeded `prod`), or any env with
+`require_second_pair_of_eyes`, the person who **triggered** the run cannot be the one who
+**confirms** it — another authorized approver must. It only applies to runs a human triggered: a
+webhook or cascade run has no triggerer to oppose, so any authorized approver can confirm it.
 
 ## Friction proportional to risk
 
-An authorized non-prod apply is one click. Confirming on **`tier=prod`** or any **`destroy`** run
-opens a confirmation popover: type the **environment name** + review a `+a ~c −d` plan summary. This
+An authorized apply on an ordinary tier is one click. Confirming on a tier flagged
+`requires_four_eyes` or any **`destroy`** run opens a confirmation popover: type the **environment name** + review a `+a ~c −d` plan summary. This
 is a misclick safeguard only — it never bypasses `can_apply` (still evaluated server-side).
 
 ## Autodeploy & checks
@@ -74,13 +103,14 @@ confirm. This is the same-stack counterpart to the cross-stack [cascade](depende
 
 ## Proposed runs (from a PR)
 
-A pull request triggers a **proposed** run: plan-only, read-only state, no secrets — a safe preview
-that is never applied. See [the Git integration in SPECS](../SPECS.md).
+A pull request triggers a **proposed** run: plan-only, read-only state token, no secrets — a safe
+preview that is never applied and saves no plan file. See [the Git integration in SPECS](../SPECS.md).
 
 ## Triggering over the API
 
 ```bash
-curl -s -X POST localhost:8000/api/v1/environments/$ENV_ID/runs -H "$AUTH" -d '{}'   # trigger plan
+curl -s -X POST localhost:8000/api/v1/environments/$ENV_ID/runs -H "$AUTH" \
+  -H 'content-type: application/json' -d '{}'                                         # trigger plan
 curl -s -X POST localhost:8000/api/v1/runs/$RUN_ID/confirm -H "$AUTH"                 # approve → apply
 curl -s -X POST localhost:8000/api/v1/runs/$RUN_ID/discard -H "$AUTH"                 # discard
 ```

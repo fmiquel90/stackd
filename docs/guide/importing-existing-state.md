@@ -26,7 +26,7 @@ apply anything.
 
 ## Path 2 — adopt Stackd-managed state (`managed_state: true`)
 
-Hand state to Stackd (state in S3 behind its HTTP backend, scoped per-run tokens, visible locking,
+Hand state to Stackd (state in S3 behind its HTTP backend, per-job scoped tokens, visible locking,
 serial-regression guard). Migrate your current state **once** with a standard
 `tofu init -migrate-state` — Stackd hands you a scoped credential to do it.
 
@@ -54,8 +54,8 @@ curl -s -X POST localhost:8000/api/v1/environments/$ENV_ID/state/import-session 
 }
 ```
 
-**3. Migrate your state** with the returned config. In your repo, switch the backend block to
-`terraform { backend "http" {} }`, then run once:
+**3. Migrate your state** with the returned config. In a local checkout, switch the backend block
+to `terraform { backend "http" {} }`, then run once:
 
 ```bash
 tofu init -migrate-state \
@@ -69,12 +69,29 @@ tofu init -migrate-state \
 ```
 
 Terraform LOCKs, uploads your current state through Stackd's backend (stored as a `state_version`),
-then UNLOCKs. Future runs use the managed backend automatically.
+then UNLOCKs.
+
+**4. Remove the backend block from the committed code.** On a managed-state environment the worker
+adds its own `backend "http" {}` block and hands the address and its job token to tofu through
+`TF_HTTP_*` environment variables, so the repo must declare **no** backend: a second backend block
+makes `init` fail. Future runs then use the managed backend automatically.
+
+!!! tip "Keep the token out of `.terraform/`"
+    tofu stores `-backend-config` values, the token included, in `.terraform/terraform.tfstate`.
+    The import token expires after 30 minutes, but you can avoid writing it at all: export
+    `TF_HTTP_ADDRESS`, `TF_HTTP_LOCK_ADDRESS`, `TF_HTTP_UNLOCK_ADDRESS`, `TF_HTTP_LOCK_METHOD`,
+    `TF_HTTP_UNLOCK_METHOD`, `TF_HTTP_USERNAME` and `TF_HTTP_PASSWORD` instead of passing
+    `-backend-config` flags — that is how Stackd's own workers do it. Delete the local
+    `.terraform/` once the migration is done.
 
 !!! warning
     The import session is **admin-only**, the token expires in 30 minutes, and creating it is
     audited (`state.import_session_created`). The endpoint refuses an env where `managed_state` is
-    off (409).
+    off (409). The returned addresses use `STACKD_PUBLIC_URL`, since you run `tofu` from your own
+    machine.
+
+In the local dev stack, the imported state lands in the Garage bucket that `task dev` provisions;
+`task s3-ls` lists it under `states/<environment_id>/`.
 
 ## Which to choose?
 

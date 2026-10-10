@@ -30,9 +30,15 @@ other (primary/secondary region pattern). To wire same-named environments across
 stacks in bulk, use the helper:
 
 ```bash
-curl -s -X POST localhost:8000/api/v1/stacks/$STACK_ID/dependencies/link-by-name \
-  -H "Authorization: Bearer $TOKEN"
+curl -s -X POST localhost:8000/api/v1/stacks/$APP_STACK_ID/dependencies/link-by-name \
+  -H "Authorization: Bearer $TOKEN" -H 'content-type: application/json' \
+  -d '{"upstream_stack_id": "'"$NETWORK_STACK_ID"'", "trigger_policy": "on_output_change"}'
 ```
+
+It links each environment of the stack in the path to the same-named environment of
+`upstream_stack_id`, skipping pairs already linked and any edge that would close a
+cycle, and returns `{"created": N}` — running it twice is harmless. Add the
+`output_references` on each edge afterwards.
 
 ## How inputs resolve
 
@@ -84,12 +90,13 @@ finished; a failed parent stops that branch (`run_group = partial_failure`).
     The cascade never auto-confirms. A **protected** downstream still stops at
     `unconfirmed` and waits for a human — see [Runs & approvals](runs-and-approvals.md).
 
-Launch a whole subgraph at once with `with_downstream=true`; the root starts and
-subsequent levels follow via cascade:
+Launch a whole subgraph at once with `with_downstream: true` in the trigger body; the
+root starts and subsequent levels follow via cascade:
 
 ```bash
-curl -s -X POST "localhost:8000/api/v1/environments/$NETWORK_DEV/runs?with_downstream=true" \
-  -H "Authorization: Bearer $TOKEN"
+curl -s -X POST localhost:8000/api/v1/environments/$NETWORK_DEV/runs \
+  -H "Authorization: Bearer $TOKEN" -H 'content-type: application/json' \
+  -d '{"with_downstream": true}'
 ```
 
 ## Inspect
@@ -97,8 +104,11 @@ curl -s -X POST "localhost:8000/api/v1/environments/$NETWORK_DEV/runs?with_downs
 ```bash
 curl -s localhost:8000/api/v1/environments/$APP_DEV/outputs   -H "Authorization: Bearer $TOKEN"
 curl -s localhost:8000/api/v1/graph                            -H "Authorization: Bearer $TOKEN"
-curl -s localhost:8000/api/v1/run-groups/$GROUP_ID             -H "Authorization: Bearer $TOKEN"
 ```
+
+`/graph` only shows the environments and edges of the spaces you can see. There is no
+run-group endpoint yet: follow a cascade on the graph page, or through the downstream
+environments' runs (`triggered_by: "dependency"`).
 
 To remove an edge: `DELETE /api/v1/dependencies/{id}`.
 

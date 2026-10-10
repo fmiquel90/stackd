@@ -12,9 +12,15 @@ sub = run:<tier>:<stack>:<phase>      e.g.  run:prod:core-network:apply
 ```
 
 !!! note "Plan and apply assume different roles"
-    A `plan` run and an `apply` run get tokens with different `phase` segments and
+    A `plan` job and an `apply` job get tokens with different `phase` segments and
     therefore assume **different IAM roles**: `plan` is read-only, `apply` is write.
-    A PR plan physically cannot modify infrastructure.
+    A PR plan physically cannot modify infrastructure. A [command run](commands.md) gets
+    the `apply` role for a mutating command (`import`, `state rm`…) and the `plan` role
+    for a read-only one.
+
+The token expires after `session_duration`, capped per phase: 30 min for `plan`, and the
+apply window (the apply budget + grace, 20 min by default) for `apply` — so apply
+credentials never outlive the job they were minted for.
 
 ## How the issuer works
 
