@@ -71,8 +71,12 @@ services:
       STACKD_POOL_TOKEN_FILE: /stackd-dev/pool.token
       # The API is the only holder of S3 credentials (SPECS §11.1) and of the platform secrets:
       # plans and states reach S3 through it, and the worker never needs the DB, the master key,
-      # the JWT secret or the Google secret. Blank the shared .env values here, or they would
-      # reach repo hooks via the worker's env.
+      # the JWT secret or the Google secret. Blank the shared .env values here: tofu and platform
+      # hooks run with the worker's env minus `STACKD_*` only (SPECS §7.4), so the DB URL, the S3
+      # keys and the Google secret would reach them — and repo code runs inside tofu. The
+      # `STACKD_*` ones (master key, JWT secret) are stripped from those, but would still sit in
+      # the agent's own env, readable under /proc by a hook running as the same user (SPECS §8.3).
+      # Repo hooks get an allowlisted env, none of these.
       S3_ACCESS_KEY: ""
       S3_SECRET_KEY: ""
       DATABASE_URL: ""
