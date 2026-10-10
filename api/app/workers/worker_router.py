@@ -241,11 +241,21 @@ async def _pin_commit(session: AsyncSession, worker: Worker, run: Run, reported:
     return sha
 
 
+def _check_results(run: Run, checks: list[dict[str, Any]]) -> dict[str, Any]:
+    """`runs.check_results` with a job's `checks` added to what earlier jobs left (§8.3).
+    `results`: every check result (ok, warn, fail), each with the stage it ran at; `checks`: the
+    warn/fail ones, what needs attention — the field's meaning before `results` existed."""
+    prior = run.check_results or {}
+    results = [*(prior.get("results", prior.get("checks")) or []), *checks]
+    return {"checks": [c for c in results if c.get("status") != "ok"], "results": results}
+
+
 async def _audit_warned_checks(
     session: AsyncSession, worker: Worker, run: Run, checks: list[dict[str, Any]]
 ) -> bool:
-    """Audit `run.check_warned` (§8.3) when any of `checks` warned; True if one did."""
-    warned = [c.get("name") for c in checks if c.get("status") == "warn"]
+    """Audit `run.check_warned` (§8.3) when any of `checks` warned — with the stages they ran
+    at, so a plan's warning tells from an apply's; True if one did."""
+    warned = [c for c in checks if c.get("status") == "warn"]
     if warned:
         await record_audit(
             session,
@@ -254,7 +264,10 @@ async def _audit_warned_checks(
             actor_id=worker.id,
             target_kind="run",
             target_id=run.id,
-            context={"checks": warned},
+            context={
+                "checks": [c.get("name") for c in warned],
+                "stages": list(dict.fromkeys(c["stage"] for c in warned if c.get("stage"))),
+            },
         )
     return bool(warned)
 
@@ -262,7 +275,7 @@ async def _audit_warned_checks(
 async def _decide_after_plan(session: AsyncSession, worker: Worker, run: Run, result: dict) -> None:
     """Plan finished: set summary/checks, route to finished / unconfirmed / confirmed (§4.2)."""
     checks = result.get("checks", [])
-    fields = {"plan_summary": result.get("summary"), "check_results": {"checks": checks}}
+    fields = {"plan_summary": result.get("summary"), "check_results": _check_results(run, checks)}
     warn = await _audit_warned_checks(session, worker, run, checks)
 
     if run.is_drift:
@@ -336,15 +349,19 @@ async def post_event(
             # The apply succeeded, an after_apply hook failed (§8.3): the run fails and nothing
             # cascades, but the infra has changed, so its outputs are recorded (§9.1).
             await capture_outputs(session, run, result.get("outputs") or {})
-        failed_check = any(c.get("status") == "fail" for c in result.get("checks", []))
+        checks = result.get("checks") or []
+        failed_check = any(c.get("status") == "fail" for c in checks)
         action = "run.check_failed" if failed_check else "run.apply_failed"
+        failed_fields: dict[str, Any] = {"error": result.get("error") or body.phase or "job failed"}
+        if checks:  # the failing check, and the job's others: recorded like a finished job's
+            failed_fields["check_results"] = _check_results(run, checks)
         await transition(
             session,
             run,
             RunState.failed,
             actor=RunEventActor.worker,
             actor_id=worker.id,
-            fields={"error": result.get("error") or body.phase or "job failed"},
+            fields=failed_fields,
             audit_action=action,
             audit_context={"phase": body.phase},
         )
@@ -370,13 +387,12 @@ async def post_event(
         elif run.state == RunState.applying:
             # Capture outputs (§9.1) then finish, then cascade downstream (§9.2) — same txn.
             await capture_outputs(session, run, result.get("outputs") or {})
-            # Apply-stage checks (before_apply/after_apply warnings, §8.3) join the plan's in
-            # check_results and are audited like them; the run is already confirmed.
+            # Apply-stage checks (before_apply/after_apply, §8.3) join the plan's in check_results
+            # and are audited like them; the run is already confirmed.
             apply_checks = result.get("checks") or []
             check_fields: dict[str, Any] | None = None
             if apply_checks:
-                plan_checks = (run.check_results or {}).get("checks") or []
-                check_fields = {"check_results": {"checks": [*plan_checks, *apply_checks]}}
+                check_fields = {"check_results": _check_results(run, apply_checks)}
                 await _audit_warned_checks(session, worker, run, apply_checks)
             await transition(
                 session,

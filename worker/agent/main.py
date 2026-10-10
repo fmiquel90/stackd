@@ -317,7 +317,8 @@ def handle_plan(client: ApiClient, job: dict, settings: Settings) -> None:
 
         def stage(name: str) -> bool:
             """A stage's hooks (§8.3): True when an `on_failure: fail` hook failed — the job fails
-            at that stage, before the next tofu step. A `warn` one is reported in the checks."""
+            at that stage, before the next tofu step. Every result (ok, warn, fail) is reported in
+            the checks, with its stage."""
             results, aborted = run_hooks(
                 hooks.get(name, []),
                 cwd,
@@ -327,7 +328,7 @@ def handle_plan(client: ApiClient, job: dict, settings: Settings) -> None:
                 streamer=streamer,
                 platform_files=lambda: _cloud_token(ws, job),
             )
-            checks.extend(r for r in results if r["status"] != "ok")
+            checks.extend({**r, "stage": name} for r in results)
             return aborted
 
         if stage("before_init"):
@@ -438,7 +439,9 @@ def handle_plan(client: ApiClient, job: dict, settings: Settings) -> None:
                     phase="plan",
                     result={"error": f"secret_leak_suspected: {leak}"},
                 )
-            checks.append({"name": "secret_leak_suspected", "status": "warn", "detail": leak})
+            checks.append(
+                {"name": "secret_leak_suspected", "status": "warn", "detail": leak, "stage": "plan"}
+            )
 
         # The saved plan (§7.4): the apply job applies exactly this file, the one shown above.
         # Uploaded before any after_plan hook runs, so a repo hook can't swap what gets applied.
@@ -468,7 +471,7 @@ def handle_plan(client: ApiClient, job: dict, settings: Settings) -> None:
                 streamer=streamer,
                 platform_files=lambda: _cloud_token(ws, job),
             )
-            checks.extend(r for r in results if r["status"] != "ok")
+            checks.extend({**r, "stage": "after_plan"} for r in results)
         if aborted:
             return client.event(job_id, "job_failed", phase="after_plan", result={"checks": checks})
 
@@ -521,8 +524,9 @@ def handle_apply(client: ApiClient, job: dict, settings: Settings) -> None:
         checks: list[dict[str, Any]] = []
 
         def stage(name: str) -> bool:
-            """As in the plan job (§8.3): True when an `on_failure: fail` hook failed. A `warn` one
-            is reported in the checks — the run is already confirmed, it can't go back to it."""
+            """As in the plan job (§8.3): True when an `on_failure: fail` hook failed. Every result is
+            reported in the checks, with its stage; a `warn` one can't send the run, already
+            confirmed, back to `unconfirmed`."""
             results, aborted = run_hooks(
                 hooks.get(name, []),
                 cwd,
@@ -532,7 +536,7 @@ def handle_apply(client: ApiClient, job: dict, settings: Settings) -> None:
                 streamer=streamer,
                 platform_files=lambda: _cloud_token(ws, job),
             )
-            checks.extend(r for r in results if r["status"] != "ok")
+            checks.extend({**r, "stage": name} for r in results)
             return aborted
 
         with _tofu_files(ws, cwd, job):

@@ -150,6 +150,14 @@ export type RunState =
   | "discarded"
   | "canceled";
 
+/** One hook check (SPECS §8.3): `stage` is the hook stage it ran at (before_init … after_apply). */
+export type CheckResult = {
+  name: string;
+  status: string; // "ok" | "warn" | "fail"
+  detail?: string | null;
+  stage?: string;
+};
+
 export interface Run {
   id: string;
   environment_id: string;
@@ -161,7 +169,8 @@ export interface Run {
   trigger_user_id: string | null;
   confirmed_by_user_id: string | null;
   plan_summary: { add?: number; change?: number; destroy?: number } | null;
-  check_results: { checks?: { name: string; status: string; detail?: string }[] } | null;
+  // `results`: every hook check result (ok/warn/fail) with its stage; `checks`: the warn/fail ones.
+  check_results: { checks?: CheckResult[]; results?: CheckResult[] } | null;
   used_mocks: boolean;
   used_secret_fallback: boolean;
   variable_provenance: Record<string, string> | null;

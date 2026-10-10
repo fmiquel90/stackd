@@ -74,9 +74,10 @@ def _run(
     source: str,
     on_failure: str,
     command: str = "exit 3",
+    at: list[str] | None = None,
 ) -> tuple[_Client, list[str]]:
-    """Run the job holding `stage`, with one hook there running `command`. Returns the client and
-    the tofu subcommands that ran."""
+    """Run the job holding `stage`, with one hook there (or at each stage of `at`) running
+    `command`. Returns the client and the tofu subcommands that ran."""
     tofu: list[str] = []
 
     def fake_stream_json(cmd: list[str], cwd: Path, env: dict, **kw: Any) -> tuple:
@@ -103,7 +104,8 @@ def _run(
     monkeypatch.setattr(main.subprocess, "run", fake_subprocess_run)
 
     hook = {"name": "check", "command": command, "on_failure": on_failure}
-    _Workspace.repo_hooks = {stage: [hook]} if source == "repo" else {}
+    hooks = {s: [hook] for s in at or [stage]}
+    _Workspace.repo_hooks = hooks if source == "repo" else {}
     handler, _ = _STAGES[stage]
     job = {
         "job_id": "run-1",
@@ -116,7 +118,11 @@ def _run(
             "branch": "main",
             "project_root": ".",
         },
-        "hooks": {stage: [{**hook, "source": "platform"}]} if source == "platform" else {},
+        "hooks": (
+            {s: [{**h, "source": "platform"} for h in hs] for s, hs in hooks.items()}
+            if source == "platform"
+            else {}
+        ),
     }
     client = _Client()
     settings = SimpleNamespace(workspace_root=str(tmp_path), leak_action="warn")
@@ -130,7 +136,7 @@ def test_a_failing_hook_fails_the_job_at_its_stage(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path, stage: str, source: str
 ) -> None:
     client, tofu = _run(monkeypatch, tmp_path, stage, source, on_failure="fail")
-    failed = {"name": "check", "status": "fail", "detail": "exit 3"}
+    failed = {"name": "check", "status": "fail", "detail": "exit 3", "stage": stage}
     # After the apply, the infra has changed: its outputs are reported with the failure.
     outputs = {"outputs": OUTPUTS} if stage == "after_apply" else {}
     expected = {"phase": stage, "result": {"checks": [failed], **outputs}}
@@ -153,7 +159,8 @@ def test_a_warning_hook_lets_the_job_finish_and_is_reported(
     client, _tofu = _run(monkeypatch, tmp_path, stage, source, on_failure="warn")
     kind, kw = client.events[-1]
     assert kind == "phase_finished", client.events
-    assert kw["result"]["checks"] == [{"name": "check", "status": "warn", "detail": "exit 3"}]
+    warned = {"name": "check", "status": "warn", "detail": "exit 3", "stage": stage}
+    assert kw["result"]["checks"] == [warned]
 
 
 @pytest.mark.parametrize("on_failure", ["fail", "warn"])
@@ -169,7 +176,12 @@ def test_a_hook_past_its_timeout_is_killed_and_fails_by_its_on_failure(
         monkeypatch, tmp_path, "before_apply", source, on_failure, "sleep 5; echo LATE"
     )
     assert time.monotonic() - started < 4
-    check = {"name": "check", "status": on_failure, "detail": "timed out after 1s"}
+    check = {
+        "name": "check",
+        "status": on_failure,
+        "detail": "timed out after 1s",
+        "stage": "before_apply",
+    }
     if on_failure == "fail":
         assert client.events[-1] == (
             "job_failed",
@@ -179,3 +191,16 @@ def test_a_hook_past_its_timeout_is_killed_and_fails_by_its_on_failure(
     else:
         kind, kw = client.events[-1]
         assert kind == "phase_finished" and kw["result"]["checks"] == [check]
+
+
+@pytest.mark.parametrize("phase", ["plan", "apply"])
+def test_every_check_result_is_reported_with_its_stage(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, phase: str
+) -> None:
+    # Passing checks too, so the API records every result and where it came from (§8.3).
+    stages = [s for s, (handler, _) in _STAGES.items() if handler == f"handle_{phase}"]
+    client, _tofu = _run(monkeypatch, tmp_path, stages[0], "repo", "fail", "true", stages)
+    kind, kw = client.events[-1]
+    assert kind == "phase_finished", client.events
+    ok = {"name": "check", "status": "ok", "detail": None}
+    assert kw["result"]["checks"] == [{**ok, "stage": s} for s in stages]

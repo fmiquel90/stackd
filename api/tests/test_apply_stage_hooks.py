@@ -9,8 +9,10 @@ import httpx
 from tests.conftest_phase2 import event, login, make_env, make_stack, register_worker
 
 CHANGES = {"has_changes": True, "summary": {"add": 1, "change": 0, "destroy": 0}}
-PLAN_WARN = {"name": "infracost", "status": "warn", "detail": "+$5"}
-APPLY_WARN = {"name": "smoke-test", "status": "warn", "detail": "exit 3"}
+PLAN_OK = {"name": "tfsec", "status": "ok", "detail": None, "stage": "after_plan"}
+PLAN_WARN = {"name": "infracost", "status": "warn", "detail": "+$5", "stage": "after_plan"}
+APPLY_OK = {"name": "drift-guard", "status": "ok", "detail": None, "stage": "before_apply"}
+APPLY_WARN = {"name": "smoke-test", "status": "warn", "detail": "exit 3", "stage": "after_apply"}
 
 
 async def _to_applying(
@@ -33,7 +35,7 @@ async def _to_applying(
     return admin, wh, env_id, run["id"]
 
 
-async def _warned(client: httpx.AsyncClient, admin: dict[str, str], run_id: str) -> list[list]:
+async def _warned(client: httpx.AsyncClient, admin: dict[str, str], run_id: str) -> list[dict]:
     rows = (
         await client.get(
             "/api/v1/audit",
@@ -41,20 +43,26 @@ async def _warned(client: httpx.AsyncClient, admin: dict[str, str], run_id: str)
             params={"action": "run.check_warned", "target_id": run_id},
         )
     ).json()
-    return sorted(row["context"]["checks"] for row in rows)
+    return sorted((row["context"] for row in rows), key=lambda c: c["checks"])
 
 
 async def test_apply_stage_checks_are_recorded_and_audited(client: httpx.AsyncClient) -> None:
-    admin, wh, _env, run_id = await _to_applying(client, "apply-checks", [PLAN_WARN])
-    finished = await event(
-        client, wh, run_id, "phase_finished", result={"outputs": {}, "checks": [APPLY_WARN]}
-    )
+    admin, wh, _env, run_id = await _to_applying(client, "apply-checks", [PLAN_OK, PLAN_WARN])
+    result = {"outputs": {}, "checks": [APPLY_OK, APPLY_WARN]}
+    finished = await event(client, wh, run_id, "phase_finished", result=result)
     assert finished.status_code == 200, finished.text
 
     run = (await client.get(f"/api/v1/runs/{run_id}", headers=admin)).json()
     assert run["state"] == "finished"
-    assert run["check_results"] == {"checks": [PLAN_WARN, APPLY_WARN]}
-    assert await _warned(client, admin, run_id) == [["infracost"], ["smoke-test"]]
+    # `checks` keeps what needs attention; `results` every result, each with its stage.
+    assert run["check_results"] == {
+        "checks": [PLAN_WARN, APPLY_WARN],
+        "results": [PLAN_OK, PLAN_WARN, APPLY_OK, APPLY_WARN],
+    }
+    assert await _warned(client, admin, run_id) == [
+        {"checks": ["infracost"], "stages": ["after_plan"]},
+        {"checks": ["smoke-test"], "stages": ["after_apply"]},
+    ]
 
 
 async def test_an_apply_without_checks_keeps_the_plans(client: httpx.AsyncClient) -> None:
@@ -63,8 +71,10 @@ async def test_an_apply_without_checks_keeps_the_plans(client: httpx.AsyncClient
 
     run = (await client.get(f"/api/v1/runs/{run_id}", headers=admin)).json()
     assert run["state"] == "finished"
-    assert run["check_results"] == {"checks": [PLAN_WARN]}
-    assert await _warned(client, admin, run_id) == [["infracost"]]
+    assert run["check_results"] == {"checks": [PLAN_WARN], "results": [PLAN_WARN]}
+    assert await _warned(client, admin, run_id) == [
+        {"checks": ["infracost"], "stages": ["after_plan"]}
+    ]
 
 
 async def test_a_failing_after_apply_hook_records_the_outputs_and_cascades_nothing(
