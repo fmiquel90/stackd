@@ -47,6 +47,7 @@ import { KeyboardProvider, useHotkeys, useKeyboardSettings } from "./keyboard";
 import { NAV } from "./nav";
 import { SpaceProvider, useEntitySpace, useSpaces } from "./SpaceContext";
 import { useSpaceEnvs } from "@/features/data/spaceEnvs";
+import { STUCK_AFTER_S, useQueueRows, waitedSeconds } from "@/features/queue/queueModel";
 import { useTheme } from "./theme";
 
 // Route-level code splitting: each page is its own chunk; the graph stack loads only on /graph.
@@ -56,8 +57,10 @@ const OverviewPage = lazy(() =>
 const StackRoute = lazy(() => import("@/features/stacks/StackPage").then((m) => ({ default: m.StackRoute })));
 const EnvPage = lazy(() => import("@/features/environments/EnvPage").then((m) => ({ default: m.EnvPage })));
 const RunPage = lazy(() => import("@/features/runs/RunPage").then((m) => ({ default: m.RunPage })));
-const QueuePage = lazy(() => import("@/pages/QueuePage").then((m) => ({ default: m.QueuePage })));
-const HealthPage = lazy(() => import("@/pages/HealthPage").then((m) => ({ default: m.HealthPage })));
+const QueuePage = lazy(() => import("@/features/queue/QueuePage").then((m) => ({ default: m.QueuePage })));
+const WorkersPage = lazy(() =>
+  import("@/features/workers/WorkersPage").then((m) => ({ default: m.WorkersPage })),
+);
 const AuditPage = lazy(() => import("@/pages/AuditPage").then((m) => ({ default: m.AuditPage })));
 const GraphPage = lazy(() => import("@/features/graph/GraphPage").then((m) => ({ default: m.GraphPage })));
 const SettingsPage = lazy(() => import("@/pages/SettingsPage").then((m) => ({ default: m.SettingsPage })));
@@ -89,6 +92,7 @@ function NavLinks({ user, onNavigate }: { user: User; onNavigate?: () => void })
             >
               <n.icon size={17} strokeWidth={1.5} aria-hidden />
               {n.label}
+              {n.label === "Queue" && <StuckCount />}
               {n.label === "Workers" && <WorkersCount />}
               {n.label === "Overview" && <NeedsYouCount user={user} />}
             </NavLink>
@@ -108,6 +112,20 @@ function NeedsYouCount({ user }: { user: User }) {
     <span className="ml-auto inline-flex h-5 min-w-5 items-center justify-center rounded-badge bg-st-decision px-1 font-data text-[11px] text-onfill">
       {needsYou.length}
       <span className="sr-only"> decision{needsYou.length > 1 ? "s" : ""} need you</span>
+    </span>
+  );
+}
+
+/** Runs waiting for a worker for over 2 minutes (DESIGN §5.5) — neutral: a wait is not a failure. */
+function StuckCount() {
+  const { rows } = useQueueRows(15_000);
+  const now = new Date();
+  const n = rows.filter((r) => r.group === "waiting" && (waitedSeconds(r, now) ?? 0) >= STUCK_AFTER_S).length;
+  if (!n) return null;
+  return (
+    <span className="ml-auto inline-flex h-5 min-w-5 items-center justify-center rounded-badge border border-control px-1 font-data text-[11px] text-primary">
+      {n}
+      <span className="sr-only"> run{n > 1 ? "s" : ""} waiting over 2 minutes</span>
     </span>
   );
 }
@@ -535,7 +553,7 @@ function AppRoutes() {
       <Route path="/s/:space/variable-sets" element={<VariableSetsPage />} />
       <Route path="/runs/:runId" element={<RunPage />} />
       <Route path="/queue" element={<QueuePage />} />
-      <Route path="/workers" element={<HealthPage />} />
+      <Route path="/workers" element={<WorkersPage />} />
       <Route path="/audit" element={<AuditPage />} />
       <Route path="/settings" element={<SettingsPage />} />
       {/* v1 URLs */}
