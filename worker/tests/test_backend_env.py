@@ -11,6 +11,8 @@ from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
 
+import pytest
+
 import agent.main as main
 from agent.main import _init_cmd, _repo_environ, _tofu_env
 
@@ -174,7 +176,11 @@ def _job(phase: str) -> dict:
     }
 
 
-def _run(monkeypatch, tmp_path: Path, handler: str, phase: str) -> tuple[list, _FakeClient]:
+def _run(
+    monkeypatch, tmp_path: Path, handler: str, phase: str, run_env: dict[str, str] | None = None
+) -> tuple[list, _FakeClient]:
+    """Run `handler` with tofu faked; returns each tofu call (argv, env) and the client. `run_env`
+    is added to the run's `env` variables."""
     calls: list[tuple[list[str], dict[str, str]]] = []
 
     def fake_run_command(cmd: list[str], cwd: Path, env: dict[str, str], **kw: Any) -> int:
@@ -196,8 +202,10 @@ def _run(monkeypatch, tmp_path: Path, handler: str, phase: str) -> tuple[list, _
     monkeypatch.setattr(main.subprocess, "run", fake_subprocess_run)
     (tmp_path / "plan.tfplan").write_bytes(b"PK-plan")
     client = _FakeClient()
+    job = _job(phase)
+    job["env"].update(run_env or {})
     getattr(main, handler)(
-        client, _job(phase), SimpleNamespace(workspace_root=str(tmp_path), leak_action="warn")
+        client, job, SimpleNamespace(workspace_root=str(tmp_path), leak_action="warn")
     )
     return calls, client
 
@@ -243,3 +251,40 @@ def test_command_job_gives_state_credentials_to_tofu(monkeypatch, tmp_path: Path
     for cmd, env in calls:
         assert env["TF_HTTP_PASSWORD"] == TOKEN
         assert not any(TOKEN in arg for arg in cmd), cmd
+
+
+@pytest.mark.parametrize(
+    ("handler", "phase"),
+    [("handle_plan", "plan"), ("handle_apply", "apply"), ("handle_command_run", "command")],
+)
+def test_tofu_env_carries_none_of_the_agents_own_settings(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, handler: str, phase: str
+) -> None:
+    # Repo code runs inside tofu (`data "external"`, provisioners): the agent's own settings, and
+    # any platform secret the worker host carries, must not reach it…
+    worker_own = {
+        "STACKD_POOL_TOKEN": "pool-token-1",
+        "STACKD_POOL_TOKEN_FILE": "/stackd/pool.token",
+        "STACKD_API_URL": "http://api:8000",
+        "STACKD_ENCRYPTION_KEY": "enc-key-2",
+    }
+    # …while all a provider may need still does, and the run's own variables too.
+    kept = {
+        "LANG": "C.UTF-8",
+        "HTTPS_PROXY": "http://proxy.internal:3128",
+        "SSL_CERT_FILE": "/etc/ssl/certs/ca.pem",
+        "TF_PLUGIN_CACHE_DIR": "/cache/tofu-plugins",
+        "AWS_PROFILE": "ops",
+        "GOOGLE_APPLICATION_CREDENTIALS": "/secrets/sa.json",
+    }
+    run_env = {"APP_TEAM": "core", "STACKD_RUN_LABEL": "set by the run"}
+    for name, value in {**worker_own, **kept}.items():
+        monkeypatch.setenv(name, value)
+    calls, client = _run(monkeypatch, tmp_path, handler, phase, run_env)
+    assert client.events[-1][0] == "phase_finished", client.events
+
+    assert len(calls) >= 2  # init, then the job's own tofu commands
+    for cmd, env in calls:
+        assert not set(worker_own) & set(env), (cmd, sorted(env))
+        assert {k: env.get(k) for k in {**kept, **run_env}} == {**kept, **run_env}, cmd
+        assert env["PATH"] and env["TF_HTTP_PASSWORD"] == TOKEN, cmd
