@@ -724,7 +724,8 @@ if job.phase == "plan":
     # add/change/destroy counts and `diagnostic` events surface the real error as the run's `error`.
     code, events = run_json(tf, "plan", "-json", "-out=plan.tfplan", "-detailed-exitcode",
                             *(["-destroy"] if job.destroy else []))
-    # 0 = no changes, 2 = changes, 1 = error
+    # 0 = no changes, 2 = changes; anything else (1 = error, 124 = killed past its time budget, a
+    # signal) → job_failed with the reason — never "no changes". apply/commands: any non-zero fails.
     plan_json = run(tf, "show", "-json", "plan.tfplan")   # still produced for after_plan hooks
     upload_artifacts(plan_json)
     if code == 2 and job.save_plan:

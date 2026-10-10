@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import signal
 import subprocess
 import threading
 import time
@@ -131,6 +132,22 @@ def _first_error(events: list[dict]) -> str | None:
             diag = evt.get("diagnostic") or {}
             return diag.get("summary") or evt.get("@message")
     return None
+
+
+def _exit_error(what: str, code: int, budget: int, events: list[dict[str, Any]]) -> str:
+    """Why the tofu command `what` failed with exit `code`, for the run's error: tofu's own error
+    when it reported one, else the watchdog's kill (124), a signal, or the bare code."""
+    if code == 124:
+        return f"{what} exceeded the {budget}s time budget and was terminated"
+    if code < 0:
+        try:
+            killer = signal.Signals(-code).name
+        except ValueError:
+            killer = f"signal {-code}"
+        return f"{what} was killed by {killer}"
+    return _first_error(events) or (
+        f"{what} failed" if code == 1 else f"{what} failed (exit {code})"
+    )
 
 
 # tofu refuses a saved plan before changing anything when the state changed since it was made, or
@@ -340,13 +357,16 @@ def handle_plan(client: ApiClient, job: dict, settings: Settings) -> None:
                 section=None,
                 streamer=streamer,
             )
-        if code == 1:
+        if code not in (0, 2):
+            # Only 0 and 2 are a plan: anything else — an error, the watchdog's kill (124), a
+            # signal — fails the job closed, never passes for "no changes".
+            error = _exit_error("plan", code, _DEFAULT_TIMEOUT_SECONDS, events)
             return client.event(
                 job_id,
                 "job_failed",
                 phase="plan",
                 # Mask: a tofu diagnostic can echo a sensitive variable value verbatim (§5.1).
-                result={"error": masker.mask(_first_error(events) or "plan failed")},
+                result={"error": masker.mask(error)},
             )
         has_changes = code == 2
         summary = _summary_from_events(events)
