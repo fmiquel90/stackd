@@ -347,8 +347,12 @@ async def post_event(
     if body.event == "job_failed":
         if run.state == RunState.applying and body.phase == "after_apply":
             # The apply succeeded, an after_apply hook failed (§8.3): the run fails and nothing
-            # cascades, but the infra has changed, so its outputs are recorded (§9.1).
+            # cascades, but the infra has changed — its outputs are recorded (§9.1), and the state
+            # matches reality again, so any drift is cleared as a finished apply does (§19).
             await capture_outputs(session, run, result.get("outputs") or {})
+            applied_env = await session.get(Environment, run.environment_id)
+            if applied_env is not None:
+                await clear_drift(session, applied_env, datetime.now(UTC))
         checks = result.get("checks") or []
         failed_check = any(c.get("status") == "fail" for c in checks)
         action = "run.check_failed" if failed_check else "run.apply_failed"

@@ -675,7 +675,8 @@ POST /worker/v1/jobs/{id}/events
                 "checks": [{"name":"infracost","status":"warn","detail":"..."}] } }
   phase_started(planning) carries "result": {"commit_sha": "<full SHA checked out>"}
   job_failed(after_apply) carries "result": {"checks": [...], "outputs": {...}}   # §8.3: the
-      # apply went through, an after_apply hook failed → outputs recorded (§9.1), no cascade
+      # apply went through, an after_apply hook failed → outputs recorded (§9.1), drift
+      # cleared (§19), no cascade
 
 PUT /worker/v1/jobs/{id}/artifacts/plan.tfplan | plan.json | outputs.json
 GET /worker/v1/jobs/{id}/artifacts/plan.tfplan          # the apply job's saved plan
@@ -767,7 +768,8 @@ elif job.phase == "apply":                   # a fresh clone of the pinned commi
     with with_files(tfvars=False): outputs = run(tf, "output", "-json")
     upload_artifacts(outputs, "outputs.json")
     stage("after_apply")                     # a failing check → job_failed(after_apply) carrying
-                                             # `outputs`: recorded, no cascade (§8.3)
+                                             # `outputs`: recorded, drift cleared, no
+                                             # cascade (§8.3)
     report(phase_finished, outputs=outputs, checks=checks)
 
 else:                                        # command job (§4.3): no hooks, no plan/apply phases
@@ -849,7 +851,7 @@ hooks:
 - **The run's tfvars are in the checkout only while tofu reads them.** `stackd.auto.tfvars.json` and `zzz_stackd.auto.tfvars` (§3.4) are written right before each tofu command that reads variables — `init`, `plan`, `apply` (so tofu still refuses a saved plan whose inputs changed, §7.3) and a command run's subcommand — and deleted right after it: no hook, at any stage, finds them. tofu auto-loads them as before (same precedence among the repo's own `*.auto.tfvars`, and every subcommand reads them), which `-var-file` would change.
 - **The repo token is not in the checkout.** The agent clones with the token in the URL (`repo_credentials`, §7.2), then points `origin` back at the token-free `repo_url` before anything else runs; the pinned-commit fetch (§7.3) is handed the authed URL itself. git keeps no other copy (`FETCH_HEAD` and the reflogs record the URL without its credentials): no hook finds the token under `.git/`.
 - Timeout per hook: 10 min, configurable per worker (`STACKD_HOOK_TIMEOUT_SECONDS`), for platform and repo hooks alike. Past it the hook is killed — its whole process group, so a child it started can't outlive it — and fails by its own `on_failure` (detail `timed out after <n>s`). Logs in a dedicated section of the viewer.
-- **`on_failure: fail`** → run `failed`, audit `run.check_failed`. At every stage and from either source: the job fails at that stage (`job_failed`, `phase` = the stage, the failed check in `checks`) before the next tofu step — a failing `before_apply` hook means nothing is applied. A failing `after_apply` hook fails the run although the apply has already changed the infrastructure: the agent reports the outputs it read right after the apply with the failure (`job_failed(after_apply)`, `result.outputs`), so the API records them like a finished apply's (§9.1 — `env_outputs` reflects the infrastructure), but nothing cascades from the failed run (§9.2).
+- **`on_failure: fail`** → run `failed`, audit `run.check_failed`. At every stage and from either source: the job fails at that stage (`job_failed`, `phase` = the stage, the failed check in `checks`) before the next tofu step — a failing `before_apply` hook means nothing is applied. A failing `after_apply` hook fails the run although the apply has already changed the infrastructure: the agent reports the outputs it read right after the apply with the failure (`job_failed(after_apply)`, `result.outputs`), so the API records them like a finished apply's (§9.1 — `env_outputs` reflects the infrastructure) and, the state matching reality again, clears the environment's drift as a finished apply does (§19, same transaction); but nothing cascades from the failed run (§9.2).
 - **`on_failure: warn`** → the run continues but mandatorily goes through `unconfirmed` (even with autodeploy), warning badge + detail on the run page, audit `run.check_warned`. A human takes responsibility. At the `*_apply` stages the run is already confirmed: the apply goes on and the warning is reported in the apply job's `checks` (`phase_finished`); the API adds those checks to the plan's in `runs.check_results` and audits `run.check_warned` the same way.
 - Results aggregated in `runs.check_results` and displayed in the checks status bar. A job reports **every** check result — `ok`, `warn` and `fail`, each with the hook `stage` it ran at (`before_init` … `after_apply`; the plan tripwire's `secret_leak_suspected` has `stage: "plan"`) — on its `phase_finished`, or on the `job_failed` a failing check ends it with. The API keeps them all, plan job then apply job, in `check_results.results`; `check_results.checks` keeps the `warn`/`fail` ones, what needs attention (its meaning before `results` existed). The `run.check_warned` audit context names the warned checks and their `stages`; `run.check_failed`'s `phase` is the failing stage.
 

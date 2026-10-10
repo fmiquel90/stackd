@@ -1,8 +1,11 @@
 """What the apply job's hooks (before_apply/after_apply, SPECS §8.3) leave on the run: their checks
 join the plan's in check_results, and a warning is audited `run.check_warned` like a plan's. A
-failing after_apply hook fails the run, but the apply happened: its outputs are recorded."""
+failing after_apply hook fails the run, but the apply happened: its outputs are recorded and the
+environment's drift is cleared, as after a finished apply."""
 
 from __future__ import annotations
+
+import uuid
 
 import httpx
 
@@ -127,3 +130,46 @@ async def test_a_failed_apply_records_no_outputs(client: httpx.AsyncClient) -> N
     result = {"error": "apply failed", "outputs": outputs}
     await event(client, wh, run_id, "job_failed", phase="apply", result=result)
     assert (await client.get(f"/api/v1/environments/{env_id}/outputs", headers=admin)).json() == []
+
+
+async def _drift(env_id: str, set_drifted: bool = False) -> str:
+    """The environment's drift status — first marked drifted (§19) when `set_drifted`."""
+    from app.db import SessionLocal
+    from app.enums import DriftStatus
+    from app.models.environment import Environment
+
+    async with SessionLocal() as s:
+        env = await s.get(Environment, uuid.UUID(env_id))
+        assert env is not None
+        if set_drifted:
+            env.drift_status = DriftStatus.drifted.value
+            env.drift_run_id = uuid.uuid4()
+            await s.commit()
+        return str(env.drift_status)
+
+
+async def test_a_failing_after_apply_hook_clears_the_drift(client: httpx.AsyncClient) -> None:
+    admin, wh, env_id, run_id = await _to_applying(client, "after-apply-drift", [])
+    assert await _drift(env_id, set_drifted=True) == "drifted"
+    failed = {"name": "smoke-test", "status": "fail", "detail": "exit 3", "stage": "after_apply"}
+    result = {"checks": [failed], "outputs": {}}
+    await event(client, wh, run_id, "job_failed", phase="after_apply", result=result)
+
+    assert (await client.get(f"/api/v1/runs/{run_id}", headers=admin)).json()["state"] == "failed"
+    assert await _drift(env_id) == "in_sync"  # the apply reconciled state with reality
+    rows = (
+        await client.get(
+            "/api/v1/audit",
+            headers=admin,
+            params={"action": "environment.drift_cleared", "target_id": env_id},
+        )
+    ).json()
+    assert [row["context"] for row in rows] == [{"reason": "applied"}]
+
+
+async def test_a_failed_apply_leaves_the_drift(client: httpx.AsyncClient) -> None:
+    # Only an after_apply failure means the apply itself went through.
+    _admin, wh, env_id, run_id = await _to_applying(client, "apply-fail-drift", [])
+    await _drift(env_id, set_drifted=True)
+    await event(client, wh, run_id, "job_failed", phase="apply", result={"error": "apply failed"})
+    assert await _drift(env_id) == "drifted"
