@@ -28,8 +28,10 @@ Everything below is a refinement of that sentence.
 ## 1. Space — the container
 
 A **space** is the top of the hierarchy: `space / stack / environment / run`. It owns stacks,
-variable sets and worker pools. At MVP there is exactly one space, `default` (RBAC per space is a
-later phase). You rarely think about it; it's the namespace everything hangs off.
+variable sets, worker pools and secret sources. The bootstrap creates `default` (the dev seed adds
+`demo`), and an instance admin can create more. A space is also a **permission boundary**: each
+member has a membership in it (role, allowed tiers, destroy right), you only see and touch the
+spaces you belong to (an instance admin reaches all), and configuration never crosses spaces (§3).
 
 ```
 default                      ← space
@@ -81,15 +83,22 @@ Configuration is composed from **layers**. The same variable name can be defined
 the strongest layer wins. From weakest to strongest:
 
 ```
-1. variable sets, auto_attach        (shared defaults for the whole space)
-2. variable sets attached to a stack (by priority)
-3. variable sets attached to an env  (by priority)
-4. stack variables                   (common to all envs of the stack)
-5. environment variables             ← always wins
+1. variable sets applying by rule     (auto_attach, or a label selector matching the env)
+2. variable sets attached to a tier   (by priority)
+3. variable sets attached to a stack  (by priority)
+4. variable sets attached to an env   (by priority)
+5. stack variables                    (common to all envs of the stack)
+6. environment variables              ← always wins
 ```
 
 A **variable set** is a named, reusable bundle (e.g. `common-aws`, `datadog`, `region-eu`) you
-attach to many stacks/envs. `auto_attach: true` means "attach to every stack in the space".
+attach to many stacks/envs. `auto_attach: true` means "attach to every stack in the space"; a
+`selector` (`{label: value}`) attaches it to every env whose labels match.
+
+**A set stays in its space.** You can only attach it to a stack or environment of the set's own
+space (`400 Cross-space attachment` otherwise), and a **tier** attachment reaches that tier's
+environments **in the set's space only** — tiers are a global catalog, the set is not. Deleting a
+stack or an environment removes the attachments that target it.
 
 **Worked example.** Suppose:
 
@@ -165,6 +174,12 @@ curl -s -X POST localhost:8000/api/v1/runs/$RUN/confirm -H "$AUTH"
 # → confirmed → a worker claims the apply → applying → finished
 ```
 
+**What gets applied is exactly what was reviewed.** The plan job saves its `plan.tfplan`; the API
+encrypts it and keeps it in S3 until the run ends. The run is pinned to the commit the plan checked
+out, and the apply job clones that commit and runs `tofu apply plan.tfplan` — it never re-plans. If
+the saved plan is missing, or the state moved since the plan (tofu refuses a stale plan), the run
+fails: trigger a new plan.
+
 **Concurrency invariant:** at most **one active run per environment** (enforced by a partial unique
 index). Two environments of the same stack can run in parallel; two runs on the *same* env cannot.
 
@@ -187,23 +202,27 @@ membership — tiers are not ordered, so a grant can be non-contiguous like `{de
 
 **Examples:**
 
-| User | role | ceiling | dev | staging | prod |
+| User | role | allowed tiers | dev | staging | prod |
 |---|---|---|---|---|---|
-| Bob | writer | staging | ❌ (not approver) | ❌ | ❌ |
-| Carol | approver | staging | ✅ | ✅ | ❌ (tier prod required) |
-| Alice | approver | prod | ✅ | ✅ | ✅ |
+| Bob | writer | `{dev, staging}` | ❌ (not approver) | ❌ | ❌ |
+| Carol | approver | `{dev, staging}` | ✅ | ✅ | ❌ (prod not in her set) |
+| Alice | approver | `{dev, staging, prod}` | ✅ | ✅ | ✅ |
+| Dan | approver | `{dev, prod}` | ✅ | ❌ | ✅ |
+
+These are the **effective** permissions in the environment's space: a space membership can give
+someone a different role, tier set or destroy right there than their instance defaults.
 
 Extra rules:
 
 - **Destroy** (`type=destroy`) additionally requires `can_destroy=true` — a separate, explicit right.
-- **4-eyes**: on `tier=prod` (or when `require_second_pair_of_eyes` is set), the **triggerer cannot
-  confirm their own run**. It only bites human-triggered runs — a webhook/cascade run has no human
+- **4-eyes**: on a tier flagged `requires_four_eyes` (the seeded `prod`), or when the env sets
+  `require_second_pair_of_eyes`, the **triggerer cannot confirm their own run**. It only bites human-triggered runs — a webhook/cascade run has no human
   to oppose.
 - **Mock block**: a run that consumed mock outputs cannot be applied unless `allow_mock_apply=true`
   (see §9).
 
-When a confirm is refused, the API returns the reason in clear, e.g. `403 "tier prod required —
-your ceiling is staging"`, which the UI shows on the disabled Confirm button.
+When a confirm is refused, the API returns the reason in clear, e.g. `403 "tier prod not in your
+allowed tiers (dev, staging)"`, which the UI shows on the disabled Confirm button.
 
 **Double lock with the cloud:** for prod, the restriction also lives in the AWS trust policy (§10),
 so bypassing the API still can't assume the prod apply role.
@@ -253,27 +272,38 @@ out to them.
 
 ```
 register (pool token) → heartbeat (every ~20s) → claim (long-poll)
-   → clone → setup tool → hooks → init → plan/apply → stream logs → report → repeat
+   → clone → hooks → init → plan/apply → stream logs → report → repeat
 ```
 
 - **Claim** is concurrency-safe: `SELECT … FOR UPDATE OF environment SKIP LOCKED` serialises per
   env, and the `one_active_run_per_env` unique index is the hard guarantee (a losing racer gets a
   `23505` and simply re-polls).
 - **Labels** target work to pools (e.g. a dedicated `prod` pool).
-- **Apply affinity**: the worker that produced a plan is preferred for the apply for ~60s (it still
-  has the workspace); otherwise any compatible worker re-plans then applies.
-- A worker silent > 60s → `offline`; an active run on a dead worker → `failed (worker_lost)` (an `applying` run only after the apply budget + grace, so a long apply isn't failed mid-flight).
+- **Apply affinity**: the worker that produced a plan is preferred for the apply for ~60s; past
+  that, any compatible worker takes it. Either way the apply worker starts from a fresh clone of
+  the pinned commit and applies the saved plan it downloads from the API (§4) — no workspace is
+  reused, nothing is re-planned.
+- **Per-job credentials**: each job gets its own state token, scoped to what it does — `ro` for a
+  PR plan or a read-only command, `plan` for a plan (it may lock, never write), `rw` for an apply or
+  a mutating command (§8).
+- **Worker loss**: a worker silent > 60s → `offline`. A run whose job is *executing* on it
+  (`preparing`, `planning`, `checking`, `running`, `applying`) → `failed (worker_lost)` after 120s.
+  A job holding apply credentials (an `applying` run, a mutating command) is only reclaimed after
+  the apply budget + grace (15 + 5 min by default), so a long apply isn't failed mid-flight and its
+  tokens have expired before another worker takes the env. `unconfirmed` and `confirmed` runs are
+  never reclaimed: they wait on a human or on the apply claim, not on the plan worker.
 - **Command channel.** The heartbeat response is also the *downward* channel (still no inbound to
   the worker). Today it carries **diagnostics**: an admin clicks a button, a `pending` command is
   queued, the worker picks it up on its next heartbeat, runs a **read-only** bundle (versions, disk,
   env var *names* — never values, recent agent logs) and posts it back. Same mechanism will carry
-  `cancel_job` later. Delivery latency is bounded by the claim long-poll (~25 s).
+  `cancel_job` later. Delivery latency is bounded by the heartbeat interval (~20 s).
 
 **Run an agent:**
 
 ```bash
-POOL=$(curl -s -X POST localhost:8000/api/v1/worker-pools -H "$AUTH" -d '{"name":"local"}' | jq -r .token)
-STACKD_POOL_TOKEN=$POOL STACKD_API_URL=http://localhost:8000 python -m agent.main
+POOL=$(curl -s -X POST localhost:8000/api/v1/worker-pools -H "$AUTH" \
+  -H 'content-type: application/json' -d '{"name":"local"}' | jq -r .token)
+cd worker && STACKD_POOL_TOKEN=$POOL STACKD_API_URL=http://localhost:8000 uv run python -m agent.main
 ```
 
 ---
@@ -287,10 +317,16 @@ terraform ──backend "http"──▶ Stackd API ──(SSE-KMS)──▶ S3
                                   └─▶ Postgres: versions, locks, audit
 ```
 
-Why: per-run **scoped tokens** (read-only for PR plans), **locking visible in the UI** with audited
-force-unlock, refusal of a regressive serial, and every write tied to the run that produced it. The
-worker receives the backend config in its claim payload and injects it via `-backend-config` — **zero
-changes to the user's Terraform code**. Set `managed_state: false` to keep your own `backend "s3"`.
+Why: per-job **scoped tokens**, **locking visible in the UI** with audited force-unlock, refusal
+of a regressive serial, and every write tied to the run that produced it. The token's scope follows
+the job: `ro` (PR plans, read-only commands: read only), `plan` (a plan may lock, never write),
+`rw` (an apply or a mutating command). Once its run has ended, a token can no longer write or lock.
+
+The worker adds a bare `backend "http" {}` block and hands the address and the token to tofu
+**only**, as `TF_HTTP_*` environment variables — never `-backend-config`, which tofu would persist
+in `.terraform/` (readable by repo hooks) and in the saved plan. **Zero changes to the user's
+Terraform code**: the repo declares no backend. Set `managed_state: false` to keep your own
+`backend "s3"`.
 
 ---
 
@@ -378,10 +414,11 @@ filtered by `project_root`:
 - **push** → a `tracked` run per matching env, and `head_sha` advances.
 - **pull request** → a `proposed` run: plan-only, read-only state, secrets off, mocks allowed.
 
-**Staleness** answers "applied ≠ tip of branch": Stackd compares the last applied commit to the
-branch head (`head_sha`, refreshed by webhook, by `git ls-remote` polling, or manually). A stale env
-shows a `↑N` chip; a stale `unconfirmed` run shows a banner with *Re-plan*. Staleness is information,
-never an automatic trigger.
+**Staleness** answers "applied ≠ tip of branch": Stackd compares the commit of the last finished
+tracked run (every run is pinned to the commit it planned) to the branch head (`head_sha`, refreshed
+by webhook, by `git ls-remote` polling every 15 min, or manually). A stale env shows a `↑N` chip; a
+stale `unconfirmed` run shows a banner with *Re-plan*. Changing an env's branch resets its recorded
+head; a push deleting the branch clears it. Staleness is information, never an automatic trigger.
 
 ---
 
@@ -457,7 +494,7 @@ notify-worthy state, it inserts a row into `notification_outbox` **in the same D
 the state change (no HTTP in the request path). A background scheduler task drains the outbox under
 a `pg_try_advisory_lock` (one replica at a time) with `FOR UPDATE … SKIP LOCKED`, resolves the
 matching targets (env-level for the run's env + stack-level for its stack, filtered by `on_states`),
-and POSTs. Consequences worth knowing:
+and POSTs — with no DB transaction held during the HTTP call. Consequences worth knowing:
 
 - a **rolled-back** transition never notifies (the outbox row rolls back with it);
 - two API replicas never double-send (the lock + `SKIP LOCKED`);
@@ -466,28 +503,36 @@ and POSTs. Consequences worth knowing:
 
 Deep links use `STACKD_APP_URL` (the SPA base, e.g. `http://localhost:5173`).
 
+**SSRF guard.** A target URL must be `https` and its host must resolve to public addresses only
+(no private, loopback, link-local or metadata IP), checked at create/update and again at every
+delivery. The POST connects to the IP that check vetted (Host, SNI and certificate stay on the
+hostname), never follows redirects, and **ignores `HTTPS_PROXY`/env proxies by design**: a proxy
+would resolve the name again. An API whose only egress is a proxy cannot deliver notifications.
+Targets are deleted with their stack or environment.
+
 ---
 
 ## 15. Quick reference
 
 | Term | One line |
 |---|---|
-| **Space** | top container; one `default` at MVP |
+| **Space** | top container and permission boundary (`default`, plus any an admin creates) |
 | **Stack** | template: repo + folder + tool |
 | **Environment** | instance: tier + branch + state + variables + protections |
-| **Variable set** | reusable bundle of variables, attached to stacks/envs |
+| **Variable set** | reusable bundle of variables, attached to tiers/stacks/envs of its own space |
 | **Provenance** | where a resolved variable came from (`set:…`, `stack`, `env`, `dependency:…`, `mock`) |
 | **Run** | one execution against one env, driven by the state machine |
 | **`transition()`** | the only thing that changes a run's state |
 | **Tier** | configurable catalog; gates apply via the user's `allowed_tiers` set (not ordered) |
-| **4-eyes** | triggerer ≠ confirmer on prod / when required |
+| **4-eyes** | triggerer ≠ confirmer on a `requires_four_eyes` tier / when the env requires it |
 | **Hook** | shell step at a lifecycle stage; platform (governance) or repo |
 | **Worker** | stateless agent that pulls and runs jobs |
-| **Managed state** | tfstate in S3 via Stackd's HTTP backend |
+| **Managed state** | tfstate in S3 via Stackd's HTTP backend, per-job scoped tokens |
+| **Saved plan** | the reviewed `plan.tfplan`, kept encrypted until the run ends; the apply applies exactly it |
 | **Mock output** | placeholder value to bootstrap a cascade; blocks apply |
 | **Cascade** | downstream runs triggered when an upstream apply finishes |
 | **Workload token** | per-run OIDC token, `sub=run:<tier>:<stack>:<phase>` |
 | **Audit** | who-did-what, append-only |
-| **Proposed run** | plan-only run from a PR (RO state, no secrets) |
+| **Proposed run** | plan-only run from a PR (`ro` state token, no secrets) |
 | **Notification target** | outbound Slack/webhook on a stack/env, firing on chosen run states |
 | **Outbox** | run-event notifications enqueued in-txn, drained by the scheduler (at-least-once) |
