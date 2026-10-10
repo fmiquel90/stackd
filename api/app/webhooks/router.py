@@ -55,6 +55,10 @@ def _verify(secret: str, body: bytes, signature: str | None) -> bool:
     return hmac.compare_digest(expected, signature.removeprefix("sha256="))
 
 
+def _is_zero_sha(sha: str) -> bool:
+    return bool(sha) and not sha.strip("0")
+
+
 def _touches_root(payload: dict, project_root: str) -> bool:
     if project_root in (".", ""):
         return True
@@ -106,6 +110,8 @@ async def github_webhook(
     if x_github_event == "push":
         branch = payload.get("ref", "").removeprefix("refs/heads/")
         after = payload.get("after")
+        # A push that deletes the branch has an all-zero `after`: no head to record, nothing to run.
+        deleted = payload.get("deleted") is True or (isinstance(after, str) and _is_zero_sha(after))
         for stack in stacks:
             envs = (
                 (
@@ -119,6 +125,14 @@ async def github_webhook(
                 .all()
             )
             for env in envs:
+                if deleted:
+                    # Staleness (§9.6): the branch has no head any more, so nothing to be behind;
+                    # stamped now so a poll that read the old head meanwhile doesn't restore it.
+                    env.head_sha = None
+                    env.commits_ahead = None
+                    env.affects_project_root = None
+                    env.head_updated_at = datetime.now(UTC)
+                    continue
                 # Staleness (§9.6): head_sha always advances, even when no run is triggered.
                 env.head_sha = after
                 env.head_updated_at = datetime.now(UTC)
