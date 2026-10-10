@@ -441,7 +441,7 @@ POST /worker/v1/jobs/{id}/logs
 - `seq` strictly increasing per phase → idempotency of retries.
 - `section` distinguishes hooks from the terraform stream (dedicated sections in the viewer).
 - Agent buffer: 1 s / 32 KB. **Masking before sending of ALL the run's sensitive values** — `sensitive_env` *and* the `tfvars` marked `sensitive` (§3.3) — replaced with `***`. The agent builds the masking table from the claim payload, not only from `sensitive_env`.
-- **Residual leak via `plan.json`**: an `after_plan` hook (infracost, jq, script) reads `plan.json`, which contains the variable values. Terraform marks `sensitive` the values it knows as such, but a hook that dumps the raw JSON can re-print a sensitive value to its stdout (and thus to the logs). Mitigations: (a) the value-based masking above also applies to hook stdout; (b) a short or transformed secret (base64, substring) escapes value-based masking — a **documented** limit, do not put exploitable secrets in non-sensitive `tfvars`. The check tools (tfsec/checkov/infracost) do not print values by default.
+- **`plan.json` and hooks**: `tofu show -json` lists the run's variable values in clear, sensitive ones included. **Repo** hooks only ever read a **masked copy** (§8.3): every value tofu marks sensitive and every value of the masking table above replaced by `***`; the uploaded `plan.json` artifact is that copy too. **Platform** hooks (trusted, §8.1) read the raw JSON: one that dumps it can re-print a sensitive value to its stdout, where the value-based masking above still applies. Residual limit: a short or transformed secret (base64, substring) escapes value-based masking — in hook stdout, and in the repo hooks' copy wherever tofu did not mark the value sensitive itself — a **documented** limit, do not put exploitable secrets in non-sensitive `tfvars`. The check tools (tfsec/checkov/infracost) do not print values by default.
 - **Cleartext tripwire (Phase C)**: after a phase, the agent scans the plan (`show -json`) and apply (`output -json`) for any value Stackd treats as sensitive appearing verbatim in a **non-sensitive** output — terraform only redacts outputs the *repo* marked `sensitive = true`, so a sensitive Stackd variable echoed by an unmarked output leaks. On plan it flags the run with a `secret_leak_suspected` **warn** check (config `STACKD_LEAK_TRIPWIRE=fail` aborts the run before any apply); on apply it is warn-only (a masked log line) since the infra has already changed. The tripwire **narrows, does not eliminate**, the leak surface — a transformed secret still escapes value-based detection. The human-readable `show` already relies on terraform's own `(sensitive value)` redaction; only the masked JSON artifact is uploaded.
 - ANSI sequences preserved (color rendering on the front side).
 
@@ -683,12 +683,12 @@ GET /worker/v1/jobs/{id}/artifacts/plan.tfplan          # the apply job's saved 
 
 **Saved plan.** What a human confirms is the plan file the plan job made, and the apply applies exactly that file (`tofu apply plan.tfplan`) — never a fresh plan:
 
-- **Upload** (`PUT …/plan.tfplan`, worker-authenticated, the run's worker only): accepted only for a `tracked`/`destroy` run (`409` for a proposed or command run) and only during its plan job (`preparing`/`planning`/`checking`, checked under the run's row lock — `409` afterwards: once planned, the reviewed plan is frozen, for every worker). Capped at 64 MiB (`413`, also while streaming), empty → `400`. The API encrypts it (AES-256-GCM, app key, AAD bound to its S3 key — a plan file holds the run's variable values in clear, sensitive ones included), stores it under `artifacts/{run_id}/plan.tfplan` (§11.3) and records the key on the run (`runs.plan_artifact_key`). The agent uploads it right after `plan`/`show`, **before any `after_plan` hook** (a repo hook can't swap what gets applied).
+- **Upload** (`PUT …/plan.tfplan`, worker-authenticated, the run's worker only): accepted only for a `tracked`/`destroy` run (`409` for a proposed or command run) and only during its plan job (`preparing`/`planning`/`checking`, checked under the run's row lock — `409` afterwards: once planned, the reviewed plan is frozen, for every worker). Capped at 64 MiB (`413`, also while streaming), empty → `400`. The API encrypts it (AES-256-GCM, app key, AAD bound to its S3 key — a plan file holds the run's variable values in clear, sensitive ones included), stores it under `artifacts/{run_id}/plan.tfplan` (§11.3) and records the key on the run (`runs.plan_artifact_key`). The agent makes the plan file outside the checkout, reads it right after `plan`/`show`, deletes it and uploads those bytes **before any `after_plan` hook** (a repo hook can neither swap what gets applied nor read it, §8.3).
 - **Download** (`GET …/plan.tfplan`): only by the worker holding the run, only while the run is `applying` (`409` otherwise — not even the worker that planned it before the apply claim). No saved plan / object missing → `404`; integrity failure (wrong key, tampered or moved blob) → `500`. Never anything else in its place.
-- **Apply job**: clone the pinned commit, `init`, download the saved plan — on any refusal or error the job **fails closed** (`saved plan unavailable, not applied: …`), before the `before_apply` hooks — then `before_apply` hooks, write the plan (`0600`, replacing whatever the checkout has at that path, never through a symlink), `apply -input=false -json plan.tfplan`, delete the file (the `after_apply` repo hooks never see it). tofu itself refuses a saved plan whose state moved since (`Saved plan is stale`) or whose inputs changed (`Mismatch between input and plan variable value`): the run fails with tofu's detail and "trigger a new plan".
+- **Apply job**: clone the pinned commit, `init`, download the saved plan — on any refusal or error the job **fails closed** (`saved plan unavailable, not applied: …`), before the `before_apply` hooks — then `before_apply` hooks (a failing `fail` check fails the job here: nothing is applied, §8.3), write the plan (`0600`, replacing whatever the checkout has at that path, never through a symlink), `apply -input=false -json plan.tfplan` with the run's tfvars present for that command only, delete the file (the `after_apply` repo hooks never see it). tofu itself refuses a saved plan whose state moved since (`Saved plan is stale`) or whose inputs changed (`Mismatch between input and plan variable value`): the run fails with tofu's detail and "trigger a new plan".
 - **Retention**: deleted once the run is terminal (§11.3).
 
-**Commit pinning.** The plan job reports the full SHA it checked out on `phase_started(planning)`. A run triggered without a commit (manual, cascade) is pinned to it; a run whose `commit_sha` is a ref (branch/tag) is re-pinned to the SHA it resolved to; a run already pinned to a full SHA must have checked out exactly that commit — otherwise the API fails it (`commit_mismatch`, audited `run.apply_failed`) and answers `409`. A malformed SHA gets `400`. The apply job is handed the pinned SHA and clones exactly it (shallow `fetch` of that SHA, checkout of `FETCH_HEAD`, verified against `HEAD`), so the apply, its hooks and `output -json` run on the reviewed commit and staleness (§9.6) knows what was applied.
+**Commit pinning.** The plan job reports the full SHA it checked out on `phase_started(planning)`. A run triggered without a commit (manual, cascade) is pinned to it; a run whose `commit_sha` is a ref (branch/tag) is re-pinned to the SHA it resolved to; a run already pinned to a full SHA must have checked out exactly that commit — otherwise the API fails it (`commit_mismatch`, audited `run.apply_failed`) and answers `409`. A malformed SHA gets `400`. The apply job is handed the pinned SHA and clones exactly it (shallow `fetch` of that SHA from the authed URL — `origin` itself points at the token-free URL, §8.3 — checkout of `FETCH_HEAD`, verified against `HEAD`), so the apply, its hooks and `output -json` run on the reviewed commit and staleness (§9.6) knows what was applied.
 
 ### 7.4 Course of a job on the agent side (pseudo-code)
 
@@ -697,54 +697,77 @@ job = claim()
 ws = Workspace(job.job_id)
 # depth 1; a pinned SHA/ref is fetched exactly (FETCH_HEAD, verified), else the head of `branch`.
 # An apply job without a pinned commit is refused before cloning (§7.3).
-ws.git_clone(job.environment.repo_url, job.environment.commit_sha, branch=job.environment.branch)
-tf_env = {**platform_env, **TF_HTTP_from(job.backend)}   # managed state (§11): the backend
-                                       # settings and state token reach tofu ONLY, as TF_HTTP_*;
-                                       # the repo gets a bare `backend "http" {}` block
+ws.git_clone(job.environment.repo_url, job.environment.commit_sha, branch=job.environment.branch,
+             token=job.repo_credentials.token)  # token in the clone URL, then `origin` reset to the
+                                       # token-free URL; a pinned commit is fetched from the authed URL
+                                       # itself — no token left under .git/ (§8.3)
+# Managed state (§11): the backend settings and state token reach tofu ONLY, as TF_HTTP_* (tofu_env
+# below); the repo gets a bare `backend "http" {}` block.
 tf = ensure_tool(job.environment.tool, job.environment.tool_version)  # verifies the checksum
                                        # SHA-256 (and the cosign/GPG signature if available) of the
                                        # downloaded binary against a pinned list — refuse otherwise (supply-chain)
 
-if job.cloud_credentials:                    # §10 OIDC workload
-    token_file = ws.write_secret("oidc_token", job.cloud_credentials.oidc_token)
-    extra_env = { "AWS_WEB_IDENTITY_TOKEN_FILE": token_file,
-                  "AWS_ROLE_ARN": job.cloud_credentials.role_arn,
-                  "AWS_ROLE_SESSION_NAME": f"stackd-{job.job_id}" }
+cloud_env = {} if not job.cloud_credentials else {       # §10 OIDC workload
+    "AWS_WEB_IDENTITY_TOKEN_FILE": ws.secret_path("oidc_token"),   # outside the checkout
+    "AWS_ROLE_ARN": job.cloud_credentials.role_arn,
+    "AWS_ROLE_SESSION_NAME": f"stackd-{job.job_id}" }
+run_env = {**job.env, **job.sensitive_env, **cloud_env}
+tofu_env = {**worker_env_minus("STACKD_*"), **run_env, **tf_http(job.backend)}   # runner contract
+platform_env = {**worker_env, **run_env}                 # platform hooks (trusted, §8.3)
+repo_env = {**allowlisted(worker_env), **job.env}        # repo hooks (§8.3)
+
+# What a tofu command reads from disk that no repo hook may find (§8.3) exists only while it runs:
+# the OIDC token file, and — for a command that reads variables — the run's tfvars (`tfvars_json`,
+# dependency inputs/mocks merged in, §9.3, and `hcl_tfvars`, §3.4). Written fresh (never through a
+# symlink), deleted right after. The token file is written around each platform hook the same way.
+with_files = lambda tfvars=True: tofu_files(ws, job, tfvars)
 
 hooks = merge_hooks(job.hooks, ws.load_stackd_yml())   # platform first, §8
+# stage(name): run its hooks, each under the hook timeout (§8.3). A failing `fail` hook → report
+# job_failed(phase=name, checks) and stop, before the next tofu step; a `warn` one → into `checks`.
 
 if job.phase == "plan":
     write_backend_override(ws)               # `terraform { backend "http" {} }`, managed state only
-    write_tfvars(ws, job.tfvars_json, job.hcl_tfvars)
     report(phase_started, phase="planning", commit_sha=ws.head_sha())   # the API pins the run
-    run_hooks(hooks.before_init); run(tf, "init", "-input=false"); run_hooks(hooks.after_init)
-    run_hooks(hooks.before_plan)
+    stage("before_init")
+    with with_files(): run(tf, "init", "-input=false")
+    stage("after_init"); stage("before_plan")
     # plan/apply run with -json: the agent streams each event's human @message to the log (masked)
     # AND collects the structured events — the `change_summary` event gives the authoritative
     # add/change/destroy counts and `diagnostic` events surface the real error as the run's `error`.
-    code, events = run_json(tf, "plan", "-json", "-out=plan.tfplan", "-detailed-exitcode",
-                            *(["-destroy"] if job.destroy else []))
+    plan_file = ws.private_path("plan.tfplan")             # outside the checkout (§8.3)
+    with with_files():
+        code, events = run_json(tf, "plan", "-json", f"-out={plan_file}", "-detailed-exitcode",
+                                *(["-destroy"] if job.destroy else []))
     # 0 = no changes, 2 = changes; anything else (1 = error, 124 = killed past its time budget, a
     # signal) → job_failed with the reason — never "no changes". apply/commands: any non-zero fails.
-    plan_json = run(tf, "show", "-json", "plan.tfplan")   # still produced for after_plan hooks
-    upload_artifacts(plan_json)
-    if code == 2 and job.save_plan:
-        upload_artifact("plan.tfplan")        # the saved plan (§7.3) — before after_plan hooks
-    checks = run_hooks(hooks.after_plan, expose="plan.json")   # checking phase
+    with with_files(tfvars=False):
+        run(tf, "show", "-no-color", plan_file)              # the human-readable diff, to the log
+        plan_json = run(tf, "show", "-json", plan_file)
+    masked_json = mask_plan_json(plan_json)                  # §8.3
+    upload_artifact("plan.json", masked_json)
+    saved_plan = read(plan_file) if code == 2 and job.save_plan else None
+    delete(plan_file)                                        # before any hook runs
+    if saved_plan:
+        upload_artifact("plan.tfplan", saved_plan)           # the saved plan (§7.3)
+    stage("after_plan")   # checking phase: platform hooks read plan.json = plan_json, then the repo
+                          # hooks plan.json = masked_json (§8.3)
     report(phase_finished, has_changes=(code == 2), summary=..., checks=checks)
 
 elif job.phase == "apply":                   # a fresh clone of the pinned commit (§7.3)
-    write_backend_override(ws); write_tfvars(ws, job.tfvars_json, job.hcl_tfvars)
-    run(tf, "init", "-input=false")
+    write_backend_override(ws)
+    with with_files(): run(tf, "init", "-input=false")
     plan = download_artifact("plan.tfplan")  # missing/unreadable → fail closed, NEVER re-plan
-    run_hooks(hooks.before_apply)
+    stage("before_apply")                    # a failing check → nothing applied
     write_plan(plan)                         # 0600; removed right after the apply
-    run(tf, "apply", "-input=false", "-json", "plan.tfplan",   # stale → tofu refuses → failed
-        timeout=job.apply_timeout_seconds)
-    outputs = run(tf, "output", "-json")
+    with with_files():                       # the tfvars too: tofu refuses changed inputs (§7.3)
+        run(tf, "apply", "-input=false", "-json", "plan.tfplan",   # stale → tofu refuses → failed
+            timeout=job.apply_timeout_seconds)
+    with with_files(tfvars=False): outputs = run(tf, "output", "-json")
     upload_artifacts(outputs, "outputs.json")
-    run_hooks(hooks.after_apply)
-    report(phase_finished)
+    stage("after_apply")                     # a failing check → job_failed(after_apply) carrying
+                                             # `outputs`: recorded, no cascade (§8.3)
+    report(phase_finished, outputs=outputs, checks=checks)
 
 else:                                        # command job (§4.3): no hooks, no plan/apply phases
     write_backend_override(ws); write_tfvars(ws, job.tfvars_json, job.hcl_tfvars)
@@ -818,7 +841,7 @@ hooks:
 - **Cloud credentials (§10) not exported to repo hooks.** The `AWS_WEB_IDENTITY_TOKEN_FILE` / `AWS_ROLE_ARN` variables are injected only into the environment of **terraform** invocations, never into that of **repo** hooks by default (same reasons as `sensitive_env`: a `.stackd.yml` pushed via PR must not be able to assume the prod apply role and exfiltrate). Opt-in per env if a hook legitimately needs the cloud. **Platform** hooks (non-bypassable) have access to it. The token file `AWS_WEB_IDENTITY_TOKEN_FILE` names (`<workspace>/oidc_token`, outside the checkout) is on disk only while a tofu command or a platform hook runs — written fresh for each, never through a planted symlink, and removed right after — so a repo hook can't read it either (as `../oidc_token`).
 - **Repo-hook env is built from an allowlist.** Of the worker process environment, the agent's `repo_env` keeps only what any shell command needs — `PATH`, `HOME`, `USER`, `LOGNAME`, `SHELL`, `TMPDIR`, `TERM`, `LANG`, `LANGUAGE`, `LC_*`, `TZ`, the proxy settings (`HTTP_PROXY`, `HTTPS_PROXY`, `NO_PROXY`, `ALL_PROXY`, either case) and the CA bundle location (`SSL_CERT_FILE`, `SSL_CERT_DIR`) — then layers the run's non-sensitive `env`. Nothing else of the worker's own environment reaches a repo hook: a worker host can carry any secret there (the pool token, a database URL, a cloud-credential family such as `AWS_*` — exported, on the **trusted-dev** `local` runner, by a mounted `~/.aws`; the `docker` runner (prod) bakes no long-lived creds into the image), and the state backend's `TF_HTTP_*` (§11.2) go to tofu only. Anything a repo hook needs is set as a run variable. Platform hooks keep the worker's environment. A regression test asserts a repo hook sees neither cloud nor sensitive env, nor any other worker variable.
 - **Repo hooks at the `*_apply` stages on tier=prod**: forbidden by default. On a `tier=prod` env, only **platform** hooks execute at `before_apply`/`after_apply`; a repo hook at these stages is ignored with a visible warning (it would run with the prod write role). The `*_init`/`*_plan` repo stages remain allowed (plan role = ReadOnly).
-- `plan.json` available for reading at the `after_plan` stage and beyond. `tofu show -json` lists the run's variable values in clear, sensitive ones included: **platform** hooks read it as is; before the first **repo** hook runs it is replaced by a **masked copy** — every value tofu marks sensitive (input variables declared `sensitive`, resource attributes, outputs) and every value the agent masks in logs (§5.1) replaced by `***`, the rest kept as valid JSON. The uploaded `plan.json` artifact is that masked copy. The plan job writes its plan file (`plan.tfplan`) outside the checkout and deletes it, once shown and uploaded (§7.3), before any `after_plan` hook runs: no repo hook finds the saved plan, nor raw plan JSON, in the workspace. Files the agent writes into the checkout replace whatever is there — a repo-planted symlink is never written through.
+- `plan.json` available for reading at the `after_plan` stage — the plan job's last; the apply job is a fresh clone (§7.3) and has none. `tofu show -json` lists the run's variable values in clear, sensitive ones included: **platform** hooks read it as is; before the first **repo** hook runs it is replaced by a **masked copy** — every value tofu marks sensitive (input variables declared `sensitive`, resource attributes, outputs) and every value the agent masks in logs (§5.1) replaced by `***`, the rest kept as valid JSON. The uploaded `plan.json` artifact is that masked copy. The plan job writes its plan file (`plan.tfplan`) outside the checkout and deletes it, once shown and uploaded (§7.3), before any `after_plan` hook runs: no repo hook finds the saved plan, nor raw plan JSON, in the workspace. Files the agent writes into the checkout replace whatever is there — a repo-planted symlink is never written through.
 - **The run's tfvars are in the checkout only while tofu reads them.** `stackd.auto.tfvars.json` and `zzz_stackd.auto.tfvars` (§3.4) are written right before each tofu command that reads variables — `init`, `plan`, `apply` (so tofu still refuses a saved plan whose inputs changed, §7.3) and a command run's subcommand — and deleted right after it: no hook, at any stage, finds them. tofu auto-loads them as before (same precedence among the repo's own `*.auto.tfvars`, and every subcommand reads them), which `-var-file` would change.
 - **The repo token is not in the checkout.** The agent clones with the token in the URL (`repo_credentials`, §7.2), then points `origin` back at the token-free `repo_url` before anything else runs; the pinned-commit fetch (§7.3) is handed the authed URL itself. git keeps no other copy (`FETCH_HEAD` and the reflogs record the URL without its credentials): no hook finds the token under `.git/`.
 - Timeout per hook: 10 min, configurable per worker (`STACKD_HOOK_TIMEOUT_SECONDS`), for platform and repo hooks alike. Past it the hook is killed — its whole process group, so a child it started can't outlive it — and fails by its own `on_failure` (detail `timed out after <n>s`). Logs in a dedicated section of the viewer.
