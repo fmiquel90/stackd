@@ -555,6 +555,10 @@ POST /worker/v1/jobs/claim?wait=25
     "environment": { "id", "name": "prod", "stack_name": "core-network",
       "repo_url", "commit_sha", "branch", "project_root",
       "tool": "opentofu" | "terraform", "tool_version" },
+                                           # commit_sha null (plan job only): the agent clones the
+                                           # head of `branch`, reports the SHA (§7.3) and the API
+                                           # pins the run to it; an apply job always gets the pinned
+                                           # full SHA and clones exactly it (no SHA → refused)
     "repo_credentials": { "kind": "none" | "token" | "deploy_key",
                           "token": "<decrypted, memory TTL>" },   # token only if kind≠none and set
     "env": { ... },                        # environment-kind variables, resolution
@@ -626,9 +630,12 @@ POST /worker/v1/jobs/{id}/events
     "phase": "...", "exit_code": 0,
     "result": { "has_changes": true, "summary": {...},
                 "checks": [{"name":"infracost","status":"warn","detail":"..."}] } }
+  phase_started(planning) carries "result": {"commit_sha": "<full SHA checked out>"}
 
 PUT /worker/v1/jobs/{id}/artifacts/plan.tfplan | plan.json | outputs.json
 ```
+
+**Commit pinning.** The plan job reports the full SHA it checked out on `phase_started(planning)`. A run triggered without a commit (manual, cascade) is pinned to it; a run whose `commit_sha` is a ref (branch/tag) is re-pinned to the SHA it resolved to; a run already pinned to a full SHA must have checked out exactly that commit — otherwise the API fails it (`commit_mismatch`, audited `run.apply_failed`) and answers `409`. A malformed SHA gets `400`. The apply job is handed the pinned SHA and clones exactly it (shallow `fetch` of that SHA, checkout of `FETCH_HEAD`, verified against `HEAD`), so the apply, its hooks and `output -json` run on the reviewed commit and staleness (§9.6) knows what was applied.
 
 ### 7.4 Course of a job on the agent side (pseudo-code)
 

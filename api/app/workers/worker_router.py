@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import re
 import uuid
 from datetime import UTC, datetime
 from typing import Annotated
@@ -47,6 +48,9 @@ from app.workers.schemas import (
 router = APIRouter(prefix="/worker/v1", tags=["worker"])
 DbSession = Annotated[AsyncSession, Depends(get_session)]
 _log = get_logger("stackd.worker")
+
+# A full commit SHA (SHA-1, or SHA-256 object format) — what a worker reports it checked out.
+_FULL_SHA = re.compile(r"^(?:[0-9a-f]{40}|[0-9a-f]{64})$")
 
 _PHASE_TO_STATE = {
     "planning": RunState.planning,
@@ -193,6 +197,38 @@ async def _load_owned_run(session: AsyncSession, worker: Worker, job_id: uuid.UU
     return run
 
 
+async def _pin_commit(session: AsyncSession, worker: Worker, run: Run, reported: object) -> str:
+    """The commit the plan job checked out (§7.2/§7.3), to record on the run: the apply job then
+    clones exactly it, and staleness (§9.6) compares it with the branch head. A run already pinned
+    to a full SHA must have checked out that very commit — a mismatch fails the run (409). A ref
+    (branch/tag) the API can't resolve itself is replaced by the commit it resolved to."""
+    sha = reported.lower() if isinstance(reported, str) else ""
+    if not _FULL_SHA.match(sha):
+        raise ProblemException(400, "Invalid commit", "commit_sha must be a full commit SHA.")
+    pinned = (run.commit_sha or "").lower()
+    if _FULL_SHA.match(pinned) and pinned != sha:
+        error = (
+            f"commit_mismatch: the run is pinned to {run.commit_sha}, the worker checked out {sha}"
+        )
+        await transition(
+            session,
+            run,
+            RunState.failed,
+            actor=RunEventActor.worker,
+            actor_id=worker.id,
+            fields={"error": error},
+            audit_action="run.apply_failed",
+            audit_context={
+                "reason": "commit_mismatch",
+                "commit": run.commit_sha,
+                "checked_out": sha,
+            },
+        )
+        await session.commit()
+        raise ProblemException(409, "Commit mismatch", error)
+    return sha
+
+
 async def _decide_after_plan(session: AsyncSession, worker: Worker, run: Run, result: dict) -> None:
     """Plan finished: set summary/checks, route to finished / unconfirmed / confirmed (§4.2)."""
     checks = result.get("checks", [])
@@ -265,7 +301,14 @@ async def post_event(
     if body.event == "phase_started":
         target = _PHASE_TO_STATE.get(body.phase or "")
         if target and target in ALLOWED.get(run.state, set()):
-            await transition(session, run, target, actor=RunEventActor.worker, actor_id=worker.id)
+            fields = None
+            if result.get("commit_sha") is not None:
+                fields = {
+                    "commit_sha": await _pin_commit(session, worker, run, result["commit_sha"])
+                }
+            await transition(
+                session, run, target, actor=RunEventActor.worker, actor_id=worker.id, fields=fields
+            )
             await session.commit()
         return {"ok": True}
 

@@ -14,6 +14,8 @@ import yaml
 # within a safe charset — blocks option/argument injection into git fetch/checkout. The API
 # validates the same shape; this is the worker-side defence-in-depth.
 _SAFE_REF = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._/-]{0,255}$")
+# A full commit SHA (SHA-1, or SHA-256 object format): what a pinned run must check out exactly.
+_FULL_SHA = re.compile(r"^(?:[0-9a-f]{40}|[0-9a-f]{64})$")
 
 
 def _authed_url(repo_url: str, token: str | None) -> str:
@@ -51,24 +53,36 @@ class Workspace:
         self.path.chmod(0o700)  # workspace holds secrets/tfvars — not world-readable
 
     def git_clone(
-        self, repo_url: str, commit_sha: str | None, project_root: str, token: str | None = None
+        self,
+        repo_url: str,
+        commit_sha: str | None,
+        project_root: str,
+        token: str | None = None,
+        branch: str | None = None,
     ) -> Path:
         # A source repo may be owned by another uid (e.g. CI bind mounts); the worker image trusts
         # all repos via `git config --system safe.directory '*'` (a `-c` override is ignored by git).
         # `token` (repo_auth_kind=token) is injected into the HTTPS URL so private repos can clone.
         clone_url = _authed_url(repo_url, token)
+        git_env = {
+            **os.environ,
+            "GIT_TERMINAL_PROMPT": "0",
+            # ssh:// / git@ repos: never prompt, and trust a host key on first contact (TOFU)
+            # so a fresh worker can clone without a pre-seeded known_hosts.
+            "GIT_SSH_COMMAND": "ssh -o BatchMode=yes -o StrictHostKeyChecking=accept-new",
+        }
+        clone = ["git", "clone", "--depth", "1"]
+        if branch and not commit_sha:
+            # No pinned commit: the head of the environment's branch, not the remote's default.
+            if not _SAFE_REF.match(branch):
+                raise RuntimeError(f"invalid branch: {branch!r}")
+            clone += ["--branch", branch]
         # Surface git's stderr so a clone failure isn't an opaque "exit status 128".
         result = subprocess.run(
-            ["git", "clone", "--depth", "1", clone_url, str(self.path / "repo")],
+            [*clone, clone_url, str(self.path / "repo")],
             capture_output=True,
             text=True,
-            env={
-                **os.environ,
-                "GIT_TERMINAL_PROMPT": "0",
-                # ssh:// / git@ repos: never prompt, and trust a host key on first contact (TOFU)
-                # so a fresh worker can clone without a pre-seeded known_hosts.
-                "GIT_SSH_COMMAND": "ssh -o BatchMode=yes -o StrictHostKeyChecking=accept-new",
-            },
+            env=git_env,
         )
         if result.returncode != 0:
             msg = result.stderr.strip() or result.stdout.strip()
@@ -79,15 +93,23 @@ class Workspace:
         if commit_sha:
             if not _SAFE_REF.match(commit_sha):
                 raise RuntimeError(f"invalid commit ref: {commit_sha!r}")
-            subprocess.run(
+            # The shallow clone holds only the default branch's tip: fetch exactly the pinned
+            # commit (a full SHA, or a ref), then check out what was fetched (FETCH_HEAD — a
+            # fetched branch or tag gets no local ref to check out by name).
+            fetch = subprocess.run(
                 ["git", "fetch", "--depth", "1", "origin", commit_sha],
                 cwd=self.path / "repo",
                 capture_output=True,
+                text=True,
+                env=git_env,
             )
+            if fetch.returncode != 0:
+                msg = _redact(fetch.stderr.strip() or fetch.stdout.strip(), token)
+                raise RuntimeError(f"git fetch {commit_sha} failed: {msg}")
             # Checkout MUST succeed: silently staying on the default-branch HEAD would plan/apply
             # the wrong commit. Fail loudly with git's stderr.
             checkout = subprocess.run(
-                ["git", "checkout", commit_sha],
+                ["git", "checkout", "--detach", "FETCH_HEAD"],
                 cwd=self.path / "repo",
                 capture_output=True,
                 text=True,
@@ -97,6 +119,9 @@ class Workspace:
                     f"git checkout {commit_sha} failed: "
                     f"{checkout.stderr.strip() or checkout.stdout.strip()}"
                 )
+            head = self.head_sha()
+            if _FULL_SHA.match(commit_sha.lower()) and head != commit_sha.lower():
+                raise RuntimeError(f"checked out {head}, expected the pinned commit {commit_sha}")
         # `project_root` comes from the server payload; a `..`-laden value would resolve outside the
         # clone and let terraform/secret writes escape the per-job workspace. Confine it.
         repo_root = (self.path / "repo").resolve()
@@ -104,6 +129,16 @@ class Workspace:
         if not cwd.is_relative_to(repo_root):
             raise RuntimeError(f"project_root escapes the repository: {project_root!r}")
         return cwd
+
+    def head_sha(self) -> str:
+        """The full SHA of the checked-out commit. A plan job reports it so the API pins the run to
+        it and the apply job clones exactly that commit (§7.2)."""
+        result = subprocess.run(
+            ["git", "rev-parse", "HEAD"], cwd=self.path / "repo", capture_output=True, text=True
+        )
+        if result.returncode != 0:
+            raise RuntimeError(f"git rev-parse HEAD failed: {result.stderr.strip()}")
+        return result.stdout.strip()
 
     def write_tfvars(self, cwd: Path, tfvars: dict) -> None:
         # JSON tfvars are always valid HCL2 inputs; auto-loaded by terraform/tofu.

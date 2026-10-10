@@ -185,6 +185,7 @@ def handle_plan(client: ApiClient, job: dict, settings: Settings) -> None:
             env_info.get("commit_sha"),
             env_info["project_root"],
             token=_repo_token(job),
+            branch=env_info.get("branch"),
         )
         ws.write_tfvars(cwd, job.get("tfvars_json", {}))
         ws.write_hcl_tfvars(cwd, job.get("hcl_tfvars", {}))
@@ -206,7 +207,11 @@ def handle_plan(client: ApiClient, job: dict, settings: Settings) -> None:
         tf_env = _tofu_env(platform_env, backend)  # + state-backend creds, for tofu only
         checks: list[dict] = []
 
-        client.event(job_id, "phase_started", phase="planning")
+        # Report the exact commit checked out: the API pins the run to it (or refuses a mismatch
+        # with the commit it pinned), and the apply job clones exactly that SHA (§7.2/§7.3).
+        client.event(
+            job_id, "phase_started", phase="planning", result={"commit_sha": ws.head_sha()}
+        )
 
         def stage(name: str) -> bool:
             results, aborted = run_hooks(
@@ -338,11 +343,22 @@ def handle_apply(client: ApiClient, job: dict, settings: Settings) -> None:
     tool = _tool_bin(env_info["tool"])
 
     try:
+        # The apply runs on exactly the commit the plan was made on — pinned by the API from the
+        # plan job's report (§7.2) — never on wherever the branch head has moved since.
+        commit_sha = env_info.get("commit_sha")
+        if not commit_sha:
+            return client.event(
+                job_id,
+                "job_failed",
+                phase="apply",
+                result={"error": "apply refused: the run has no pinned commit; trigger a new plan"},
+            )
         cwd = ws.git_clone(
             env_info["repo_url"],
-            env_info.get("commit_sha"),
+            commit_sha,
             env_info["project_root"],
             token=_repo_token(job),
+            branch=env_info.get("branch"),
         )
         ws.write_tfvars(cwd, job.get("tfvars_json", {}))
         ws.write_hcl_tfvars(cwd, job.get("hcl_tfvars", {}))
@@ -458,6 +474,7 @@ def handle_command_run(client: ApiClient, job: dict, settings: Settings) -> None
             env_info.get("commit_sha"),
             env_info["project_root"],
             token=_repo_token(job),
+            branch=env_info.get("branch"),
         )
         ws.write_tfvars(cwd, job.get("tfvars_json", {}))
         ws.write_hcl_tfvars(cwd, job.get("hcl_tfvars", {}))
@@ -586,7 +603,13 @@ def _run_job(client: ApiClient, job: dict, settings: Settings) -> None:
         detail = Masker(job.get("mask_values", [])).mask(str(exc))
         log.error("job failed", extra={"event": "agent.failed", "run_id": jid, "error": detail})
         if jid:
-            client.event(jid, "job_failed", phase=jphase, result={"error": detail})
+            try:
+                client.event(jid, "job_failed", phase=jphase, result={"error": detail})
+            except Exception as report_exc:  # noqa: BLE001 — e.g. the API already failed the run
+                log.warning(
+                    "job_failed not accepted",
+                    extra={"event": "agent.report_error", "run_id": jid, "error": str(report_exc)},
+                )
 
 
 def run() -> None:
