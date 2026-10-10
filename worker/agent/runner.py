@@ -5,6 +5,7 @@ import subprocess
 import threading
 import time
 from collections.abc import Callable
+from contextlib import AbstractContextManager, nullcontext
 from pathlib import Path
 
 from agent.client import ApiClient
@@ -176,17 +177,25 @@ def run_hooks(
     repo_env: dict[str, str],
     phase: str,
     streamer: LogStreamer,
+    platform_files: Callable[[], AbstractContextManager[object]] = nullcontext,
 ) -> tuple[list[dict], bool]:
     """Run a stage's hooks. Returns (check_results, aborted). A `fail` hook aborts; `warn` continues
     but is surfaced and will force manual confirmation (§8.3). Repo hooks get `repo_env` (no
-    secrets / cloud creds); platform hooks get `platform_env`."""
+    secrets / cloud creds); platform hooks get `platform_env`, and run inside `platform_files()`
+    (the secret files only they may read, on disk only while one of them runs)."""
     results: list[dict] = []
     for hook in hooks:
         section = f"hook:{hook['name']}"
-        env = repo_env if hook.get("source") == "repo" else platform_env
-        code = run_command(
-            ["sh", "-c", hook["command"]], cwd, env, phase=phase, section=section, streamer=streamer
-        )
+        repo = hook.get("source") == "repo"
+        with nullcontext() if repo else platform_files():
+            code = run_command(
+                ["sh", "-c", hook["command"]],
+                cwd,
+                repo_env if repo else platform_env,
+                phase=phase,
+                section=section,
+                streamer=streamer,
+            )
         if code == 0:
             results.append({"name": hook["name"], "status": "ok", "detail": None})
             continue

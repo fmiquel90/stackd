@@ -6,7 +6,8 @@ import subprocess
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
-from contextlib import AbstractContextManager
+from collections.abc import Iterator
+from contextlib import AbstractContextManager, ExitStack, contextmanager, nullcontext
 from pathlib import Path
 from typing import Any
 
@@ -138,14 +139,17 @@ def _tool_bin(tool: str) -> str:
     return "tofu" if tool == "opentofu" else "terraform"
 
 
+_OIDC_TOKEN_FILE = "oidc_token"
+
+
 def _cloud_env(ws: Workspace, job: dict) -> dict[str, str]:
-    """OIDC workload env for terraform only (§10.4 / §8.3 — never for repo hooks)."""
+    """OIDC workload env for terraform and platform hooks only (§10.4 / §8.3 — never for repo
+    hooks). The token file it names is on disk only while one of them runs (`_cloud_token`)."""
     creds = job.get("cloud_credentials")
     if not creds:
         return {}
-    token_file = ws.write_secret("oidc_token", creds["oidc_token"])
     env = {
-        "AWS_WEB_IDENTITY_TOKEN_FILE": token_file,
+        "AWS_WEB_IDENTITY_TOKEN_FILE": str(ws.secret_path(_OIDC_TOKEN_FILE)),
         "AWS_ROLE_ARN": creds["role_arn"],
         "AWS_ROLE_SESSION_NAME": f"stackd-{job['job_id']}",
     }
@@ -181,10 +185,26 @@ def _tofu_env(base: dict[str, str], backend: dict | None) -> dict[str, str]:
     return env
 
 
-def _tfvars(ws: Workspace, cwd: Path, job: dict[str, Any]) -> AbstractContextManager[None]:
-    """The run's variable files, present in the checkout only while the tofu command it wraps runs:
-    a repo hook, at any stage, never finds them (§8.3)."""
-    return ws.tfvars(cwd, job.get("tfvars_json", {}), job.get("hcl_tfvars", {}))
+def _cloud_token(ws: Workspace, job: dict[str, Any]) -> AbstractContextManager[object]:
+    """The OIDC token file `_cloud_env` points at, written for one tofu command or platform hook
+    and removed right after: never on disk while a repo hook runs (§8.3)."""
+    token = (job.get("cloud_credentials") or {}).get("oidc_token")
+    return ws.secret_file(_OIDC_TOKEN_FILE, token) if token else nullcontext()
+
+
+@contextmanager
+def _tofu_files(
+    ws: Workspace, cwd: Path, job: dict[str, Any], *, tfvars: bool = True
+) -> Iterator[None]:
+    """What one tofu command reads from disk that no repo hook may find (§8.3), present only while
+    it runs: the OIDC token file, and the run's variable files unless the command reads none."""
+    with ExitStack() as files:
+        files.enter_context(_cloud_token(ws, job))
+        if tfvars:
+            files.enter_context(
+                ws.tfvars(cwd, job.get("tfvars_json", {}), job.get("hcl_tfvars", {}))
+            )
+        yield
 
 
 def _init_cmd(
@@ -254,6 +274,7 @@ def handle_plan(client: ApiClient, job: dict, settings: Settings) -> None:
                 repo_env=repo_env,
                 phase="planning",
                 streamer=streamer,
+                platform_files=lambda: _cloud_token(ws, job),
             )
             checks.extend(r for r in results if r["status"] != "ok")
             return aborted
@@ -262,7 +283,7 @@ def handle_plan(client: ApiClient, job: dict, settings: Settings) -> None:
             return client.event(
                 job_id, "job_failed", phase="before_init", result={"checks": checks}
             )
-        with _tfvars(ws, cwd, job):
+        with _tofu_files(ws, cwd, job):
             init_rc = run_command(
                 _init_cmd(tool, backend, job.get("backend_config_file"), job.get("backend_config")),
                 cwd,
@@ -295,7 +316,7 @@ def handle_plan(client: ApiClient, job: dict, settings: Settings) -> None:
             plan_cmd.insert(2, "-refresh-only")
         if job.get("destroy"):
             plan_cmd.insert(2, "-destroy")
-        with _tfvars(ws, cwd, job):
+        with _tofu_files(ws, cwd, job):
             code, events = stream_json_command(
                 plan_cmd,
                 cwd,
@@ -318,23 +339,23 @@ def handle_plan(client: ApiClient, job: dict, settings: Settings) -> None:
         # The -json events streamed above are terse ("Plan to create"); also stream the human-readable
         # diff operators expect (the real `terraform plan` output), read from the saved plan file
         # (fast — no refresh, no API calls). `-no-color` so the ANSI doesn't fight the log viewer.
-        run_command(
-            [tool, "show", "-no-color", str(plan_file)],
-            cwd,
-            platform_env,
-            phase="planning",
-            section="plan",
-            streamer=streamer,
-        )
-
-        # plan.json for after_plan hooks (infracost/jq); `show -json` is already machine-readable.
-        show = subprocess.run(
-            [tool, "show", "-json", str(plan_file)],
-            cwd=cwd,
-            env=platform_env,
-            capture_output=True,
-            text=True,
-        )
+        # Then plan.json for after_plan hooks (infracost/jq): `show -json` is machine-readable.
+        with _tofu_files(ws, cwd, job, tfvars=False):
+            run_command(
+                [tool, "show", "-no-color", str(plan_file)],
+                cwd,
+                platform_env,
+                phase="planning",
+                section="plan",
+                streamer=streamer,
+            )
+            show = subprocess.run(
+                [tool, "show", "-json", str(plan_file)],
+                cwd=cwd,
+                env=platform_env,
+                capture_output=True,
+                text=True,
+            )
         plan_doc = show.stdout if show.returncode == 0 and show.stdout.strip() else "{}"
         # It lists the run's variable values in clear (§8.3): the artifact, and what repo hooks
         # read, is a copy with every sensitive value masked.
@@ -383,6 +404,7 @@ def handle_plan(client: ApiClient, job: dict, settings: Settings) -> None:
                 repo_env=repo_env,
                 phase="checking",
                 streamer=streamer,
+                platform_files=lambda: _cloud_token(ws, job),
             )
             checks.extend(r for r in results if r["status"] != "ok")
         if aborted:
@@ -451,11 +473,12 @@ def handle_apply(client: ApiClient, job: dict, settings: Settings) -> None:
                 repo_env=repo_env,
                 phase="applying",
                 streamer=streamer,
+                platform_files=lambda: _cloud_token(ws, job),
             )
             checks.extend(r for r in results if r["status"] != "ok")
             return aborted
 
-        with _tfvars(ws, cwd, job):
+        with _tofu_files(ws, cwd, job):
             init_rc = run_command(
                 _init_cmd(tool, backend, job.get("backend_config_file"), job.get("backend_config")),
                 cwd,
@@ -493,7 +516,7 @@ def handle_apply(client: ApiClient, job: dict, settings: Settings) -> None:
         apply_timeout = job.get("apply_timeout_seconds") or _DEFAULT_TIMEOUT_SECONDS
         try:
             # With the run's variables too: tofu refuses a saved plan whose inputs changed (§7.3).
-            with _tfvars(ws, cwd, job):
+            with _tofu_files(ws, cwd, job):
                 code, events = stream_json_command(
                     [tool, "apply", "-input=false", "-json", plan_file.name],
                     cwd,
@@ -519,9 +542,10 @@ def handle_apply(client: ApiClient, job: dict, settings: Settings) -> None:
                 # Mask: a tofu diagnostic can echo a sensitive variable value verbatim (§5.1).
                 result={"error": masker.mask(error)},
             )
-        out = subprocess.run(
-            [tool, "output", "-json"], cwd=cwd, env=tf_env, capture_output=True, text=True
-        )
+        with _tofu_files(ws, cwd, job, tfvars=False):
+            out = subprocess.run(
+                [tool, "output", "-json"], cwd=cwd, env=tf_env, capture_output=True, text=True
+            )
         ok_output = out.returncode == 0
         if ok_output:
             client.upload_artifact(job_id, "outputs.json", masker.mask(out.stdout).encode())
@@ -585,7 +609,7 @@ def handle_command_run(client: ApiClient, job: dict, settings: Settings) -> None
         tf_env = _tofu_env(platform_env, backend)  # + state-backend creds, for tofu only
 
         client.event(job_id, "phase_started", phase="running")
-        with _tfvars(ws, cwd, job):
+        with _tofu_files(ws, cwd, job):
             init_rc = run_command(
                 _init_cmd(tool, backend, job.get("backend_config_file"), job.get("backend_config")),
                 cwd,
@@ -599,7 +623,7 @@ def handle_command_run(client: ApiClient, job: dict, settings: Settings) -> None
 
         argv = [tool, *str(cmd.get("name", "")).split(), *(cmd.get("args") or [])]
         timeout = _command_timeout(job)
-        with _tfvars(ws, cwd, job):
+        with _tofu_files(ws, cwd, job):
             code = run_command(
                 argv,
                 cwd,

@@ -200,13 +200,20 @@ class Workspace:
         # Only for managed_state envs (§11.3): the repo declares no backend; we inject http.
         (cwd / "zzz_stackd_backend.tf").write_text('terraform {\n  backend "http" {}\n}\n')
 
-    def write_secret(self, name: str, content: str) -> str:
-        # Create with 0600 atomically — no world-readable window between write and chmod.
-        path = self.path / name
-        fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
-        with os.fdopen(fd, "w") as f:
-            f.write(content)
-        return str(path)
+    def secret_path(self, name: str) -> Path:
+        """Where `secret_file` puts `name`: in the job's workspace, outside the checkout."""
+        return self.path.resolve() / name
+
+    @contextmanager
+    def secret_file(self, name: str, content: str) -> Iterator[Path]:
+        """A secret file (the OIDC token, §10.4) present only while the command it wraps runs —
+        never while a repo hook does (§8.3). 0600, written fresh (a file or symlink a hook left at
+        its path is replaced, never written through), removed right after."""
+        path = self.secret_path(name)
+        try:
+            yield _write_new(path, content.encode())
+        finally:
+            path.unlink(missing_ok=True)
 
     def write_plan(self, cwd: Path, data: bytes) -> Path:
         """Write the saved plan the apply job applies (§7.4): 0600 (it holds the run's variable
@@ -223,7 +230,7 @@ class Workspace:
         """A path in the job's workspace but outside the checkout, for a file no repo hook may find
         in the tree it runs in (the plan job's saved plan, §8.3). Whatever is there is removed
         first, so a file or symlink a hook left there is never written through."""
-        path = self.path.resolve() / name
+        path = self.secret_path(name)
         path.unlink(missing_ok=True)
         return path
 

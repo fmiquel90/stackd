@@ -32,6 +32,13 @@ HCL_SECRET = "hcl-s3cr3t"  # in an hcl-typed variable, written to its own .auto.
 TFVARS_FILES = ["stackd.auto.tfvars.json", "zzz_stackd.auto.tfvars"]
 TOKEN = "ghp_t0k@en/%25"  # the repo token: on disk, git would hold it percent-encoded
 TOKEN_FORMS = [TOKEN, quote(TOKEN, safe="")]
+OIDC_TOKEN = "eyJ-oidc-workload-jwt"  # §10: tofu and platform hooks read it from a file
+CLOUD = {
+    "provider": "aws",
+    "oidc_token": OIDC_TOKEN,
+    "role_arn": "arn:aws:iam::123456789012:role/stackd-plan",
+    "region": "eu-west-1",
+}
 # What `tofu show -json` prints for the plan: the variable values in clear, sensitive ones included.
 RAW_PLAN_JSON = {
     "variables": {"db_password": {"value": SECRET}, "region": {"value": "eu-west-1"}},
@@ -51,12 +58,13 @@ RAW_PLAN_JSON = {
     },
 }
 
-# tofu: logs each call (whether the run's tfvars were there, and where it really wrote the plan
-# file), writes a plan file that embeds the variable values (like a real one) behind a marker,
+# tofu: logs each call (whether the run's tfvars and the OIDC token file were there, and where it
+# really wrote the plan file), writes a plan file that embeds the variable values (like a real one) behind a marker,
 # prints RAW_PLAN_JSON for `show -json`, and keeps a copy of the plan file it applies.
 _FAKE_TOFU = """#!/bin/sh
 tfvars=no; [ -f stackd.auto.tfvars.json ] && [ -f zzz_stackd.auto.tfvars ] && tfvars=yes
-echo "$1 tfvars=$tfvars" >> "$FAKE_TOFU/calls"
+token=no; [ -n "$AWS_WEB_IDENTITY_TOKEN_FILE" ] && [ -f "$AWS_WEB_IDENTITY_TOKEN_FILE" ] && token=yes
+echo "$1 tfvars=$tfvars token=$token" >> "$FAKE_TOFU/calls"
 case "$1" in
 plan)
   for a; do case "$a" in -out=*) out="${a#-out=}";; esac; done
@@ -215,23 +223,24 @@ def _job(phase: str, url: str, sha: str | None, tofu: Path, **extra: Any) -> dic
         "env": {"PATH": f"{tofu}:{os.environ['PATH']}"},
         "tfvars_json": {"db_password": SECRET, "region": "eu-west-1"},
         "hcl_tfvars": {"tags": f'{{ team = "{HCL_SECRET}" }}'},
-        "mask_values": [SECRET, HCL_SECRET, TOKEN],
+        "mask_values": [SECRET, HCL_SECRET, TOKEN, OIDC_TOKEN],
         **extra,
     }
 
 
 def _plan_and_apply(
-    tmp_path: Path, url: str, sha: str, tofu: Path, repo_credentials: Any = None, **plan: Any
+    tmp_path: Path, url: str, sha: str, tofu: Path, both: dict | None = None, **plan: Any
 ) -> _Client:
+    """The plan job (with `plan` in its payload), then the apply job; `both` goes to both."""
     client = _Client()
     api = cast(ApiClient, client)
     settings = cast(
         Settings, SimpleNamespace(workspace_root=str(tmp_path / "ws"), leak_action="warn")
     )
-    creds = {"repo_credentials": repo_credentials}
-    main.handle_plan(api, _job("plan", url, None, tofu, save_plan=True, **creds, **plan), settings)
+    both = both or {}
+    main.handle_plan(api, _job("plan", url, None, tofu, save_plan=True, **both, **plan), settings)
     assert client.events[-1][0] == "phase_finished", client.events
-    main.handle_apply(api, _job("apply", url, sha, tofu, **creds), settings)
+    main.handle_apply(api, _job("apply", url, sha, tofu, **both), settings)
     assert client.events[-1][0] == "phase_finished", client.events
     return client
 
@@ -257,25 +266,38 @@ def _calls(tofu: Path) -> list[str]:
 def test_repo_hooks_find_no_secret_in_the_workspace(
     tmp_path: Path, tofu: Path, git_http: str
 ) -> None:
-    needles = ["RAW-PLAN", SECRET, HCL_SECRET, *TOKEN_FORMS]
-    scan = _scan_hook(tmp_path, needles, ["plan.tfplan", *TFVARS_FILES])
+    needles = ["RAW-PLAN", SECRET, HCL_SECRET, *TOKEN_FORMS, OIDC_TOKEN]
+    scan = _scan_hook(tmp_path, needles, ["plan.tfplan", *TFVARS_FILES, "oidc_token"])
     _, sha = _repo(tmp_path, {stage: [f"{scan} {stage}"] for stage in STAGES})
-    # A private repository: both jobs clone it with the token (the apply also fetches its commit).
-    creds = {"kind": "token", "token": TOKEN}
-    client = _plan_and_apply(tmp_path, f"{git_http}/src", sha, tofu, repo_credentials=creds)
+    # A platform hook at every stage reads the OIDC token file, like tofu (§10.4).
+    has_token = '[ -f "$AWS_WEB_IDENTITY_TOKEN_FILE" ] && echo "PLATFORM {0} token=yes"'
+    platform = {
+        stage: [{"name": f"p-{stage}", "command": has_token.format(stage), "source": "platform"}]
+        for stage in STAGES
+    }
+    # A private repository: both jobs clone it with the token (the apply also fetches its commit),
+    # and hold OIDC workload credentials.
+    both = {
+        "repo_credentials": {"kind": "token", "token": TOKEN},
+        "cloud_credentials": CLOUD,
+        "hooks": platform,
+    }
+    client = _plan_and_apply(tmp_path, f"{git_http}/src", sha, tofu, both)
 
     scans = [line for line in client.lines if line.startswith("SCAN ")]
     assert scans == [f"SCAN {stage} hits=[] files=[]" for stage in STAGES], client.lines
+    platform_seen = [line for line in client.lines if line.startswith("PLATFORM ")]
+    assert platform_seen == [f"PLATFORM {stage} token=yes" for stage in STAGES], client.lines
     # tofu still reads the run's variables wherever it needs them — at apply too, so it still
-    # refuses a saved plan whose inputs changed (§7.3) — and only there.
+    # refuses a saved plan whose inputs changed (§7.3) — and only there; and the token always.
     assert _calls(tofu) == [
-        "init tfvars=yes",
-        "plan tfvars=yes",
-        "show tfvars=no",
-        "show tfvars=no",
-        "init tfvars=yes",
-        "apply tfvars=yes",
-        "output tfvars=no",
+        "init tfvars=yes token=yes",
+        "plan tfvars=yes token=yes",
+        "show tfvars=no token=yes",
+        "show tfvars=no token=yes",
+        "init tfvars=yes token=yes",
+        "apply tfvars=yes token=yes",
+        "output tfvars=no token=yes",
     ]
     # The saved plan still reaches the apply, exactly as tofu made it.
     assert client.uploads["plan.tfplan"].startswith(b"RAW-PLAN\n")
@@ -308,15 +330,21 @@ def test_after_plan_repo_hooks_read_a_masked_plan_json(tmp_path: Path, tofu: Pat
 
 def test_files_a_repo_plants_never_receive_a_secret(tmp_path: Path, tofu: Path) -> None:
     # The repo commits symlinks where the tfvars are written, and a before_plan hook plants more
-    # where the plan and plan.json used to be.
+    # where the plan, plan.json and the OIDC token file are written.
     loot = tmp_path / "loot"
     loot.mkdir()
     links = {name: loot / name for name in TFVARS_FILES}
-    plant = (
-        f"ln -s {loot}/a plan.tfplan && ln -s {loot}/b plan.json && ln -s {loot}/c ../plan.tfplan"
+    plant = " && ".join(
+        f"ln -s {loot}/{name} {path}"
+        for name, path in (
+            ("a", "plan.tfplan"),
+            ("b", "plan.json"),
+            ("c", "../plan.tfplan"),
+            ("d", "../oidc_token"),
+        )
     )
     url, sha = _repo(tmp_path, {"before_plan": [plant], "after_plan": ["true"]}, links)
-    client = _plan_and_apply(tmp_path, url, sha, tofu)
+    client = _plan_and_apply(tmp_path, url, sha, tofu, {"cloud_credentials": CLOUD})
 
     assert sorted(loot.iterdir()) == []  # nothing was written through them…
     [wrote] = [c for c in (tofu / "calls").read_text().splitlines() if c.startswith("wrote ")]
@@ -325,15 +353,16 @@ def test_files_a_repo_plants_never_receive_a_secret(tmp_path: Path, tofu: Path) 
 
 
 def test_command_run_reads_the_tfvars(tmp_path: Path, tofu: Path) -> None:
-    # A command (refresh, import, …) needs the run's variables like a plan does.
+    # A command (refresh, import, …) needs the run's variables and credentials like a plan does.
     url, sha = _repo(tmp_path, {})
     client = _Client()
     job = _job("command", url, sha, tofu, cred_phase="apply", command={"name": "refresh"})
+    job["cloud_credentials"] = CLOUD
     main.handle_command_run(
         cast(ApiClient, client), job, cast(Settings, SimpleNamespace(workspace_root=str(tmp_path)))
     )
     assert client.events[-1][0] == "phase_finished", client.events
-    assert _calls(tofu) == ["init tfvars=yes", "refresh tfvars=yes"]
+    assert _calls(tofu) == ["init tfvars=yes token=yes", "refresh tfvars=yes token=yes"]
 
 
 _REAL_MAIN_TF = """terraform {
