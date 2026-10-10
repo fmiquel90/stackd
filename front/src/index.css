@@ -1,26 +1,62 @@
 @import "tailwindcss";
 @import "./styles/tokens.css";
 
-/* Map the design tokens into Tailwind utilities (bg-*, text-*, border-*, rounded-*).
-   Utility names are distinct from the raw token names to avoid self-reference. */
+/* Tokens → Tailwind utilities (bg-surface, text-muted, border-control, text-st-failed…). Utility
+   names MUST differ from the raw token names: @theme re-emits them as variables, and
+   `--color-x: var(--color-x)` is a cycle. Hence scrim, ring, logo, onfill, mocked, df-*. DESIGN §8: components use these
+   utilities, never inline colour styles. */
 @theme inline {
   --color-base: var(--color-bg-base);
   --color-surface: var(--color-bg-surface);
   --color-raised: var(--color-bg-raised);
+  --color-sunken: var(--color-bg-sunken);
   --color-line: var(--color-border);
+  --color-control: var(--color-border-control);
+  --color-scrim: var(--color-overlay);
+
   --color-primary: var(--color-text-primary);
   --color-muted: var(--color-text-secondary);
-  --color-signal: var(--color-accent);
+  --color-ring: var(--color-focus);
+  --color-logo: var(--color-brand);
+  --color-onfill: var(--color-on-fill);
 
   --color-st-queued: var(--color-state-queued);
   --color-st-running: var(--color-state-running);
-  --color-st-unconfirmed: var(--color-state-unconfirmed);
+  --color-st-decision: var(--color-state-decision);
   --color-st-finished: var(--color-state-finished);
   --color-st-failed: var(--color-state-failed);
   --color-mocked: var(--color-mock);
 
+  --color-tint-decision: var(--color-decision-tint);
+  --color-tint-failed: var(--color-failed-tint);
+  --color-tint-mock: var(--color-mock-tint);
+
+  --color-df-create: var(--color-diff-create);
+  --color-df-destroy: var(--color-diff-destroy);
+  --color-df-replace: var(--color-diff-replace);
+  --color-df-update: var(--color-diff-update);
+  --color-df-read: var(--color-diff-read);
+
+  /* Legacy utility names used by pre-redesign pages (removed at the end of stage 4). */
+  --color-signal: var(--color-focus);
+  --color-st-unconfirmed: var(--color-state-decision);
+
   --font-sans: "IBM Plex Sans", system-ui, sans-serif;
   --font-mono: "JetBrains Mono", ui-monospace, monospace;
+
+  /* Type scale (DESIGN §3.3) */
+  --text-eyebrow: 11px;
+  --text-eyebrow--line-height: 16px;
+  --text-data: 12px;
+  --text-data--line-height: 18px;
+  --text-ui: 13px;
+  --text-ui--line-height: 20px;
+  --text-section: 14px;
+  --text-section--line-height: 20px;
+  --text-title: 16px;
+  --text-title--line-height: 24px;
+  --text-display: 20px;
+  --text-display--line-height: 28px;
 
   --radius-base: 4px;
   --radius-badge: 2px;
@@ -38,17 +74,41 @@ body {
   color: var(--color-text-primary);
   font-family: var(--font-sans);
   font-size: 13px; /* dense UI base (DESIGN §3.3) */
+  line-height: 20px;
   -webkit-font-smoothing: antialiased;
 }
 
-/* "The data is mono" — tabular figures so columns don't dance while streaming (DESIGN §7). */
+/* "Data is mono" — tabular figures so columns don't dance while streaming (DESIGN §3.3, §7). */
 .font-data {
   font-family: var(--font-mono);
   font-variant-numeric: tabular-nums;
 }
 
-/* Interactive affordance for buttons: pointer cursor + a brightness lift on hover so an enabled
-   control is visibly actionable (works on any token background without a hard-coded color). */
+/* Eyebrow: column headers, field labels, badge labels (DESIGN §3.3). */
+.eyebrow {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  line-height: 16px;
+  font-weight: 500;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+/* Visible focus everywhere (DESIGN §7): 2 px focus-token ring, 2 px offset. */
+:focus-visible {
+  outline: 2px solid var(--color-focus);
+  outline-offset: 2px;
+}
+
+/* Links in prose are neutral and underlined (DESIGN §2.1). */
+a.link {
+  color: var(--color-text-primary);
+  text-decoration: underline;
+  text-decoration-thickness: 1px;
+  text-underline-offset: 2px;
+}
+
+/* Interactive affordance for legacy buttons (pre-redesign pages). */
 .ui-btn {
   cursor: pointer;
   transition:
