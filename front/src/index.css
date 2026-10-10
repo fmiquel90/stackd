@@ -115,6 +115,36 @@ body {
   }
 }
 
+/* React Flow on the tokens (DESIGN §5.4): no library default colour survives. */
+.graph-canvas .react-flow {
+  --xy-background-color: var(--color-bg-base);
+  --xy-background-pattern-color: var(--color-border);
+  --xy-edge-stroke: var(--color-text-secondary);
+  --xy-edge-stroke-width: 1.5;
+  --xy-edge-label-background-color: var(--color-bg-surface);
+  --xy-edge-label-color: var(--color-text-primary);
+  --xy-controls-button-background-color: var(--color-bg-raised);
+  --xy-controls-button-background-color-hover: var(--color-bg-surface);
+  --xy-controls-button-color: var(--color-text-primary);
+  --xy-controls-button-color-hover: var(--color-text-primary);
+  --xy-controls-button-border-color: var(--color-border-control);
+  --xy-controls-box-shadow: none;
+  --xy-handle-background-color: var(--color-bg-surface);
+  --xy-handle-border-color: var(--color-border-control);
+}
+.graph-canvas .react-flow__edge-text {
+  font-family: var(--font-mono);
+  font-size: 11px;
+}
+.graph-canvas .edge-mock .react-flow__edge-path {
+  stroke: var(--color-mock);
+  stroke-dasharray: 6 4;
+}
+.graph-canvas .react-flow__node:focus-visible {
+  outline: 2px solid var(--color-focus);
+  outline-offset: 2px;
+}
+
 /* Interactive affordance for legacy buttons (pre-redesign pages). */
 .ui-btn {
   cursor: pointer;

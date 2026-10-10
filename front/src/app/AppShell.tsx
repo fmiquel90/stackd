@@ -59,7 +59,7 @@ const RunPage = lazy(() => import("@/features/runs/RunPage").then((m) => ({ defa
 const QueuePage = lazy(() => import("@/pages/QueuePage").then((m) => ({ default: m.QueuePage })));
 const HealthPage = lazy(() => import("@/pages/HealthPage").then((m) => ({ default: m.HealthPage })));
 const AuditPage = lazy(() => import("@/pages/AuditPage").then((m) => ({ default: m.AuditPage })));
-const GraphPage = lazy(() => import("@/pages/GraphPage").then((m) => ({ default: m.GraphPage })));
+const GraphPage = lazy(() => import("@/features/graph/GraphPage").then((m) => ({ default: m.GraphPage })));
 const SettingsPage = lazy(() => import("@/pages/SettingsPage").then((m) => ({ default: m.SettingsPage })));
 const VariableSetsPage = lazy(() =>
   import("@/pages/VariableSetsPage").then((m) => ({ default: m.VariableSetsPage })),
