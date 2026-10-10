@@ -488,7 +488,7 @@ hook.* (created|updated|deleted)
 run.triggered / run.confirmed ⭐ / run.discarded / run.canceled
 run.applied ⭐ / run.apply_failed / run.destroy_triggered
 run.check_failed / run.check_warned           # results of the after_plan hooks
-state.force_unlocked / state.version_downloaded / state.deleted
+state.force_unlocked / state.import_session_created   # §11.4
 dependency.created / dependency.deleted / dependency.mock_consumed
 cloud_integration.created / cloud_integration.updated / cloud_integration.deleted
 worker_pool.created / worker_pool.token_rotated / worker_pool.deleted
@@ -1047,7 +1047,8 @@ GET /api/v1/logs           # admin: structured JSON buffer, filters level/event/
 POST /api/v1/auth/me/onboarded              # marks the walkthrough seen (persisted server-side)
 
 # State
-GET /api/v1/environments/{id}/state/versions[...]
+GET /api/v1/environments/{id}/state/versions
+POST /api/v1/environments/{id}/state/import-session      # admin, audited (§11.4)
 DELETE /api/v1/environments/{id}/state/lock              # force-unlock (admin, audited)
 
 # Webhooks
@@ -1060,7 +1061,7 @@ PUT  /worker/v1/jobs/{id}/artifacts/{name}
 POST /worker/v1/commands/{id}/result        # result of a downstream command (diagnostics…)
 
 # State backend HTTP (Terraform — detail §11)
-GET|POST|DELETE /state/v1/{env_id} ; LOCK|UNLOCK /state/v1/{env_id}/lock
+GET|POST /state/v1/{env_id} ; LOCK|UNLOCK /state/v1/{env_id}/lock
 ```
 
 ---
