@@ -1,6 +1,9 @@
 # Front-end redesign — Stage 1: audit and direction
 
-> Status: **proposal, awaiting validation** (stage 1 of 4). No application code is changed by this stage.
+> Status: **validated 2026-10-10** (stage 1 of 4). Decisions (§9): direction A with the two borrowings;
+> achromatic chrome; amber narrowed; space and names in the URL; plan diff parsed from the logs until A1;
+> stage-3 dependencies approved; API items A1–A10 stay in this document (no issues opened). Stage 2
+> output: `docs/DESIGN.md` v2. No application code is changed by this stage.
 > Scope: `front/` only. The API, the invariants of CLAUDE.md §4/§8 and the semantic rules listed in the
 > brief are treated as fixed. Everything that would need API work is collected in §6, with the SPECS
 > section it touches.
