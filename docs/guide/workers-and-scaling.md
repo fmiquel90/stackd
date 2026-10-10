@@ -26,7 +26,7 @@ sequenceDiagram
     end
     W->>A: POST /worker/v1/jobs/claim?wait=25
     A-->>W: 200 { job } | 204 nothing
-    Note over W: clone → tool → hooks → plan/apply → report
+    Note over W: clone → hooks → init → plan/apply → report
 ```
 
 The **queue is Postgres**, not a broker. A claim is an atomic `SELECT … FOR UPDATE … SKIP LOCKED` that picks the next eligible run. There is no Redis, no RabbitMQ, nothing to operate beyond the database.
@@ -51,15 +51,16 @@ A job holding **apply credentials** — an `applying` run, or a **mutating comma
 
 ### Time budgets
 
-Each job's subprocesses run under a watchdog that kills them past their budget. An apply or a command killed this way fails the run with an "exceeded the …s time budget" error:
+Each job's subprocesses run under a watchdog that kills them — their whole process group — past their budget. A plan, an apply or a command killed this way fails the run with an "exceeded the …s time budget" error:
 
 | What | Budget |
 |---|---|
 | `apply` of the saved plan | the apply budget, `apply_timeout_seconds` in the claim (`STACKD_APPLY_TIMEOUT_SECONDS` on the API, default 900 s) |
 | a command run's subcommand | the apply budget when the claim's `cred_phase` is `apply` (a mutating command); the default cap when it is `plan` (a read-only command). A missing or unknown `cred_phase` (an older API) gets the apply budget: it fails closed |
-| anything else (`init`, `plan`, hooks…) | the agent's default cap, 2 h |
+| each hook | the hook timeout, `STACKD_HOOK_TIMEOUT_SECONDS` on the worker (default 600 s). A hook past it fails by its own `on_failure` ([Hooks](hooks.md#failures-warnings-and-timeouts)) |
+| anything else (`init`, `plan`, `show`, `output`) | the agent's default cap, 2 h |
 
-The worker never decides on its own whether a command is mutating: it reads `cred_phase` from the claim.
+The worker never decides on its own whether a command is mutating: it reads `cred_phase` from the claim. A plan fails on any exit code but 0 (no changes) and 2 (changes) — a killed plan never passes for "no changes".
 
 ## Create a pool
 
@@ -83,15 +84,31 @@ STACKD_POOL_TOKEN=$POOL_TOKEN \
   uv run python -m agent.main
 ```
 
-`STACKD_MAX_CONCURRENT_JOBS` (default `1`) lets one worker run several jobs at once — always on different environments.
+### Worker settings
+
+| Variable | Default | What it does |
+|---|---|---|
+| `STACKD_API_URL` | `http://api:8000` | where the worker reaches the API |
+| `STACKD_POOL_TOKEN` / `STACKD_POOL_TOKEN_FILE` | — | the pool token, or a file holding it |
+| `STACKD_WORKER_NAME` | the host name | the worker's name in the UI |
+| `STACKD_MAX_CONCURRENT_JOBS` | `1` | jobs run at once, always on different environments |
+| `STACKD_HOOK_TIMEOUT_SECONDS` | `600` | each hook's time budget |
+| `STACKD_LEAK_TRIPWIRE` | `warn` | `fail` fails a plan whose non-sensitive output shows a secret |
+| `STACKD_WORKSPACE_ROOT` | `/tmp/stackd-ws` | where each job's workspace is created, then removed |
+| `STACKD_HEARTBEAT_INTERVAL`, `STACKD_POLL_WAIT` | `20`, `25` (s) | heartbeat period, claim long-poll |
+
+These `STACKD_*` settings are the agent's own: **they never reach tofu or a hook**, so repo code
+can't read the pool token from its environment.
 
 !!! warning "Keep platform secrets out of the worker's environment"
-    The worker needs no database, S3 or signing credential: it reaches states and saved plans through the API. Repo hooks inherit the worker's environment (minus cloud credentials and the state backend's `TF_HTTP_*` settings), so never give the worker `DATABASE_URL`, `STACKD_ENCRYPTION_KEY`, `STACKD_JWT_SECRET`, `S3_*` keys or `GOOGLE_CLIENT_SECRET`. The dev compose file blanks them for the worker.
+    The worker needs no database, S3 or signing credential: it reaches states and saved plans through the API. tofu and platform hooks inherit the worker's environment — minus the `STACKD_*` namespace — and repo code runs inside tofu (`data "external"`, provisioners). So never give the worker `DATABASE_URL`, `S3_*` keys or `GOOGLE_CLIENT_SECRET`, nor `STACKD_ENCRYPTION_KEY` or `STACKD_JWT_SECRET`. The dev compose file blanks them for the worker. Repo hooks get only an allowlist (`PATH`, `HOME`, locale, proxy and CA settings), see [Hooks](hooks.md#what-hooks-can-see).
 
-In dev the runner executes commands locally. In prod the **container runner** runs each terraform and hook command inside `stackd/runner:<tool>-<version>` (bundling tfsec, checkov, infracost, jq).
+### Runners
 
-!!! warning "Fargate runner caveat"
-    The container runner needs to launch containers, i.e. Docker-in-Docker. **AWS Fargate does not allow this.** On Fargate, run the worker with the **local** runner, or use an ECS launch type / host that provides a Docker daemon.
+Every job runs in its own workspace, removed when the job ends. Today the agent runs each tofu and hook command as a **local subprocess**, as its own OS user — whatever `STACKD_RUNNER` says. A **container runner** (`STACKD_RUNNER=docker`: each job in its own container from a runner image, see `deploy/images/`) is specified but **not implemented yet**. Until it exists, a job is isolated neither from the agent's own process nor from the other jobs of its worker: keep `STACKD_MAX_CONCURRENT_JOBS=1` on workers that run code you don't fully trust.
+
+!!! warning "Fargate caveat, for the container runner"
+    A container runner needs to launch containers, i.e. Docker-in-Docker. **AWS Fargate does not allow this.** On Fargate, the worker runs commands locally, as it does today.
 
 ## Dedicate a pool with labels
 

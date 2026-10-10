@@ -36,8 +36,10 @@ This is the exact reverse of [importing an existing stack](importing-existing-st
 
 ### 1. Pull managed state back out
 
-Only for environments with `managed_state: true`. Mint a session (it returns a scoped `rw` token +
-the HTTP backend config), then migrate to your own backend with a standard command:
+Only for environments with `managed_state: true`. Mint a session (admin; it returns a scoped `rw`
+token + the HTTP backend config, valid 30 minutes). In a local checkout, add a
+`terraform { backend "http" {} }` block, export the session's settings as `TF_HTTP_*` variables
+(exactly as in [importing, step 3](importing-existing-state.md)) and run `tofu init`. Then:
 
 ```bash
 # get a scoped token + backend address
@@ -46,8 +48,8 @@ curl -s -X POST localhost:8000/api/v1/environments/$ENV_ID/state/import-session 
 # option A — pull the raw tfstate (it's standard) and push it anywhere
 tofu state pull > terraform.tfstate
 
-# option B — migrate the backend in place: switch the repo's backend block from
-# `http` to `s3` (or local), then:
+# option B — migrate in place: replace the `http` backend block with your own
+# (`s3`, local…), then:
 tofu init -migrate-state
 ```
 

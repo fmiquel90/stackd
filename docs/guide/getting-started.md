@@ -43,11 +43,12 @@ In dev, authentication is a **dev login** with three personas of distinct tiers 
 The seed creates a `demo-network` and a `demo-app` stack in the `demo` space, each with a `dev`
 and a `prod` environment; `demo-app` consumes `demo-network`'s output. From the UI:
 
-1. Open a stack → an environment → **Plan**. A run is created and a worker picks it up.
+1. Open a stack → an environment → **Plan**. A run is created and a worker picks up its plan job.
 2. Watch the **Run page**: the phase rail, the plan diff, the checks, the resolved inputs with
    their provenance, and the live log.
-3. When it reaches **unconfirmed**, an approver clicks **Confirm & apply** (prod additionally needs
-   a second person and a typed confirmation). The apply runs exactly the plan you reviewed, on the
+3. When it reaches **unconfirmed**, an approver clicks **Confirm & apply**. On `prod`, that
+   approver must be someone other than the person who triggered the run (four-eyes), and types the
+   environment's name to confirm. The apply runs exactly the plan you reviewed, on the
    commit it was made on — see [Runs & approvals](runs-and-approvals.md#what-gets-applied-is-what-was-reviewed).
 
 The same flow over the API:

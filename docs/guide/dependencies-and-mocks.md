@@ -83,12 +83,15 @@ walks the outgoing edges and triggers downstream runs (`type=tracked`,
 | `always` | downstream triggered on every finished upstream apply |
 | `on_output_change` | triggered only if the resolved `value_hash` differs from the downstream's last run |
 
-A downstream with multiple parents fires only when **all** its run-group parents have
-finished; a failed parent stops that branch (`run_group = partial_failure`).
+Each finished upstream apply triggers its downstream runs on its own: a downstream with two
+parents can run twice. Waiting for **all** parents of a run group, and stopping a branch when a
+parent fails, are specified but not implemented yet (SPECS §9.2). Only a finished apply cascades:
+a failed run, including one whose `after_apply` hook failed, triggers nothing.
 
 !!! warning "Protections are never bypassed"
-    The cascade never auto-confirms. A **protected** downstream still stops at
-    `unconfirmed` and waits for a human — see [Runs & approvals](runs-and-approvals.md).
+    A cascade run is routed like any other plan. It auto-confirms only on an `autodeploy`,
+    unprotected environment, with no mock and no `warn` check; a **protected** downstream always
+    stops at `unconfirmed` and waits for a human — see [Runs & approvals](runs-and-approvals.md).
 
 Launch a whole subgraph at once with `with_downstream: true` in the trigger body; the
 root starts and subsequent levels follow via cascade:

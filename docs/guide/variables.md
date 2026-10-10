@@ -8,8 +8,8 @@ Each variable has a `kind` that decides how the worker injects it:
 
 | Kind | Injection |
 |---|---|
-| `terraform` | exposed as `TF_VAR_<name>` (and written to a tfvars file) |
-| `environment` | exposed as a plain process environment variable for the run |
+| `terraform` | written to an auto-loaded tfvars file, present only while a tofu command runs (listed as `TF_VAR_<name>`); hooks only see it inside `plan.json` |
+| `environment` | exposed as a plain process environment variable for the run: to tofu and hooks — to repo hooks only when it is not sensitive |
 
 ## Where a variable can live
 

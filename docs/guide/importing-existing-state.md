@@ -70,7 +70,7 @@ tofu init -migrate-state
 
 The settings go through `TF_HTTP_*` environment variables rather than `-backend-config`: tofu writes
 `-backend-config` values, the token included, into `.terraform/`, while environment variables never
-touch disk.
+touch disk. Stackd's own workers do the same.
 
 Terraform LOCKs, uploads your current state through Stackd's backend (stored as a `state_version`),
 then UNLOCKs.
@@ -80,13 +80,9 @@ adds its own `backend "http" {}` block and hands the address and its job token t
 `TF_HTTP_*` environment variables, so the repo must declare **no** backend: a second backend block
 makes `init` fail. Future runs then use the managed backend automatically.
 
-!!! tip "Keep the token out of `.terraform/`"
-    tofu stores `-backend-config` values, the token included, in `.terraform/terraform.tfstate`.
-    The import token expires after 30 minutes, but you can avoid writing it at all: export
-    `TF_HTTP_ADDRESS`, `TF_HTTP_LOCK_ADDRESS`, `TF_HTTP_UNLOCK_ADDRESS`, `TF_HTTP_LOCK_METHOD`,
-    `TF_HTTP_UNLOCK_METHOD`, `TF_HTTP_USERNAME` and `TF_HTTP_PASSWORD` instead of passing
-    `-backend-config` flags — that is how Stackd's own workers do it. Delete the local
-    `.terraform/` once the migration is done.
+!!! tip "Clean up the local checkout"
+    Delete the local `.terraform/` once the migration is done, and don't commit the temporary
+    `backend "http" {}` block (step 4).
 
 !!! warning
     The import session is **admin-only**, the token expires in 30 minutes, and creating it is

@@ -9,9 +9,10 @@ A **run** is one execution against one environment. It always pauses for a human
 queued → preparing → planning → [checking] → unconfirmed → confirmed → applying → finished
 ```
 
-A worker claims a `queued` run, clones the repo, runs hooks + `plan`, and reports back. With a
-non-empty diff the run stops at **`unconfirmed`** and waits for a human. After **confirm**, a worker
-claims the apply and drives it to **`finished`**. An empty diff goes straight to `finished`; a
+A worker claims a `queued` run and executes its **plan job**: it clones the repo, runs hooks +
+`plan`, and reports back. With a non-empty diff the run stops at **`unconfirmed`** and waits for a
+human. After **confirm**, a worker (not necessarily the same one) claims the **apply job** and
+drives the run to **`finished`**. An empty diff goes straight to `finished`; a
 failure to `failed`. A human can `discard` an `unconfirmed` run, or `cancel` a `queued` or
 `unconfirmed` one (stopping a run a worker is executing is not supported yet).
 
@@ -82,6 +83,12 @@ is a misclick safeguard only — it never bypasses `can_apply` (still evaluated 
 An environment with `autodeploy` auto-confirms when the plan is clean — **but a `warn` check forces
 `unconfirmed`** so a human still sees it. A `protected` environment can never autodeploy.
 
+Every [hook](hooks.md) result is kept on the run with the stage it ran at, from the plan job and
+then the apply job: `check_results.results` lists them all (`ok`, `warn`, `fail`),
+`check_results.checks` only the ones that warned or failed — what the run page shows. A `fail`
+check fails the run at its stage; a failing `before_apply` check means nothing is applied. See
+[Hooks — check results](hooks.md#check-results).
+
 ## Mock block
 
 A run that consumed a mock upstream output (`used_mocks=true`) **cannot be applied** unless the env
@@ -103,8 +110,14 @@ confirm. This is the same-stack counterpart to the cross-stack [cascade](depende
 
 ## Proposed runs (from a PR)
 
-A pull request triggers a **proposed** run: plan-only, read-only state token, no secrets — a safe
-preview that is never applied and saves no plan file. See [the Git integration in SPECS](../SPECS.md).
+A pull request triggers a **proposed** run: plan-only, with a read-only state token — a preview
+that is never applied and saves no plan file. See [the Git integration in SPECS](../SPECS.md).
+
+!!! warning "Proposed runs still get secrets"
+    Withholding secrets from proposed runs is specified but **not implemented yet**: a proposed
+    run's job gets the environment's sensitive variables and plan-role cloud credentials like any
+    plan, and the pull request's code runs inside tofu. Only let trusted contributors trigger
+    proposed runs on environments holding real secrets.
 
 ## Triggering over the API
 
