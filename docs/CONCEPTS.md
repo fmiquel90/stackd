@@ -4,6 +4,50 @@
 > concrete, copy-pasteable examples. For the exhaustive field-by-field truth, see **SPECS.md** —
 > this document never contradicts it, it illustrates it.
 
+## Key concepts at a glance
+
+Read this first if you are new to Stackd: each line is expanded, with examples, in the numbered
+section given in the last column.
+
+```
+Space                  a team or project boundary: who can see and do what
+└── Stack              the code: a Git repo + a folder (the template)
+    ├── Environment    dev      ┐
+    ├── Environment    staging  ├ real deployments of that code, each with its own state,
+    └── Environment    prod     ┘ variables and rules — every run targets one of them
+```
+
+| Concept | What it is | Why it matters | § |
+|---|---|---|---|
+| **Space** | A boundary for a team or project, holding its stacks, variable sets and worker pools. | Members get a role and a set of tiers *per space*; nothing crosses from one space to another. | 1 |
+| **Stack** | The code: a Git repository, a folder in it, and the tool (OpenTofu or Terraform). | Written once, deployed many times. A stack never runs on its own. | 2 |
+| **Environment** | One real deployment of a stack (`dev`, `prod`…): its branch, state, variables and protections. | Environments are fully isolated from each other — the opposite of Terraform workspaces. | 2 |
+| **Variables & variable sets** | The code's inputs, set on the environment, the stack, or in sets shared across stacks. | The most specific value wins and the UI shows where each value came from. Secrets are write-only. | 3 |
+| **Run** | One attempt to change an environment: plan, wait for review, apply exactly the reviewed plan. | It is the unit of change, of review and of audit. One active run per environment at a time. | 4 |
+| **Tier** | A label on an environment (`dev`, `prod`, or your own). | Decides who may approve it, and whether someone other than the person who started the run must confirm. | 5 |
+| **Role** | *reader*, *writer* (starts runs), *approver* (confirms applies on their tiers), *admin*. | Approving needs both the role **and** the environment's tier in your allowed tiers. | 5 |
+| **Hook** | A command run at a fixed step of a run: a security scan, a cost check, a policy. | Platform hooks are enforced and trusted; hooks from the repo run without secrets. | 6 |
+| **Worker** | The agent that runs OpenTofu on your infrastructure. | It pulls its jobs (no inbound port), keeps nothing between jobs and can be replaced at any time. | 7 |
+| **Managed state** | The `tfstate`, stored by Stackd in S3 behind its own HTTP backend. | Each job gets a short-lived token scoped to what it may do: read, lock, or write. | 8 |
+| **Dependency & mock** | One environment's outputs feeding another's inputs (network → app). | An upstream change re-plans its dependents. A mock lets a new chain plan before its upstream exists, but blocks the apply by default. | 9 |
+| **Cloud credentials (OIDC)** | Short-lived cloud credentials minted for each job. | No static cloud keys to store or rotate; plan and apply use different roles. | 10 |
+| **Staleness** | "This environment is behind its branch." | Tells you a merged change hasn't been applied yet; it never triggers anything by itself. | 11 |
+| **Audit** | An append-only record of every action, written with the action itself. | Answers "who changed prod, and why?" | 12 |
+
+### The life of a change
+
+1. **Someone pushes, opens a pull request, or clicks *Plan*.** Stackd creates a run for the
+   environment(s) tracking that branch. A pull request only ever gets a read-only plan.
+2. **A worker picks the run up**, checks out the exact commit, and plans with credentials minted
+   for this job only. Hooks scan the plan.
+3. **The run waits for a human.** An approver allowed on that tier reads the diff, the checks and
+   every input with its origin, then confirms or discards.
+4. **A worker applies the saved plan** — exactly what was reviewed, on the same commit.
+5. **If the outputs changed, dependent environments re-plan** under their own approval rules.
+   Everything above is in the audit log.
+
+## Following the examples
+
 All examples assume the local dev stack is up (`task dev`) with the API on `http://localhost:8000`
 and dev login enabled. Authenticate once:
 

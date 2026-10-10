@@ -70,6 +70,30 @@ What the reviewer sees:
 └────────────────────────────────────────────────────────────────────────────────┘
 ```
 
+## Key concepts
+
+```
+Space                  a team or project boundary: who can see and do what
+└── Stack              the code: a Git repo + a folder (the template)
+    ├── Environment    dev      ┐
+    ├── Environment    staging  ├ real deployments of that code, each with its own state,
+    └── Environment    prod     ┘ variables and rules — every run targets one of them
+```
+
+| Concept | In one sentence |
+|---|---|
+| **Space** | A boundary for a team or project. Members get a role and the tiers they may deploy to; nothing crosses from one space to another. |
+| **Stack** | The code: a Git repository, a folder in it, and the tool (OpenTofu or Terraform). A stack never runs on its own. |
+| **Environment** | One real deployment of a stack (`dev`, `prod`…), with its own branch, state, variables and protections. |
+| **Run** | One attempt to change an environment: plan, review, apply. Started by a push, a pull request (plan only), a click, or a change upstream. |
+| **Tier** | A label on an environment (`dev`, `prod`, or your own) that decides who may approve it, and whether someone other than the person who started the run must confirm. |
+| **Role** | What a member may do: *reader* looks, *writer* starts runs, *approver* confirms applies on their tiers, *admin* manages everything. |
+| **Variables** | The code's inputs. Variable sets share values across stacks; the most specific value wins, and the UI shows where each one came from. Secrets are write-only. |
+| **Dependency** | Feeds one environment's outputs into another's inputs (network → app). A *mock* value lets a new chain plan before its upstream exists; a plan that used one can't be applied unless the environment allows it. |
+| **Worker** | The agent that runs OpenTofu on your infrastructure. It pulls jobs from the API, keeps nothing, and can be replaced at any time. |
+
+Each concept is explained with examples in **[Concepts](docs/CONCEPTS.md)**.
+
 ## Quick start
 
 > **Prerequisites:** Docker, [Task](https://taskfile.dev), [`uv`](https://docs.astral.sh/uv/) and
