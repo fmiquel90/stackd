@@ -12,9 +12,15 @@ sub = run:<tier>:<stack>:<phase>      e.g.  run:prod:core-network:apply
 ```
 
 !!! note "Plan and apply assume different roles"
-    A `plan` run and an `apply` run get tokens with different `phase` segments and
+    A `plan` job and an `apply` job get tokens with different `phase` segments and
     therefore assume **different IAM roles**: `plan` is read-only, `apply` is write.
-    A PR plan physically cannot modify infrastructure.
+    A PR plan physically cannot modify infrastructure. A [command run](commands.md) gets
+    the `apply` role for a mutating command (`import`, `state rm`…) and the `plan` role
+    for a read-only one.
+
+The token expires after `session_duration`, capped per phase: 30 min for `plan`, and the
+apply window (the apply budget + grace, 20 min by default) for `apply` — so apply
+credentials never outlive the job they were minted for.
 
 ## How the issuer works
 
@@ -96,28 +102,32 @@ unreachable issuer.
 
 ## What the agent injects
 
-When a `cloud_integration` is set, the worker writes the signed token to a file and
-exports, **to the terraform process only**:
+When a `cloud_integration` is set, the worker exports, **to tofu and to platform hooks only**:
 
 ```
-AWS_WEB_IDENTITY_TOKEN_FILE = <path to the token file>
+AWS_WEB_IDENTITY_TOKEN_FILE = <path to the token file, outside the checkout>
 AWS_ROLE_ARN                = <plan_role_arn | apply_role_arn for this phase>
 AWS_ROLE_SESSION_NAME       = stackd-<run_id>
+AWS_REGION                  = <region, when the integration sets one>
 ```
+
+The token file is written right before each tofu command or platform hook and deleted right
+after: it is never on disk while a repo hook runs.
 
 The AWS SDK inside the providers performs the AssumeRoleWithWebIdentity natively. The
 session name ties every CloudTrail entry back to the run — and thus to the human who
 confirmed the apply.
 
 These variables are **never** exported to repo hooks (a `.stackd.yml` pushed via PR must
-not be able to assume the apply role and exfiltrate). Platform hooks can opt in. See
-[Hooks](hooks.md).
+not be able to assume the apply role and exfiltrate). Platform hooks always get them. See
+[Hooks](hooks.md#what-hooks-can-see).
 
 ## Fallback and coexistence
 
-With no `cloud_integration`, Stackd falls back to classic static variables (the
-`aws-credentials` variable set). If both an integration **and** static `AWS_*` variables
-are resolved, the OIDC credentials win and a configuration warning is shown.
+With no `cloud_integration`, Stackd falls back to classic static variables (for example an
+`aws-credentials` variable set). Don't resolve both on one environment: Stackd does not warn
+about it yet, and a static `AWS_ACCESS_KEY_ID` stays in tofu's environment, where the AWS SDK
+normally uses it before the OIDC token.
 
 ## See also
 

@@ -24,8 +24,10 @@ from app.models.environment import Environment
 from app.models.run import Run
 from app.models.stack import Stack
 from app.models.worker import Worker
+from app.runs.artifacts import SAVED_PLAN_TYPES
 from app.runs.commands import is_mutating
 from app.runs.transition import transition
+from app.statebackend.tokens import StateScope, mint_state_token
 from app.variables.resolution import ResolvedVariable, provenance_snapshot, resolve_variables
 from app.workers.hooks import platform_hooks
 
@@ -97,6 +99,44 @@ async def claim_one(session: AsyncSession, worker: Worker, affinity_seconds: int
     return run
 
 
+def holds_apply_credentials(run: Run) -> bool:
+    """True when the run's claimed job holds apply (write) credentials: an apply, or a mutating
+    command run (§4.3). The ONE definition of a "mutating job", shared by the job's credential
+    phase (apply OIDC role + cap, apply-window state token) and the worker-lost reclaim cutoff
+    (scheduler), so a job's write credentials expire by the time another run can take its env."""
+    if run.type == RunType.command:
+        return is_mutating((run.command or {}).get("name", ""))
+    return run.state == RunState.applying
+
+
+def _state_scope(run: Run, cred_phase: JobPhase) -> StateScope:
+    """The job's state-token scope, bound at mint time (§11.2): only a job holding apply credentials
+    writes state. A plan job reads and locks — `tofu plan` (`-refresh-only` included) takes the lock
+    but never persists state. A proposed run (drift included) and a read-only command only read:
+    they are handed no lock address, and `output`/`show`/`state list|show`/`providers`/`validate`
+    never lock anyway."""
+    if run.type == RunType.proposed:
+        return "ro"
+    if cred_phase == JobPhase.apply:
+        return "rw"
+    return "ro" if run.type == RunType.command else "plan"
+
+
+def withholds_secrets(run: Run) -> bool:
+    """True when the run's job gets none of the environment's secrets (§13): a proposed run. Its
+    code is a pull request's, which nobody has reviewed, and repo code runs inside tofu (`data
+    "external"`, provisioners) with everything tofu gets. A drift run is a proposed run too, but it
+    plans the environment's last applied commit (§19.2) — code that already ran with those secrets
+    — so it keeps them. The per-environment opt-in of §13 is not implemented: always withheld."""
+    return run.type == RunType.proposed and not run.is_drift
+
+
+def _is_secret(rv: ResolvedVariable) -> bool:
+    """A sensitive variable, of either kind, or an external secret reference (§15.1: always
+    sensitive, whatever its flag says)."""
+    return rv.sensitive or rv.is_reference
+
+
 def _is_hcl_tfvar(rv: ResolvedVariable) -> bool:
     """True when a terraform var must be written verbatim to the HCL tfvars file (§3.4, Phase D): an
     `hcl`-typed var with a value. It is then excluded from the JSON tfvars to avoid a double
@@ -106,13 +146,21 @@ def _is_hcl_tfvar(rv: ResolvedVariable) -> bool:
 
 async def build_job_payload(session: AsyncSession, run: Run) -> dict:
     """Construct the claim payload (SPECS §7.2). Resolves variables with secrets revealed; the
-    agent masks them in logs. Snapshots provenance onto the run."""
+    agent masks them in logs. Snapshots provenance onto the run. A proposed run gets no secret
+    (§13, `withholds_secrets`)."""
     env = await session.get(Environment, run.environment_id)
     assert env is not None
     stack = await session.get(Stack, env.stack_id)
     assert stack is not None
 
-    resolved = await resolve_variables(session, env, reveal_sensitive=True)
+    withhold = withholds_secrets(run)
+    resolved = await resolve_variables(session, env, reveal_sensitive=not withhold)
+    if withhold:
+        # Dropped before anything below sees them: no sensitive variable reaches `sensitive_env`,
+        # the tfvars, `mask_values` or the provenance snapshot, and no external reference is
+        # fetched. One the plan needs gets no value: tofu falls back to the variable's default in
+        # the repo, or fails with "No value for required variable" — never a stand-in value.
+        resolved = [rv for rv in resolved if not _is_secret(rv)]
 
     # Resolve external secret references (§15): fetch live values, or apply the configured fallback.
     # Raises SecretUnavailable (caught by the claim endpoint → run failed) when a reference can't
@@ -143,7 +191,7 @@ async def build_job_payload(session: AsyncSession, run: Run) -> dict:
             hcl_tfvars[rv.name] = rv.value
         elif rv.kind == VariableKind.terraform:
             tfvars_json[rv.name] = rv.value
-        elif rv.sensitive:
+        elif _is_secret(rv):
             sensitive_env[rv.name] = rv.value
         else:
             env_vars[rv.name] = rv.value
@@ -180,55 +228,53 @@ async def build_job_payload(session: AsyncSession, run: Run) -> dict:
     provenance.update(secret_provenance)  # §15: secret:/secret_fallback:/secret_override:
     run.variable_provenance = provenance
 
+    # The repo token stays with a proposed run: it clones the pull request's commit, and reaches
+    # neither tofu nor a hook (§8.3 — it is in no environment and nowhere under the checkout).
     repo_credentials: dict[str, str | None] = {"kind": stack.repo_auth_kind.value}
     if stack.repo_auth_kind != RepoAuthKind.none and stack.repo_secret_encrypted is not None:
         repo_credentials["token"] = decrypt(stack.repo_secret_encrypted)
 
-    if run.type == RunType.command:
-        phase = JobPhase.command
-        # A mutating subcommand gets the apply role; a read-only one the (read-only) plan role.
-        cred_phase = (
-            JobPhase.apply if is_mutating((run.command or {}).get("name", "")) else JobPhase.plan
-        )
-    else:
-        phase = JobPhase.plan if run.state == RunState.preparing else JobPhase.apply
-        cred_phase = phase
+    # An apply or a mutating subcommand gets the apply role; a plan or a read-only subcommand the
+    # (read-only) plan role. A plan/apply job's type is its credential phase.
+    cred_phase = JobPhase.apply if holds_apply_credentials(run) else JobPhase.plan
+    phase = JobPhase.command if run.type == RunType.command else cred_phase
 
-    # Managed state (§11): hand the worker a scoped HTTP backend (RO for proposed runs).
+    # Managed state (§11): hand the worker an HTTP backend with a job-scoped state token.
     settings = get_settings()
     backend = None
     if env.managed_state:
-        from app.statebackend.tokens import mint_state_token
-
-        scope = "ro" if run.type == RunType.proposed else "rw"
+        scope = _state_scope(run, cred_phase)
         base = settings.internal_url.rstrip("/")  # worker-reachable, not the public URL
-        # An apply's state token lives only for the apply budget + grace so a reaped/partitioned
-        # worker loses state-write access shortly after the API reclaims its run (§4.2). Plan/RO
-        # tokens keep the generous window.
+        # A job holding apply credentials (an apply, or a mutating command) gets a state token that
+        # lives only for the apply budget + grace — the same window as its OIDC cap and its
+        # worker-lost reclaim cutoff (§4.2) — so a reaped/partitioned worker loses state-write
+        # access before another run can take the env. Plan/read-only jobs keep the generous window.
         state_ttl = (
-            settings.apply_reclaim_window_seconds if run.state == RunState.applying else 6 * 3600
+            settings.apply_reclaim_window_seconds if cred_phase == JobPhase.apply else 6 * 3600
         )
         token = mint_state_token(
             environment_id=env.id, run_id=run.id, scope=scope, ttl_seconds=state_ttl
         )
         addr = f"{base}/state/v1/{env.id}"
-        backend = {
-            "type": "http",
-            "address": addr,
-            "lock_address": f"{addr}/lock",
-            "unlock_address": f"{addr}/lock",
-            "lock_method": "LOCK",
-            "unlock_method": "UNLOCK",
-            "username": "env",
-            "password": token,
-        }
+        backend = {"type": "http", "address": addr, "username": "env", "password": token}
+        if scope != "ro":
+            # A `ro` job gets no lock address: tofu's http backend then skips locking altogether
+            # instead of sending a LOCK its token is refused (which failed every proposed plan).
+            backend.update(
+                lock_address=f"{addr}/lock",
+                unlock_address=f"{addr}/lock",
+                lock_method="LOCK",
+                unlock_method="UNLOCK",
+            )
 
-    cloud_credentials = await _cloud_credentials(session, env, stack, run, cred_phase)  # §10
+    # §10: a proposed run keeps its OIDC credentials — those of the plan role, read-only by design
+    # (§10.3: "a PR plan physically cannot modify the infra"), which a plan needs to refresh.
+    cloud_credentials = await _cloud_credentials(session, env, stack, run, cred_phase)
 
     # Literal secret values the agent masks in ALL log output (§5.1) — sensitive variables, the
     # short-lived state-backend and OIDC tokens, and the repo auth token (it rides inside the clone
     # URL, so a failed `git clone` could otherwise echo it to logs).
-    mask_values = [rv.value for rv in resolved if rv.sensitive and rv.value]
+    mask_values = [rv.value for rv in resolved if _is_secret(rv) and rv.value]
     if backend:
         mask_values.append(backend["password"])
     if cloud_credentials and cloud_credentials.get("oidc_token"):
@@ -239,10 +285,18 @@ async def build_job_payload(session: AsyncSession, run: Run) -> dict:
     return {
         "job_id": str(run.id),
         "phase": phase.value,
-        # Hard apply budget (§4.2): the worker kills `apply` past this. API-owned so the cap and the
-        # worker-lost reclaim window can never drift apart.
+        # The job's credential phase (§4.3/§7.2): "apply" when it holds apply credentials (an apply,
+        # a mutating command), else "plan". Sent explicitly so the worker never re-derives it.
+        "cred_phase": cred_phase.value,
+        # Hard apply budget (§4.2): the worker kills `apply` — and a cred_phase=apply command — past
+        # this. API-owned so the cap and the worker-lost reclaim window can never drift apart.
         "apply_timeout_seconds": settings.stackd_apply_timeout_seconds,
         "refresh_only": run.is_drift,  # §19: drift plan uses `-refresh-only` (state vs reality)
+        # §7.4: a destroy run plans with `-destroy`; its saved plan carries that to the apply.
+        "destroy": run.type == RunType.destroy,
+        # §7.4: the plan job uploads its plan file (when it has changes) for every run that can
+        # later be applied; the apply job downloads and applies exactly it.
+        "save_plan": phase == JobPhase.plan and run.type in SAVED_PLAN_TYPES,
         "command": run.command,  # set only for RunType.command jobs
         "environment": {
             "id": str(env.id),

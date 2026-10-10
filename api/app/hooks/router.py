@@ -11,6 +11,7 @@ from app.audit import record_audit
 from app.auth.deps import CurrentUser, require_role
 from app.db import get_session
 from app.enums import AttachmentTarget, AuditActorKind, Role
+from app.environments.router import lock_attach_target
 from app.errors import ProblemException
 from app.hooks.schemas import HookCreate, HookOut, HookUpdate
 from app.models.hook import Hook
@@ -47,6 +48,7 @@ async def _create(
     target_id: uuid.UUID,
     body: HookCreate,
 ) -> Hook:
+    await lock_attach_target(session, target_kind, target_id)  # no orphan on a racing deletion
     hook = Hook(
         target_kind=target_kind,
         target_id=target_id,

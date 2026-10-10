@@ -5,7 +5,6 @@ import ipaddress
 import socket
 import uuid
 from datetime import datetime
-from urllib.parse import urlsplit
 
 import httpx
 from sqlalchemy import select, update
@@ -23,6 +22,7 @@ _log = get_logger("stackd.notifications")
 
 _MAX_ATTEMPTS = 5  # after this, the row is dead-lettered (left unsent, excluded from the poll)
 _HTTP_TIMEOUT = 5.0
+_DNS_TIMEOUT = 5.0
 
 # SSRF guard: notification targets are operator-supplied URLs we POST to from inside the cluster,
 # so they must point at a public host over TLS. We reject non-https schemes and any host that
@@ -30,8 +30,10 @@ _HTTP_TIMEOUT = 5.0
 # covers the cloud metadata endpoint (169.254.169.254), which we name explicitly for clarity.
 _METADATA_IP = ipaddress.ip_address("169.254.169.254")
 
+IPAddress = ipaddress.IPv4Address | ipaddress.IPv6Address
 
-def _ip_is_blocked(ip: ipaddress.IPv4Address | ipaddress.IPv6Address) -> bool:
+
+def _ip_is_blocked(ip: IPAddress) -> bool:
     return (
         ip == _METADATA_IP
         or ip.is_private
@@ -43,40 +45,59 @@ def _ip_is_blocked(ip: ipaddress.IPv4Address | ipaddress.IPv6Address) -> bool:
     )
 
 
-def _assert_public_host(host: str) -> None:
-    """Raise ValueError if `host` is, or resolves to, a non-public address.
-
-    A literal IP is checked directly. A hostname is resolved via getaddrinfo and every returned
-    address is checked. Resolution failure is *not* an error here — an unresolvable host can't reach
-    an internal target, and surfacing DNS state as a validation error would leak resolver behaviour;
-    the actual HTTP attempt fails harmlessly instead.
-    """
+def _literal_ip(host: str) -> IPAddress | None:
     try:
-        literal = ipaddress.ip_address(host)
+        return ipaddress.ip_address(host)
     except ValueError:
-        literal = None
-    if literal is not None:
-        if _ip_is_blocked(literal):
-            raise ValueError(f"url host {host!r} resolves to a non-public address")
-        return
+        return None
+
+
+def check_url_syntax(url: str) -> httpx.URL:
+    """DNS-free part of the URL check: https scheme, a host, and — when the host is a literal IP —
+    a public one. Cheap enough for request-body validators. Raises ValueError.
+
+    Parsed with httpx, the parser `deliver` builds the request from, so the host we vet is the host
+    we connect to."""
     try:
-        infos = socket.getaddrinfo(host, None)
-    except socket.gaierror:
-        return
-    for info in infos:
-        addr = info[4][0]
-        if _ip_is_blocked(ipaddress.ip_address(addr)):
-            raise ValueError(f"url host {host!r} resolves to a non-public address ({addr})")
-
-
-def assert_safe_url(url: str) -> None:
-    """Validate a notification target URL: https scheme + public host. Raises ValueError."""
-    parts = urlsplit(url)
-    if parts.scheme != "https":
+        parsed = httpx.URL(url)
+    except httpx.InvalidURL as exc:
+        raise ValueError(f"invalid url: {exc}") from exc
+    if parsed.scheme != "https":
         raise ValueError("url must use the https scheme")
-    if not parts.hostname:
+    if not parsed.host:
         raise ValueError("url must include a host")
-    _assert_public_host(parts.hostname)
+    literal = _literal_ip(parsed.host)
+    if literal is not None and _ip_is_blocked(literal):
+        raise ValueError(f"url host {parsed.host!r} resolves to a non-public address")
+    return parsed
+
+
+async def check_url_safe(url: str) -> tuple[httpx.URL, list[IPAddress]]:
+    """Full URL check: `check_url_syntax`, then a single DNS resolution — on the loop's executor and
+    time-bounded, so a slow resolver never blocks the event loop — whose every address must be
+    public. Returns the parsed URL and the vetted addresses. Raises ValueError.
+
+    Resolution failure is *not* an error here and yields no addresses — an unresolvable host can't
+    reach an internal target, and surfacing DNS state as a validation error would leak resolver
+    behaviour; `deliver` then refuses to send.
+    """
+    parsed = check_url_syntax(url)
+    host = parsed.raw_host.decode("ascii")
+    literal = _literal_ip(host)
+    if literal is not None:
+        return parsed, [literal]
+    try:
+        infos = await asyncio.wait_for(
+            asyncio.get_running_loop().getaddrinfo(host, None, type=socket.SOCK_STREAM),
+            _DNS_TIMEOUT,
+        )
+    except (socket.gaierror, TimeoutError):
+        return parsed, []
+    addrs = list(dict.fromkeys(ipaddress.ip_address(info[4][0]) for info in infos))
+    for addr in addrs:
+        if _ip_is_blocked(addr):
+            raise ValueError(f"url host {parsed.host!r} resolves to a non-public address ({addr})")
+    return parsed, addrs
 
 
 # Short human label per state for the message subject line.
@@ -146,15 +167,32 @@ async def _matching_targets(
 
 
 async def deliver(target: NotificationTarget, body: dict) -> bool:
-    # Re-validate at request time: DNS can change between create-time validation and now
-    # (rebinding), so the stored URL is not trusted on its own. follow_redirects stays off so a
-    # public URL can't 302 us onto an internal host. The check resolves DNS synchronously
-    # (getaddrinfo), so run it in a thread to keep a slow resolver off the event loop.
-    await asyncio.to_thread(assert_safe_url, target.url)
-    async with httpx.AsyncClient(timeout=_HTTP_TIMEOUT, follow_redirects=False) as http:
-        resp = await http.post(target.url, json=body)
-        resp.raise_for_status()
-    return True
+    # Re-validate at request time: DNS can change since create-time validation, so the stored URL
+    # is not trusted on its own. Then connect only to the addresses that single lookup vetted —
+    # letting httpx resolve the hostname again would reopen a DNS-rebinding window (public IP for
+    # the check, internal IP for the POST). The request URL carries the vetted IP while the Host
+    # header, TLS SNI and certificate verification stay on the original hostname. The explicit
+    # transport keeps httpx off env proxies: they'd re-resolve the hostname themselves (and
+    # httpcore's proxy tunnel ignores sni_hostname). follow_redirects stays off so a public URL
+    # can't 302 us onto an internal host.
+    url, addrs = await check_url_safe(target.url)
+    headers = {"Host": url.netloc.decode("ascii")}
+    extensions = {"sni_hostname": url.raw_host.decode("ascii")}
+    error: Exception = ValueError(f"url host {url.host!r} does not resolve")
+    async with httpx.AsyncClient(
+        transport=httpx.AsyncHTTPTransport(), timeout=_HTTP_TIMEOUT, follow_redirects=False
+    ) as http:
+        for addr in addrs:
+            try:
+                resp = await http.post(
+                    url.copy_with(host=str(addr)), json=body, headers=headers, extensions=extensions
+                )
+            except (httpx.ConnectError, httpx.ConnectTimeout) as exc:
+                error = exc  # unreachable — try the host's next vetted address
+                continue
+            resp.raise_for_status()
+            return True
+    raise error
 
 
 async def dispatch_pending(session: AsyncSession, now: datetime, *, limit: int = 20) -> int:

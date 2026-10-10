@@ -150,6 +150,57 @@ async def test_drift_run_flips_env_and_notifies_once(client: httpx.AsyncClient) 
     assert await _drift_notifs(admin_id) == 1
 
 
+async def test_drift_alert_follows_space_membership(client: httpx.AsyncClient) -> None:
+    # Same audience as an approval request: who can apply in the env's space (effective
+    # membership), not instance role/tiers. An instance approver with no membership in the space
+    # must not learn about its envs; a membership-only approver (instance writer) must be told.
+    from sqlalchemy import select
+
+    from app.db import SessionLocal
+    from app.drift.service import record_drift_result
+    from app.enums import DriftStatus
+    from app.models.environment import Environment
+    from app.models.run import Run
+
+    admin = await login(client, "admin")
+    await login(client, "alice")  # instance approver {dev, staging, prod}
+    await login(client, "bob")  # instance writer
+    space = await client.post("/api/v1/spaces", headers=admin, json={"name": "drift-space"})
+    assert space.status_code == 201, space.text
+    space_id = space.json()["id"]
+    alice_id = await _user_id("alice@dev.local")
+    bob_id = await _user_id("bob@dev.local")
+    await client.delete(f"/api/v1/spaces/{space_id}/members/{alice_id}", headers=admin)
+    grant = await client.put(
+        f"/api/v1/spaces/{space_id}/members",
+        headers=admin,
+        json={"user_id": str(bob_id), "role": "approver", "allowed_tiers": ["dev"]},
+    )
+    assert grant.status_code == 200, grant.text
+    stack = await client.post(
+        "/api/v1/stacks",
+        headers=admin,
+        json={
+            "space_id": space_id,
+            "name": "drift-space-stack",
+            "repo_url": "file:///repos/x",
+            "tool_version": "1.12.0",
+        },
+    )
+    assert stack.status_code == 201, stack.text
+    env = await make_env(client, admin, stack.json()["id"], "dev", "dev")
+    await _applied_commit(env)
+
+    alice_before, bob_before = await _drift_notifs(alice_id), await _drift_notifs(bob_id)
+    async with SessionLocal() as s:
+        env_obj = await s.get(Environment, uuid.UUID(env))
+        run = (await s.execute(select(Run).where(Run.environment_id == env_obj.id))).scalar_one()
+        await record_drift_result(s, run, env_obj, DriftStatus.drifted)
+        await s.commit()
+    assert await _drift_notifs(bob_id) == bob_before + 1
+    assert await _drift_notifs(alice_id) == alice_before
+
+
 async def test_clear_drift_on_apply(client: httpx.AsyncClient) -> None:
     from app.db import SessionLocal
     from app.drift.service import clear_drift

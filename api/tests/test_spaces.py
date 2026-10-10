@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import uuid
+
 import httpx
 
 from tests.conftest_phase2 import login
@@ -143,3 +145,26 @@ async def test_members_listing_requires_space_admin(client: httpx.AsyncClient) -
     # admin can list — the creator is auto-enrolled as a space admin.
     members = (await client.get(f"/api/v1/spaces/{space_id}/members", headers=admin)).json()
     assert any(m["email"] == "admin@dev.local" and m["role"] == "admin" for m in members)
+
+
+async def test_create_in_unknown_space_is_404(client: httpx.AsyncClient) -> None:
+    # resolve_target_space must reject an explicit space_id that names no space: an instance admin
+    # passes the membership gate for any id, so without the check the INSERT hit the FK (a
+    # misleading 409 on /stacks, a raw 500 on /worker-pools).
+    admin = await login(client, "admin")
+    bob = await login(client, "bob")
+    bogus = str(uuid.uuid4())
+    stack_body = {"name": "ghost", "repo_url": "file:///x", "tool_version": "1.12.0"}
+
+    for path, body in (
+        ("/api/v1/stacks", stack_body),
+        ("/api/v1/worker-pools", {"name": "ghost-pool"}),
+        ("/api/v1/variable-sets", {"name": "ghost-set"}),
+    ):
+        r = await client.post(path, headers=admin, json={**body, "space_id": bogus})
+        assert r.status_code == 404, f"{path}: {r.status_code} {r.text}"
+        assert r.json()["title"] == "Space not found"
+
+    # A non-member still gets the membership 403 (no existence probe).
+    r = await client.post("/api/v1/stacks", headers=bob, json={**stack_body, "space_id": bogus})
+    assert r.status_code == 403

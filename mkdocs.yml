@@ -74,6 +74,7 @@ nav:
       - Notifications: guide/notifications.md
       - Observability: guide/observability.md
   - Concepts: CONCEPTS.md
+  - Architecture: ARCHITECTURE.md
   - API: api.md
   - Reference:
       - Specification: SPECS.md

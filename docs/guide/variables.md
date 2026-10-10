@@ -8,36 +8,38 @@ Each variable has a `kind` that decides how the worker injects it:
 
 | Kind | Injection |
 |---|---|
-| `terraform` | exposed as `TF_VAR_<name>` (and written to a tfvars file) |
-| `environment` | exposed as a plain process environment variable for the run |
+| `terraform` | written to an auto-loaded tfvars file, present only while a tofu command runs (listed as `TF_VAR_<name>`); hooks only see it inside `plan.json` |
+| `environment` | exposed as a plain process environment variable for the run: to tofu and hooks — to repo hooks only when it is not sensitive |
 
 ## Where a variable can live
 
 - **Stack variable** — common to all environments of a stack (`environment_id` is null).
 - **Environment variable** — scoped to a single environment.
-- **Variable set** — a named, reusable bundle (e.g. `common-aws`, `datadog`, `region-eu`) you attach to many stacks or envs. Set members are never scoped to an env directly; the *attachment* carries the targeting.
+- **Variable set** — a named, reusable bundle (e.g. `common-aws`, `datadog`, `region-eu`) that belongs to one space and that you attach to tiers, stacks or envs of that space. Set members are never scoped to an env directly; the *attachment* carries the targeting.
 
-## Resolution order (5 layers)
+## Resolution order (6 layers)
 
 At claim time the value of each variable is resolved from weakest to strongest. The strongest layer that defines a given `(name, kind)` wins.
 
 ```mermaid
 flowchart LR
-  A["1· sets auto_attach"] --> B["2· sets attached to stack"]
-  B --> C["3· sets attached to env"]
-  C --> D["4· stack variables"]
-  D --> E["5· environment variables<br/>(always wins)"]
+  A["1· sets by rule<br/>(auto_attach, selector)"] --> T["2· sets attached to tier"]
+  T --> B["3· sets attached to stack"]
+  B --> C["4· sets attached to env"]
+  C --> D["5· stack variables"]
+  D --> E["6· environment variables<br/>(always wins)"]
 ```
 
 | Layer | Source | Ordered by |
 |---|---|---|
-| 1 | variable sets with `auto_attach` | increasing `priority` |
-| 2 | variable sets attached to the stack | increasing `priority` |
-| 3 | variable sets attached to the env | increasing `priority` |
-| 4 | stack variables | — |
-| 5 | environment variables | — (always wins) |
+| 1 | variable sets that apply by rule: `auto_attach`, or a `selector` matching the env's labels | set name |
+| 2 | variable sets attached to the env's **tier** | increasing `priority` |
+| 3 | variable sets attached to the stack | increasing `priority` |
+| 4 | variable sets attached to the env | increasing `priority` |
+| 5 | stack variables | — |
+| 6 | environment variables | — (always wins) |
 
-Within a layer, sets are ordered by their attachment `priority`. Two more sources are merged in at claim time but sit outside this order: upstream outputs (`dependency:`) and mocks (`mock`) — see [Concepts](../CONCEPTS.md) and [SPECS](../SPECS.md) §9.
+Only sets of the environment's own space take part. A `selector` (`{"label": "value", …}`) matches an env whose effective labels (stack labels + env labels, env wins) contain every pair. Two more sources are merged in at claim time but sit outside this order: upstream outputs (`dependency:`) and mocks (`mock`) — see [Concepts](../CONCEPTS.md) and [SPECS](../SPECS.md) §9.
 
 ## Inspecting resolved values
 
@@ -59,7 +61,7 @@ The provenance snapshot is frozen onto the run (`variable_provenance`) for audit
 
 ## Variable sets
 
-Create a set, add members, then attach it. `auto_attach: true` attaches it to every stack in the space; otherwise attach explicitly with a `priority`.
+Create a set, add members, then attach it. `auto_attach: true` attaches it to every stack in the space; otherwise attach explicitly to a `tier`, `stack` or `environment`, with a `priority`. A set is created in the `default` space unless you pass `space_id`.
 
 ```bash
 SET=$(curl -s -X POST localhost:8000/api/v1/variable-sets \
@@ -71,8 +73,21 @@ curl -s -X POST localhost:8000/api/v1/variable-sets/$SET/attachments \
   -d '{"target_kind":"environment","target_id":"'"$ENV"'","priority":10}'
 ```
 
+### Attachments stay inside the set's space
+
+A variable set only ever reaches its own space:
+
+- A **stack** or **environment** attachment requires the target to live in the set's space, and you
+  need `writer` on it. Otherwise the attach is refused: `400 Cross-space attachment` (or `403` when
+  you can't write the target).
+- A **tier** attachment (`target_id` = the tier's id from `GET /api/v1/tiers`) applies to that
+  tier's environments **inside the set's space only**. Tiers are a global catalog; attaching
+  `prod-credentials` to the `prod` tier never injects it into another space's prod environments.
+- At resolution, an attachment from a set of another space is ignored, even one created before
+  this rule existed.
+
 !!! note
-    Detach a set before deleting it. Deleting an attached set returns **409** with the list of attachments — explicit detachment is required.
+    Detach a set before deleting it. Deleting an attached set returns **409** with the list of attachments — explicit detachment is required. Deleting a stack or an environment removes the attachments that target it for you (audited `variable_set.detached` with the reason).
 
 ## Sensitive values
 

@@ -1,7 +1,11 @@
 from __future__ import annotations
 
+import ipaddress
+import socket
+import ssl
 from datetime import UTC, datetime
 
+import httpcore
 import httpx
 import pytest
 
@@ -173,3 +177,164 @@ async def test_dispatcher_delivers_to_matching_targets(
     async with SessionLocal() as s:
         assert await dispatcher.dispatch_pending(s, datetime.now(UTC)) == 0
     assert len(captured) == 1
+
+
+# --- SSRF guard: DNS is resolved once, off the event loop, and the POST is pinned to that answer ---
+
+_PUBLIC_IP = "93.184.216.34"
+_real_getaddrinfo = socket.getaddrinfo
+
+
+def _fake_dns(monkeypatch: pytest.MonkeyPatch, answers: dict[str, list[str]]) -> list[str]:
+    """Each lookup of a host in `answers` returns its next IP (the last one sticks), so
+    `[public, private]` is a TTL-0 rebinding record. Other hosts resolve normally (the DB). Returns
+    the log of scripted lookups."""
+    lookups: list[str] = []
+
+    def getaddrinfo(host, *args, **kwargs):  # type: ignore[no-untyped-def]
+        if host not in answers:
+            return _real_getaddrinfo(host, *args, **kwargs)
+        lookups.append(host)
+        ip = answers[host].pop(0) if len(answers[host]) > 1 else answers[host][0]
+        return [(socket.AF_INET, socket.SOCK_STREAM, 6, "", (ip, 0))]
+
+    monkeypatch.setattr(socket, "getaddrinfo", getaddrinfo)
+    return lookups
+
+
+class _FakeStream(httpcore.AsyncNetworkStream):
+    """Serves one canned HTTP response; records the TLS parameters and the request bytes.
+    (httpcore passes `timeout` by keyword only; the fakes swallow it via `**_`.)"""
+
+    def __init__(self, net: dict, response: bytes) -> None:
+        self._net, self._response = net, response
+
+    async def start_tls(
+        self, ssl_context: ssl.SSLContext, server_hostname: str | None = None, **_: object
+    ) -> httpcore.AsyncNetworkStream:
+        self._net["tls"] = (server_hostname, ssl_context.check_hostname, ssl_context.verify_mode)
+        return self
+
+    async def write(self, buffer: bytes, **_: object) -> None:
+        self._net["sent"] += buffer
+
+    async def read(self, max_bytes: int, **_: object) -> bytes:
+        chunk, self._response = self._response, b""
+        return chunk
+
+    async def aclose(self) -> None:
+        pass
+
+
+def _fake_net(
+    monkeypatch: pytest.MonkeyPatch, response: bytes = b"HTTP/1.1 204 No Content\r\n\r\n"
+) -> dict:
+    """Stand in for httpcore's TCP connect. Like the real backend, a hostname that reaches it is
+    resolved (again) — that second lookup is the rebinding window. Records the address dialled."""
+    net: dict = {"connected": [], "tls": None, "sent": b""}
+
+    async def connect_tcp(self, host, port, **_):  # type: ignore[no-untyped-def]
+        try:
+            ip = str(ipaddress.ip_address(host))
+        except ValueError:
+            ip = socket.getaddrinfo(host, port)[0][4][0]
+        net["connected"].append((ip, port))
+        return _FakeStream(net, response)
+
+    monkeypatch.setattr(httpcore.AnyIOBackend, "connect_tcp", connect_tcp)
+    # An env proxy would resolve the hostname on its own side; delivery must not go through it.
+    monkeypatch.setenv("HTTPS_PROXY", "http://proxy.invalid:3128")
+    monkeypatch.setenv("https_proxy", "http://proxy.invalid:3128")
+    return net
+
+
+async def test_deliver_pins_vetted_ip_against_dns_rebinding(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from app.models.notification import NotificationTarget
+    from app.notifications.dispatcher import deliver
+
+    # The check's lookup answers a public IP; any later lookup answers the metadata endpoint.
+    lookups = _fake_dns(monkeypatch, {"rebind.example": [_PUBLIC_IP, "169.254.169.254"]})
+    net = _fake_net(monkeypatch)
+
+    assert await deliver(NotificationTarget(url="https://rebind.example/hook?x=1"), {"a": 1})
+
+    assert lookups == ["rebind.example"]  # resolved exactly once
+    assert net["connected"] == [(_PUBLIC_IP, 443)]  # the vetted IP, never the rebound one
+    # TLS still authenticates the original hostname: SNI + certificate/hostname verification.
+    assert net["tls"] == ("rebind.example", True, ssl.CERT_REQUIRED)
+    assert net["sent"].startswith(b"POST /hook?x=1 HTTP/1.1\r\n")
+    assert b"\r\nhost: rebind.example\r\n" in net["sent"].lower()
+
+
+async def test_deliver_refuses_host_resolving_to_private_ip(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from app.models.notification import NotificationTarget
+    from app.notifications.dispatcher import deliver
+
+    _fake_dns(monkeypatch, {"internal.example": ["10.0.0.7"]})
+    net = _fake_net(monkeypatch)
+    with pytest.raises(ValueError, match=r"non-public address \(10\.0\.0\.7\)"):
+        await deliver(NotificationTarget(url="https://internal.example/hook"), {})
+    assert net["connected"] == []
+
+
+async def test_deliver_does_not_follow_redirects(monkeypatch: pytest.MonkeyPatch) -> None:
+    from app.models.notification import NotificationTarget
+    from app.notifications.dispatcher import deliver
+
+    _fake_dns(monkeypatch, {"hooks.example": [_PUBLIC_IP]})
+    net = _fake_net(
+        monkeypatch,
+        b"HTTP/1.1 302 Found\r\nLocation: https://169.254.169.254/\r\nContent-Length: 0\r\n\r\n",
+    )
+    with pytest.raises(httpx.HTTPStatusError):
+        await deliver(NotificationTarget(url="https://hooks.example/hook"), {})
+    assert net["connected"] == [(_PUBLIC_IP, 443)]
+
+
+async def test_rejects_url_resolving_to_private_ip(
+    client: httpx.AsyncClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _fake_dns(monkeypatch, {"internal.example": ["10.0.0.7"], "hooks.example": [_PUBLIC_IP]})
+    admin = await login(client, "admin")
+    stack = await make_stack(client, admin, "notif-ssrf")
+    base = f"/api/v1/stacks/{stack}/notifications"
+    body = {"name": "x", "kind": "webhook", "url": "https://internal.example/x"}
+
+    r = await client.post(base, headers=admin, json=body)
+    assert r.status_code == 422, r.text
+    assert r.headers["content-type"] == "application/problem+json"
+    [err] = r.json()["errors"]
+    assert err["loc"] == ["body", "url"]
+    assert err["msg"] == (
+        "Value error, url host 'internal.example' resolves to a non-public address (10.0.0.7)"
+    )
+
+    ok = await client.post(base, headers=admin, json={**body, "url": "https://hooks.example/x"})
+    assert ok.status_code == 201, ok.text
+    r = await client.patch(
+        f"{base}/{ok.json()['id']}", headers=admin, json={"url": "https://internal.example/y"}
+    )
+    assert r.status_code == 422, r.text
+    assert r.json()["errors"][0]["loc"] == ["body", "url"]
+    listed = await client.get(base, headers=admin)
+    assert [t["url"] for t in listed.json()] == ["https://hooks.example/x"]  # unchanged
+
+
+def test_schema_validation_does_not_resolve_dns(monkeypatch: pytest.MonkeyPatch) -> None:
+    from pydantic import ValidationError
+
+    from app.notifications.schemas import NotificationCreate, NotificationUpdate
+
+    lookups = _fake_dns(monkeypatch, {"hooks.example": ["10.0.0.7"]})
+    NotificationCreate(name="x", kind="webhook", url="https://hooks.example/x")
+    NotificationUpdate(url="https://hooks.example/y")
+    assert lookups == []  # resolution is the routes' (async) job, never the validators'
+
+    # The cheap, DNS-free checks still run at parse time.
+    for url in ["http://hooks.example/x", "https://169.254.169.254/latest", "https://[::1]/x"]:
+        with pytest.raises(ValidationError):
+            NotificationCreate(name="x", kind="webhook", url=url)

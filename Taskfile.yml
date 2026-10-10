@@ -15,9 +15,11 @@ tasks:
     status: [test -f .env]
 
   dev:
-    desc: Full local stack (compose + migrations + seed)
+    desc: Full local stack (compose + S3 bootstrap + migrations + seed)
     deps: [env]
     cmds:
+      # S3 first: it writes the key into .env, which compose reads when it creates the api.
+      - task: s3
       - "{{.COMPOSE}} up -d --wait"
       - task: migrate
       - task: seed-fixtures
@@ -27,16 +29,20 @@ tasks:
     desc: Dev stack + Gitea (real webhooks)
     deps: [env]
     cmds:
+      - task: s3
       - "{{.COMPOSE}} --profile git up -d --wait"
       - task: migrate
+      - task: seed-fixtures
       - task: seed
 
   dev-aws:
     desc: Dev stack + LocalStack
     deps: [env]
     cmds:
+      - task: s3
       - "{{.COMPOSE}} --profile aws up -d --wait"
       - task: migrate
+      - task: seed-fixtures
       - task: seed
 
   dev-aws-creds:
@@ -45,9 +51,17 @@ tasks:
     cmds:
       # Adds the opt-in overlay so the worker keeps the ~/.aws mount across restarts — use this
       # instead of `task dev` whenever you want to plan against real AWS with your named profiles.
+      - task: s3
       - "{{.COMPOSE}} -f deploy/docker-compose.dev.aws.yml up -d --wait"
       - task: migrate
+      - task: seed-fixtures
       - task: seed
+
+  s3:
+    desc: Provision the dev S3 (Garage layout, access key into .env, bucket; idempotent)
+    env:
+      COMPOSE: "{{.COMPOSE}}"
+    cmds: [bash scripts/bootstrap-s3.sh]
 
   front-install:
     desc: Install front-end dependencies (idempotent)
@@ -87,6 +101,9 @@ tasks:
     desc: Tear everything down and start fresh
     cmds:
       - "{{.COMPOSE}} down -v"
+      # The pool token belongs to the wiped DB: drop it so the worker waits for the new seed
+      # instead of registering with a stale token before the migrations have run.
+      - rm -f .dev/pool.token
       - task: dev
 
   test:
@@ -115,6 +132,18 @@ tasks:
   psql:
     desc: Postgres shell
     cmds: ["{{.COMPOSE}} exec postgres psql -U stackd stackd"]
+
+  s3-ls:
+    desc: List the dev S3 bucket (managed states, saved plans), with the API's own S3 settings
+    cmds:
+      - >-
+        {{.COMPOSE}} exec -T api uv run python -c "import boto3; from app.config import get_settings;
+        s = get_settings(); c = boto3.client('s3', endpoint_url=s.s3_endpoint_url,
+        aws_access_key_id=s.s3_access_key, aws_secret_access_key=s.s3_secret_key,
+        region_name=s.aws_region);
+        pages = c.get_paginator('list_objects_v2').paginate(Bucket=s.s3_bucket);
+        [print(o['LastModified'].isoformat(), o['Size'], o['Key'], sep='  ')
+        for p in pages for o in p.get('Contents', [])]"
 
   docs:
     desc: Serve the user documentation locally (http://localhost:8001)

@@ -102,6 +102,38 @@ async def test_four_eyes_on_prod(client: httpx.AsyncClient) -> None:
     assert other_confirm.status_code == 200
 
 
+async def _alice_planned(client, wh, env_id) -> str:  # type: ignore[no-untyped-def]
+    alice = await login(client, "alice")
+    run = (await client.post(f"/api/v1/environments/{env_id}/runs", headers=alice, json={})).json()
+    assert (await client.post("/worker/v1/jobs/claim", headers=wh)).status_code == 200
+    await event(client, wh, run["id"], "phase_started", phase="planning")
+    await event(client, wh, run["id"], "phase_finished", result=CHANGES)
+    return str(run["id"])
+
+
+async def test_four_eyes_on_a_protected_env(client: httpx.AsyncClient) -> None:
+    # `protected` forces confirmation AND four-eyes (CLAUDE.md §4, SPECS §2.4), on a tier that
+    # doesn't require it (the seeded dev). Who may confirm still comes from the tier only.
+    alice = await login(client, "alice")  # approver, dev in her tiers
+    admin = await login(client, "admin")
+    # One worker per env: a confirmed run stays reserved for the worker that planned it (§7.2).
+    wh_open = await register_worker(client, admin, "pool-open-4eyes")
+    wh_protected = await register_worker(client, admin, "pool-protected-4eyes")
+    stack = await make_stack(client, admin, "protected-4eyes-stack")
+    open_env = await make_env(client, admin, stack, "dev", "dev")
+    protected_env = await make_env(client, admin, stack, "dev-protected", "dev", protected=True)
+
+    run_id = await _alice_planned(client, wh_open, open_env)  # control: a plain dev env
+    assert (await client.post(f"/api/v1/runs/{run_id}/confirm", headers=alice)).status_code == 200
+
+    run_id = await _alice_planned(client, wh_protected, protected_env)
+    self_confirm = await client.post(f"/api/v1/runs/{run_id}/confirm", headers=alice)
+    assert self_confirm.status_code == 403, self_confirm.text
+    assert "4-eyes" in self_confirm.json()["detail"]
+    other_confirm = await client.post(f"/api/v1/runs/{run_id}/confirm", headers=admin)
+    assert other_confirm.status_code == 200, other_confirm.text
+
+
 async def test_autodeploy_and_warn_forces_unconfirmed(client: httpx.AsyncClient) -> None:
     admin = await login(client, "admin")
     wh = await register_worker(client, admin, "pool-auto")
@@ -191,3 +223,40 @@ async def test_repo_token_is_masked_in_claim(client: httpx.AsyncClient) -> None:
     payload = (await client.post("/worker/v1/jobs/claim", headers=wh)).json()
     assert payload["repo_credentials"]["token"] == "ghp_supersecrettoken"
     assert "ghp_supersecrettoken" in payload["mask_values"]  # so the agent redacts it in logs
+
+
+async def test_claim_payload_carries_credential_phase(client: httpx.AsyncClient) -> None:
+    """The claim payload names the job's credential phase explicitly (§7.2): "apply" for a job
+    holding apply credentials (an apply, a mutating command), "plan" otherwise. The worker sizes a
+    command's time budget from it rather than from its own copy of the API's command lists."""
+    admin = await login(client, "admin")
+    wh = await register_worker(client, admin, "pool-cred-phase")
+    stack = await make_stack(client, admin, "cred-phase-stack")
+    env_id = await make_env(client, admin, stack, "dev", "dev")
+
+    run = (await client.post(f"/api/v1/environments/{env_id}/runs", headers=admin, json={})).json()
+    plan = (await client.post("/worker/v1/jobs/claim", headers=wh)).json()
+    assert (plan["phase"], plan["cred_phase"]) == ("plan", "plan")
+    await event(client, wh, run["id"], "phase_started", phase="planning")
+    await event(client, wh, run["id"], "phase_finished", result=CHANGES)
+    confirm = await client.post(f"/api/v1/runs/{run['id']}/confirm", headers=admin)
+    assert confirm.status_code == 200, confirm.text
+    apply = (await client.post("/worker/v1/jobs/claim", headers=wh)).json()
+    assert (apply["phase"], apply["cred_phase"]) == ("apply", "apply")
+    await event(client, wh, run["id"], "phase_finished")  # run finished → the env is free again
+
+    for command, args, cred_phase in (
+        ("output", [], "plan"),  # read-only
+        ("state rm", ["aws_s3_bucket.old"], "apply"),  # mutating
+    ):
+        cmd = await client.post(
+            f"/api/v1/environments/{env_id}/commands",
+            headers=admin,
+            json={"command": command, "args": args},
+        )
+        assert cmd.status_code == 201, cmd.text
+        job = (await client.post("/worker/v1/jobs/claim", headers=wh)).json()
+        assert job["job_id"] == cmd.json()["id"]
+        assert (job["phase"], job["cred_phase"]) == ("command", cred_phase), command
+        await event(client, wh, job["job_id"], "phase_started", phase="running")
+        await event(client, wh, job["job_id"], "phase_finished", result={"command": command})

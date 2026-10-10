@@ -21,12 +21,12 @@ def test_repo_environ_strips_cloud_creds(monkeypatch) -> None:
     monkeypatch.setenv("AWS_SECRET_ACCESS_KEY", "akia-secret")
     monkeypatch.setenv("AWS_SESSION_TOKEN", "tok")
     monkeypatch.setenv("AZURE_CLIENT_SECRET", "azp")
-    monkeypatch.setenv("PROJECT_NAME", "demo")
+    monkeypatch.setenv("PATH", "/usr/bin:/bin")
     env = _repo_environ()
     assert "AWS_SECRET_ACCESS_KEY" not in env
     assert "AWS_SESSION_TOKEN" not in env
     assert "AZURE_CLIENT_SECRET" not in env
-    assert env.get("PROJECT_NAME") == "demo"
+    assert env.get("PATH") == "/usr/bin:/bin"
 
 
 def test_repo_hook_sees_neither_cloud_nor_sensitive_env(tmp_path: Path) -> None:

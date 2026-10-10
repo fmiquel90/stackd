@@ -3,7 +3,7 @@ from __future__ import annotations
 import base64
 import json
 import uuid
-from typing import Annotated
+from typing import Annotated, Any
 
 import jwt
 from fastapi import APIRouter, Depends, Request, Response
@@ -14,10 +14,11 @@ from app.audit import record_audit
 from app.auth.deps import CurrentUser, require_role
 from app.config import get_settings
 from app.db import get_session
-from app.enums import AuditActorKind, Role
+from app.enums import ACTIVE_STATES, AuditActorKind, Role, RunState
 from app.errors import ProblemException
 from app.ids import uuid7
 from app.models.environment import Environment
+from app.models.run import Run
 from app.models.state import StateLock, StateVersion
 from app.spaces import guard_env_id
 from app.statebackend.store import get_object, put_object, state_key
@@ -44,9 +45,54 @@ def _require_env(claims: dict, env_id: uuid.UUID) -> None:
         raise ProblemException(403, "Forbidden", "Token not scoped to this environment.")
 
 
-def _require_rw(claims: dict) -> None:
+def _require_rw(claims: dict[str, Any]) -> None:
+    """POST: only an `rw` token writes state — a job holding apply credentials (an apply or a
+    mutating command, §4.3) or a run-less import session (§11.4). A plan job's `plan` token and a
+    `ro` token never do, so no plan (nor a stale/leaked plan token) can write state (§11.2)."""
     if claims.get("scope") != "rw":
-        raise ProblemException(403, "Read-only", "This run holds a read-only state token.")
+        raise ProblemException(403, "Read-only", "This state token cannot write state.")
+
+
+def _require_lock_scope(claims: dict[str, Any]) -> None:
+    """LOCK/UNLOCK: `tofu plan` takes the lock, so a plan job's `plan` token may lock as well as an
+    `rw` one. A `ro` token (proposed run, read-only command) is handed no lock address and never
+    locks, so it must not lock nor unlock (§11.2)."""
+    if claims.get("scope") not in ("plan", "rw"):
+        raise ProblemException(403, "Read-only", "This state token cannot lock state.")
+
+
+# A plan job runs while its run is preparing / planning / checking (§7.2): its `plan` token may
+# take the lock only then, never while that same run waits for confirmation or applies.
+_PLAN_PHASE_STATES = frozenset({RunState.preparing, RunState.planning, RunState.checking})
+
+
+async def _require_run_phase(session: AsyncSession, claims: dict[str, Any]) -> None:
+    """Defense in depth (§4.2/§11.2): a run-scoped token writes state or takes the lock only while
+    its run is active — and a `plan` token only during its run's plan phase. Once the run is
+    terminal (e.g. failed as worker_lost and its env handed to the next run), a partitioned
+    worker's still-unexpired token must not write over the new run's state. FOR SHARE: a
+    concurrent transition to terminal waits for this write instead of interleaving with it.
+    Run-less import-session tokens (§11.4) are bounded by their own short TTL. UNLOCK stays ungated
+    so a reclaimed run can still release the lock it holds, not strand it."""
+    run_id = claims.get("run_id")
+    if run_id is None:
+        return
+    state = (
+        await session.execute(
+            select(Run.state).where(Run.id == uuid.UUID(run_id)).with_for_update(read=True)
+        )
+    ).scalar_one_or_none()
+    if claims.get("scope") == "plan":
+        if state not in _PLAN_PHASE_STATES:
+            raise ProblemException(
+                403,
+                "Plan phase over",
+                "This plan job's state token is only valid during its run's plan phase.",
+            )
+    elif state not in ACTIVE_STATES:
+        raise ProblemException(
+            403, "Run not active", "This state token's run has ended; it can no longer write."
+        )
 
 
 async def _latest(session: AsyncSession, env_id: uuid.UUID) -> StateVersion | None:
@@ -79,10 +125,14 @@ async def post_state(
     claims = _token_claims(request)
     _require_env(claims, env_id)
     _require_rw(claims)
+    await _require_run_phase(session, claims)
 
+    # While the state is locked only its holder writes, naming the lock in `?ID=` as tofu does when
+    # it holds one: no ID or another one gets the holder, like a LOCK conflict. Unlocked state takes
+    # an ID-less write (`tofu -lock=false`).
     lock = await session.get(StateLock, env_id)
-    if lock is not None and ID and lock.lock_id != ID:
-        raise ProblemException(423, "Locked", "Lock ID mismatch.")
+    if lock is not None and ID != lock.lock_id:
+        return _locked(lock)
 
     body = await request.body()
     doc = json.loads(body)
@@ -115,19 +165,37 @@ async def post_state(
     return Response(status_code=200)
 
 
+def _lock_id(info: object) -> str | None:
+    """The `ID` of a LOCK/UNLOCK body (tofu's lock info), or None if it carries none."""
+    lock_id = info.get("ID") if isinstance(info, dict) else None
+    return lock_id if isinstance(lock_id, str) and lock_id else None
+
+
+def _locked(holder: StateLock) -> Response:
+    """423 + the holder's lock info: the http backend's answer to a lock conflict (tofu prints the
+    body as the lock holder)."""
+    return Response(
+        content=json.dumps(holder.info or {}), status_code=423, media_type="application/json"
+    )
+
+
 @tf_router.api_route("/{env_id}/lock", methods=["LOCK"])
 async def lock_state(env_id: uuid.UUID, request: Request, session: DbSession) -> Response:
     claims = _token_claims(request)
     _require_env(claims, env_id)
-    _require_rw(claims)
+    _require_lock_scope(claims)
+    await _require_run_phase(session, claims)
     info = json.loads(await request.body() or b"{}")
+    lock_id = _lock_id(info)
+    if lock_id is None:
+        # Its holder releases a lock by presenting its ID (UNLOCK below): an ID-less lock could
+        # only be force-unlocked. tofu always sends one.
+        raise ProblemException(400, "Lock ID required", "The lock info carries no ID.")
 
     existing = await session.get(StateLock, env_id)
     if existing is not None:
-        return Response(
-            content=json.dumps(existing.info or {}), status_code=423, media_type="application/json"
-        )
-    session.add(StateLock(environment_id=env_id, lock_id=info.get("ID", ""), info=info))
+        return _locked(existing)
+    session.add(StateLock(environment_id=env_id, lock_id=lock_id, info=info))
     await session.commit()
     return Response(status_code=200)
 
@@ -136,13 +204,16 @@ async def lock_state(env_id: uuid.UUID, request: Request, session: DbSession) ->
 async def unlock_state(env_id: uuid.UUID, request: Request, session: DbSession) -> Response:
     claims = _token_claims(request)
     _require_env(claims, env_id)
-    _require_rw(claims)  # a read-only token (proposed runs) never locks, so it must not unlock
+    _require_lock_scope(claims)  # a `ro` token never locks, so it must not unlock
     info = json.loads(await request.body() or b"{}")
     existing = await session.get(StateLock, env_id)
     if existing is None:
         return Response(status_code=200)
-    if info.get("ID") and existing.lock_id and info["ID"] != existing.lock_id:
-        raise ProblemException(423, "Locked", "Lock ID mismatch.")
+    # Only the holder releases its lock: tofu's UNLOCK body is the lock info it LOCKed with (and
+    # `tofu force-unlock <id>` sends that id), so a missing or different ID is another job's
+    # unlock — refused like a LOCK conflict. An admin breaks a lock with `force_unlock` below.
+    if _lock_id(info) != existing.lock_id:
+        return _locked(existing)
     await session.delete(existing)
     await session.commit()
     return Response(status_code=200)
@@ -229,17 +300,21 @@ async def create_import_session(env_id: uuid.UUID, user: CurrentUser, session: D
         "username": "env",
         "password": token,
     }
-    init_args = " ".join(f'-backend-config="{k}={v}"' for k, v in backend.items())
+    # Passed as TF_HTTP_* env, not -backend-config: tofu persists -backend-config values (the
+    # token included) into .terraform/, while env settings never touch disk.
+    env_args = " ".join(f'TF_HTTP_{k.upper()}="{v}"' for k, v in backend.items())
     return {
         "expires_in": _IMPORT_TTL_SECONDS,
         "current_serial": latest.serial if latest else None,
         "backend": {"type": "http", **backend},
         "instructions": [
-            'Replace your stack\'s backend block with: terraform { backend "http" {} }',
+            "In a local checkout only (do not commit it), temporarily replace your stack's "
+            'backend block with: terraform { backend "http" {} }',
             f"Run once to migrate your current state into Stackd:\n"
-            f"  tofu init -migrate-state {init_args}",
-            "After it succeeds, future runs use the managed backend automatically. The token "
-            f"expires in {_IMPORT_TTL_SECONDS // 60} minutes.",
+            f"  {env_args} tofu init -migrate-state",
+            "Then remove the backend block from the repository: Stackd injects its own backend on "
+            "every run, and a committed backend block makes runs fail at init. The token expires "
+            f"in {_IMPORT_TTL_SECONDS // 60} minutes.",
         ],
     }
 

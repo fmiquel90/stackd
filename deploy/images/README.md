@@ -1,9 +1,11 @@
 # Runner images (OpenTofu / Terraform)
 
-Minimal, hardened images that carry **one IaC tool + git** for Stackd's prod Docker runner (the
-worker executes `plan`/`apply` inside one of these per run). The dev worker image
-(`worker/Dockerfile.dev`) bundles OpenTofu directly; these are the standalone, production-grade
-runners.
+Minimal, hardened images that carry **one IaC tool + git**, built for Stackd's prod `docker`
+runner, where the worker is to execute each job's commands (tofu and hooks) inside one of these
+(SPECS §7.4). **That runner is not implemented yet**: whatever `STACKD_RUNNER` says, the agent runs
+every command as a local subprocess, with the `tofu`/`terraform` on its own `PATH`, and uses none of
+these images. The dev worker image (`worker/Dockerfile.dev`) bundles OpenTofu directly; these are
+the standalone, production-grade runner images, ready for when the runner exists.
 
 ## What they follow
 

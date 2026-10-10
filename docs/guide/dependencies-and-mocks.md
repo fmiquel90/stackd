@@ -30,9 +30,15 @@ other (primary/secondary region pattern). To wire same-named environments across
 stacks in bulk, use the helper:
 
 ```bash
-curl -s -X POST localhost:8000/api/v1/stacks/$STACK_ID/dependencies/link-by-name \
-  -H "Authorization: Bearer $TOKEN"
+curl -s -X POST localhost:8000/api/v1/stacks/$APP_STACK_ID/dependencies/link-by-name \
+  -H "Authorization: Bearer $TOKEN" -H 'content-type: application/json' \
+  -d '{"upstream_stack_id": "'"$NETWORK_STACK_ID"'", "trigger_policy": "on_output_change"}'
 ```
+
+It links each environment of the stack in the path to the same-named environment of
+`upstream_stack_id`, skipping pairs already linked and any edge that would close a
+cycle, and returns `{"created": N}` — running it twice is harmless. Add the
+`output_references` on each edge afterwards.
 
 ## How inputs resolve
 
@@ -77,19 +83,23 @@ walks the outgoing edges and triggers downstream runs (`type=tracked`,
 | `always` | downstream triggered on every finished upstream apply |
 | `on_output_change` | triggered only if the resolved `value_hash` differs from the downstream's last run |
 
-A downstream with multiple parents fires only when **all** its run-group parents have
-finished; a failed parent stops that branch (`run_group = partial_failure`).
+Each finished upstream apply triggers its downstream runs on its own: a downstream with two
+parents can run twice. Waiting for **all** parents of a run group, and stopping a branch when a
+parent fails, are specified but not implemented yet (SPECS §9.2). Only a finished apply cascades:
+a failed run, including one whose `after_apply` hook failed, triggers nothing.
 
 !!! warning "Protections are never bypassed"
-    The cascade never auto-confirms. A **protected** downstream still stops at
-    `unconfirmed` and waits for a human — see [Runs & approvals](runs-and-approvals.md).
+    A cascade run is routed like any other plan. It auto-confirms only on an `autodeploy`,
+    unprotected environment, with no mock and no `warn` check; a **protected** downstream always
+    stops at `unconfirmed` and waits for a human — see [Runs & approvals](runs-and-approvals.md).
 
-Launch a whole subgraph at once with `with_downstream=true`; the root starts and
-subsequent levels follow via cascade:
+Launch a whole subgraph at once with `with_downstream: true` in the trigger body; the
+root starts and subsequent levels follow via cascade:
 
 ```bash
-curl -s -X POST "localhost:8000/api/v1/environments/$NETWORK_DEV/runs?with_downstream=true" \
-  -H "Authorization: Bearer $TOKEN"
+curl -s -X POST localhost:8000/api/v1/environments/$NETWORK_DEV/runs \
+  -H "Authorization: Bearer $TOKEN" -H 'content-type: application/json' \
+  -d '{"with_downstream": true}'
 ```
 
 ## Inspect
@@ -97,8 +107,11 @@ curl -s -X POST "localhost:8000/api/v1/environments/$NETWORK_DEV/runs?with_downs
 ```bash
 curl -s localhost:8000/api/v1/environments/$APP_DEV/outputs   -H "Authorization: Bearer $TOKEN"
 curl -s localhost:8000/api/v1/graph                            -H "Authorization: Bearer $TOKEN"
-curl -s localhost:8000/api/v1/run-groups/$GROUP_ID             -H "Authorization: Bearer $TOKEN"
 ```
+
+`/graph` only shows the environments and edges of the spaces you can see. There is no
+run-group endpoint yet: follow a cascade on the graph page, or through the downstream
+environments' runs (`triggered_by: "dependency"`).
 
 To remove an edge: `DELETE /api/v1/dependencies/{id}`.
 

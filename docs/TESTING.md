@@ -1,7 +1,7 @@
 # TESTING.md — how Stackd is tested
 
 > The test suite **is** the functional contract. This document explains the testing philosophy,
-> how to run everything, and what every test asserts. It complements `DEV.md` (environment) and
+> how to run everything, and what each test file covers. It complements `DEV.md` (environment) and
 > `SPECS.md` (the behaviour being verified). If a test and this doc disagree, the test wins —
 > update the doc.
 
@@ -15,7 +15,7 @@
   `one_active_run_per_env` partial unique index, `FOR UPDATE … SKIP LOCKED`, `LISTEN/NOTIFY`,
   `uuidv7()`, JSONB `<@` containment, cascade FKs.
 - **Real AWS surfaces are mocked with [moto](https://docs.getmoto.org/)** (S3 for the state
-  backend, STS for `AssumeRoleWithWebIdentity`). Everything else is real.
+  backend and the saved plans, STS for `AssumeRoleWithWebIdentity`). Everything else is real.
 - **Three rings of confidence:**
   1. **Unit** — pure logic with no I/O (e.g. `can_apply`, the masker, plan-summary parsing).
   2. **Integration** — the API exercised over HTTP via an in-process ASGI client against the real
@@ -32,30 +32,33 @@
 All commands go through the [Taskfile](https://github.com/fmiquel90/stackd/blob/main/Taskfile.yml):
 
 ```bash
-task test     # unit + integration (testcontainers) + front vitest
+task test     # API unit + integration (testcontainers) + front vitest
 task e2e      # live end-to-end scenario (brings up the stack, seeds, runs api/e2e)
-task lint     # ruff check + ruff format --check
+task lint     # ruff check + ruff format --check (api)
 ```
 
 Under the hood:
 
 | Task | Command | Needs |
 |---|---|---|
-| `task test` | `docker compose exec -T api uv run pytest` then `cd front && pnpm test --run` | compose `api` up |
-| `task e2e` | `docker compose exec -T api uv run pytest e2e -v` (deps: `dev`) | full stack **+ a live worker** |
+| `task test` | `docker compose exec -T api uv run pytest` then `cd front && pnpm test` (`vitest run`) | compose `api` up, Docker for testcontainers |
+| `task e2e` | `docker compose exec -T api uv run pytest e2e -v` (deps: `dev`) | full stack **+ a live worker** + the provisioned dev S3 |
 
-Run a subset directly inside the api container:
+`task test` does **not** run the worker suite. Run it directly — it needs no DB and no stack:
+
+```bash
+cd worker && uv run pytest
+```
+
+Run an API subset inside the api container:
 
 ```bash
 docker compose -f deploy/docker-compose.dev.yml exec -T api uv run pytest tests/test_runs.py -v
 docker compose -f deploy/docker-compose.dev.yml exec -T api uv run pytest tests/test_notifications.py::test_dispatcher_delivers_to_matching_targets
 ```
 
-Worker tests are standalone (no DB):
-
-```bash
-cd worker && uv run pytest
-```
+CI (`.github/workflows/ci.yml`) runs ruff, pytest and mypy for the API, ruff and pytest for the
+worker, and typecheck + vitest + build for the front; `e2e.yml` runs the live scenario.
 
 ### pytest configuration (`api/pyproject.toml`)
 
@@ -81,8 +84,10 @@ throwaway one). `task e2e` points pytest at `e2e` explicitly.
 | Fixture | Scope | What it does |
 |---|---|---|
 | `_database` | session | Starts a `postgres:18` testcontainer (asyncpg driver), sets `DATABASE_URL`, a JWT secret, a 32-byte encryption key, `STACKD_DEV_AUTH=true`, `STACKD_ALLOWED_DOMAINS`, an moto-friendly `AWS_REGION`, **disables the scheduler** (`STACKD_RUN_SCHEDULER=false`) so it can't fail runs mid-assertion, then runs `alembic upgrade head`. |
-| `_seed` | session, autouse | Calls `app.seed.seed()` to ensure the `default`/`demo` spaces exist before any test. |
+| `_seed` | session, autouse | Calls `app.seed.seed()` so the `default`/`demo` spaces and the tier catalog exist before any test. |
 | `client` | function | An `httpx.AsyncClient` over `ASGITransport(app)` (in-process, no socket). **Deletes all `runs` before each test** so the global claim queue starts clean. Enters the app lifespan context. |
+
+Tests that need the scheduler's tasks (worker loss, head polling, drift) call them directly.
 
 ### `api/tests/conftest_phase2.py` — run/worker helpers
 
@@ -99,156 +104,71 @@ throwaway one). `task e2e` points pytest at `e2e` explicitly.
 | Fixture | Difference from the unit harness |
 |---|---|
 | `http` | Real `httpx.AsyncClient` over **HTTP** to `STACKD_E2E_BASE_URL` (default `http://localhost:8000`) — not ASGI. Talks to the running api container, which shares Postgres with the live worker. |
-| `envs` | Resolves the seeded demo env ids by `<stack>/<env>` name **straight from the DB** (`SessionLocal`), because the demo stacks live in the `demo` space which the public API doesn't list. Asserts the demo graph was seeded. |
+| `graph` | Builds a **throwaway copy** of the seeded demo graph through the public API, as admin, in the `demo` space (`e2e-<MMDDhhmmss>-<tag>-network` / `-app`: same repos, tiers, settings, variable-set attachments, dependency + mock). It reads the seed straight from the DB (the API hides mock values). Teardown ends what is still active, then deletes the copy if the scenario passed; otherwise it keeps it and names it in a warning. Every run starts from never-applied environments, so the scenario is re-runnable without `task reset` (DEV §7). |
 
 ### `worker/tests/` — no conftest
 
-Worker tests import agent modules directly (`agent.diagnostics`, `agent.masking`, `agent.main`);
-no DB, no network.
+Worker tests import agent modules directly (`agent.main`, `agent.workspace`, `agent.runner`,
+`agent.masking`, `agent.diagnostics`…) and fake the API client where a job is driven end to end.
+No DB and no external network: the clone tests run real `git` against local repositories (one
+dials a closed loopback port, `test_hook_secrets.py` serves one over a loopback HTTP server). Hooks
+run for real (`sh -c`); tofu is a stand-in script, except in the one test that runs the real
+OpenTofu when `tofu` is on the `PATH` (skipped otherwise).
 
 ---
 
-## 4. Test map (what each test asserts)
+## 4. Test map (what each file covers)
 
-### API — unit & integration (`api/tests/`, 92 tests)
+One line per file. The test names are descriptive: `uv run pytest --collect-only -q` lists them
+all. Counts in parentheses include parametrized cases and drift as tests are added — see §5.
 
-**`test_auth.py` (5)** — auth flow & session security
-- `test_dev_login_personas` — persona login returns the user (role/tier) + a usable access token.
-- `test_refresh_requires_csrf` — `/refresh` rejects a request missing the `X-CSRF-Token` (double-submit).
-- `test_refresh_rotation_and_reuse_detection` — each refresh rotates the token; replaying an old one → 401 and the whole family is revoked.
-- `test_onboarding_flag_persists` — `POST /auth/me/onboarded` persists `onboarded=true`.
-- `test_unauthenticated_me` — `GET /auth/me` unauthenticated → 401 problem+json.
+### API — unit & integration (`api/tests/`)
 
-**`test_audit.py` (2)** — the who-did-what journal
-- `test_audit_filter_and_export` — mutations land in `/audit`; filtering by action works; CSV export has the right columns.
-- `test_audit_export_admin_only` — a non-admin gets 403 on export.
-
-**`test_permissions.py` (6)** — `can_apply` logic (pure, no HTTP)
-- `test_approver_can_apply_allowed_tier` — approver whose `allowed_tiers` contains the env tier may apply.
-- `test_writer_cannot_confirm` — a writer is refused (apply needs approver+); the reason mentions the role.
-- `test_membership_not_linear` — a non-contiguous set `{dev, prod}` applies dev/prod, refused on staging.
-- `test_no_tiers_cannot_apply` — empty `allowed_tiers` → denied.
-- `test_custom_tier` — a custom tier (`qa`) in the set is honored.
-- `test_destroy_requires_can_destroy` — destroy needs `can_destroy` on top of `can_apply`.
-
-**`test_runs.py` (7)** — the run lifecycle & its gates
-- `test_full_run_lifecycle` — trigger → claim → plan events → unconfirmed → confirm → apply → finished.
-- `test_one_active_run_per_env_under_concurrency` — two workers claim the same env → exactly one wins, the loser is netted by `23505`.
-- `test_confirm_blocked_by_tier` — confirming a tier not in one's `allowed_tiers` → 403.
-- `test_four_eyes_on_prod` — the triggerer can't confirm their own prod run; a second person can.
-- `test_autodeploy_and_warn_forces_unconfirmed` — autodeploy auto-confirms, but a `warn` check forces `unconfirmed`.
-- `test_confirm_rejected_when_not_unconfirmed` — confirming a non-`unconfirmed` run → 409.
-- `test_mock_block` — a run with `used_mocks=true` can't be confirmed (reason mentions the mock).
-
-**`test_commands.py` (4)** — ad-hoc command runs (§4.3)
-- `test_command_allowlist_rejected` — a non-allowlisted command (e.g. `apply`) → 400.
-- `test_readonly_command_allowed_for_writer` — a writer may run a read-only command (`output`) → 201, `type=command`.
-- `test_mutating_command_requires_can_apply` — a writer is refused `state rm` (403); an admin is allowed.
-- `test_command_run_lifecycle` — claim carries `phase=command` + the subcommand; `running → finished`; audited (`run.command_triggered`/`run.command_executed`).
-
-**`test_promote.py` (3)** — environment promotion (§9.7)
-- `test_promote_carries_the_applied_commit` — promote dev→staging creates a tracked run pinned to dev's last applied commit; audited `run.promoted`.
-- `test_promote_requires_an_applied_source` — promoting from an env with nothing applied → 409.
-- `test_promote_rejects_cross_stack` — promoting between different stacks → 400.
-
-**`test_dependencies.py` (5)** — cross-env outputs, mocks, cascade
-- `test_mock_used_and_blocks_apply` — no real upstream output → the mock is injected, `used_mocks=true`, apply blocked.
-- `test_real_value_beats_mock` — a real output overrides the mock.
-- `test_missing_upstream_without_mock_fails_run` — no output and no mock → the run fails (`missing_upstream_output`).
-- `test_anti_cycle` — creating a dependency cycle → 422.
-- `test_cascade_triggers_downstream` — an upstream apply cascades a downstream run carrying the real output.
-
-**`test_hooks.py` (2)** — platform hooks
-- `test_platform_hook_crud_and_appears_in_claim` — a created hook shows up in the claim payload tagged platform; PATCH/DELETE work.
-- `test_hooks_require_writer` — writer may manage hooks (reader is gated by the permission model).
-
-**`test_state_backend.py` (7)** — Terraform HTTP state backend + import (moto S3)
-- `test_state_lock_post_get_unlock` — LOCK→409-on-second→POST→serial-regression-409→GET→UNLOCK.
-- `test_readonly_token_cannot_write` — a `ro` state token (proposed runs) can't POST state → 403.
-- `test_state_token_scoped_to_env` — a token scoped to env X can't touch env Y → 403.
-- `test_readonly_token_cannot_unlock` — a `ro` token is refused on UNLOCK → 403 (it never locks).
-- `test_import_session_adopts_existing_state` — an admin import session mints a backend config; the LOCK/POST/UNLOCK migration stores a `state_version` with no originating run (§11.4).
-- `test_import_session_requires_admin` — a non-admin can't mint an import session → 403.
-- `test_import_session_requires_managed_state` — importing into a `managed_state=false` env → 409.
-
-**`test_oidc.py` (4)** — workload credentials (§10)
-- `test_issuer_metadata_and_jwks` — discovery doc + JWKS endpoints serve RSA keys.
-- `test_claim_payload_signs_plan_token` — a plan claim carries a signed token with `sub=run:<tier>:<stack>:plan`, verifiable against JWKS.
-- `test_apply_uses_apply_role` — apply uses the apply role ARN, not the plan one.
-- `test_assume_role_against_moto` — the cloud-integration test endpoint assumes a role under moto STS.
-
-**`test_webhooks.py` (3)** — GitHub ingestion (§5)
-- `test_push_updates_head_and_triggers` — a valid-HMAC push advances `head_sha` and triggers a tracked run.
-- `test_invalid_signature_rejected` — a bad signature → 401.
-- `test_pull_request_creates_proposed_run` — a PR opens a proposed (plan-only) run at the PR head sha.
-
-**`test_users.py` (2)** — user administration
-- `test_non_admin_cannot_list_users` — listing users is admin-only.
-- `test_admin_updates_tier_is_audited` — changing tier/destroy emits the matching audit actions.
-
-**`test_variables_api.py` (4)** — 5-layer resolution & secrets
-- `test_five_layer_resolution_and_provenance` — env > env-attached set > stack > auto-attach set, each with the right provenance and `TF_VAR_` injection name.
-- `test_sensitive_variable_is_write_only` — sensitive values are masked everywhere in API responses.
-- `test_attached_set_delete_requires_detach` — deleting an attached set → 409 until detached.
-- `test_protected_env_forces_no_autodeploy` — `protected=true` forces `autodeploy=false`.
-
-**`test_secret_sources.py` (7)** — external secret references & fallback (§15)
-- `test_reference_resolved_live_is_masked` — a referenced variable resolves to the live provider value, lands in `tfvars`, is added to `mask_values`, provenance `secret:<source>`.
-- `test_static_fallback_used_and_blocks_apply` — provider down → the static fallback value is used, `used_secret_fallback=true`; confirm is blocked until `allow_fallback_apply` is turned on.
-- `test_error_mode_fails_the_run` — provider down with `mode=error` → the claim returns 204 and the run is `failed` (fail-closed).
-- `test_break_glass_override` — a `break_glass` reference uses the operator's inline `secret_overrides` value when the provider is down; provenance `secret_override:<source>`.
-- `test_override_requires_apply_permission` — a writer (no apply right) supplying `secret_overrides` → 403.
-- `test_source_crud_hides_bootstrap_and_gates_writes` — a writer can't create a source (admin-only); the bootstrap credential is never serialized.
-- `test_source_in_use_cannot_be_deleted` — deleting a source a variable still references → 409 (FK RESTRICT).
-
-**`test_tiers.py` (4)** — configurable tier catalog (§2.4)
-- `test_tier_name_charset_rejected` — names with `:`/whitespace/uppercase → 422 (OIDC `sub` safety).
-- `test_update_user_rejects_unknown_tier` — `allowed_tiers` validated against the catalog → 422.
-- `test_delete_tier_strips_user_grants` — deleting a tier removes its name from every user's set (no resurrection).
-- `test_delete_tier_in_use_blocked` — deleting a tier an env references → 409.
-
-**`test_inbox.py` (4)** — in-app notification center (§17)
-- `test_approval_request_fans_out_to_approvers` — a run reaching `unconfirmed` notifies eligible approvers (not the triggerer).
-- `test_terminal_notifies_the_triggerer` — a finished run notifies its human triggerer.
-- `test_comment_reply_and_mention_notify` — a reply notifies the root author; an `@mention` notifies the mentioned user.
-- `test_feed_is_per_user_and_mark_read` — the feed is per-user; the triggerer isn't approval-notified for their own run; mark-read clears unread.
-
-**`test_comments.py` (6)** — plan-review comments (§16)
-- `test_comment_thread_and_anchor` — general + anchored (`plan_line`) comment + a reply; listed together.
-- `test_anchor_validation` — a `plan_line` anchor missing `phase`/`seq` → 422.
-- `test_no_nested_replies` — replying to a reply → 422 (threads stay one level deep).
-- `test_resolve_and_edit_permissions` — non-author can't edit the body; an approver may resolve; author edits own.
-- `test_delete_only_author_or_admin` — an approver ≠ author is refused (403); an admin can delete.
-- `test_delete_thread_with_replies_guarded` — a non-admin can't delete a root carrying others' replies (409); an admin can.
-
-**`test_notifications.py` (4)** — outbound notifications
-- `test_notification_target_crud` — create/list/patch/delete a target (default `on_states=[unconfirmed, failed]`); each mutation audited.
-- `test_rejects_unsupported_state` — an `on_states` value that never fires → 422.
-- `test_outbox_enqueued_on_transition` — a run reaching `unconfirmed` enqueues exactly one outbox row.
-- `test_dispatcher_delivers_to_matching_targets` — only targets whose `on_states` match are delivered; the row is marked sent (second drain is a no-op).
-
-**`test_observability.py` (3)** — health & logs
-- `test_request_id_header` — every response carries `x-request-id`.
-- `test_health` — `/health` reports db + worker + run counts.
-- `test_logs_admin_only_and_structured` — `/logs` is admin-only and returns structured records.
-
-**`test_worker_diagnostics.py` (2)** — the downward command channel
-- `test_diagnostics_command_roundtrip` — an admin queues diagnostics; the worker picks it up on heartbeat, posts a read-only bundle (tools, disk, env var *names*), the admin reads the result.
-- `test_diagnostics_admin_only` — non-admins can't request diagnostics.
-
-**`test_scheduler.py` (1)** — background reconciliation
-- `test_worker_lost_fails_active_run` — a run on a worker whose heartbeat lapsed is transitioned to `failed (worker_lost)`.
-
-**`test_ws_notify.py` (1)** — the live-update bridge
-- `test_transition_emits_listen_notify` — each `transition()` emits a `LISTEN/NOTIFY` signal on the run channel with the new state.
-
-**`test_seed.py` (1)** — demo data
-- `test_seed_demo_is_idempotent` — `seed_demo()` run twice yields exactly the DEV §7 graph (2 stacks, 4 envs, 2 deps, the protected/4-eyes prod env, the `local` pool) with no duplicates; cleans up after itself so `/graph` stays unpolluted for other tests.
+| File | Covers |
+|---|---|
+| `test_auth.py` (5) | Dev-login personas; `/refresh` CSRF double-submit; refresh rotation and reuse detection (the family is revoked); onboarding flag; unauthenticated `/me` → 401 problem+json. |
+| `test_permissions.py` (9) | `can_apply` (pure): approver + tier set, writer refused, non-contiguous sets, empty set, custom tier, `can_destroy`; a space membership overrides the instance tiers, role and destroy right. |
+| `test_spaces.py` (8) | Per-space RBAC: non-members blocked on env-scoped reads, `/graph` and space listing scoped to memberships, grant then revoke, create = instance admin, members listing = space admin, create in an unknown space → 404. |
+| `test_tiers.py` (4) | Tier catalog: name charset (OIDC `sub` safety), `allowed_tiers` validated, deleting a tier strips grants, a tier in use can't be deleted. |
+| `test_users.py` (3) | User listing is admin-only; the `@mention` directory is readable by anyone; tier/destroy changes are audited. |
+| `test_audit.py` (2) | Mutations land in `/audit`, filter by action, CSV export columns; export is admin-only. |
+| `test_runs.py` (10) | Run lifecycle; one active run per env under concurrency (`23505`); tier gate; four-eyes on a `requires_four_eyes` tier and on a `protected` env; autodeploy and `warn` forcing `unconfirmed`; confirm only from `unconfirmed`; mock block; repo token masked in the claim; the claim carries `cred_phase`. |
+| `test_commit_pin.py` (6) | An unpinned run is pinned to the commit its plan checked out and the apply gets it; staleness then works for a manual run; a pinned SHA must match (`commit_mismatch` fails the run); a ref is re-pinned to its SHA; a malformed SHA → 400. |
+| `test_saved_plan.py` (10) | The plan is stored encrypted and served only to the run's apply job; it can't be replaced after the plan phase; a blob moved to another run's key doesn't decrypt; no saved plan → nothing served; proposed runs save none; destroy runs plan with `-destroy`; 64 MiB cap; deleted once the run is terminal, kept if that transition rolls back. |
+| `test_commands.py` (8) | Command runs: allowlist, read-only for writers, mutating needs `can_apply`, lifecycle + audit; mutating → `rw` token with the apply-window TTL, read-only → `ro` token with the 6 h TTL. |
+| `test_promote.py` (5) | Promotion pins the source's applied commit (audited); needs an applied source; refuses cross-stack; distinct 404 for a missing source vs target; the source stays space-gated. |
+| `test_deletion.py` (7) | Stack/env deletion refused (409) while a run is active, allowed once it is terminal; attachments, hooks and notification targets removed with their target (audited); an attach racing a deletion leaves no orphan (variable set, hook, notification target). |
+| `test_variables_api.py` (12) | Layered resolution and provenance; sensitive values write-only; attached set can't be deleted; selectors on stack/env labels; tier attachments; cross-space attach refused; a tier attachment stays in the set's space; input discovery; backend config file round trip; `protected` forces no autodeploy. |
+| `test_tfvars.py` (4) | `hcl` variables routed to the generated `.auto.tfvars`, everything else to JSON. |
+| `test_secret_sources.py` (8) | External secret references: live value masked, static fallback + apply gate, `error` mode fails closed, break-glass override (needs apply right), source CRUD hides the bootstrap secret, in-use source can't be deleted, a fallback appearing at the apply claim is gated. |
+| `test_proposed_secrets.py` (3) | A proposed run's claim carries no secret — no sensitive variable of either kind, no external reference (not fetched), nothing in `mask_values` or the provenance — and keeps the plan role and the repo token; a tracked run and a drift run still get every secret. |
+| `test_dependencies.py` (10) | Mocks (used, block apply, real value wins, missing → fail), anti-cycle, cascade; `link-by-name` idempotent, skips hand-made and racing edges and in-request cycles; `/graph` hides edges outside the caller's spaces. |
+| `test_hooks.py` (2) | Platform hook CRUD, tagged `platform` in the claim; writer gate. |
+| `test_check_results.py` (6) | Every check result is kept with its stage in `check_results.results`, the warn/fail ones in `checks`: a plan failing on a check records it with the ones before; an apply's checks add to the plan's; a job failing on no check records the checks it ran and audits a warning among them, in a plan and in an apply job; a job that ran no check leaves them alone; a run recorded before `results` existed keeps its checks. |
+| `test_apply_stage_hooks.py` (6) | `before_apply`/`after_apply` checks are recorded and audited (`run.check_warned`); an apply without checks keeps the plan's; a failing `after_apply` hook records the outputs, clears the drift and cascades nothing; a failed apply records no outputs and leaves the drift. |
+| `test_state_backend.py` (13) | HTTP state backend (moto S3): LOCK/POST/GET/UNLOCK and serial regression; `ro` tokens can't write or unlock, `plan` tokens lock but can't write, proposed runs never lock; env scoping; TTL follows the credential phase; a terminal run's token can't write; UNLOCK and a locked POST need the holder's lock ID; import session (adopt, admin-only, managed state only). |
+| `test_oidc.py` (4) | Issuer metadata + JWKS; the plan token's `sub`; apply uses the apply role; AssumeRole against moto STS. |
+| `test_scheduler.py` (4) | The advisory lock survives a task's commit (dedicated connection); worker loss fails an executing run, waits the apply window for a mutating command, spares `unconfirmed`/`confirmed` runs. |
+| `test_staleness.py` (11) | `stale` on the env API; head polling once per (repo, branch, credentials), surviving a failing repo, respecting the interval, bounded concurrency, never blocking the other scheduler tasks; refresh-head holds no transaction across git and is audited; a branch change resets the head. |
+| `test_webhooks.py` (5) | Push updates the head and triggers; bad signature → 401; PR → proposed run; a branch-deletion push clears the head and triggers nothing; an env re-pointed meanwhile is skipped. |
+| `test_vcs.py` (6) | GitHub post-back: owner/repo parsing, PR metadata persisted, PR close cancels proposed runs, status + one comment per run, a bad secret fails only its row, resync. |
+| `test_drift.py` (6) | Drift runs enqueued only for envs with an applied commit; status flips and approvers (by space membership) are notified once; an apply clears drift; user runs are claimed first. |
+| `test_repo_safety.py` (65) | Repo introspection: discovery reads only regular `.tf` files inside the clone (symlinks never escape), `project_root` containment, clone budget, cleanup off the event loop; the repo token percent-encoded in clone URLs and masked in every git error (both forms); git killed and reaped on timeout. |
+| `test_notifications.py` (10) | Target CRUD + audit, test delivery, unsupported states, outbox enqueue and dispatch; SSRF: delivery pinned to the vetted IP (DNS rebinding), private IPs refused at create and at delivery, no redirects, body validation does no DNS. |
+| `test_inbox.py` (6) | In-app notifications: approval requests to eligible approvers by space membership, terminal notifies the triggerer, replies and mentions, per-user feed, mark read, delete and clear. |
+| `test_comments.py` (6) | Plan-review threads: anchors, one level of replies, edit/resolve/delete permissions. |
+| `test_metrics_ratelimit.py` (8) | Token buckets (burst, per IP) in a bounded LRU (cap, eviction, concurrent new keys); `/metrics` exposition; `/health` needs auth, `/metrics` doesn't; discovery clone size budget. |
+| `test_observability.py` (3) | `X-Request-ID`; `/health`; `/logs` admin-only and structured. |
+| `test_worker_diagnostics.py` (2) | Diagnostics round trip over the heartbeat; admin-only. |
+| `test_worker_heartbeat.py` (2) | `in_flight` drives busy/idle; a bodyless heartbeat keeps the worker online. |
+| `test_worker_register.py` (1) | Re-registering under the same name reuses the worker row. |
+| `test_ws_notify.py` (1) | Each `transition()` emits a `LISTEN/NOTIFY` signal on the run channel. |
+| `test_seed.py` (1) | The demo seed is idempotent and yields exactly the DEV §7 graph. |
 
 ### API — end-to-end (`api/e2e/`, 1 scenario)
 
-**`test_scenario.py::test_full_scenario`** — the DEV §7 narrative against the live stack + real
-worker running OpenTofu (≈2 min). It drives, in order:
+**`test_scenario.py::test_full_scenario`** — the DEV §7 narrative against the live stack and a real
+worker running OpenTofu, on the `graph` copy (≈2 min). It drives, in order:
 
 1. `bob` (writer) triggers `network/dev` → plan → `unconfirmed`.
 2. `bob` is refused at confirm (apply needs approver+); `alice` confirms → apply → `finished`.
@@ -260,40 +180,52 @@ worker running OpenTofu (≈2 min). It drives, in order:
 8. the cascade re-runs `app/prod`, now with the **real** output (`used_mocks=false`).
 9. the audit lists `run.confirmed` with `alice@dev.local` as the actor.
 
-> **Note (spec drift):** DEV §7 narrates *bob* confirming and a *tier* refusal. The implemented
-> permission model (CLAUDE §4 #4) gates confirm on role ∈ {approver, admin}, so a writer is refused
-> for **role**, and no seeded persona is an approver-with-sub-prod-tier. The e2e is faithful to the
-> implementation. Reconcile DEV.md, or add a 4th persona, to demo the tier gate.
+Every apply goes through the saved plan in S3, so the scenario needs the provisioned dev Garage.
+The tier gate (an approver without `prod`) and staleness stay manual checks (DEV §3, §7).
 
-### Worker (`worker/tests/`, 5 tests)
+### Worker (`worker/tests/`)
 
-**`test_diagnostics.py` (1)**
-- `test_diagnostics_exposes_env_names_not_values` — the bundle lists env var **names** but never their values.
-
-**`test_masking.py` (6)** — masking + the `-json` event parsing
-- `test_masker_replaces_all_secrets` — every known secret in a string is replaced.
-- `test_masker_longest_first` — overlapping secrets are masked longest-first (no partial leaks).
-- `test_merge_hooks_platform_before_repo` — platform hooks are merged ahead of repo hooks (non-bypassable).
-- `test_summary_from_change_summary_event` — the plan summary comes from tofu's `change_summary` event.
-- `test_summary_defaults_when_no_change_summary` — no `change_summary` → zero counts.
-- `test_first_error_picks_the_diagnostic_summary` — the run error is the first `diagnostic` summary.
+| File | Covers |
+|---|---|
+| `test_saved_plan.py` (10) | The plan job uploads the plan it showed, before the `after_plan` hooks; destroy runs plan with `-destroy`; the apply job applies exactly the saved plan, fails closed without a usable one, reports a stale plan clearly; the plan file is never written through a checked-out symlink; the API's refusal reaches the job error. |
+| `test_commit_pin.py` (7) | An unpinned clone takes the env branch head; a pinned SHA off the default tip and a pinned ref are checked out exactly; an unknown commit fails at fetch; the plan reports its commit; an apply without a pinned commit fails closed. |
+| `test_backend_env.py` (12) | The managed backend reaches tofu only via `TF_HTTP_*` (never `-backend-config`), with no lock address for a read-only job; inherited `TF_HTTP_*` dropped; unmanaged unchanged; repo hooks never get it, in plan, apply and command jobs; tofu's environment carries none of the agent's `STACKD_*` settings, in all three jobs. |
+| `test_hook_failures.py` (40) | At every stage and from both sources: a `fail` hook fails the job at its stage, a `warn` one lets it finish and is reported; a failing `before_apply` hook stops the apply; a hook past `STACKD_HOOK_TIMEOUT_SECONDS` is killed and fails by its `on_failure`; a hook's background process is killed when the hook exits, whether it holds the hook's output or not; a job failing on no check (init, plan, plan JSON, apply, an uncaught error) reports the checks of the stages that ran; every check result is reported with its stage, in plan and apply jobs. |
+| `test_hook_secrets.py` (8) | What a repo hook can read: no saved plan, raw plan JSON, tfvars, OIDC token file or repo token in the workspace; a masked `plan.json` at `after_plan` (platform hooks get the raw one); symlinks a repo plants never receive a secret; the clone leaves no token under `.git/`; repo hooks get only the allowlisted worker env, platform hooks none of the agent's `STACKD_*` settings; command runs still read the tfvars; the real OpenTofu end to end. |
+| `test_exit_codes.py` (17) | A plan succeeds only on exit 0 or 2: an error, the watchdog's kill (124), a signal or any other code fails the job with the reason; an apply or command fails on any non-zero code; a plan without its JSON document (`show -json` failed or printed no JSON object) fails closed. |
+| `test_command_run.py` (14) | A command's time budget follows `cred_phase`: apply budget when mutating, default cap when read-only, apply budget when missing (fail closed); an over-budget command fails with a clear message. |
+| `test_authed_url.py` (45) | The repo token is percent-encoded into the clone URL (git dials the real host); other URLs unchanged; a failed clone masks both token forms. |
+| `test_init_cmd.py` (6) | The `init` command for managed state and for unmanaged partial backends (file, inline map, both). |
+| `test_security.py` (6) | Repo-hook env stripped of cloud credentials and sensitive values; the cleartext tripwire on plan and output JSON. |
+| `test_masking.py` (8) | Masking (all secrets, longest first); platform hooks before repo hooks; plan summary and first error from tofu's JSON events; the masked plan JSON hides every sensitive value and keeps the rest, and a non-JSON document is masked as text. |
+| `test_workspace.py` (6) | `hcl` tfvars written verbatim; token injection into HTTPS clone URLs. |
+| `test_concurrency.py` (3) | The in-flight counter; `STACKD_MAX_CONCURRENT_JOBS` default and floor. |
+| `test_runner_diag.py` (1) | A tofu diagnostic is expanded to its detail and location. |
+| `test_diagnostics.py` (1) | The diagnostics bundle lists env var names, never values. |
 
 ### Front (`front/`)
 
-`pnpm test --run` (vitest) is wired but there are currently no component test files. The
-identity components are instead pinned by **Ladle stories** (the DESIGN §8 visual contract):
-`pnpm ladle` / `pnpm ladle:build` — `StateBadge`, `PhaseRail`, `ProvenanceBadge`.
+- **vitest** (`pnpm test`): `StateBadge.test.tsx` (label alongside color, mocked/fallback
+  modifiers), `ProvenanceBadge.test.ts` (provenance parsing) and `ProvenanceBadge.render.test.tsx`.
+- **Playwright** (`pnpm e2e`, `e2e/happy-path.spec.ts`): one smoke test — dev login reaches the
+  Stacks view — against a running dev stack (`PW_BASE_URL`, default `http://localhost:5173`). Not
+  run by CI yet.
+- **Ladle stories** (`pnpm ladle` / `pnpm ladle:build`) pin the identity components visually (the
+  DESIGN §8 contract): `StateBadge`, `PhaseRail`, `ProvenanceBadge`, plus `BrandMark` and the base
+  UI kit.
 
 ---
 
 ## 5. Counts
 
-| Location | Files | Tests |
-|---|---|---|
-| `api/tests` | 23 | 92 |
-| `api/e2e` | 1 | 1 (multi-step scenario) |
-| `worker/tests` | 2 | 7 |
-| **Total** | **26** | **100** |
+Roughly **282 API tests** (38 files), **184 worker tests** (15 files), **1 e2e scenario** and
+**9 front unit tests**, parametrized cases included. The numbers move with every change; count them
+instead of trusting this page:
+
+```bash
+cd api && uv run pytest --collect-only -q | tail -1      # unit + integration
+cd worker && uv run pytest --collect-only -q | tail -1
+```
 
 ---
 

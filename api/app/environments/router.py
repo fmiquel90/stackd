@@ -3,12 +3,13 @@ from __future__ import annotations
 import asyncio
 import shutil
 import uuid
+from collections.abc import Sequence
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Annotated
 
 from fastapi import APIRouter, Depends
-from sqlalchemy import select
+from sqlalchemy import ColumnElement, and_, delete, or_, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -17,17 +18,30 @@ from app.auth.deps import CurrentUser, require_role
 from app.config import get_settings
 from app.crypto import decrypt
 from app.db import get_session
-from app.enums import AuditActorKind, Role, VariableKind
+from app.enums import (
+    ACTIVE_STATES,
+    AttachmentTarget,
+    AuditActorKind,
+    Role,
+    RunState,
+    RunType,
+    VariableKind,
+)
 from app.environments.schemas import EnvironmentCreate, EnvironmentOut, EnvironmentUpdate
 from app.errors import ProblemException
 from app.models.environment import Environment
+from app.models.hook import Hook
+from app.models.notification import NotificationTarget
+from app.models.run import Run
 from app.models.stack import Stack
 from app.models.tier import Tier
+from app.models.user import User
+from app.models.variable_set import VariableSetAttachment
 from app.ratelimit import rate_limit
 from app.spaces import guard_env_id, guard_stack_id
 from app.stacks.git import clone_shallow, enforce_clone_budget, ls_remote_sha
 from app.variables.crud import create_variable, get_variable, update_variable, variables_for
-from app.variables.discovery import DiscoveredInput, parse_inputs, placeholder
+from app.variables.discovery import DiscoveredInput, parse_inputs, placeholder, tf_files
 from app.variables.resolution import resolve_variables
 from app.variables.schemas import (
     ResolvedVariableOut,
@@ -51,23 +65,195 @@ def _scan_clone(
     """Size-cap the clone (§H), locate the project root and parse its REQUIRED inputs. Synchronous
     filesystem work — run via asyncio.to_thread, never directly on the event loop."""
     enforce_clone_budget(dest, max_mb=max_mb)
+    # project_root (or a symlinked dir on its way) must resolve inside the clone — a path-wise
+    # check, not a string prefix (`/tmp/x` would otherwise admit `/tmp/x2`).
     root = (dest / project_root).resolve()
-    if not str(root).startswith(str(dest.resolve())):  # project_root must stay inside the repo
+    if not root.is_relative_to(dest.resolve()):
         raise ProblemException(400, "Invalid project root", None)
-    tf_count = sum(1 for _ in root.glob("*.tf"))
+    tf_count = len(tf_files(root, dest))  # exactly the files parse_inputs will read
     if tf_count > max_tf_files:
         raise ProblemException(
             413,
             "Too many Terraform files",
             f"{tf_count} .tf files exceed the discovery cap ({max_tf_files}).",
         )
-    return [i for i in parse_inputs(root) if i.required]
+    return [i for i in parse_inputs(root, dest) if i.required]
+
+
+async def _envs_out(session: AsyncSession, envs: Sequence[Environment]) -> list[EnvironmentOut]:
+    """Serialize envs with their git staleness (§9.6). `last_applied_sha` is the commit of each
+    env's last finished tracked run — a tracked run only finishes after an apply or an empty plan —
+    fetched for the whole batch in one query."""
+    last_applied: dict[uuid.UUID, str | None] = {}
+    if envs:
+        rows = await session.execute(
+            select(Run.environment_id, Run.commit_sha)
+            .where(
+                Run.environment_id.in_([e.id for e in envs]),
+                Run.type == RunType.tracked,
+                Run.state == RunState.finished,
+            )
+            .order_by(Run.environment_id, Run.finished_at.desc(), Run.id.desc())
+            .distinct(Run.environment_id)
+        )
+        last_applied = {env_id: sha for env_id, sha in rows.all()}
+    return [EnvironmentOut.of(e, last_applied_sha=last_applied.get(e.id)) for e in envs]
+
+
+async def _env_out(session: AsyncSession, env: Environment) -> EnvironmentOut:
+    return (await _envs_out(session, [env]))[0]
 
 
 async def _require_tier(session: AsyncSession, name: str) -> None:
     exists = (await session.execute(select(Tier).where(Tier.name == name))).scalar_one_or_none()
     if exists is None:
         raise ProblemException(422, "Unknown tier", f"No tier named '{name}'. Define it first.")
+
+
+async def lock_envs_for_deletion(
+    session: AsyncSession, *criteria: ColumnElement[bool]
+) -> list[uuid.UUID]:
+    """Lock the envs about to be deleted (a stack's, or one) and refuse with 409 while any has an
+    active run (§3.5): the DB cascade would delete that run outside `transition()` (§4.2), leaving
+    a worker executing a run that no longer exists. A claim locks its env row too (FOR UPDATE OF e
+    SKIP LOCKED, §7.2), so no run starts on these envs until the deletion commits. Returns their
+    ids. Queued runs aren't executing anywhere: they go with their env."""
+    env_ids = list(
+        (await session.execute(select(Environment.id).where(*criteria).with_for_update()))
+        .scalars()
+        .all()
+    )
+    if env_ids:
+        active = (
+            await session.execute(
+                select(Run.id, Run.environment_id)
+                .where(Run.environment_id.in_(env_ids), Run.state.in_(ACTIVE_STATES))
+                .limit(1)
+            )
+        ).first()
+        if active is not None:
+            raise ProblemException(
+                409,
+                "Active run",
+                "A run is in progress on this environment: cancel or discard it, or let it "
+                "finish, before deleting.",
+                run_id=str(active.id),
+                environment_id=str(active.environment_id),
+            )
+    return env_ids
+
+
+async def lock_attach_target(
+    session: AsyncSession,
+    target_kind: AttachmentTarget,
+    target_id: uuid.UUID,
+    *,
+    not_found: str | None = None,
+) -> None:
+    """The attach side of `lock_envs_for_deletion`: before attaching a variable set, a hook or a
+    notification target to a stack or an env, lock that row FOR KEY SHARE until the attach
+    commits. It conflicts only with the FOR UPDATE a deletion takes: the attach either waits for
+    the deletion and then finds no target (404), or commits first and the deletion removes what it
+    attached (`drop_target_references`) — never an orphan. A tier isn't deleted with stacks/envs.
+    `not_found` overrides the 404's title."""
+    model: type[Stack] | type[Environment]
+    if target_kind == AttachmentTarget.stack:
+        model, title = Stack, "Stack not found"
+    elif target_kind == AttachmentTarget.environment:
+        model, title = Environment, "Environment not found"
+    else:
+        return
+    locked = await session.execute(
+        select(model.id).where(model.id == target_id).with_for_update(read=True, key_share=True)
+    )
+    if locked.first() is None:
+        raise ProblemException(404, not_found or title, None)
+
+
+async def drop_target_references(
+    session: AsyncSession,
+    user: User,
+    *,
+    env_ids: Sequence[uuid.UUID],
+    stack_id: uuid.UUID | None = None,
+) -> None:
+    """Variable-set attachments (§3.4), platform hooks (§8.1) and notification targets point at a
+    stack or an env by `target_kind`/`target_id`, with no FK: remove those targeting the envs (and
+    stack) being deleted, in the deletion's transaction, each audited like its manual removal."""
+    reason = "stack_deleted" if stack_id is not None else "environment_deleted"
+
+    def _targeting(
+        model: type[VariableSetAttachment] | type[Hook] | type[NotificationTarget],
+    ) -> ColumnElement[bool]:
+        targets = [
+            and_(model.target_kind == AttachmentTarget.environment, model.target_id.in_(env_ids))
+        ]
+        if stack_id is not None:
+            targets.append(
+                and_(model.target_kind == AttachmentTarget.stack, model.target_id == stack_id)
+            )
+        return or_(*targets)
+
+    async def _audit(action: str, kind: str, row_id: uuid.UUID, context: dict[str, str]) -> None:
+        await record_audit(
+            session,
+            action=action,
+            actor_kind=AuditActorKind.user,
+            actor_id=user.id,
+            actor_email=user.email,
+            target_kind=kind,
+            target_id=row_id,
+            context={**context, "reason": reason},
+        )
+
+    attachments = await session.execute(
+        delete(VariableSetAttachment)
+        .where(_targeting(VariableSetAttachment))
+        .returning(
+            VariableSetAttachment.variable_set_id,
+            VariableSetAttachment.target_kind,
+            VariableSetAttachment.target_id,
+        )
+        .execution_options(synchronize_session=False)
+    )
+    for set_id, target_kind, target_id in attachments.all():
+        await _audit(
+            "variable_set.detached",
+            "variable_set",
+            set_id,
+            {"target_kind": target_kind.value, "target_id": str(target_id)},
+        )
+    hooks = await session.execute(
+        delete(Hook)
+        .where(_targeting(Hook))
+        .returning(Hook.id, Hook.name, Hook.target_kind, Hook.target_id)
+        .execution_options(synchronize_session=False)
+    )
+    for hook_id, name, target_kind, target_id in hooks.all():
+        await _audit(
+            "hook.deleted",
+            "hook",
+            hook_id,
+            {"name": name, "on": target_kind.value, "target_id": str(target_id)},
+        )
+    notification_targets = await session.execute(
+        delete(NotificationTarget)
+        .where(_targeting(NotificationTarget))
+        .returning(
+            NotificationTarget.id,
+            NotificationTarget.name,
+            NotificationTarget.target_kind,
+            NotificationTarget.target_id,
+        )
+        .execution_options(synchronize_session=False)
+    )
+    for nt_id, name, target_kind, target_id in notification_targets.all():
+        await _audit(
+            "notification_target.deleted",
+            "notification_target",
+            nt_id,
+            {"name": name, "on": target_kind.value, "target_id": str(target_id)},
+        )
 
 
 @router.get("/stacks/{stack_id}/environments", response_model=list[EnvironmentOut])
@@ -86,7 +272,7 @@ async def list_environments(
         .scalars()
         .all()
     )
-    return [EnvironmentOut.of(e) for e in rows]
+    return await _envs_out(session, rows)
 
 
 @router.post(
@@ -122,14 +308,14 @@ async def create_environment(
     )
     await session.commit()
     await session.refresh(env)
-    return EnvironmentOut.of(env)
+    return await _env_out(session, env)
 
 
 @router.get("/environments/{env_id}", response_model=EnvironmentOut)
 async def get_environment(
     env_id: uuid.UUID, user: CurrentUser, session: DbSession
 ) -> EnvironmentOut:
-    return EnvironmentOut.of(await guard_env_id(session, user, env_id))
+    return await _env_out(session, await guard_env_id(session, user, env_id))
 
 
 @router.patch("/environments/{env_id}", response_model=EnvironmentOut, dependencies=[Writer])
@@ -140,6 +326,13 @@ async def update_environment(
     changes = body.model_dump(exclude_unset=True)
     if "tier" in changes:
         await _require_tier(session, changes["tier"])
+    if "branch" in changes and changes["branch"] != env.branch:
+        # Staleness (§9.6): the recorded head is the old branch's, so `stale` must not compare
+        # against it. No head_updated_at makes the env due at the next head poll.
+        env.head_sha = None
+        env.head_updated_at = None
+        env.commits_ahead = None
+        env.affects_project_root = None
     for field, value in changes.items():
         setattr(env, field, value)
     if env.protected:
@@ -156,12 +349,14 @@ async def update_environment(
     )
     await session.commit()
     await session.refresh(env)
-    return EnvironmentOut.of(env)
+    return await _env_out(session, env)
 
 
 @router.delete("/environments/{env_id}", status_code=204, dependencies=[Writer])
 async def delete_environment(env_id: uuid.UUID, user: CurrentUser, session: DbSession) -> None:
     env = await guard_env_id(session, user, env_id, min_role=Role.writer)
+    await lock_envs_for_deletion(session, Environment.id == env.id)
+    await drop_target_references(session, user, env_ids=[env.id])
     ctx = _env_audit_ctx(env)
     await session.delete(env)
     await record_audit(
@@ -185,14 +380,46 @@ async def refresh_head(env_id: uuid.UUID, user: CurrentUser, session: DbSession)
     stack = await session.get(Stack, env.stack_id)
     assert stack is not None
     secret = decrypt(stack.repo_secret_encrypted) if stack.repo_secret_encrypted else None
-    sha = await ls_remote_sha(stack.repo_url, stack.repo_auth_kind, secret, env.branch)
+    branch = env.branch
+    # No DB transaction is held across the git call (§9.6): end the read one first (the session
+    # doesn't expire on commit, so env and stack stay loaded).
+    await session.commit()
+    sha = await ls_remote_sha(stack.repo_url, stack.repo_auth_kind, secret, branch)
     if sha is None:
         raise ProblemException(422, "Head refresh failed", "Could not read the branch head.")
-    env.head_sha = sha
-    env.head_updated_at = datetime.now(UTC)
+    # Only while the env still tracks that branch: one re-pointed meanwhile isn't tracking it.
+    # Locked, so the audited old head is the one this refresh replaces.
+    current = (
+        await session.execute(
+            select(Environment.head_sha)
+            .where(Environment.id == env.id, Environment.branch == branch)
+            .with_for_update()
+        )
+    ).first()
+    if current is not None:
+        await session.execute(
+            update(Environment)
+            .where(Environment.id == env.id)
+            .values(head_sha=sha, head_updated_at=datetime.now(UTC))
+        )
+        await record_audit(
+            session,
+            action="environment.head_refreshed",
+            actor_kind=AuditActorKind.user,
+            actor_id=user.id,
+            actor_email=user.email,
+            target_kind="environment",
+            target_id=env.id,
+            context={
+                **_env_audit_ctx(env),
+                "branch": branch,
+                "old_sha": current.head_sha,
+                "new_sha": sha,
+            },
+        )
     await session.commit()
     await session.refresh(env)
-    return EnvironmentOut.of(env)
+    return await _env_out(session, env)
 
 
 # --- environment variables (override slot: stack_id + environment_id both set) ---
@@ -361,4 +588,5 @@ async def discover_inputs(env_id: uuid.UUID, user: CurrentUser, session: DbSessi
         await session.commit()
         return {"created": created, "skipped": skipped, "required_total": len(required)}
     finally:
-        shutil.rmtree(dest, ignore_errors=True)
+        # Removing the whole clone is blocking filesystem work too — never on the event loop.
+        await asyncio.to_thread(shutil.rmtree, dest, ignore_errors=True)

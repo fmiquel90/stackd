@@ -67,6 +67,29 @@ async def require_space_access(
     return membership
 
 
+async def users_with_space_access(
+    session: AsyncSession, space_id: uuid.UUID
+) -> list[tuple[User, SpaceMembership | None]]:
+    """Bulk form of `require_space_access` (reader floor): every enabled user who reaches the
+    space — a member of it, or an instance admin — paired with their membership (None for an
+    admin without one), so a caller can evaluate effective permissions (`can_apply`) for the whole
+    audience without a query per user. Keep the predicate in step with `require_space_access`."""
+    rows = (
+        await session.execute(
+            select(User, SpaceMembership)
+            .outerjoin(
+                SpaceMembership,
+                (SpaceMembership.user_id == User.id) & (SpaceMembership.space_id == space_id),
+            )
+            .where(
+                User.disabled.is_(False),
+                SpaceMembership.id.is_not(None) | (User.role == Role.admin),
+            )
+        )
+    ).all()
+    return [(u, m) for u, m in rows]
+
+
 async def guard_stack(
     session: AsyncSession, user: User, stack: Stack, *, min_role: Role = Role.reader
 ) -> SpaceMembership | None:
@@ -104,11 +127,18 @@ async def guard_stack_id(
 
 
 async def guard_env_id(
-    session: AsyncSession, user: User, env_id: uuid.UUID, *, min_role: Role = Role.reader
+    session: AsyncSession,
+    user: User,
+    env_id: uuid.UUID,
+    *,
+    min_role: Role = Role.reader,
+    not_found: str = "Environment not found",
 ) -> Environment:
+    """`not_found` titles the 404 so a route taking two env ids (e.g. promote's source) can tell
+    the client which one is missing; the membership gate is identical either way."""
     env = await session.get(Environment, env_id)
     if env is None:
-        raise ProblemException(404, "Environment not found", None)
+        raise ProblemException(404, not_found, None)
     await guard_env(session, user, env, min_role=min_role)
     return env
 
@@ -127,9 +157,13 @@ async def resolve_target_space(
     session: AsyncSession, user: User, space_id: uuid.UUID | None, *, min_role: Role = Role.reader
 ) -> uuid.UUID:
     """Resolve the target space of a create request (explicit space_id or the bootstrap default,
-    SPECS §3.0) and gate the caller's membership on it in one step."""
+    SPECS §3.0) and gate the caller's membership on it in one step. An explicit id that names no
+    space is a 404 — checked after the gate, so a non-member still gets 403 and can't probe ids
+    (an instance admin passes the gate for any id, and would otherwise hit the FK on INSERT)."""
     resolved = space_id or (await get_default_space(session)).id
     await require_space_access(session, user, resolved, min_role=min_role)
+    if space_id is not None and await session.get(Space, space_id) is None:
+        raise ProblemException(404, "Space not found", None)
     return resolved
 
 

@@ -78,7 +78,13 @@ async def promote(env_id: uuid.UUID, body: PromoteIn, user: CurrentUser, session
     """Promote the commit currently applied on `from_environment_id` to this environment (same
     stack). Creates a tracked run pinned to that commit; the apply is gated as usual at confirm."""
     target = await guard_env_id(session, user, env_id, min_role=Role.writer)
-    source = await guard_env_id(session, user, body.from_environment_id, min_role=Role.writer)
+    source = await guard_env_id(
+        session,
+        user,
+        body.from_environment_id,
+        min_role=Role.writer,
+        not_found="Source environment not found",
+    )
     return await promote_run(session, source, target, user)
 
 

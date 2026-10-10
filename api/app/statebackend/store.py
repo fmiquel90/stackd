@@ -44,12 +44,21 @@ def _get_sync(key: str) -> bytes | None:
         return None
 
 
+def _delete_sync(key: str) -> None:
+    # Idempotent in S3: deleting a missing key succeeds.
+    _client().delete_object(Bucket=get_settings().s3_bucket, Key=key)  # type: ignore[no-untyped-call]
+
+
 async def put_object(key: str, data: bytes) -> None:
     await asyncio.to_thread(_put_sync, key, data)
 
 
 async def get_object(key: str) -> bytes | None:
     return await asyncio.to_thread(_get_sync, key)
+
+
+async def delete_object(key: str) -> None:
+    await asyncio.to_thread(_delete_sync, key)
 
 
 def state_key(environment_id: str, version_id: str) -> str:

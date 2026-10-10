@@ -4,6 +4,7 @@ import uuid
 from typing import Annotated
 
 from fastapi import APIRouter, Depends
+from fastapi.exceptions import RequestValidationError
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -11,9 +12,10 @@ from app.audit import record_audit
 from app.auth.deps import CurrentUser, require_role
 from app.db import get_session
 from app.enums import AttachmentTarget, AuditActorKind, Role
+from app.environments.router import lock_attach_target
 from app.errors import ProblemException
 from app.models.notification import NotificationTarget
-from app.notifications.dispatcher import deliver
+from app.notifications.dispatcher import check_url_safe, deliver
 from app.notifications.schemas import NotificationCreate, NotificationOut, NotificationUpdate
 from app.spaces import guard_env_id, guard_stack_id
 
@@ -44,6 +46,25 @@ async def _list(
     return list(rows)
 
 
+async def _check_url(url: str) -> None:
+    """The DNS-resolving half of the URL check, which the body validators can't do without blocking
+    the event loop. Reported exactly like a failed body validator (422 problem+json)."""
+    try:
+        await check_url_safe(url)
+    except ValueError as exc:
+        raise RequestValidationError(
+            [
+                {
+                    "type": "value_error",
+                    "loc": ("body", "url"),
+                    "msg": f"Value error, {exc}",
+                    "input": url,
+                    "ctx": {"error": exc},
+                }
+            ]
+        ) from exc
+
+
 async def _create(
     session: AsyncSession,
     user: CurrentUser,
@@ -51,6 +72,8 @@ async def _create(
     target_id: uuid.UUID,
     body: NotificationCreate,
 ) -> NotificationTarget:
+    await _check_url(body.url)
+    await lock_attach_target(session, target_kind, target_id)  # no orphan on a racing deletion
     target = NotificationTarget(
         target_kind=target_kind,
         target_id=target_id,
@@ -92,6 +115,8 @@ async def _get_owned(
 async def _update(
     session: AsyncSession, user: CurrentUser, t: NotificationTarget, body: NotificationUpdate
 ) -> NotificationTarget:
+    if body.url is not None:
+        await _check_url(body.url)
     for field, value in body.model_dump(exclude_unset=True).items():
         setattr(t, field, value)
     await record_audit(

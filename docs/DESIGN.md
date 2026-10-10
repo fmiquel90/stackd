@@ -25,7 +25,7 @@ The aesthetic draws on **technical drawings and engineering schematics**: deep s
 
 ### 2.2 Signature element: the **phase rail**
 
-THE memorable thing about the interface: a **vertical rail** present on every run page, which materializes the state machine (queued → preparing → planning → checking → unconfirmed → applying → finished; `checking` only appears if checks exist, `confirmed` is transient and is displayed as the start of the applying segment). Each segment:
+THE memorable thing about the interface: a **vertical rail** present on every run page, which materializes the state machine (queued → preparing → planning → checking → unconfirmed → applying → finished; `checking` only appears if the plan ran `after_plan` hooks, `confirmed` is transient and is displayed as the start of the applying segment). Each segment:
 
 - semantic color code (cf. §3.2), the active segment animated with a discreet pulse (the only ambient animation in the app);
 - clickable: navigates directly to the log section for that phase;
@@ -134,12 +134,12 @@ Absolute rule: these colors serve **only** state semantics. Never decorative blu
 └────────┴─┴─────────────────────────────────────────────┴─┘
 ```
 
-- **Sticky action bar** at the top, not at the bottom: the decision is always visible, with the context (who triggered, env tier). Confirm button **amber**, disabled with the reason spelled out ("prod tier required — your cap is staging", "approver role required", "destroy permission required", "mocked run — apply disabled", "you triggered this prod run"). The triggerer and the confirmer are shown with their tier.
-- **Friction proportional to risk.** An authorized non-prod apply = one click. But confirming an apply on **`tier=prod`** or **any `destroy` run** requires an **explicit confirmation** in a popover anchored to the button: typing the **name of the environment** (GitHub pattern, consistent with deletions §5.7) + a `+a ~c −d` summary of the plan, destructions highlighted. Consistent with the principle: deleting a stack already requires typing its name — applying a destruction on prod cannot be less demanding than editing config. The popover bypasses no access rule (`can_apply` is still evaluated on the API side): it is a misclick safeguard, not a permission check.
+- **Sticky action bar** at the top, not at the bottom: the decision is always visible, with the context (who triggered, env tier). Confirm button **amber**, disabled with the reason spelled out ("tier prod not in your allowed tiers (dev, staging)", "approver role required", "destroy permission required", "mocked run — apply disabled", "you triggered this prod run"). The triggerer and the confirmer are shown with their tier.
+- **Friction proportional to risk.** An authorized apply on an ordinary tier = one click. But confirming an apply on a **tier flagged `requires_four_eyes`** (the seeded `prod`) or **any `destroy` run** requires an **explicit confirmation** in a popover anchored to the button: typing the **name of the environment** (GitHub pattern, consistent with deletions §5.7) + a `+a ~c −d` summary of the plan, destructions highlighted. Consistent with the principle: deleting a stack already requires typing its name — applying a destruction on prod cannot be less demanding than editing config. The popover bypasses no access rule (`can_apply` is still evaluated on the API side): it is a misclick safeguard, not a permission check.
 - **Staleness banner**: if the tracked branch advances while a plan awaits confirmation, a banner above the content — "Plan computed on `abc1234` · the branch has advanced by 2 commits" — with a *Re-plan* action. Confirming remains possible (applying a precise commit is legitimate), but never unknowingly.
 - Header: triggerer AND confirmer shown (Google avatars) — audit is in the interface, not hidden in a page.
 - **Plan** tab: `+3 ~1 −0` summary in giant mono, then a list of resources grouped by action (create/update/delete), each resource expandable into an attribute-by-attribute diff (added green / modified amber / deleted red, values in mono). **Destructions are always expanded by default** — a delete is never hidden.
-- **Checks** tab: one block per after_plan hook (name, status, duration, output), warn = amber with the note "manual confirmation required".
+- **Checks** tab: one block per hook check, from every stage of the plan and apply jobs (`check_results.results`, SPECS §8.3) — name, stage, status, duration, output; warn = amber with the note "manual confirmation required" (a warning at an apply stage comes after the confirmation and only informs). A run older than `results` shows its `checks` instead (warn/fail only), with the stage as `—`.
 - **Inputs** tab: resolved variables with their **provenance as a mono badge** (`set:common-aws`, `stack`, `env`, `dependency`, `MOCK` in magenta). Sensitive values: `•••` with no "reveal" button.
 
 ### 5.3 Log viewer (in the run page)
@@ -241,7 +241,7 @@ The visual answer to "why isn't my run starting?".
 
 - Drop shadows, gradients, glassmorphism, decorative illustrations, emojis in the UI.
 - State colors used for anything other than state; brand violet used to carry state meaning; amber used outside its meaning ("needs a human": decision, `unconfirmed`, warn/review signals) — e.g. for log severity or technical telemetry.
-- An icon alone on a destructive action; confirmation without typing the name for deletions **and for any `tier=prod` or `destroy` apply** (§5.2).
+- An icon alone on a destructive action; confirmation without typing the name for deletions **and for any apply on a `requires_four_eyes` tier or any `destroy` apply** (§5.2).
 - Toasts for background events; unsolicited animations beyond the rail's pulse.
 - Hiding or collapsing a resource destruction in a plan.
 - Any system text (ID, SHA, value, duration) in the UI font: data is mono, always.

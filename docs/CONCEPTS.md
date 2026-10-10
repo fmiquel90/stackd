@@ -4,6 +4,57 @@
 > concrete, copy-pasteable examples. For the exhaustive field-by-field truth, see **SPECS.md** —
 > this document never contradicts it, it illustrates it.
 
+## Key concepts at a glance
+
+Read this first if you are new to Stackd: each line is expanded, with examples, in the numbered
+section given in the last column.
+
+```
+Space                  a team or project boundary: who can see and do what
+└── Stack              the code: a Git repo + a folder (the template)
+    ├── Environment    dev      ┐ real deployments of that code, each with its own
+    ├── Environment    staging  ├ state, variables and rules
+    └── Environment    prod     ┘
+        └── Run        one change to one environment: plan → review → apply
+            ├── Job    plan job: a worker plans the change and runs the checks
+            └── Job    apply job: a worker applies the reviewed plan
+```
+
+| Concept | What it is | Why it matters | § |
+|---|---|---|---|
+| **Space** | A boundary for a team or project, holding its stacks, variable sets and worker pools. | Members get a role and a set of tiers *per space*; nothing crosses from one space to another. | 1 |
+| **Stack** | The code: a Git repository, a folder in it, and the tool (OpenTofu or Terraform). | Written once, deployed many times. A stack never runs on its own. | 2 |
+| **Environment** | One real deployment of a stack (`dev`, `prod`…): its branch, state, variables and protections. | Environments are fully isolated from each other — the opposite of Terraform workspaces. | 2 |
+| **Variables & variable sets** | The code's inputs, set on the environment, the stack, or in sets shared across stacks. | The most specific value wins and the UI shows where each value came from. Secrets are write-only. | 3 |
+| **Run** | One change to one environment: plan, wait for review, apply exactly the reviewed plan. | It is the unit of change, of review and of audit. One active run per environment at a time. | 4 |
+| **Job** | One piece of a run that a worker executes: the *plan job*, then — once confirmed — the *apply job*. A command run has a single *command job*. | The two jobs of a run can land on different workers: the apply job starts from a fresh clone and the saved plan. | 4 |
+| **Tier** | A label on an environment (`dev`, `prod`, or your own). | Decides who may approve it, and whether someone other than the person who started the run must confirm. | 5 |
+| **Role** | *reader* (looks), *writer* (starts runs, edits configuration), *approver* (also confirms applies on their tiers), *admin* (also manages workers, users and settings). | Approving needs both the role **and** the environment's tier in your allowed tiers. | 5 |
+| **Hook** | A command run at a fixed step of a job: a security scan, a cost check, a policy. | Platform hooks are enforced and trusted; hooks from the repo run without secrets. Each result is kept on the run as a *check*. | 6 |
+| **Worker** | The agent that runs OpenTofu on your infrastructure. | It pulls its jobs (no inbound port), keeps nothing between jobs and can be replaced at any time. | 7 |
+| **Managed state** | The `tfstate`, stored by Stackd in S3 behind its own HTTP backend. | Each job gets a short-lived token scoped to what it may do: read (a pull request's plan), lock (a plan), or write (an apply). | 8 |
+| **Dependency & mock** | One environment's outputs feeding another's inputs (network → app). | An upstream change re-plans its dependents. A mock lets a new chain plan before its upstream exists, but blocks the apply by default. | 9 |
+| **Cloud credentials (OIDC)** | Short-lived cloud credentials minted for each job. | No static cloud keys to store or rotate; the plan job assumes the plan role (read-only), the apply job the apply role. | 10 |
+| **Staleness** | "This environment is behind its branch." | Tells you a merged change hasn't been applied yet; it never triggers anything by itself. | 11 |
+| **Audit** | An append-only record of every action, written with the action itself. | Answers "who changed prod, and why?" | 12 |
+
+### The life of a change
+
+1. **Someone pushes, opens a pull request, or clicks *Plan*.** Stackd creates a run for the
+   environment(s) tracking that branch. A pull request only ever gets a read-only plan.
+2. **A worker runs the plan job**: it checks out the exact commit and plans with credentials
+   minted for this job only. Hooks check the plan.
+3. **The run waits for a human** (unless the environment autodeploys a clean plan). An approver
+   allowed on that tier reads the diff, the checks and every input with its origin, then confirms
+   or discards. If the tier or the environment requires four-eyes, that approver can't be the
+   person who started the run.
+4. **A worker runs the apply job**: it applies the saved plan — exactly what was reviewed, on the
+   same commit.
+5. **If the outputs changed, dependent environments re-plan** under their own approval rules.
+   Everything above is in the audit log.
+
+## Following the examples
+
 All examples assume the local dev stack is up (`task dev`) with the API on `http://localhost:8000`
 and dev login enabled. Authenticate once:
 
@@ -28,8 +79,10 @@ Everything below is a refinement of that sentence.
 ## 1. Space — the container
 
 A **space** is the top of the hierarchy: `space / stack / environment / run`. It owns stacks,
-variable sets and worker pools. At MVP there is exactly one space, `default` (RBAC per space is a
-later phase). You rarely think about it; it's the namespace everything hangs off.
+variable sets, worker pools and secret sources. The bootstrap creates `default` (the dev seed adds
+`demo`), and an instance admin can create more. A space is also a **permission boundary**: each
+member has a membership in it (role, allowed tiers, destroy right), you only see and touch the
+spaces you belong to (an instance admin reaches all), and configuration never crosses spaces (§3).
 
 ```
 default                      ← space
@@ -81,32 +134,40 @@ Configuration is composed from **layers**. The same variable name can be defined
 the strongest layer wins. From weakest to strongest:
 
 ```
-1. variable sets, auto_attach        (shared defaults for the whole space)
-2. variable sets attached to a stack (by priority)
-3. variable sets attached to an env  (by priority)
-4. stack variables                   (common to all envs of the stack)
-5. environment variables             ← always wins
+1. variable sets applying by rule          (auto_attach, or a label selector matching
+                                            the environment)
+2. variable sets attached to a tier        (by priority)
+3. variable sets attached to a stack       (by priority)
+4. variable sets attached to an environment (by priority)
+5. stack variables                         (common to all environments of the stack)
+6. environment variables                   ← always wins
 ```
 
 A **variable set** is a named, reusable bundle (e.g. `common-aws`, `datadog`, `region-eu`) you
-attach to many stacks/envs. `auto_attach: true` means "attach to every stack in the space".
+attach to many stacks and environments. `auto_attach: true` means "attach to every stack in the
+space"; a `selector` (`{label: value}`) attaches it to every environment whose labels match.
+
+**A set stays in its space.** You can only attach it to a stack or environment of the set's own
+space (`400 Cross-space attachment` otherwise), and a **tier** attachment reaches that tier's
+environments **in the set's space only** — tiers are a global catalog, the set is not. Deleting a
+stack or an environment removes the attachments that target it.
 
 **Worked example.** Suppose:
 
 | Layer | defines |
 |---|---|
 | set `common-aws` (auto_attach) | `region = eu-west-1`, `tags = {team:core}` |
-| set `region-us` (attached to env `prod-us`) | `region = us-east-1` |
+| set `region-us` (attached to environment `prod-us`) | `region = us-east-1` |
 | stack variable | `cidr = 10.0.0.0/16` |
-| env variable on `prod-us` | `cidr = 10.9.0.0/16` |
+| environment variable on `prod-us` | `cidr = 10.9.0.0/16` |
 
 Resolving variables for `prod-us`:
 
 | Variable | Value | Provenance |
 |---|---|---|
-| `region` | `us-east-1` | `set:region-us` (env-attached set beats auto_attach) |
+| `region` | `us-east-1` | `set:region-us` (a set attached to the environment beats auto_attach) |
 | `tags` | `{team:core}` | `set:common-aws` |
-| `cidr` | `10.9.0.0/16` | `env` (env override beats the stack variable) |
+| `cidr` | `10.9.0.0/16` | `env` (the environment's override beats the stack variable) |
 
 See it for real:
 
@@ -120,8 +181,9 @@ or "overridden here". The provenance is also frozen onto the run (`variable_prov
 
 ### Variable kinds
 
-- `terraform` → injected as `TF_VAR_<name>` / written to a tfvars file.
-- `environment` → injected as a process env var for the run.
+- `terraform` → written to an auto-loaded tfvars file that exists only while tofu runs (listed as
+  `TF_VAR_<name>`).
+- `environment` → injected as a process environment variable for the run.
 
 ### Sensitive variables are write-only
 
@@ -139,7 +201,7 @@ curl -s -X POST localhost:8000/api/v1/stacks/$STACK/variables -H "$AUTH" -H 'con
 
 ## 4. Runs & the state machine
 
-A **run** is one execution against one environment. Its life is an explicit state machine — and
+A **run** is one change to one environment, from plan to apply. Its life is an explicit state machine — and
 **the only way the state ever changes is the `transition()` function**, which writes a `run_event`,
 an `audit_event` (for human/terminal actions) and a live WebSocket signal, all in one DB transaction.
 
@@ -153,6 +215,12 @@ queued → preparing → planning → [checking] → unconfirmed → confirmed �
 - `unconfirmed` = **waiting for a human** (the amber state — see DESIGN).
 - If the plan has no changes, the run jumps straight to `finished`.
 
+**Run and job.** A run is the *change*; a **job** is what a worker executes for it. A run that goes
+all the way has two jobs: the **plan job** (`preparing` → `planning` → `checking`: clone, hooks,
+`init`, `plan`, checks) and, once confirmed, the **apply job** (`applying`: fresh clone, apply the
+saved plan, outputs). They can run on different workers. A [command run](guide/commands.md) (`import`, `state rm`…) has one **command job**;
+a pull request's run has only a plan job. Hooks, credentials and state tokens are per job.
+
 **Example — a manual plan that needs confirmation:**
 
 ```bash
@@ -165,8 +233,15 @@ curl -s -X POST localhost:8000/api/v1/runs/$RUN/confirm -H "$AUTH"
 # → confirmed → a worker claims the apply → applying → finished
 ```
 
+**What gets applied is exactly what was reviewed.** The plan job saves its `plan.tfplan`; the API
+encrypts it and keeps it in S3 until the run ends. The run is pinned to the commit the plan checked
+out, and the apply job clones that commit and runs `tofu apply plan.tfplan` — it never re-plans. If
+the saved plan is missing, or the state moved since the plan (tofu refuses a stale plan), the run
+fails: trigger a new plan.
+
 **Concurrency invariant:** at most **one active run per environment** (enforced by a partial unique
-index). Two environments of the same stack can run in parallel; two runs on the *same* env cannot.
+index). Two environments of the same stack can run in parallel; two runs on the *same* environment
+cannot.
 
 ---
 
@@ -187,23 +262,28 @@ membership — tiers are not ordered, so a grant can be non-contiguous like `{de
 
 **Examples:**
 
-| User | role | ceiling | dev | staging | prod |
+| User | role | allowed tiers | dev | staging | prod |
 |---|---|---|---|---|---|
-| Bob | writer | staging | ❌ (not approver) | ❌ | ❌ |
-| Carol | approver | staging | ✅ | ✅ | ❌ (tier prod required) |
-| Alice | approver | prod | ✅ | ✅ | ✅ |
+| Bob | writer | `{dev, staging}` | ❌ (not approver) | ❌ | ❌ |
+| Carol | approver | `{dev, staging}` | ✅ | ✅ | ❌ (prod not in her set) |
+| Alice | approver | `{dev, staging, prod}` | ✅ | ✅ | ✅ |
+| Dan | approver | `{dev, prod}` | ✅ | ❌ | ✅ |
+
+These are the **effective** permissions in the environment's space: a space membership can give
+someone a different role, tier set or destroy right there than their instance defaults.
 
 Extra rules:
 
 - **Destroy** (`type=destroy`) additionally requires `can_destroy=true` — a separate, explicit right.
-- **4-eyes**: on `tier=prod` (or when `require_second_pair_of_eyes` is set), the **triggerer cannot
-  confirm their own run**. It only bites human-triggered runs — a webhook/cascade run has no human
-  to oppose.
+- **Four-eyes**: on a tier flagged `requires_four_eyes` (the seeded `prod`), on a `protected`
+  environment, or when the environment sets `require_second_pair_of_eyes`, **someone other than
+  the person who triggered the run must confirm it**. It only bites human-triggered runs — a
+  webhook or cascade run has no human to oppose.
 - **Mock block**: a run that consumed mock outputs cannot be applied unless `allow_mock_apply=true`
   (see §9).
 
-When a confirm is refused, the API returns the reason in clear, e.g. `403 "tier prod required —
-your ceiling is staging"`, which the UI shows on the disabled Confirm button.
+When a confirm is refused, the API returns the reason in clear, e.g. `403 "tier prod not in your
+allowed tiers (dev, staging)"`, which the UI shows on the disabled Confirm button.
 
 **Double lock with the cloud:** for prod, the restriction also lives in the AWS trust policy (§10),
 so bypassing the API still can't assume the prod apply role.
@@ -217,11 +297,12 @@ Hooks run shell commands at lifecycle stages: `before_init`, `after_init`, `befo
 
 | Source | Where | Editable by | Use |
 |---|---|---|---|
-| **Platform** | UI/API (per stack or env) | writer+ (audited) | governance — **not bypassable by a PR** |
+| **Platform** | UI/API (per stack or environment) | writer+ (audited) | governance — **not bypassable by a PR** |
 | **Repo** | `.stackd.yml` in the repo | anyone who pushes | project-specific logic |
 
-Order per stage: **platform (stack) → platform (env) → repo**. Security-critical checks belong on
-the platform side.
+Order per stage: **platform (stack) → platform (environment) → repo**. Security-critical checks
+belong on the platform side. The plan job runs the `*_init`, `*_plan` stages; the apply job the
+`*_apply` ones.
 
 **`.stackd.yml` example:**
 
@@ -237,12 +318,25 @@ hooks:
       on_failure: fail          # run → failed
 ```
 
-- `on_failure: fail` → the run fails (`run.check_failed`).
+- `on_failure: fail` → the job stops at that stage and the run fails (`run.check_failed`), at every
+  stage. A failing `before_apply` hook means nothing is applied. A failing `after_apply` hook fails
+  the run after the infrastructure changed: its outputs are still recorded, but nothing cascades.
 - `on_failure: warn` → the run continues but is **forced through `unconfirmed`** even if autodeploy
-  was on — a human must own the warning.
+  was on — a human must own the warning. (At an apply stage the run is already confirmed: the
+  warning is only recorded.)
+- Each hook has 10 minutes (`STACKD_HOOK_TIMEOUT_SECONDS` on the worker); past it, it is killed and
+  fails by its `on_failure`. If tofu can't produce the plan JSON, the plan job fails rather than
+  check an empty plan.
 
-Repo hooks never receive `sensitive_env` or cloud credentials by default, and repo hooks at
-`*_apply` stages are ignored on `tier=prod` (they'd run with the prod write role).
+**Checks.** Every hook result is a *check*, kept on the run with the stage it ran at
+(`check_results.results`: `ok`, `warn`, `fail`; `check_results.checks`: only warn/fail).
+
+**Repo hooks get nothing secret**: of the worker's environment only an allowlist (`PATH`, `HOME`,
+locale, proxies…), the run's non-sensitive environment variables, no cloud credentials, and a
+`plan.json` with every sensitive value masked. While a repo hook runs, neither the saved plan, the
+run's tfvars, the cloud token file nor the repo token is on disk. Platform hooks are trusted: they
+get the run's secrets, the cloud credentials and the raw `plan.json`. Neither tofu nor any hook sees
+the agent's own `STACKD_*` settings. See [Hooks](guide/hooks.md#what-hooks-can-see).
 
 ---
 
@@ -253,27 +347,39 @@ out to them.
 
 ```
 register (pool token) → heartbeat (every ~20s) → claim (long-poll)
-   → clone → setup tool → hooks → init → plan/apply → stream logs → report → repeat
+   → clone → hooks → init → plan/apply → stream logs → report → repeat
 ```
 
 - **Claim** is concurrency-safe: `SELECT … FOR UPDATE OF environment SKIP LOCKED` serialises per
-  env, and the `one_active_run_per_env` unique index is the hard guarantee (a losing racer gets a
+  environment, and the `one_active_run_per_env` unique index is the hard guarantee (a losing racer gets a
   `23505` and simply re-polls).
 - **Labels** target work to pools (e.g. a dedicated `prod` pool).
-- **Apply affinity**: the worker that produced a plan is preferred for the apply for ~60s (it still
-  has the workspace); otherwise any compatible worker re-plans then applies.
-- A worker silent > 60s → `offline`; an active run on a dead worker → `failed (worker_lost)` (an `applying` run only after the apply budget + grace, so a long apply isn't failed mid-flight).
+- **Apply affinity**: the worker that produced a plan is preferred for the apply for ~60s; past
+  that, any compatible worker takes it. Either way the apply worker starts from a fresh clone of
+  the pinned commit and applies the saved plan it downloads from the API (§4) — no workspace is
+  reused, nothing is re-planned.
+- **Per-job credentials**: each job gets its own state token, scoped to what it does — `ro` for a
+  PR plan or a read-only command, `plan` for a plan job (it may lock, never write), `rw` for an
+  apply job or a mutating command (§8) — and its own cloud credentials: the plan role for a plan
+  job, the apply role for an apply job (§10).
+- **Worker loss**: a worker silent > 60s → `offline`. A run whose job is *executing* on it
+  (`preparing`, `planning`, `checking`, `running`, `applying`) → `failed (worker_lost)` after 120s.
+  A job holding apply credentials (an `applying` run, a mutating command) is only reclaimed after
+  the apply budget + grace (15 + 5 min by default), so a long apply isn't failed mid-flight and its
+  tokens have expired before another worker takes the environment. `unconfirmed` and `confirmed` runs are
+  never reclaimed: they wait on a human or on the apply claim, not on the plan worker.
 - **Command channel.** The heartbeat response is also the *downward* channel (still no inbound to
   the worker). Today it carries **diagnostics**: an admin clicks a button, a `pending` command is
   queued, the worker picks it up on its next heartbeat, runs a **read-only** bundle (versions, disk,
-  env var *names* — never values, recent agent logs) and posts it back. Same mechanism will carry
-  `cancel_job` later. Delivery latency is bounded by the claim long-poll (~25 s).
+  environment variable *names* — never values, recent agent logs) and posts it back. Same mechanism will carry
+  `cancel_job` later. Delivery latency is bounded by the heartbeat interval (~20 s).
 
 **Run an agent:**
 
 ```bash
-POOL=$(curl -s -X POST localhost:8000/api/v1/worker-pools -H "$AUTH" -d '{"name":"local"}' | jq -r .token)
-STACKD_POOL_TOKEN=$POOL STACKD_API_URL=http://localhost:8000 python -m agent.main
+POOL=$(curl -s -X POST localhost:8000/api/v1/worker-pools -H "$AUTH" \
+  -H 'content-type: application/json' -d '{"name":"local"}' | jq -r .token)
+cd worker && STACKD_POOL_TOKEN=$POOL STACKD_API_URL=http://localhost:8000 uv run python -m agent.main
 ```
 
 ---
@@ -287,10 +393,16 @@ terraform ──backend "http"──▶ Stackd API ──(SSE-KMS)──▶ S3
                                   └─▶ Postgres: versions, locks, audit
 ```
 
-Why: per-run **scoped tokens** (read-only for PR plans), **locking visible in the UI** with audited
-force-unlock, refusal of a regressive serial, and every write tied to the run that produced it. The
-worker receives the backend config in its claim payload and injects it via `-backend-config` — **zero
-changes to the user's Terraform code**. Set `managed_state: false` to keep your own `backend "s3"`.
+Why: per-job **scoped tokens**, **locking visible in the UI** with audited force-unlock, refusal
+of a regressive serial, and every write tied to the run that produced it. The token's scope follows
+the job: `ro` (PR plans, read-only commands: read only), `plan` (a plan may lock, never write),
+`rw` (an apply or a mutating command). Once its run has ended, a token can no longer write or lock.
+
+The worker adds a bare `backend "http" {}` block and hands the address and the token to tofu
+**only**, as `TF_HTTP_*` environment variables — never `-backend-config`, which tofu would persist
+in `.terraform/` (readable by repo hooks) and in the saved plan. **Zero changes to the user's
+Terraform code**: the repo declares no backend. Set `managed_state: false` to keep your own
+`backend "s3"`.
 
 ---
 
@@ -356,8 +468,9 @@ condition {
 ```
 
 The wildcard is allowed **only on the stack segment** — `tier` and `phase` are always fixed; that's
-the double lock with §5. The worker writes the token to a file and exports
-`AWS_WEB_IDENTITY_TOKEN_FILE` / `AWS_ROLE_ARN` for terraform only (never for repo hooks). The
+the double lock with §5. The worker exports `AWS_WEB_IDENTITY_TOKEN_FILE` / `AWS_ROLE_ARN` to tofu
+and platform hooks only — never to repo hooks — and the token file exists only while one of them
+runs. The
 `AWS_ROLE_SESSION_NAME = stackd-<run_id>` ties every CloudTrail action back to the run — and thus to
 the human who confirmed it.
 
@@ -375,13 +488,19 @@ curl -s -X POST localhost:8000/api/v1/environments/$PROD/cloud-integration/test 
 A Git webhook (HMAC-verified, secret per repo) maps a pushed branch to the environments tracking it,
 filtered by `project_root`:
 
-- **push** → a `tracked` run per matching env, and `head_sha` advances.
-- **pull request** → a `proposed` run: plan-only, read-only state, secrets off, mocks allowed.
+- **push** → a `tracked` run per matching environment, and `head_sha` advances.
+- **pull request** → a `proposed` run: plan-only, read-only state, mocks allowed, and **no
+  secrets**: the pull request's code runs inside tofu, so it gets none of the environment's
+  sensitive variables — only the read-only plan role — see
+  [Runs & approvals](guide/runs-and-approvals.md#proposed-runs-from-a-pr).
 
-**Staleness** answers "applied ≠ tip of branch": Stackd compares the last applied commit to the
-branch head (`head_sha`, refreshed by webhook, by `git ls-remote` polling, or manually). A stale env
-shows a `↑N` chip; a stale `unconfirmed` run shows a banner with *Re-plan*. Staleness is information,
-never an automatic trigger.
+**Staleness** answers "applied ≠ tip of branch": Stackd compares the commit of the last finished
+tracked run (every run is pinned to the commit it planned) to the branch head (`head_sha`, refreshed
+by webhook, by `git ls-remote` polling every 15 min, or manually). The API exposes it on each
+environment (`stale`, `commits_ahead`); the `↑N` chip and the *Re-plan* banner on a stale
+`unconfirmed` run (DESIGN §5.1–5.2) are not in the UI yet. Changing an environment's branch resets
+its recorded head; a push deleting the branch clears it. Staleness is information, never an
+automatic trigger.
 
 ---
 
@@ -438,7 +557,7 @@ A **notification target** is an outbound webhook attached to a **stack** or an *
 | `finished` | a run finished (incl. apply) | deploy log / changelog |
 
 Two kinds: `slack` (posts `{"text": …}` to a Slack/Mattermost incoming webhook, with a deep link to
-the run) and `webhook` (a structured JSON envelope: state, run id, stack/env, tier, commit, url).
+the run) and `webhook` (a structured JSON envelope: state, run id, stack/environment, tier, commit, url).
 
 **Example — Slack the approver whenever a prod apply is pending:**
 
@@ -456,8 +575,8 @@ curl -s -X POST localhost:8000/api/v1/environments/$ENV_ID/notifications -H "$AU
 notify-worthy state, it inserts a row into `notification_outbox` **in the same DB transaction** as
 the state change (no HTTP in the request path). A background scheduler task drains the outbox under
 a `pg_try_advisory_lock` (one replica at a time) with `FOR UPDATE … SKIP LOCKED`, resolves the
-matching targets (env-level for the run's env + stack-level for its stack, filtered by `on_states`),
-and POSTs. Consequences worth knowing:
+matching targets (those on the run's environment + those on its stack, filtered by `on_states`),
+and POSTs — with no DB transaction held during the HTTP call. Consequences worth knowing:
 
 - a **rolled-back** transition never notifies (the outbox row rolls back with it);
 - two API replicas never double-send (the lock + `SKIP LOCKED`);
@@ -466,28 +585,38 @@ and POSTs. Consequences worth knowing:
 
 Deep links use `STACKD_APP_URL` (the SPA base, e.g. `http://localhost:5173`).
 
+**SSRF guard.** A target URL must be `https` and its host must resolve to public addresses only
+(no private, loopback, link-local or metadata IP), checked at create/update and again at every
+delivery. The POST connects to the IP that check vetted (Host, SNI and certificate stay on the
+hostname), never follows redirects, and **ignores `HTTPS_PROXY` and other proxy variables by design**: a proxy
+would resolve the name again. An API whose only egress is a proxy cannot deliver notifications.
+Targets are deleted with their stack or environment.
+
 ---
 
 ## 15. Quick reference
 
 | Term | One line |
 |---|---|
-| **Space** | top container; one `default` at MVP |
+| **Space** | top container and permission boundary (`default`, plus any an admin creates) |
 | **Stack** | template: repo + folder + tool |
 | **Environment** | instance: tier + branch + state + variables + protections |
-| **Variable set** | reusable bundle of variables, attached to stacks/envs |
+| **Variable set** | reusable bundle of variables, attached to tiers, stacks or environments of its own space |
 | **Provenance** | where a resolved variable came from (`set:…`, `stack`, `env`, `dependency:…`, `mock`) |
-| **Run** | one execution against one env, driven by the state machine |
+| **Run** | one change to one environment, from plan to apply, driven by the state machine |
+| **Job** | what a worker executes for a run: the plan job, the apply job, or a command job |
 | **`transition()`** | the only thing that changes a run's state |
 | **Tier** | configurable catalog; gates apply via the user's `allowed_tiers` set (not ordered) |
-| **4-eyes** | triggerer ≠ confirmer on prod / when required |
-| **Hook** | shell step at a lifecycle stage; platform (governance) or repo |
+| **Four-eyes** | the person who triggered a run can't confirm it, on a `requires_four_eyes` tier, a `protected` environment, or when the environment requires it |
+| **Hook** | shell step at a lifecycle stage; platform (governance, trusted) or repo (no secrets) |
+| **Check** | a hook's result (`ok`, `warn`, `fail`), kept on the run with its stage |
 | **Worker** | stateless agent that pulls and runs jobs |
-| **Managed state** | tfstate in S3 via Stackd's HTTP backend |
-| **Mock output** | placeholder value to bootstrap a cascade; blocks apply |
+| **Managed state** | tfstate in S3 via Stackd's HTTP backend, per-job scoped tokens |
+| **Saved plan** | the reviewed `plan.tfplan`, kept encrypted until the run ends; the apply applies exactly it |
+| **Mock output** | placeholder value to bootstrap a cascade; blocks the apply unless the environment sets `allow_mock_apply` |
 | **Cascade** | downstream runs triggered when an upstream apply finishes |
-| **Workload token** | per-run OIDC token, `sub=run:<tier>:<stack>:<phase>` |
+| **Workload token** | per-job OIDC token, `sub=run:<tier>:<stack>:<phase>` |
 | **Audit** | who-did-what, append-only |
-| **Proposed run** | plan-only run from a PR (RO state, no secrets) |
-| **Notification target** | outbound Slack/webhook on a stack/env, firing on chosen run states |
+| **Proposed run** | plan-only run from a PR (`ro` state token, plan role, no secrets) |
+| **Notification target** | outbound Slack/webhook on a stack or environment, firing on chosen run states |
 | **Outbox** | run-event notifications enqueued in-txn, drained by the scheduler (at-least-once) |

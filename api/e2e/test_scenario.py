@@ -1,7 +1,9 @@
 """The full non-regression scenario (DEV §7). If this passes against the live stack, the core of
 the product works: plan → confirm → apply, automatic cascade, mock-block, tier + 4-eyes gates.
 
-Run with `task e2e`. Requires the seeded demo graph and a live worker processing jobs.
+Run with `task e2e`. Requires the seeded demo graph and a live worker processing jobs. Runs on
+`graph` (conftest), a throwaway copy of the demo graph built per run, so it is re-runnable on a
+used database and never touches the seeded stacks.
 """
 
 from __future__ import annotations
@@ -63,13 +65,13 @@ async def _wait_new_run(http, h, env_id: str, exclude: set[str], *, timeout_s: f
     raise AssertionError(f"no new run appeared on {env_id}")
 
 
-async def test_full_scenario(http: httpx.AsyncClient, envs: dict[str, str]) -> None:
-    bob = await _login(http, "bob")  # writer, max_apply_tier=staging
-    alice = await _login(http, "alice")  # approver, max_apply_tier=prod
+async def test_full_scenario(http: httpx.AsyncClient, graph: dict[str, str]) -> None:
+    bob = await _login(http, "bob")  # writer, allowed_tiers={dev, staging}
+    alice = await _login(http, "alice")  # approver, allowed_tiers={dev, staging, prod}
     admin = await _login(http, "admin")
 
-    net_dev, net_prod = envs["demo-network/dev"], envs["demo-network/prod"]
-    app_dev, app_prod = envs["demo-app/dev"], envs["demo-app/prod"]
+    net_dev, net_prod = graph["network/dev"], graph["network/prod"]
+    app_dev, app_prod = graph["app/dev"], graph["app/prod"]
 
     # 1. bob (writer) triggers network/dev → plan → unconfirmed. A writer may trigger a plan.
     r1 = await _trigger(http, bob, net_dev)

@@ -7,14 +7,15 @@ import uuid
 from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.enums import Role, RunState, TriggeredBy
+from app.enums import RunState, RunType, TriggeredBy
 from app.models.environment import Environment
 from app.models.run import Run
+from app.models.stack import Stack
 from app.models.user import User
 from app.models.user_notification import UserNotification
+from app.permissions import can_apply
+from app.spaces.service import users_with_space_access
 
-# Approver roles (mirror app.permissions, kept local to avoid a cycle).
-_APPROVERS = (Role.approver, Role.admin)
 _MENTION_RE = re.compile(r"@([a-zA-Z0-9._+-]+)")
 
 
@@ -40,20 +41,24 @@ async def notify(
     )
 
 
-async def eligible_approver_ids(session: AsyncSession, tier: str) -> list[uuid.UUID]:
-    """Users who may approve for this tier: enabled, approver/admin role, tier in their allowed
-    set (§2.4). The single who-may-approve fan-out query — approval requests and drift alerts both
-    use it, so a future membership-aware rewrite lands in one place."""
-    rows = (
-        await session.execute(
-            select(User.id).where(
-                User.role.in_(_APPROVERS),
-                User.disabled.is_(False),
-                text(":tier = ANY(allowed_tiers)").bindparams(tier=tier),
-            )
-        )
-    ).scalars()
-    return list(rows)
+async def eligible_approver_ids(
+    session: AsyncSession, env: Environment, *, is_destroy: bool = False
+) -> list[uuid.UUID]:
+    """Users who may confirm an apply on `env` — the rule `confirm_run` enforces, evaluated with
+    the same `can_apply` (§2.4, §6 Phase F): space access (a member of the env's space, or an
+    instance admin) AND the *effective* role/tiers (+ can_destroy for a destroy run) from that
+    membership, else the instance defaults. So the fan-out neither leaks the env to a non-member
+    nor misses a membership-only approver. The single who-may-approve fan-out — approval requests
+    and drift alerts both use it. Fails closed: no stack → nobody; no allowed tier → not eligible.
+    """
+    stack = await session.get(Stack, env.stack_id)
+    if stack is None:
+        return []
+    return [
+        user.id
+        for user, membership in await users_with_space_access(session, stack.space_id)
+        if can_apply(user, env, membership, is_destroy=is_destroy).allowed
+    ]
 
 
 async def enqueue_for_transition(session: AsyncSession, run: Run, to_state: RunState) -> None:
@@ -65,7 +70,8 @@ async def enqueue_for_transition(session: AsyncSession, run: Run, to_state: RunS
         if env is None:
             return
         ctx = {"environment_id": str(env.id), "environment": env.name, "tier": env.tier}
-        for uid in await eligible_approver_ids(session, env.tier):
+        is_destroy = run.type == RunType.destroy  # as confirm_run: a destroy needs can_destroy
+        for uid in await eligible_approver_ids(session, env, is_destroy=is_destroy):
             if uid == run.trigger_user_id:
                 continue  # the triggerer already knows; avoids "approve your own" noise
             await notify(session, uid, "approval_request", run_id=run.id, context=ctx)

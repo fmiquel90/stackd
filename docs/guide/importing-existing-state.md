@@ -26,7 +26,7 @@ apply anything.
 
 ## Path 2 — adopt Stackd-managed state (`managed_state: true`)
 
-Hand state to Stackd (state in S3 behind its HTTP backend, scoped per-run tokens, visible locking,
+Hand state to Stackd (state in S3 behind its HTTP backend, per-job scoped tokens, visible locking,
 serial-regression guard). Migrate your current state **once** with a standard
 `tofu init -migrate-state` — Stackd hands you a scoped credential to do it.
 
@@ -54,27 +54,44 @@ curl -s -X POST localhost:8000/api/v1/environments/$ENV_ID/state/import-session 
 }
 ```
 
-**3. Migrate your state** with the returned config. In your repo, switch the backend block to
-`terraform { backend "http" {} }`, then run once:
+**3. Migrate your state** with the returned config. In a local checkout, switch the backend block
+to `terraform { backend "http" {} }`, then run once:
 
 ```bash
-tofu init -migrate-state \
-  -backend-config="address=$ADDRESS" \
-  -backend-config="lock_address=$ADDRESS/lock" \
-  -backend-config="unlock_address=$ADDRESS/lock" \
-  -backend-config="lock_method=LOCK" \
-  -backend-config="unlock_method=UNLOCK" \
-  -backend-config="username=env" \
-  -backend-config="password=$TOKEN"
+TF_HTTP_ADDRESS="$ADDRESS" \
+TF_HTTP_LOCK_ADDRESS="$ADDRESS/lock" \
+TF_HTTP_UNLOCK_ADDRESS="$ADDRESS/lock" \
+TF_HTTP_LOCK_METHOD=LOCK \
+TF_HTTP_UNLOCK_METHOD=UNLOCK \
+TF_HTTP_USERNAME=env \
+TF_HTTP_PASSWORD="$TOKEN" \
+tofu init -migrate-state
 ```
 
+The settings go through `TF_HTTP_*` environment variables rather than `-backend-config`: tofu writes
+`-backend-config` values, the token included, into `.terraform/`, while environment variables never
+touch disk. Stackd's own workers do the same.
+
 Terraform LOCKs, uploads your current state through Stackd's backend (stored as a `state_version`),
-then UNLOCKs. Future runs use the managed backend automatically.
+then UNLOCKs.
+
+**4. Remove the backend block from the committed code.** On a managed-state environment the worker
+adds its own `backend "http" {}` block and hands the address and its job token to tofu through
+`TF_HTTP_*` environment variables, so the repo must declare **no** backend: a second backend block
+makes `init` fail. Future runs then use the managed backend automatically.
+
+!!! tip "Clean up the local checkout"
+    Delete the local `.terraform/` once the migration is done, and don't commit the temporary
+    `backend "http" {}` block (step 4).
 
 !!! warning
     The import session is **admin-only**, the token expires in 30 minutes, and creating it is
     audited (`state.import_session_created`). The endpoint refuses an env where `managed_state` is
-    off (409).
+    off (409). The returned addresses use `STACKD_PUBLIC_URL`, since you run `tofu` from your own
+    machine.
+
+In the local dev stack, the imported state lands in the Garage bucket that `task dev` provisions;
+`task s3-ls` lists it under `states/<environment_id>/`.
 
 ## Which to choose?
 

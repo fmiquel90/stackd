@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import uuid
+
 import httpx
 
 from tests.conftest_phase2 import event, login, make_env, make_stack, register_worker
@@ -69,3 +71,54 @@ async def test_promote_rejects_cross_stack(client: httpx.AsyncClient) -> None:
         f"/api/v1/environments/{other}/promote", headers=admin, json={"from_environment_id": dev}
     )
     assert r.status_code == 400
+
+
+async def test_promote_missing_source_vs_target_404(client: httpx.AsyncClient) -> None:
+    # The two ids get distinct 404 titles so a client can tell which one is wrong.
+    admin = await login(client, "admin")
+    stack = await make_stack(client, admin, "promote-404")
+    staging = await make_env(client, admin, stack, "staging", "staging")
+    bogus = str(uuid.uuid4())
+
+    r = await client.post(
+        f"/api/v1/environments/{staging}/promote",
+        headers=admin,
+        json={"from_environment_id": bogus},
+    )
+    assert r.status_code == 404
+    assert r.json()["title"] == "Source environment not found"
+
+    r = await client.post(
+        f"/api/v1/environments/{bogus}/promote",
+        headers=admin,
+        json={"from_environment_id": staging},
+    )
+    assert r.status_code == 404
+    assert r.json()["title"] == "Environment not found"
+
+
+async def test_promote_source_still_space_gated(client: httpx.AsyncClient) -> None:
+    # The custom 404 title must not weaken the access check on the source: a writer who can reach
+    # the target but not the source's space is refused.
+    admin = await login(client, "admin")
+    bob = await login(client, "bob")  # writer, member of the default space only
+    space = await client.post("/api/v1/spaces", headers=admin, json={"name": "promote-other"})
+    assert space.status_code == 201, space.text
+    other_stack = await client.post(
+        "/api/v1/stacks",
+        headers=admin,
+        json={
+            "space_id": space.json()["id"],
+            "name": "promote-other-stack",
+            "repo_url": "file:///repos/x",
+            "tool_version": "1.12.0",
+        },
+    )
+    source = await make_env(client, admin, other_stack.json()["id"], "dev", "dev")
+    stack = await make_stack(client, admin, "promote-gated")
+    target = await make_env(client, admin, stack, "staging", "staging")
+
+    r = await client.post(
+        f"/api/v1/environments/{target}/promote", headers=bob, json={"from_environment_id": source}
+    )
+    assert r.status_code == 403

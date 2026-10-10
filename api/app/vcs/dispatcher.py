@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import uuid
 from datetime import datetime
 
 from sqlalchemy import select, update
@@ -87,22 +88,33 @@ async def dispatch_vcs(session: AsyncSession, now: datetime, *, limit: int = 20)
         )
     ).all()
     by_run = {run.id: (run, env, stack) for run, env, stack in triples}
+    # End the read txn before any HTTP so no pooled connection idles in transaction across the
+    # batch. Commit, not rollback (which would expire the rows): with expire_on_commit=False the
+    # loaded rows stay usable — plain columns only, no relationship to lazy-load.
+    await session.commit()
 
-    done: list[tuple] = []  # (row_id, run_id, comment_id|None)
+    done: list[uuid.UUID] = []  # outbox rows to mark sent
+    # Latest PR comment id per run, refreshed after every upsert: a batch can hold several rows for
+    # one run (a fast plan, a backlog) and each must edit that one comment, not post a new one.
+    comment_ids: dict[uuid.UUID, int] = {}
     # One pooled client for the whole batch — every post-back reuses a single TLS connection.
     async with github.client() as http:
         for row_id, run_id, to_state, attempt in batch:
             run, env, stack = by_run.get(run_id, (None, None, None))
             if run is None or run.vcs_provider != "github":
-                done.append((row_id, None, None))
+                done.append(row_id)
                 continue
-            owner_repo = github.parse_owner_repo(stack.repo_url)
-            token = decrypt(stack.repo_secret_encrypted) if stack.repo_secret_encrypted else None
-            if owner_repo is None or token is None:
-                done.append((row_id, None, None))  # not postable (no creds / not github) — drop
-                continue
-            owner, repo = owner_repo
             try:
+                # Inside the try: one stack's undecryptable secret (key rotation, corrupt blob)
+                # fails that row only — retried / dead-lettered — never the rest of the batch.
+                owner_repo = github.parse_owner_repo(stack.repo_url)
+                token = (
+                    decrypt(stack.repo_secret_encrypted) if stack.repo_secret_encrypted else None
+                )
+                if owner_repo is None or token is None:
+                    done.append(row_id)  # not postable (no creds / not github) — drop
+                    continue
+                owner, repo = owner_repo
                 if run.vcs_head_sha:
                     await github.set_status(
                         token,
@@ -115,18 +127,17 @@ async def dispatch_vcs(session: AsyncSession, now: datetime, *, limit: int = 20)
                         description=_summary(run) if to_state == "finished" else to_state,
                         http=http,
                     )
-                comment_id = run.vcs_comment_id
                 if run.pr_number:
-                    comment_id = await github.upsert_comment(
+                    comment_ids[run_id] = await github.upsert_comment(
                         token,
                         owner,
                         repo,
                         run.pr_number,
                         _comment_body(run, stack, env),
-                        run.vcs_comment_id,
+                        comment_ids.get(run_id, run.vcs_comment_id),
                         http=http,
                     )
-                done.append((row_id, run_id, comment_id))
+                done.append(row_id)
             except Exception as exc:  # external API — never crash the loop
                 _log.warning(
                     "vcs post-back failed",
@@ -135,18 +146,15 @@ async def dispatch_vcs(session: AsyncSession, now: datetime, *, limit: int = 20)
                         "run_id": str(run_id),
                         "state": to_state,
                         "attempt": attempt,
-                        "error": str(exc),
+                        "error": str(exc) or type(exc).__name__,  # InvalidTag has no message
                     },
                 )
 
     if done:
-        await session.execute(
-            update(VcsOutbox).where(VcsOutbox.id.in_([d[0] for d in done])).values(sent_at=now)
-        )
-        for _row_id, run_id, comment_id in done:
-            if run_id is not None and comment_id is not None:
-                await session.execute(
-                    update(Run).where(Run.id == run_id).values(vcs_comment_id=comment_id)
-                )
+        await session.execute(update(VcsOutbox).where(VcsOutbox.id.in_(done)).values(sent_at=now))
+        for run_id, comment_id in comment_ids.items():
+            await session.execute(
+                update(Run).where(Run.id == run_id).values(vcs_comment_id=comment_id)
+            )
         await session.commit()
     return len(batch)

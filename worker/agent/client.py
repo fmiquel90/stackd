@@ -82,3 +82,19 @@ class ApiClient:
         self._send(
             "PUT", f"/worker/v1/jobs/{job_id}/artifacts/{name}", content=data
         ).raise_for_status()
+
+    def download_artifact(self, job_id: str, name: str) -> bytes:
+        """A job's artifact (the apply job's saved plan, §7.4). Any refusal raises, carrying the
+        API's problem detail — the caller fails closed on it."""
+        resp = self._send("GET", f"/worker/v1/jobs/{job_id}/artifacts/{name}")
+        if resp.status_code != 200:
+            try:
+                body = resp.json()
+            except ValueError:
+                body = None
+            if isinstance(body, dict):
+                detail = body.get("detail") or body.get("title")
+            else:
+                detail = resp.text[:200]
+            raise RuntimeError(f"HTTP {resp.status_code}: {detail}")
+        return resp.content
