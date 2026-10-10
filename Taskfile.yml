@@ -98,6 +98,9 @@ tasks:
     desc: Tear everything down and start fresh
     cmds:
       - "{{.COMPOSE}} down -v"
+      # The pool token belongs to the wiped DB: drop it so the worker waits for the new seed
+      # instead of registering with a stale token before the migrations have run.
+      - rm -f .dev/pool.token
       - task: dev
 
   test:
