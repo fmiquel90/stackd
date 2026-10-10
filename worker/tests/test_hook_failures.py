@@ -5,7 +5,10 @@ for real (`sh -c`); tofu is faked."""
 
 from __future__ import annotations
 
+import contextlib
 import json
+import os
+import signal
 import subprocess
 import time
 from pathlib import Path
@@ -17,6 +20,7 @@ import pytest
 import agent.main as main
 from agent.client import ApiClient
 from agent.config import Settings
+from agent.runner import LogStreamer, run_hooks
 from agent.workspace import Workspace
 
 OUTPUTS = {"vpc_id": {"sensitive": False, "type": "string", "value": "vpc-0abc"}}
@@ -191,6 +195,56 @@ def test_a_hook_past_its_timeout_is_killed_and_fails_by_its_on_failure(
     else:
         kind, kw = client.events[-1]
         assert kind == "phase_finished" and kw["result"]["checks"] == [check]
+
+
+class _Streamer:
+    def emit(self, *args: Any, **kw: Any) -> None:
+        pass
+
+
+def _running(pid: int) -> bool:
+    """True while `pid` runs (a killed process its reaper has yet to collect counts as gone)."""
+    try:
+        stat = Path(f"/proc/{pid}/stat").read_text()
+    except FileNotFoundError:
+        return False
+    return stat.rsplit(")", 1)[1].split()[0] != "Z"
+
+
+@pytest.mark.skipif(not Path("/proc/self/stat").exists(), reason="reads /proc")
+@pytest.mark.parametrize("source", ["platform", "repo"])
+@pytest.mark.parametrize(
+    "background", ["sleep 30 &", "sleep 30 >/dev/null 2>&1 &"], ids=["holding-output", "detached"]
+)
+def test_a_hooks_background_process_does_not_outlive_it(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, source: str, background: str
+) -> None:
+    # §8.3: once the hook exits, its whole process group is killed — a background process would
+    # otherwise still run while tofu has the tfvars and OIDC token on disk, or a platform hook the
+    # raw plan JSON. One still holding the hook's output no longer keeps the hook from ending.
+    monkeypatch.setenv("STACKD_HOOK_TIMEOUT_SECONDS", "5")
+    pid_file = tmp_path / "background.pid"
+    hook = {"name": "bg", "command": f"{background} echo $! > {pid_file}", "source": source}
+    started = time.monotonic()
+    results, aborted = run_hooks(
+        [hook],
+        tmp_path,
+        platform_env=dict(os.environ),
+        repo_env=dict(os.environ),
+        phase="planning",
+        streamer=cast(LogStreamer, _Streamer()),
+    )
+    pid = int(pid_file.read_text())
+    try:
+        assert time.monotonic() - started < 3  # not the hook timeout's kill
+        assert (results, aborted) == ([{"name": "bg", "status": "ok", "detail": None}], False)
+        deadline = time.monotonic() + 2
+        while _running(pid) and time.monotonic() < deadline:
+            time.sleep(0.02)
+        assert not _running(pid)
+    finally:
+        with contextlib.suppress(ProcessLookupError):
+            os.kill(pid, signal.SIGKILL)
 
 
 @pytest.mark.parametrize("phase", ["plan", "apply"])

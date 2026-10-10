@@ -51,7 +51,7 @@ A job holding **apply credentials** — an `applying` run, or a **mutating comma
 
 ### Time budgets
 
-Each job's subprocesses run under a watchdog that kills them — their whole process group — past their budget. A plan, an apply or a command killed this way fails the run with an "exceeded the …s time budget" error:
+Each job's subprocesses run in their own process group: whatever a hook or a tofu command leaves running there is killed once it exits, and a watchdog kills the whole group past its budget. A plan, an apply or a command killed this way fails the run with an "exceeded the …s time budget" error:
 
 | What | Budget |
 |---|---|

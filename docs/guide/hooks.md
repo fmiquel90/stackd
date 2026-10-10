@@ -57,6 +57,9 @@ job, a fresh clone of the reviewed commit, runs `before_apply` and `after_apply`
 - **Timeout.** Each hook gets 10 minutes (`STACKD_HOOK_TIMEOUT_SECONDS` on the worker). Past it the
   hook and every process it started are killed, and it fails by its own `on_failure` (detail
   `timed out after <n>s`).
+- **No background process.** When a hook's command exits, every process it left running in its
+  process group (`cmd &`) is killed: nothing a hook starts outlives it. Run what a check needs in
+  the foreground.
 - **No plan JSON, no checks.** If tofu can't produce the plan's JSON document, the plan job fails
   (`plan JSON unavailable, not checked`): an `after_plan` check never passes on an empty plan.
 

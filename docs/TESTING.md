@@ -190,7 +190,7 @@ The tier gate (an approver without `prod`) and staleness stay manual checks (DEV
 | `test_saved_plan.py` (10) | The plan job uploads the plan it showed, before the `after_plan` hooks; destroy runs plan with `-destroy`; the apply job applies exactly the saved plan, fails closed without a usable one, reports a stale plan clearly; the plan file is never written through a checked-out symlink; the API's refusal reaches the job error. |
 | `test_commit_pin.py` (7) | An unpinned clone takes the env branch head; a pinned SHA off the default tip and a pinned ref are checked out exactly; an unknown commit fails at fetch; the plan reports its commit; an apply without a pinned commit fails closed. |
 | `test_backend_env.py` (12) | The managed backend reaches tofu only via `TF_HTTP_*` (never `-backend-config`), with no lock address for a read-only job; inherited `TF_HTTP_*` dropped; unmanaged unchanged; repo hooks never get it, in plan, apply and command jobs; tofu's environment carries none of the agent's `STACKD_*` settings, in all three jobs. |
-| `test_hook_failures.py` (31) | At every stage and from both sources: a `fail` hook fails the job at its stage, a `warn` one lets it finish and is reported; a failing `before_apply` hook stops the apply; a hook past `STACKD_HOOK_TIMEOUT_SECONDS` is killed and fails by its `on_failure`; every check result is reported with its stage, in plan and apply jobs. |
+| `test_hook_failures.py` (35) | At every stage and from both sources: a `fail` hook fails the job at its stage, a `warn` one lets it finish and is reported; a failing `before_apply` hook stops the apply; a hook past `STACKD_HOOK_TIMEOUT_SECONDS` is killed and fails by its `on_failure`; a hook's background process is killed when the hook exits, whether it holds the hook's output or not; every check result is reported with its stage, in plan and apply jobs. |
 | `test_hook_secrets.py` (8) | What a repo hook can read: no saved plan, raw plan JSON, tfvars, OIDC token file or repo token in the workspace; a masked `plan.json` at `after_plan` (platform hooks get the raw one); symlinks a repo plants never receive a secret; the clone leaves no token under `.git/`; repo hooks get only the allowlisted worker env, platform hooks none of the agent's `STACKD_*` settings; command runs still read the tfvars; the real OpenTofu end to end. |
 | `test_exit_codes.py` (17) | A plan succeeds only on exit 0 or 2: an error, the watchdog's kill (124), a signal or any other code fails the job with the reason; an apply or command fails on any non-zero code; a plan without its JSON document (`show -json` failed or printed no JSON object) fails closed. |
 | `test_command_run.py` (14) | A command's time budget follows `cred_phase`: apply budget when mutating, default cap when read-only, apply budget when missing (fail closed); an over-budget command fails with a clear message. |
@@ -218,7 +218,7 @@ The tier gate (an approver without `prod`) and staleness stay manual checks (DEV
 
 ## 5. Counts
 
-Roughly **279 API tests** (38 files), **175 worker tests** (15 files), **1 e2e scenario** and
+Roughly **279 API tests** (38 files), **179 worker tests** (15 files), **1 e2e scenario** and
 **9 front unit tests**, parametrized cases included. The numbers move with every change; count them
 instead of trusting this page:
 
