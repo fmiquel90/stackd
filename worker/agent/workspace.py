@@ -6,7 +6,7 @@ import re
 import shutil
 import subprocess
 from pathlib import Path
-from urllib.parse import urlsplit, urlunsplit
+from urllib.parse import quote, urlsplit, urlunsplit
 
 import yaml
 
@@ -19,14 +19,27 @@ _SAFE_REF = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._/-]{0,255}$")
 def _authed_url(repo_url: str, token: str | None) -> str:
     """Inject an HTTPS token credential the way the API does (x-access-token@). SSH / no-token URLs
     pass through unchanged. Mirrors app.stacks.git._authed_url so the worker clones what the API
-    validated."""
+    validated: each userinfo component is percent-encoded (a raw `@ : / ? # %` in the token would
+    end the userinfo early, so git would contact the wrong host or carry part of the token in the
+    host or path), and the host[:port] is kept verbatim (any userinfo already in `repo_url` is
+    replaced), so IPv6 brackets and the port survive."""
     if token and repo_url.startswith("http"):
         parts = urlsplit(repo_url)
-        netloc = f"x-access-token:{token}@{parts.hostname}"
-        if parts.port:
-            netloc += f":{parts.port}"
+        userinfo = ":".join(quote(p, safe="") for p in ("x-access-token", token))
+        netloc = f"{userinfo}@{parts.netloc.rpartition('@')[2]}"
         return urlunsplit((parts.scheme, netloc, parts.path, parts.query, parts.fragment))
     return repo_url
+
+
+def _redact(text: str, token: str | None) -> str:
+    """Mask the repo token in what git reports: the authed URL (percent-encoded form) can appear
+    verbatim in git's errors, the raw form anywhere else. Longest form first: the raw token can be
+    a substring of its encoded form (a literal `%25` in it), and masking that first would leave the
+    rest of the encoded token behind. Mirrors app.stacks.git._redact."""
+    if token:
+        for form in sorted({token, quote(token, safe="")}, key=len, reverse=True):
+            text = text.replace(form, "•••")
+    return text
 
 
 class Workspace:
@@ -60,9 +73,8 @@ class Workspace:
         if result.returncode != 0:
             msg = result.stderr.strip() or result.stdout.strip()
             # The error is reported via job_failed (not the log masker) — redact the token here so a
-            # failed authenticated clone can never leak it.
-            if token:
-                msg = msg.replace(token, "•••")
+            # failed authenticated clone can never leak it, in either form.
+            msg = _redact(msg, token)
             raise RuntimeError(f"git clone failed: {msg}")
         if commit_sha:
             if not _SAFE_REF.match(commit_sha):
