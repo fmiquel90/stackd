@@ -1,6 +1,7 @@
 """What a repo hook can read (SPECS §8.3). It runs repo-controlled code in the job's checkout, so
 nothing secret may be there while it runs: not the saved plan, nor tofu's raw plan JSON (repo hooks
-read a masked plan.json), nor the run's tfvars, nor the repo token. Real git (over HTTP with a token,
+read a masked plan.json), nor the run's tfvars, nor the repo token; and of the worker's own
+environment it gets only what a shell command needs. Real git (over HTTP with a token,
 where it matters), real Workspace, real hooks (`sh -c`); tofu is a stand-in script that behaves just
 enough like it — or the real one, when it is installed."""
 
@@ -405,3 +406,61 @@ def test_clone_keeps_no_token_in_the_checkout(tmp_path: Path, git_http: str) -> 
     )
     assert hits.stdout == "", hits.stdout  # nowhere: not in .git/config, FETCH_HEAD, reflogs, …
     assert _git(ws.path / "repo", "remote", "get-url", "origin") == url
+
+
+# All a repo hook may get of the worker's own environment (§8.3), and what `sh` sets itself.
+_ALLOWED_WORKER_ENV = {
+    *("PATH", "HOME", "USER", "LOGNAME", "SHELL", "TMPDIR", "TERM", "LANG", "LANGUAGE", "TZ"),
+    *("HTTP_PROXY", "HTTPS_PROXY", "NO_PROXY", "ALL_PROXY"),
+    *("http_proxy", "https_proxy", "no_proxy", "all_proxy", "SSL_CERT_FILE", "SSL_CERT_DIR"),
+}
+_SHELL_SET = {"PWD", "OLDPWD", "SHLVL", "_"}
+
+
+def test_repo_hooks_get_only_allowlisted_worker_env(
+    tmp_path: Path, tofu: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # Whatever secrets an operator's worker host carries in its environment.
+    secrets = {
+        "STACKD_ENCRYPTION_KEY": "enc-key-1",
+        "STACKD_JWT_SECRET": "jwt-secret-2",
+        "STACKD_POOL_TOKEN": "pool-token-3",
+        "DATABASE_URL": "postgresql://stackd:db-pw-4@db/stackd",
+        "MY_TOKEN": "my-token-5",
+        "AWS_SECRET_ACCESS_KEY": "aws-key-6",
+    }
+    basics = {
+        "HOME": "/home/worker",
+        "LANG": "C.UTF-8",
+        "LC_ALL": "C.UTF-8",
+        "TMPDIR": str(tmp_path),
+        "TERM": "dumb",
+        "HTTPS_PROXY": "http://proxy.internal:3128",
+        "NO_PROXY": "localhost",
+    }
+    for name, value in {**secrets, **basics}.items():
+        monkeypatch.setenv(name, value)
+    dump = "env | sed 's/^/{} /'"
+    url, sha = _repo(tmp_path, {"before_init": [dump.format("REPO")]})
+    platform = {"name": "governance", "command": dump.format("PLATFORM"), "source": "platform"}
+    client = _plan_and_apply(tmp_path, url, sha, tofu, hooks={"before_init": [platform]})
+
+    def seen(who: str) -> dict[str, str]:
+        prefix = f"{who} "
+        lines = [line.removeprefix(prefix) for line in client.lines if line.startswith(prefix)]
+        return dict(line.split("=", 1) for line in lines if "=" in line)
+
+    repo, platform_env = seen("REPO"), seen("PLATFORM")
+    assert not set(secrets) & set(repo), sorted(repo)  # names only: never print a value
+    assert not any(v in line for v in secrets.values() for line in client.lines if "REPO" in line)
+    assert {k: repo.get(k) for k in basics} == basics
+    assert repo["PATH"] == f"{tofu}:{os.environ['PATH']}"  # the run's env still layers on top
+    run_env = _job("plan", url, None, tofu)["env"]
+    others = {
+        k
+        for k in repo
+        if k not in _ALLOWED_WORKER_ENV | _SHELL_SET | set(run_env) and not k.startswith("LC_")
+    }
+    assert others == set(), others  # nothing else of the worker's environment
+    # Platform hooks keep the worker's environment (§8.3).
+    assert {k: platform_env.get(k) for k in secrets} == secrets

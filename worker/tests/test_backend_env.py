@@ -80,10 +80,10 @@ def test_tofu_env_unmanaged_is_unchanged() -> None:
 def test_repo_environ_strips_state_backend_settings(monkeypatch) -> None:
     monkeypatch.setenv("TF_HTTP_PASSWORD", TOKEN)
     monkeypatch.setenv("TF_HTTP_ADDRESS", "http://api/state/v1/env")
-    monkeypatch.setenv("PROJECT_NAME", "demo")
+    monkeypatch.setenv("PATH", "/usr/bin:/bin")
     env = _repo_environ()
     assert not any(k.startswith("TF_HTTP_") for k in env)
-    assert env.get("PROJECT_NAME") == "demo"
+    assert env.get("PATH") == "/usr/bin:/bin"
 
 
 # --- through the plan / command handlers: tofu gets the token, hooks never do -----------------

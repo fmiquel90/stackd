@@ -34,18 +34,27 @@ def _safe_json(raw: str) -> dict:
         return {}
 
 
-# Cloud-credential env families an untrusted repo hook must never see (§8.3). The docker runner
-# bakes none of these in; this also protects the trusted-dev `local` runner where a mounted ~/.aws
-# can export AWS_* into the worker process.
-_CLOUD_ENV_PREFIXES = ("AWS_", "GOOGLE_", "GCLOUD_", "GCP_", "AZURE_", "ARM_")
 # The HTTP state backend's settings (§11.2): the state token rides in TF_HTTP_PASSWORD.
 _STATE_BACKEND_ENV_PREFIX = "TF_HTTP_"
+# All an untrusted repo hook gets of the worker's own environment (§8.3): what any shell command
+# needs (plus LC_*), nothing else. A worker host can carry any secret in its env — the pool token,
+# a cloud credential family (a mounted ~/.aws on the trusted-dev `local` runner exports AWS_*), a
+# database URL — and none of it may reach a repo hook.
+_REPO_ENV_ALLOWLIST = frozenset(
+    {
+        *("PATH", "HOME", "USER", "LOGNAME", "SHELL", "TMPDIR", "TERM"),
+        *("LANG", "LANGUAGE", "TZ"),
+        *("HTTP_PROXY", "HTTPS_PROXY", "NO_PROXY", "ALL_PROXY"),
+        *("http_proxy", "https_proxy", "no_proxy", "all_proxy"),
+        *("SSL_CERT_FILE", "SSL_CERT_DIR"),  # the CA bundle a TLS-inspecting proxy needs
+    }
+)
 
 
 def _repo_environ() -> dict[str, str]:
-    """Base process env for repo hooks, stripped of cloud and state-backend credentials (§8.3)."""
-    deny = (*_CLOUD_ENV_PREFIXES, _STATE_BACKEND_ENV_PREFIX)
-    return {k: v for k, v in os.environ.items() if not k.startswith(deny)}
+    """Base process env for repo hooks: the allowlisted variables of the worker's own environment
+    only (§8.3). The run's non-sensitive `env` is layered on top by the caller."""
+    return {k: v for k, v in os.environ.items() if k in _REPO_ENV_ALLOWLIST or k.startswith("LC_")}
 
 
 def _secret_leak_in_outputs(doc: str, masker: Masker) -> str | None:
