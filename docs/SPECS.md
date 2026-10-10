@@ -551,6 +551,11 @@ POST /worker/v1/jobs/claim?wait=25
                                            # the agent kills `apply`, and a cred_phase=apply command,
                                            # past it
     "refresh_only": false,                 # true for a drift run (§19): plan with -refresh-only
+    "destroy": false,                      # true for a destroy run: plan with -destroy (the saved
+                                           # plan carries it to the apply)
+    "save_plan": true,                     # plan job of a tracked/destroy run: upload plan.tfplan
+                                           # when the plan has changes (§7.3); false for a proposed
+                                           # run (never applied), an apply or a command job
     "command": {"name": "state rm", "args": ["aws_s3_bucket.old"]},   # command jobs only, else null
     "environment": { "id", "name": "prod", "stack_name": "core-network",
       "repo_url", "commit_sha", "branch", "project_root",
@@ -620,7 +625,7 @@ FROM next WHERE runs.id = next.id RETURNING runs.*;
 1. **Serialize per env**: the `SELECT ... FOR UPDATE` also locks the corresponding `environments` row (`JOIN environments e ... FOR UPDATE OF e SKIP LOCKED`), so that only one claim per env progresses at a time; the others skip the locked env and take another run.
 2. **Safety net**: the violation of `one_active_run_per_env` is **caught** (SQLSTATE `23505`) and treated as "nothing to claim" → `204`, the worker re-polls. This is the correctness guarantee; the lock above is only an optimization to avoid discarded work.
 
-Apply affinity: a `confirmed` run is reserved for its originating worker for **60 s** (`AND (r.worker_id = :wid OR r.confirmed_at < now() - interval '60 seconds')` on confirmed runs). Past that delay (dead or saturated worker), any compatible worker takes it and does an **automatic re-plan** before the apply (workspace absent → §4.2).
+Apply affinity: a `confirmed` run is reserved for its originating worker for **60 s** (`AND (r.worker_id = :wid OR r.confirmed_at < now() - interval '60 seconds')` on confirmed runs). Past that delay (dead or saturated worker), any compatible worker takes it: the apply needs nothing from the plan worker's workspace — it downloads the run's **saved plan** from the API (§7.3) and applies exactly it. There is **no re-plan** on the apply path: no saved plan → the apply fails.
 
 ### 7.3 Events and artifacts
 
@@ -633,7 +638,15 @@ POST /worker/v1/jobs/{id}/events
   phase_started(planning) carries "result": {"commit_sha": "<full SHA checked out>"}
 
 PUT /worker/v1/jobs/{id}/artifacts/plan.tfplan | plan.json | outputs.json
+GET /worker/v1/jobs/{id}/artifacts/plan.tfplan          # the apply job's saved plan
 ```
+
+**Saved plan.** What a human confirms is the plan file the plan job made, and the apply applies exactly that file (`tofu apply plan.tfplan`) — never a fresh plan:
+
+- **Upload** (`PUT …/plan.tfplan`, worker-authenticated, the run's worker only): accepted only for a `tracked`/`destroy` run (`409` for a proposed or command run) and only during its plan job (`preparing`/`planning`/`checking`, checked under the run's row lock — `409` afterwards: once planned, the reviewed plan is frozen, for every worker). Capped at 64 MiB (`413`, also while streaming), empty → `400`. The API encrypts it (AES-256-GCM, app key, AAD bound to its S3 key — a plan file holds the run's variable values in clear, sensitive ones included), stores it under `artifacts/{run_id}/plan.tfplan` (§11.3) and records the key on the run (`runs.plan_artifact_key`). The agent uploads it right after `plan`/`show`, **before any `after_plan` hook** (a repo hook can't swap what gets applied).
+- **Download** (`GET …/plan.tfplan`): only by the worker holding the run, only while the run is `applying` (`409` otherwise — not even the worker that planned it before the apply claim). No saved plan / object missing → `404`; integrity failure (wrong key, tampered or moved blob) → `500`. Never anything else in its place.
+- **Apply job**: clone the pinned commit, `init`, download the saved plan — on any refusal or error the job **fails closed** (`saved plan unavailable, not applied: …`), before the `before_apply` hooks — then `before_apply` hooks, write the plan (`0600`, replacing whatever the checkout has at that path, never through a symlink), `apply -input=false -json plan.tfplan`, delete the file (the `after_apply` repo hooks never see it). tofu itself refuses a saved plan whose state moved since (`Saved plan is stale`) or whose inputs changed (`Mismatch between input and plan variable value`): the run fails with tofu's detail and "trigger a new plan".
+- **Retention**: deleted once the run is terminal (§11.3).
 
 **Commit pinning.** The plan job reports the full SHA it checked out on `phase_started(planning)`. A run triggered without a commit (manual, cascade) is pinned to it; a run whose `commit_sha` is a ref (branch/tag) is re-pinned to the SHA it resolved to; a run already pinned to a full SHA must have checked out exactly that commit — otherwise the API fails it (`commit_mismatch`, audited `run.apply_failed`) and answers `409`. A malformed SHA gets `400`. The apply job is handed the pinned SHA and clones exactly it (shallow `fetch` of that SHA, checkout of `FETCH_HEAD`, verified against `HEAD`), so the apply, its hooks and `output -json` run on the reviewed commit and staleness (§9.6) knows what was applied.
 
@@ -663,19 +676,23 @@ if job.phase == "plan":
     # plan/apply run with -json: the agent streams each event's human @message to the log (masked)
     # AND collects the structured events — the `change_summary` event gives the authoritative
     # add/change/destroy counts and `diagnostic` events surface the real error as the run's `error`.
-    code, events = run_json(tf, "plan", "-json", "-out=plan.tfplan", "-detailed-exitcode")
+    code, events = run_json(tf, "plan", "-json", "-out=plan.tfplan", "-detailed-exitcode",
+                            *(["-destroy"] if job.destroy else []))
     # 0 = no changes, 2 = changes, 1 = error
     plan_json = run(tf, "show", "-json", "plan.tfplan")   # still produced for after_plan hooks
-    upload_artifacts(plan_json, "plan.tfplan")
+    upload_artifacts(plan_json)
+    if code == 2 and job.save_plan:
+        upload_artifact("plan.tfplan")        # the saved plan (§7.3) — before after_plan hooks
     checks = run_hooks(hooks.after_plan, expose="plan.json")   # checking phase
     report(phase_finished, has_changes=(code == 2), summary=..., checks=checks)
-    if code == 2: keep_workspace(ttl="24h")   # the apply (auto-confirmed OR confirmed
-                                              # manually) reuses this workspace
 
-elif job.phase == "apply":
-    ws = restore_workspace(job.job_id)       # or re-plan if absent
+elif job.phase == "apply":                   # a fresh clone of the pinned commit (§7.3)
+    write_backend_override(ws, job.backend); write_tfvars(ws, job.tfvars_json, job.mock_inputs)
+    run(tf, "init", "-input=false")
+    plan = download_artifact("plan.tfplan")  # missing/unreadable → fail closed, NEVER re-plan
     run_hooks(hooks.before_apply)
-    run(tf, "apply", "-input=false", "plan.tfplan")
+    write_plan(plan)                         # 0600; removed right after the apply
+    run(tf, "apply", "-input=false", "-json", "plan.tfplan")   # stale → tofu refuses → failed
     outputs = run(tf, "output", "-json")
     upload_artifacts(outputs, "outputs.json")
     run_hooks(hooks.after_apply)
@@ -972,6 +989,8 @@ s3://stackd-<org>/
   logs/{run_id}/{phase}.log.gz
   artifacts/{run_id}/plan.tfplan | plan.json | outputs.json
 ```
+
+`artifacts/{run_id}/plan.tfplan` is the run's **saved plan** (§7.3): it holds the run's variable values in clear, sensitive ones included, so the API encrypts it **AES-256-GCM with the application key** before it reaches S3 (layout `nonce(12) || ciphertext || tag`, AAD = `stackd:artifact:<s3 key>` so a blob moved under another run's key does not decrypt) — on top of the bucket's SSE. Its key is recorded on the run (`runs.plan_artifact_key`). **Retention**: it lives only while the run can still be applied. On any transition to a terminal state (`finished`, `failed`, `discarded`, `canceled` — whatever the path: worker event, user, scheduler), `transition()` clears `plan_artifact_key` in the same transaction and the object is deleted once that transaction commits (best effort: a failed delete is logged; the blob stays encrypted and the API serves it to nobody, since only an `applying` run's worker can download it). `plan.json`/`outputs.json` are accepted but not archived yet.
 
 `managed_state: false` → no HTTP backend injected, the repo keeps its own `backend` block. For a **partial** backend, set either/both (per-env, applied at init in this order — later `-backend-config` wins): `environments.backend_config_file` (repo-relative `.config`/`.tfbackend` path → `-backend-config=<file>`) and `environments.backend_config` (a `{key: value}` map → one `-backend-config=key=value` each, e.g. `bucket`/`key`/`region`/`dynamodb_table`/`use_lockfile`). The inline map is the way to onboard a new tier on shared code without a per-env `.config` file: set its own `key` so it doesn't collide with another env's state. Mutually exclusive with the managed HTTP backend.
 

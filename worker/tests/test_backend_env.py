@@ -102,8 +102,12 @@ class _FakeClient:
     def upload_artifact(self, *args: Any) -> None:
         pass
 
+    def download_artifact(self, *args: Any) -> bytes:
+        return b"PK-plan"
+
 
 _HOOK = 'echo "HOOK {name} PW=[$TF_HTTP_PASSWORD] ADDR=[$TF_HTTP_ADDRESS]"'
+_STAGES = ("before_init", "after_init", "before_plan", "after_plan", "before_apply", "after_apply")
 
 
 class _FakeWorkspace:
@@ -127,11 +131,14 @@ class _FakeWorkspace:
     def write_backend_override(self, *args: Any) -> None:
         pass
 
+    def write_plan(self, cwd: Path, data: bytes) -> Path:
+        (cwd / "plan.tfplan").write_bytes(data)
+        return cwd / "plan.tfplan"
+
     def load_stackd_yml(self, cwd: Path) -> dict[str, list[dict]]:
-        stages = ("before_init", "after_init", "before_plan", "after_plan")
         return {
             s: [{"name": f"repo-{s}", "command": _HOOK.format(name=s), "source": "repo"}]
-            for s in stages
+            for s in _STAGES
         }
 
     def cleanup(self) -> None:
@@ -147,7 +154,7 @@ def _job(phase: str) -> dict:
         "environment": {
             "tool": "opentofu",
             "repo_url": "file:///repos/x",
-            "commit_sha": None,
+            "commit_sha": "c" * 40,
             "branch": "main",
             "project_root": ".",
         },
@@ -157,7 +164,7 @@ def _job(phase: str) -> dict:
         # A platform hook at every plan stage too: trusted, but it needs no state credentials.
         "hooks": {
             s: [{"name": f"platform-{s}", "command": _HOOK.format(name=s), "source": "platform"}]
-            for s in ("before_init", "after_init", "before_plan", "after_plan")
+            for s in _STAGES
         },
     }
 
@@ -171,7 +178,7 @@ def _run(monkeypatch, tmp_path: Path, handler: str, phase: str) -> tuple[list, _
 
     def fake_stream_json(cmd: list[str], cwd: Path, env: dict[str, str], **kw: Any) -> tuple:
         calls.append((cmd, env))
-        return 2, [{"type": "change_summary", "changes": {"add": 1}}]
+        return (2 if cmd[1] == "plan" else 0), [{"type": "change_summary", "changes": {"add": 1}}]
 
     def fake_subprocess_run(cmd: list[str], **kw: Any) -> subprocess.CompletedProcess[str]:
         calls.append((cmd, kw["env"]))
@@ -204,6 +211,22 @@ def test_plan_job_gives_state_credentials_to_tofu_only(monkeypatch, tmp_path: Pa
     # Every hook ran — platform and repo, at every stage — and none saw the backend settings.
     hooks = [line for line in client.lines if line.startswith("HOOK ")]
     assert len(hooks) == 8, client.lines
+    assert all("PW=[] ADDR=[]" in line for line in hooks), hooks
+    assert TOKEN not in "\n".join(client.lines)
+
+
+def test_apply_job_gives_state_credentials_to_tofu_only(monkeypatch, tmp_path: Path) -> None:
+    calls, client = _run(monkeypatch, tmp_path, "handle_apply", "apply")
+    assert client.events[-1][0] == "phase_finished", client.events
+
+    by_subcommand = {cmd[1]: env for cmd, env in calls}
+    for sub in ("init", "apply", "output"):  # the commands that reach the backend
+        assert by_subcommand[sub]["TF_HTTP_PASSWORD"] == TOKEN, sub
+    for cmd, _env in calls:
+        assert not any(TOKEN in arg for arg in cmd), cmd
+
+    hooks = [line for line in client.lines if line.startswith("HOOK ")]
+    assert len(hooks) == 4, client.lines  # platform + repo, before_apply + after_apply
     assert all("PW=[] ADDR=[]" in line for line in hooks), hooks
     assert TOKEN not in "\n".join(client.lines)
 

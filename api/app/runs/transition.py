@@ -16,6 +16,7 @@ from app.logging import get_logger
 from app.models.notification import NotificationOutbox
 from app.models.run import Run, RunEvent
 from app.models.vcs import VcsOutbox
+from app.runs.artifacts import discard_saved_plan
 
 _log = get_logger("stackd.runs")
 
@@ -127,6 +128,10 @@ async def transition(
             metrics.run_duration.labels(phase=phase).observe(
                 (locked.finished_at - locked.claimed_at).total_seconds()
             )
+    if to_state in TERMINAL_STATES:
+        # Saved-plan retention (§11.3): a terminal run is never applied, and its plan file holds
+        # secrets — drop it (pointer now, S3 object once this transaction commits).
+        discard_saved_plan(session, locked)
 
     session.add(
         RunEvent(

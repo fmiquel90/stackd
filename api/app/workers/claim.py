@@ -24,6 +24,7 @@ from app.models.environment import Environment
 from app.models.run import Run
 from app.models.stack import Stack
 from app.models.worker import Worker
+from app.runs.artifacts import SAVED_PLAN_TYPES
 from app.runs.commands import is_mutating
 from app.runs.transition import transition
 from app.statebackend.tokens import StateScope, mint_state_token
@@ -264,6 +265,11 @@ async def build_job_payload(session: AsyncSession, run: Run) -> dict:
         # this. API-owned so the cap and the worker-lost reclaim window can never drift apart.
         "apply_timeout_seconds": settings.stackd_apply_timeout_seconds,
         "refresh_only": run.is_drift,  # §19: drift plan uses `-refresh-only` (state vs reality)
+        # §7.4: a destroy run plans with `-destroy`; its saved plan carries that to the apply.
+        "destroy": run.type == RunType.destroy,
+        # §7.4: the plan job uploads its plan file (when it has changes) for every run that can
+        # later be applied; the apply job downloads and applies exactly it.
+        "save_plan": phase == JobPhase.plan and run.type in SAVED_PLAN_TYPES,
         "command": run.command,  # set only for RunType.command jobs
         "environment": {
             "id": str(env.id),

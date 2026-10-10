@@ -31,6 +31,14 @@ from app.models.run import Run
 from app.models.run_log import RunLog
 from app.models.worker import Worker
 from app.models.worker_command import WorkerCommand
+from app.runs.artifacts import (
+    MAX_PLAN_BYTES,
+    PLAN_FILE,
+    SAVED_PLAN_TYPES,
+    SavedPlanUnreadable,
+    load_plan,
+    save_plan,
+)
 from app.runs.transition import ALLOWED, transition
 from app.secret_sources.providers import SecretUnavailable
 from app.workers.auth import CurrentWorker, mint_worker_token, pool_from_token
@@ -51,6 +59,10 @@ _log = get_logger("stackd.worker")
 
 # A full commit SHA (SHA-1, or SHA-256 object format) — what a worker reports it checked out.
 _FULL_SHA = re.compile(r"^(?:[0-9a-f]{40}|[0-9a-f]{64})$")
+
+# The states of a run's plan job (claim → plan → after_plan checks): the only window in which its
+# saved plan may be uploaded.
+_PLAN_JOB_STATES = frozenset({RunState.preparing, RunState.planning, RunState.checking})
 
 _PHASE_TO_STATE = {
     "planning": RunState.planning,
@@ -391,11 +403,99 @@ async def ingest_logs(
     return {"accepted": True}
 
 
+async def _read_capped(request: Request, limit: int) -> bytes:
+    """The request body, refused (413) past `limit` bytes without buffering more than that."""
+    declared = request.headers.get("content-length", "")
+    if declared.isdigit() and int(declared) > limit:
+        raise ProblemException(413, "Artifact too large", f"The limit is {limit} bytes.")
+    body = bytearray()
+    async for chunk in request.stream():
+        body += chunk
+        if len(body) > limit:
+            raise ProblemException(413, "Artifact too large", f"The limit is {limit} bytes.")
+    return bytes(body)
+
+
+def _check_plan_upload(run: Run, worker: Worker) -> None:
+    if run.worker_id != worker.id:
+        raise ProblemException(409, "Not your job", "This run is claimed by another worker.")
+    if run.type not in SAVED_PLAN_TYPES:
+        raise ProblemException(409, "No saved plan", f"A {run.type.value} run is never applied.")
+    if run.state not in _PLAN_JOB_STATES:
+        # Once planned, the reviewed plan is frozen: no worker can replace it before the apply.
+        raise ProblemException(
+            409, "Plan upload refused", "A saved plan is accepted only during the run's plan job."
+        )
+
+
 @router.put("/jobs/{job_id}/artifacts/{name}", status_code=204)
 async def put_artifact(
     job_id: uuid.UUID, name: str, request: Request, worker: CurrentWorker, session: DbSession
 ) -> Response:
-    await _load_owned_run(session, worker, job_id)
-    await request.body()  # drain — S3 archival of artifacts is a follow-up (§11.3)
-    _ = name
+    run = await _load_owned_run(session, worker, job_id)
+    if name != PLAN_FILE:
+        await request.body()  # drain — S3 archival of plan.json/outputs.json is a follow-up (§11.3)
+        return Response(status_code=204)
+
+    # The saved plan (§7.4): the exact plan the apply job will apply. Encrypted at rest — it holds
+    # the run's variable values in clear (app.runs.artifacts).
+    _check_plan_upload(run, worker)
+    await session.commit()  # hold no DB connection while the body streams in
+    data = await _read_capped(request, MAX_PLAN_BYTES)
+    if not data:
+        raise ProblemException(400, "Empty artifact", "The plan file is empty.")
+    # Re-check under the run's row lock, held until commit: a concurrent terminal transition
+    # (worker_lost, cancel) either runs first — and this upload is refused — or after, and then
+    # finds the key to purge. Never a saved plan left behind on a terminal run.
+    locked = (
+        await session.execute(
+            select(Run)
+            .where(Run.id == job_id)
+            .with_for_update()
+            .execution_options(populate_existing=True)
+        )
+    ).scalar_one()
+    _check_plan_upload(locked, worker)
+    locked.plan_artifact_key = await save_plan(locked.id, data)
+    await session.commit()
+    _log.info(
+        "saved plan stored",
+        extra={"event": "worker.plan_saved", "run_id": str(job_id), "size_bytes": len(data)},
+    )
     return Response(status_code=204)
+
+
+@router.get("/jobs/{job_id}/artifacts/{name}")
+async def get_artifact(
+    job_id: uuid.UUID, name: str, worker: CurrentWorker, session: DbSession
+) -> Response:
+    """The saved plan, for the run's apply job only (§7.4) — the worker that holds the run in
+    `applying`. Missing or unreadable → an error, never anything else to apply."""
+    run = await _load_owned_run(session, worker, job_id)
+    if name != PLAN_FILE:
+        raise ProblemException(404, "Artifact not found", f"No downloadable artifact {name!r}.")
+    if run.state != RunState.applying:
+        raise ProblemException(
+            409, "Not an apply job", "The saved plan is served only to the run's apply job."
+        )
+    if run.plan_artifact_key is None:
+        raise ProblemException(
+            404, "No saved plan", "This run has no saved plan to apply; trigger a new plan."
+        )
+    try:
+        data = await load_plan(run.plan_artifact_key)
+    except SavedPlanUnreadable:
+        _log.error(
+            "saved plan unreadable",
+            extra={"event": "worker.plan_unreadable", "run_id": str(run.id)},
+        )
+        raise ProblemException(
+            500,
+            "Saved plan unreadable",
+            "The stored plan failed its integrity check: not applied. Trigger a new plan.",
+        ) from None
+    if data is None:
+        raise ProblemException(
+            404, "Saved plan missing", "The stored plan object is missing; trigger a new plan."
+        )
+    return Response(content=data, media_type="application/octet-stream")

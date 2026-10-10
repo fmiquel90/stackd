@@ -107,6 +107,21 @@ def _first_error(events: list[dict]) -> str | None:
     return None
 
 
+# tofu refuses a saved plan before changing anything when the state changed since it was made, or
+# when the run's inputs no longer match the values it was planned with. Its summary alone is terse.
+_SAVED_PLAN_REFUSALS = ("Saved plan is stale", "Mismatch between input and plan variable value")
+
+
+def _apply_error(events: list[dict]) -> str | None:
+    """`_first_error`, spelling out a saved-plan refusal: tofu's detail, and what to do."""
+    error = _first_error(events)
+    if error not in _SAVED_PLAN_REFUSALS:
+        return error
+    diag = next(e.get("diagnostic") or {} for e in events if e.get("@level") == "error")
+    detail = str(diag.get("detail") or "").strip()
+    return f"{error}: {detail} The reviewed plan was not applied; trigger a new plan."
+
+
 def _tool_bin(tool: str) -> str:
     return "tofu" if tool == "opentofu" else "terraform"
 
@@ -247,9 +262,12 @@ def handle_plan(client: ApiClient, job: dict, settings: Settings) -> None:
         # `-json`: stream readable @message lines while collecting structured events (change_summary
         # for the counts, diagnostics for the real error message). detailed-exitcode: 0=no changes,
         # 2=changes, 1=error. `-refresh-only` (drift, §19): diff state against real infra only.
+        # `-destroy` (a destroy run): the saved plan carries it to the apply.
         plan_cmd = [tool, "plan", "-input=false", "-json", "-detailed-exitcode", "-out=plan.tfplan"]
         if job.get("refresh_only"):
             plan_cmd.insert(2, "-refresh-only")
+        if job.get("destroy"):
+            plan_cmd.insert(2, "-destroy")
         code, events = stream_json_command(
             plan_cmd,
             cwd,
@@ -306,6 +324,12 @@ def handle_plan(client: ApiClient, job: dict, settings: Settings) -> None:
                     result={"error": f"secret_leak_suspected: {leak}"},
                 )
             checks.append({"name": "secret_leak_suspected", "status": "warn", "detail": leak})
+
+        # The saved plan (§7.4): the apply job applies exactly this file, the one shown above.
+        # Uploaded before any after_plan hook runs, so a repo hook can't swap what gets applied.
+        # A run that can't be applied (proposed, drift) or has nothing to apply saves none.
+        if has_changes and job.get("save_plan"):
+            client.upload_artifact(job_id, "plan.tfplan", (cwd / "plan.tfplan").read_bytes())
 
         if job.get("hooks", {}).get("after_plan") or ws.load_stackd_yml(cwd).get("after_plan"):
             client.event(job_id, "phase_started", phase="checking")
@@ -387,6 +411,20 @@ def handle_apply(client: ApiClient, job: dict, settings: Settings) -> None:
             != 0
         ):
             return client.event(job_id, "job_failed", phase="init", result={"error": "init failed"})
+        # The saved plan the human reviewed (§7.4). Missing or unreadable → the apply fails closed:
+        # it never re-plans, so it can only ever apply what was reviewed.
+        try:
+            saved_plan = client.download_artifact(job_id, "plan.tfplan")
+            refusal = "" if saved_plan else "the plan file is empty"
+        except Exception as exc:  # noqa: BLE001 — any refusal or transport error: fail closed
+            saved_plan, refusal = b"", str(exc)
+        if refusal:
+            return client.event(
+                job_id,
+                "job_failed",
+                phase="apply",
+                result={"error": masker.mask(f"saved plan unavailable, not applied: {refusal}")},
+            )
         run_hooks(
             hooks.get("before_apply", []),
             cwd,
@@ -395,23 +433,30 @@ def handle_apply(client: ApiClient, job: dict, settings: Settings) -> None:
             phase="applying",
             streamer=streamer,
         )
+        # Written only now, after the before_apply hooks (a repo hook can't swap it), and removed
+        # right after the apply (after_apply repo hooks never see its secrets).
+        plan_file = ws.write_plan(cwd, saved_plan)
         # Hard apply budget (§4.2): the API caps an apply's wall-clock; the watchdog kills tofu past
         # it (exit 124) so a hung apply can't pin the worker or outlive its short-lived credentials.
         apply_timeout = job.get("apply_timeout_seconds") or _DEFAULT_TIMEOUT_SECONDS
-        code, events = stream_json_command(
-            [tool, "apply", "-input=false", "-json", "-auto-approve"],
-            cwd,
-            tf_env,
-            phase="applying",
-            section=None,
-            streamer=streamer,
-            timeout=apply_timeout,
-        )
+        try:
+            code, events = stream_json_command(
+                [tool, "apply", "-input=false", "-json", plan_file.name],
+                cwd,
+                tf_env,
+                phase="applying",
+                section=None,
+                streamer=streamer,
+                timeout=apply_timeout,
+            )
+        finally:
+            plan_file.unlink(missing_ok=True)
         if code != 0:
+            # A stale saved plan (state changed since it was made) is refused by tofu itself.
             error = (
                 f"apply exceeded the {apply_timeout}s time budget and was terminated"
                 if code == 124
-                else (_first_error(events) or "apply failed")
+                else (_apply_error(events) or "apply failed")
             )
             return client.event(
                 job_id,

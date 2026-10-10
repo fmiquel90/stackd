@@ -165,6 +165,17 @@ class Workspace:
             f.write(content)
         return str(path)
 
+    def write_plan(self, cwd: Path, data: bytes) -> Path:
+        """Write the saved plan the apply job applies (§7.4): 0600 (it holds the run's variable
+        values in clear), and as a new file — whatever the checkout has at that path (a file, or a
+        symlink pointing out of the workspace) is replaced, never written through."""
+        path = cwd / "plan.tfplan"
+        path.unlink(missing_ok=True)
+        fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
+        with os.fdopen(fd, "wb") as f:
+            f.write(data)
+        return path
+
     def load_stackd_yml(self, cwd: Path) -> dict[str, list[dict]]:
         f = cwd / ".stackd.yml"
         if not f.exists():
