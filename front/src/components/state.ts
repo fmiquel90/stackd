@@ -9,6 +9,7 @@ export type RunState =
   | "unconfirmed"
   | "confirmed"
   | "applying"
+  | "running"
   | "finished"
   | "failed"
   | "discarded"
@@ -31,6 +32,7 @@ export const STATE_META: Record<RunState, StateMeta> = {
   unconfirmed: { label: "Unconfirmed", color: "unconfirmed", icon: CirclePause },
   confirmed: { label: "Confirmed", color: "running", icon: Loader },
   applying: { label: "Applying", color: "running", icon: Loader },
+  running: { label: "Running", color: "running", icon: Loader },
   finished: { label: "Finished", color: "finished", icon: Check },
   failed: { label: "Failed", color: "failed", icon: X },
   discarded: { label: "Discarded", color: "queued", icon: Ban },

@@ -31,6 +31,7 @@ const ORDER: Record<RunState, number> = {
   unconfirmed: 4,
   confirmed: 5,
   applying: 6,
+  running: 6,
   finished: 7,
   failed: 7,
   discarded: 7,

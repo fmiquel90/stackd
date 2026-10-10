@@ -1,0 +1,50 @@
+
+OpenTofu used the selected providers to generate the following execution
+plan. Resource actions are indicated with the following symbols:
+  + create
+  ~ update in-place (current -> planned)
+  - destroy
+
+OpenTofu will perform the following actions:
+
+  # terraform_data.nat_gateway will be destroyed
+  # (because terraform_data.nat_gateway is not in configuration)
+  - resource "terraform_data" "nat_gateway" {
+      - id     = "c5be833d-0f64-86ce-110f-08de8cc402d9" -> null
+      - input  = "demo-nat-local-1" -> null
+      - output = "demo-nat-local-1" -> null
+    }
+
+  # terraform_data.subnet_db will be created
+  + resource "terraform_data" "subnet_db" {
+      + id     = (known after apply)
+      + input  = {
+          + az   = "local-1c"
+          + cidr = "10.20.20.0/24"
+          + tier = "database"
+        }
+      + output = (known after apply)
+    }
+
+  # terraform_data.subnet_public will be updated in-place
+  ~ resource "terraform_data" "subnet_public" {
+        id     = "eddaf3f6-486e-a91d-e394-0c2ec188abab"
+      ~ input  = {
+          ~ cidr = "10.20.0.0/24" -> "10.20.0.0/23"
+            # (2 unchanged attributes hidden)
+        }
+      ~ output = {
+          - az   = "local-1a"
+          - cidr = "10.20.0.0/24"
+          - tier = "public"
+        } -> (known after apply)
+    }
+
+Plan: 1 to add, 1 to change, 1 to destroy.
+
+Changes to Outputs:
+  ~ subnet_ids   = [
+        # (1 unchanged element hidden)
+        "ba06c7b8-9348-e325-f8a6-6fa0fd0ccdee",
+      + (known after apply),
+    ]
