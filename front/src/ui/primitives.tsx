@@ -34,6 +34,13 @@ export const NativeSelect = forwardRef<HTMLSelectElement, SelectHTMLAttributes<H
   },
 );
 
+/** Native checkbox; the selection colour is the focus violet (DESIGN §3.1: selection, not state). */
+export const Checkbox = forwardRef<HTMLInputElement, Omit<InputHTMLAttributes<HTMLInputElement>, "type">>(
+  function Checkbox({ className, ...rest }, ref) {
+    return <input ref={ref} type="checkbox" className={cn("size-4 accent-ring", className)} {...rest} />;
+  },
+);
+
 export function Field({ label, help, children }: { label: string; help?: ReactNode; children: ReactNode }) {
   return (
     <label className="flex flex-col gap-1">

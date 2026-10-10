@@ -61,7 +61,7 @@ const QueuePage = lazy(() => import("@/features/queue/QueuePage").then((m) => ({
 const WorkersPage = lazy(() =>
   import("@/features/workers/WorkersPage").then((m) => ({ default: m.WorkersPage })),
 );
-const AuditPage = lazy(() => import("@/pages/AuditPage").then((m) => ({ default: m.AuditPage })));
+const AuditPage = lazy(() => import("@/features/audit/AuditPage").then((m) => ({ default: m.AuditPage })));
 const GraphPage = lazy(() => import("@/features/graph/GraphPage").then((m) => ({ default: m.GraphPage })));
 const SettingsPage = lazy(() => import("@/pages/SettingsPage").then((m) => ({ default: m.SettingsPage })));
 const VariableSetsPage = lazy(() =>
