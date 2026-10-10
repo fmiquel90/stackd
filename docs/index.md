@@ -10,7 +10,7 @@
 **StackD is a self-hostable control plane for
 Terraform & OpenTofu:** every change becomes a reviewable **`plan → human approval → apply`** run,
 executed on disposable pull-based workers, with a full audit trail and short-lived cloud
-credentials minted per run.
+credentials minted for each job. The apply runs exactly the plan that was approved.
 
 > No static cloud secrets. No shared state. No one running `apply` from their laptop.
 
@@ -31,7 +31,8 @@ with the run.
 - 🛡️ **[Runs & approvals](guide/runs-and-approvals.md)** — tiers, four-eyes, the apply gate.
 - 🪝 **[Hooks & `.stackd.yml`](guide/hooks.md)** — platform and repo hooks.
 - 📥 **[Importing an existing stack](guide/importing-existing-state.md)** — adopt existing remote state.
-- 🔑 **[Cloud credentials (OIDC)](guide/cloud-credentials.md)** — per-run roles, no static keys.
+- 🔑 **[Cloud credentials (OIDC)](guide/cloud-credentials.md)** — per-job roles, no static keys.
+- 🏗️ **[Architecture](ARCHITECTURE.md)** — how it works inside, with diagrams.
 
 New to the model? The **[Concepts](CONCEPTS.md)** guide explains everything with worked examples.
 For the exhaustive technical truth, see the **[Specification](SPECS.md)**.
