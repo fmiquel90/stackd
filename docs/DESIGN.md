@@ -139,7 +139,7 @@ Absolute rule: these colors serve **only** state semantics. Never decorative blu
 - **Staleness banner**: if the tracked branch advances while a plan awaits confirmation, a banner above the content — "Plan computed on `abc1234` · the branch has advanced by 2 commits" — with a *Re-plan* action. Confirming remains possible (applying a precise commit is legitimate), but never unknowingly.
 - Header: triggerer AND confirmer shown (Google avatars) — audit is in the interface, not hidden in a page.
 - **Plan** tab: `+3 ~1 −0` summary in giant mono, then a list of resources grouped by action (create/update/delete), each resource expandable into an attribute-by-attribute diff (added green / modified amber / deleted red, values in mono). **Destructions are always expanded by default** — a delete is never hidden.
-- **Checks** tab: one block per after_plan hook (name, status, duration, output), warn = amber with the note "manual confirmation required".
+- **Checks** tab: one block per hook check, from every stage of the plan and apply jobs (`check_results.results`, SPECS §8.3) — name, stage, status, duration, output; warn = amber with the note "manual confirmation required" (a warning at an apply stage comes after the confirmation and only informs).
 - **Inputs** tab: resolved variables with their **provenance as a mono badge** (`set:common-aws`, `stack`, `env`, `dependency`, `MOCK` in magenta). Sensitive values: `•••` with no "reveal" button.
 
 ### 5.3 Log viewer (in the run page)

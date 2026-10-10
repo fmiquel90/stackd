@@ -171,13 +171,13 @@ The platform becomes an **OIDC issuer** (the same mechanism as GitHub Actions OI
 
 #### 2c. The worker agent
 - [ ] Loop claim → clone → tool setup → **hooks** → init → plan → upload → confirmation → **hooks** → apply → report — *status: the run is pinned to the commit its plan checked out, and the apply clones that commit and applies the uploaded saved plan, never a fresh plan (SPECS §7.3)*
-- [ ] Ephemeral workspace, Docker runner, secret masking in the logs
+- [ ] Ephemeral workspace, Docker runner, secret masking in the logs — *status: workspace and masking done; the Docker runner is not: the agent runs every command as a local subprocess whatever `STACKD_RUNNER` says, and does not enforce `tool_version` (SPECS §7.4)*
 
 #### 2d. Hooks & checks (custom flows, see SPECS §8)
 - [ ] **YAML** declaration in two places, merged: `.stackd.yml` file in the repo (versioned with the code) + hooks defined at the stack/environment level in the UI (governance imposed by the platform, not bypassable by a PR)
 - [ ] Anchor points: `before_init`, `after_init`, `before_plan`, `after_plan`, `before_apply`, `after_apply`
 - [ ] Each hook = a command executed in the workspace, with read access to `plan.json` (for post-plan checks: tfsec, checkov, infracost, in-house scripts)
-- [ ] Failure modes: `fail` (run → failed), `warn` (continue, visible warning, manual confirmation forced even if autodeploy)
+- [ ] Failure modes: `fail` (run → failed), `warn` (continue, visible warning, manual confirmation forced even if autodeploy) — *status: done at every stage, plan and apply jobs; each hook under a 10 min timeout; every check result kept on the run with its stage; repo hooks run without secrets (SPECS §8.3). The `*_apply` repo-hook ban on prod and the per-env secret opt-in are pending a decision*
 - [ ] Hook logs integrated into the viewer (dedicated sections)
 
 #### 2e. Terraform job logs
@@ -222,7 +222,7 @@ The platform becomes an **OIDC issuer** (the same mechanism as GitHub Actions OI
   - used when the upstream has **never produced** the output (bootstrapping a new cascade) or on **proposed runs** if the upstream is not applied
   - a run that has consumed at least one mock is marked `used_mocks: true`: visible badge, **apply forbidden** (validation plan-only) unless explicit opt-in per env
   - solves the chicken-and-egg problem: write `app/dev` and plan its config before `network/dev` has run
-- [ ] Propagation scheduler: topological cascade, policies, multi-parents, stop on failure
+- [ ] Propagation scheduler: topological cascade, policies, multi-parents, stop on failure — *status: cascade and policies done; multi-parent gating and stop-on-failure are not (SPECS §9.2)*
 - [ ] Run groups + graph view; the cascade never bypasses the protections
 
 **Deliverable: plan `app/dev` with `vpc_id = "vpc-mock00000"` before the first apply of `network/dev`, then a real cascade.**
@@ -232,8 +232,8 @@ The platform becomes an **OIDC issuer** (the same mechanism as GitHub Actions OI
 ### Phase 5 — Git webhooks + proposed runs (2 weeks)
 
 - [ ] GitHub/GitLab webhook: HMAC, branch → environments mapping, filtering by `project_root`
-- [ ] **Git staleness**: tracking of `head_sha` per env (webhook + ls-remote polling 15 min + manual refresh), `↑N` chip on lagging envs, "stale plan" banner + re-plan on stale unconfirmed runs — see SPECS §9.6 / DESIGN §5.1-5.2 — *status: done: `stale` computed on every env the API returns, background ls-remote polling, audited manual refresh, branch-deletion and re-pointed-branch handling*
-- [ ] Push → tracked runs; PR → **proposed runs** plan-only (RO state, secrets not injected by default, mocks allowed)
+- [ ] **Git staleness**: tracking of `head_sha` per env (webhook + ls-remote polling 15 min + manual refresh), `↑N` chip on lagging envs, "stale plan" banner + re-plan on stale unconfirmed runs — see SPECS §9.6 / DESIGN §5.1-5.2 — *status: done: `stale` computed on every env the API returns, background ls-remote polling, audited manual refresh, branch-deletion and re-pointed-branch handling; the `↑N` chip and the stale-plan banner are not in the UI yet*
+- [ ] Push → tracked runs; PR → **proposed runs** plan-only (RO state, secrets not injected by default, mocks allowed) — *status: done, except that a proposed run still gets the environment's secrets and plan role (SPECS §13)*
 - [ ] (Optional) PR comment: plan summary + check results (warn/fail hooks) — *status: shipped for GitHub (SPECS §18): a commit status and one comment per run, edited in place*
 
 **Deliverable: `git push` → automatic plans + checks visible in the PR.**
@@ -288,8 +288,8 @@ The platform becomes an **OIDC issuer** (the same mechanism as GitHub Actions OI
 
 | Risk / decision | Impact | Mitigation / current position |
 |---|---|---|
-| Execution security (providers/provisioners = arbitrary code) | High | Self-hosted workers, Docker per run, no multi-tenant. Platform hooks (non-bypassable) are the governance safeguard |
-| Repo hooks (`.stackd.yml`) modifiable by PR | Medium | The **platform** hooks (stack/env) always run and are not bypassable; critical security checks go there, not in the repo |
+| Execution security (providers/provisioners = arbitrary code) | High | Self-hosted workers, Docker per run (not implemented yet, SPECS §7.4), no multi-tenant. Platform hooks (non-bypassable) are the governance safeguard |
+| Repo hooks (`.stackd.yml`) modifiable by PR | Medium | The **platform** hooks (stack/env) always run and are not bypassable; critical security checks go there, not in the repo. Repo hooks run without secrets: an allowlisted env, a masked `plan.json`, no tfvars, saved plan or token on disk (SPECS §8.3) |
 | OIDC issuer: compromise of the signing key = access to all roles | High | Keys in KMS (`kms:Sign` signing, key never in memory) or encrypted volume, rotation with overlap, JWKS with kid, token TTL ≤ run duration, precise claims in the trust policies (`sub` wildcard tolerated only on the stack segment, never tier/phase) |
 | OIDC issuer and state backend in the same API process | Medium | In the MVP, all surfaces (human API, worker API, state backend, OIDC issuer, webhooks) share one process → a flaw in any one of them approaches the signing key. Strong mitigation = KMS (the private key never resides in the process). Isolating the signer in a dedicated service = Phase 7 track if the threat model requires it |
 | Mock outputs applied by mistake | Medium | `used_mocks` → apply forbidden by default, very visible UI badge, opt-in per env only |

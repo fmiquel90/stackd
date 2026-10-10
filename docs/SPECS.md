@@ -252,7 +252,10 @@ triggered_by enum(manual|webhook|dependency|api|schedule), trigger_user_id nulla
 confirmed_by_user_id nullable,       -- who approved the apply (core of the audit)
 parent_run_id nullable, run_group_id nullable, worker_id nullable,
 plan_summary jsonb,                  -- {add, change, destroy, resources}
-check_results jsonb,                 -- results of the after_plan hooks (§8)
+check_results jsonb,                 -- hook check results, plan and apply jobs (§8.3):
+                                     --   {results: every check (ok|warn|fail), each with its
+                                     --    `stage`; checks: the warn/fail ones only (the field's
+                                     --    meaning before `results` existed)}
 resolved_inputs jsonb,               -- injected upstream outputs (non-sensitive)
 used_mocks bool default false,       -- §9.3: at least one mock consumed
 variable_provenance jsonb,           -- §3.4: provenance of each resolved variable
@@ -417,8 +420,8 @@ Command runs (§4.3) take a shorter path: `queued → preparing → running → 
 | `planning/checking → finished` | worker | empty diff (outputs captured after refresh) |
 | `unconfirmed → confirmed` | user | `can_apply(user, env)` = role∈{approver,admin} AND `env.tier ∈ allowed_tiers` (§2.4); ≠ triggerer if the tier requires four-eyes or 4-eyes; for a `destroy` run: `can_destroy` required; **blocked if `used_mocks` and `allow_mock_apply=false`** |
 | `confirmed → applying` | worker (claim) | the plan's worker within the affinity window, then any compatible worker (§7.2); re-checks `allow_mock_apply` and the secret-fallback gate against the apply-time resolution (§9.3/§15.5). The apply job clones the pinned commit and applies the run's **saved plan** (§7.3); a missing or unreadable plan fails the run — it never re-plans |
-| `applying → finished` | worker | apply exit 0 + outputs uploaded |
-| `* → failed` | worker/system | exit ≠ 0, hook `fail`, timeouts — the worker hard-kills the process past its budget: the apply (and a mutating command run, §4.3) past `stackd_apply_timeout_seconds` (default 15 min, sent as `apply_timeout_seconds`), any other subprocess past the agent's 2 h cap (separate prepare/plan budgets are not enforced yet); `worker_lost` (§3.7); `commit_mismatch` (§7.3); an unresolvable dependency or secret at claim (§9.3, §15.2) |
+| `applying → finished` | worker | apply exit 0 + outputs uploaded + no failing `after_apply` check (one that fails → `failed`, the outputs still recorded, nothing cascades, §8.3) |
+| `* → failed` | worker/system | a tofu command failing (a plan fails on any exit but 0 or 2, an apply or a command on any non-zero exit), the plan JSON unavailable (§8.3), a hook `fail` at any stage (§8.3), timeouts — the worker hard-kills the process group past its budget: the apply (and a mutating command run, §4.3) past `stackd_apply_timeout_seconds` (default 15 min, sent as `apply_timeout_seconds`), a hook past the hook timeout (10 min, `STACKD_HOOK_TIMEOUT_SECONDS`, then it fails by its `on_failure`), any other subprocess past the agent's 2 h cap (separate prepare/plan budgets are not enforced yet); `worker_lost` (§3.7); `commit_mismatch` (§7.3); an unresolvable dependency or secret at claim (§9.3, §15.2) |
 
 Single function `transition(run, to_state, actor, payload)`: legality, atomic update guarded on `from_state`, `run_event`, audit event if the action is human or terminal, WS publication, scheduler hooks. The guarded UPDATE uses `RETURNING` (PG18: old + new tuple) to produce the `from→to` `run_event` without a re-read, in the same transaction.
 
@@ -516,9 +519,13 @@ run.confirmed ⭐                  # a human confirm, or the system on autodeplo
 run.discarded / run.canceled      # canceled: a user, or the system when a PR closes (reason pr_closed)
 run.plan_finished                 # plan-only terminal: empty diff, or a proposed/drift run
 run.applied ⭐ / run.command_executed
-run.apply_failed                  # ANY failed run, whatever its phase — context phase, or reason:
+run.apply_failed                  # any failed run, whatever its phase, unless a check failed it —
+                                  #   context phase, or reason:
                                   #   worker_lost | commit_mismatch | dependency | secret (§7.2/§7.3)
-run.check_failed / run.check_warned            # results of the after_plan hooks
+run.check_failed                  # a hook check with on_failure=fail failed the run, at any stage
+                                  #   (§8.3) — context phase = the failing stage
+run.check_warned                  # a job (plan or apply) finished with warn checks — context:
+                                  #   checks (their names), stages (where they ran)
 state.force_unlocked / state.import_session_created   # §11.2, §11.4
 dependency.created / dependency.deleted / dependency.mock_consumed   # created: also via link-by-name
 cloud_integration.created / cloud_integration.updated / cloud_integration.deleted
@@ -707,6 +714,8 @@ ws.git_clone(job.environment.repo_url, job.environment.commit_sha, branch=job.en
 tf = ensure_tool(job.environment.tool, job.environment.tool_version)  # verifies the checksum
                                        # SHA-256 (and the cosign/GPG signature if available) of the
                                        # downloaded binary against a pinned list — refuse otherwise (supply-chain)
+                                       # NOT IMPLEMENTED YET: the agent runs the `tofu`/`terraform`
+                                       # on its PATH and does not enforce `tool_version`
 
 cloud_env = {} if not job.cloud_credentials else {       # §10 OIDC workload
     "AWS_WEB_IDENTITY_TOKEN_FILE": ws.secret_path("oidc_token"),   # outside the checkout
@@ -790,9 +799,9 @@ of them sees the agent's own settings. Hooks get the platform env (platform
 hooks) or the stripped repo env (§8.3), never the `TF_HTTP_*` settings. Subprocesses without an
 explicit budget are capped at 2 h by the agent's watchdog.
 
-`docker` runner: each command (terraform AND hooks) runs in `stackd/runner:<tool>-<version>` (image including the common check tools: tfsec, checkov, infracost, jq).
+`docker` runner: each command (terraform AND hooks) runs in `stackd/runner:<tool>-<version>` (image including the common check tools: tfsec, checkov, infracost, jq). **Not implemented yet**: the agent reads `STACKD_RUNNER` but, whatever its value, runs every command as a local subprocess, as its own OS user. The runner images exist (`deploy/images/`, `task build-runner-images`); the agent does not use them.
 
-**Runner trust contract (Phase C).** The `docker` runner (prod) is the trust boundary: one **ephemeral** container per job; the image carries **no long-lived cloud creds**; the OIDC token is written to a `0600` file outside the checkout (`Workspace.secret_file`) only for the duration of each tofu command and each platform hook — never while a repo hook runs (§8.3) — exposed to them via `AWS_WEB_IDENTITY_TOKEN_FILE`, and the whole workspace is removed in the `finally` `ws.cleanup()`; an optional egress allowlist is enforced via the run's network. Repo code also runs inside tofu (`data "external"`, provisioners), and feeds the check tools platform hooks run (their config files in the checkout): tofu and platform hooks get the worker's environment **minus the agent's own settings** — the whole `STACKD_*` namespace (the pool token, the API URL, …, and any platform setting a worker host carries) — then the run's `env` and `sensitive_env` and the OIDC workload env (§10.4); tofu also gets, for managed state, `TF_HTTP_*` (§11.2). Everything else a provider may need stays: `PATH` and locale, proxies and CA bundle, `TF_*` (plugin cache, …), provider settings. Repo hooks run untrusted: `sh -c <repo command>` with an allowlisted `repo_env` (§8.3). The `local` runner (dev) with a mounted `~/.aws` is **trusted-dev only** — never prod (`STACKD_ENV=production` is documented to require the `docker` runner).
+**Runner trust contract (Phase C).** The `docker` runner (prod) is the trust boundary — **target design, see the note above**: one **ephemeral** container per job; the image carries **no long-lived cloud creds**; an optional egress allowlist is enforced via the run's network. What holds today, on every runner: the OIDC token is written to a `0600` file outside the checkout (`Workspace.secret_file`) only for the duration of each tofu command and each platform hook — never while a repo hook runs (§8.3) — exposed to them via `AWS_WEB_IDENTITY_TOKEN_FILE`, and the whole workspace is removed in the `finally` `ws.cleanup()`. Repo code also runs inside tofu (`data "external"`, provisioners), and feeds the check tools platform hooks run (their config files in the checkout): tofu and platform hooks get the worker's environment **minus the agent's own settings** — the whole `STACKD_*` namespace (the pool token, the API URL, …, and any platform setting a worker host carries) — then the run's `env` and `sensitive_env` and the OIDC workload env (§10.4); tofu also gets, for managed state, `TF_HTTP_*` (§11.2). Everything else a provider may need stays: `PATH` and locale, proxies and CA bundle, `TF_*` (plugin cache, …), provider settings. Repo hooks run untrusted: `sh -c <repo command>` with an allowlisted `repo_env` (§8.3). The `local` runner (dev) with a mounted `~/.aws` is **trusted-dev only** — never prod (`STACKD_ENV=production` is documented to require the `docker` runner; nothing enforces it yet).
 
 ### 7.5 Periodic tasks (internal scheduler, multi-replica)
 
@@ -844,17 +853,32 @@ hooks:
 
 ### 8.3 Execution semantics
 
-- Each hook: one shell command in the workspace (cwd = project_root), the run's env vars injected (except `sensitive_env` for **repo** hooks — opt-in per env, same logic as proposed runs).
-- **Cloud credentials (§10) not exported to repo hooks.** The `AWS_WEB_IDENTITY_TOKEN_FILE` / `AWS_ROLE_ARN` variables are injected only into the environment of **terraform** invocations, never into that of **repo** hooks by default (same reasons as `sensitive_env`: a `.stackd.yml` pushed via PR must not be able to assume the prod apply role and exfiltrate). Opt-in per env if a hook legitimately needs the cloud. **Platform** hooks (non-bypassable) have access to it. The token file `AWS_WEB_IDENTITY_TOKEN_FILE` names (`<workspace>/oidc_token`, outside the checkout) is on disk only while a tofu command or a platform hook runs — written fresh for each, never through a planted symlink, and removed right after — so a repo hook can't read it either (as `../oidc_token`).
+- Each hook: one shell command (`sh -c`) in the checkout (cwd = project_root), with the run's environment-kind variables (`env`, plus `sensitive_env` for **platform** hooks only). Terraform-kind variables reach tofu only, through the tfvars files (below): no hook gets them. The plan job runs the `before_init` … `after_plan` stages, the apply job (a fresh clone, §7.3) `before_apply` and `after_apply`; a command job (§4.3) runs no hook. *Specified, **not implemented — pending a decision***: an opt-in per environment giving repo hooks `sensitive_env` ("same logic as proposed runs"). Today a repo hook never gets it.
+- **Cloud credentials (§10) not exported to repo hooks.** The `AWS_WEB_IDENTITY_TOKEN_FILE` / `AWS_ROLE_ARN` variables are injected only into the environment of **tofu** invocations and **platform** hooks (non-bypassable), never into that of **repo** hooks (same reasons as `sensitive_env`: a `.stackd.yml` pushed via PR must not be able to assume the prod apply role and exfiltrate). *Specified, **not implemented — pending a decision***: an opt-in per environment for a repo hook that legitimately needs the cloud; today a repo hook never gets it. The token file `AWS_WEB_IDENTITY_TOKEN_FILE` names (`<workspace>/oidc_token`, outside the checkout) is on disk only while a tofu command or a platform hook runs — written fresh for each, never through a planted symlink, and removed right after — so a repo hook can't read it either (as `../oidc_token`).
 - **Repo-hook env is built from an allowlist.** Of the worker process environment, the agent's `repo_env` keeps only what any shell command needs — `PATH`, `HOME`, `USER`, `LOGNAME`, `SHELL`, `TMPDIR`, `TERM`, `LANG`, `LANGUAGE`, `LC_*`, `TZ`, the proxy settings (`HTTP_PROXY`, `HTTPS_PROXY`, `NO_PROXY`, `ALL_PROXY`, either case) and the CA bundle location (`SSL_CERT_FILE`, `SSL_CERT_DIR`) — then layers the run's non-sensitive `env`. Nothing else of the worker's own environment reaches a repo hook: a worker host can carry any secret there (the pool token, a database URL, a cloud-credential family such as `AWS_*` — exported, on the **trusted-dev** `local` runner, by a mounted `~/.aws`; the `docker` runner (prod) bakes no long-lived creds into the image), and the state backend's `TF_HTTP_*` (§11.2) go to tofu only. Anything a repo hook needs is set as a run variable. Platform hooks get the worker's environment minus the agent's own settings (the `STACKD_*` namespace, like tofu, §7.4), then the run's `env`, `sensitive_env` and cloud env. A regression test asserts a repo hook sees neither cloud nor sensitive env, nor any other worker variable.
-- **Repo hooks at the `*_apply` stages on tier=prod**: forbidden by default. On a `tier=prod` env, only **platform** hooks execute at `before_apply`/`after_apply`; a repo hook at these stages is ignored with a visible warning (it would run with the prod write role). The `*_init`/`*_plan` repo stages remain allowed (plan role = ReadOnly).
+- **Not implemented yet — pending a decision.** Today repo hooks run at every stage on every tier (without secrets or cloud credentials, above). The rule below hardcodes the `prod` tier name, which conflicts with the configurable, non-ordered tier catalog (CLAUDE.md §4, §7, §2.4): it needs a criterion that does not depend on a tier's name (a tier flag, an environment setting) before it is built. As specified: **Repo hooks at the `*_apply` stages on tier=prod**: forbidden by default. On a `tier=prod` env, only **platform** hooks execute at `before_apply`/`after_apply`; a repo hook at these stages is ignored with a visible warning (it would run with the prod write role). The `*_init`/`*_plan` repo stages remain allowed (plan role = ReadOnly).
 - `plan.json` available for reading at the `after_plan` stage — the plan job's last; the apply job is a fresh clone (§7.3) and has none. `tofu show -json` lists the run's variable values in clear, sensitive ones included: **platform** hooks read it as is; before the first **repo** hook runs it is replaced by a **masked copy** — every value tofu marks sensitive (input variables declared `sensitive`, resource attributes, outputs) and every value the agent masks in logs (§5.1) replaced by `***`, the rest kept as valid JSON. The uploaded `plan.json` artifact is that masked copy. Without that document — `show -json` failed, or printed no JSON object — the plan job fails (`plan JSON unavailable, not checked: …`) before any upload or hook: the checks never run against a stand-in empty plan. The plan job writes its plan file (`plan.tfplan`) outside the checkout and deletes it, once shown and uploaded (§7.3), before any `after_plan` hook runs: no repo hook finds the saved plan, nor raw plan JSON, in the workspace. Files the agent writes into the checkout replace whatever is there — a repo-planted symlink is never written through.
 - **The run's tfvars are in the checkout only while tofu reads them.** `stackd.auto.tfvars.json` and `zzz_stackd.auto.tfvars` (§3.4) are written right before each tofu command that reads variables — `init`, `plan`, `apply` (so tofu still refuses a saved plan whose inputs changed, §7.3) and a command run's subcommand — and deleted right after it: no hook, at any stage, finds them. tofu auto-loads them as before (same precedence among the repo's own `*.auto.tfvars`, and every subcommand reads them), which `-var-file` would change.
 - **The repo token is not in the checkout.** The agent clones with the token in the URL (`repo_credentials`, §7.2), then points `origin` back at the token-free `repo_url` before anything else runs; the pinned-commit fetch (§7.3) is handed the authed URL itself. git keeps no other copy (`FETCH_HEAD` and the reflogs record the URL without its credentials): no hook finds the token under `.git/`.
-- Timeout per hook: 10 min, configurable per worker (`STACKD_HOOK_TIMEOUT_SECONDS`), for platform and repo hooks alike. Past it the hook is killed — its whole process group, so a child it started can't outlive it — and fails by its own `on_failure` (detail `timed out after <n>s`). Logs in a dedicated section of the viewer.
+- **Residual, until the `docker` runner exists (§7.4).** Hooks run as the agent's own OS user, in no container: a repo hook can reach whatever that user can — the workspace of another job running concurrently on the same worker (`STACKD_MAX_CONCURRENT_JOBS` > 1), the agent's own process environment under `/proc`, a pool-token file. And only a hook that times out has its process group killed: a background process a repo hook detaches from its output keeps running after the hook exits, while tofu or a platform hook has the files above on disk. Until then, a worker running one job at a time (`STACKD_MAX_CONCURRENT_JOBS=1`, the default) at least keeps jobs out of each other's workspaces.
+- Timeout per hook: 10 min, configurable per worker (`STACKD_HOOK_TIMEOUT_SECONDS`), for platform and repo hooks alike. Past it the hook is killed — its whole process group, the processes it started included — and fails by its own `on_failure` (detail `timed out after <n>s`). Logs in a dedicated section of the viewer.
 - **`on_failure: fail`** → run `failed`, audit `run.check_failed`. At every stage and from either source: the job fails at that stage (`job_failed`, `phase` = the stage, the failed check in `checks`) before the next tofu step — a failing `before_apply` hook means nothing is applied. A failing `after_apply` hook fails the run although the apply has already changed the infrastructure: the agent reports the outputs it read right after the apply with the failure (`job_failed(after_apply)`, `result.outputs`), so the API records them like a finished apply's (§9.1 — `env_outputs` reflects the infrastructure) and, the state matching reality again, clears the environment's drift as a finished apply does (§19, same transaction); but nothing cascades from the failed run (§9.2).
 - **`on_failure: warn`** → the run continues but mandatorily goes through `unconfirmed` (even with autodeploy), warning badge + detail on the run page, audit `run.check_warned`. A human takes responsibility. At the `*_apply` stages the run is already confirmed: the apply goes on and the warning is reported in the apply job's `checks` (`phase_finished`); the API adds those checks to the plan's in `runs.check_results` and audits `run.check_warned` the same way.
-- Results aggregated in `runs.check_results` and displayed in the checks status bar. A job reports **every** check result — `ok`, `warn` and `fail`, each with the hook `stage` it ran at (`before_init` … `after_apply`; the plan tripwire's `secret_leak_suspected` has `stage: "plan"`) — on its `phase_finished`, or on the `job_failed` a failing check ends it with. The API keeps them all, plan job then apply job, in `check_results.results`; `check_results.checks` keeps the `warn`/`fail` ones, what needs attention (its meaning before `results` existed). The `run.check_warned` audit context names the warned checks and their `stages`; `run.check_failed`'s `phase` is the failing stage.
+- Results aggregated in `runs.check_results` and displayed in the checks status bar (today the run page lists the `warn`/`fail` ones, without their stage). A job reports **every** check result — `ok`, `warn` and `fail`, each with the hook `stage` it ran at (`before_init` … `after_apply`; the plan tripwire's `secret_leak_suspected` has `stage: "plan"`) — on its `phase_finished`, or on the `job_failed` a failing check ends it with. The API keeps them all, plan job then apply job, in `check_results.results`; `check_results.checks` keeps the `warn`/`fail` ones, what needs attention (its meaning before `results` existed). The `run.check_warned` audit context names the warned checks and their `stages`; `run.check_failed`'s `phase` is the failing stage. A job that fails on anything but a check (a tofu error, a timeout, the plan JSON) reports no checks: the results of its earlier stages are not recorded, and a `warn` among them is not audited.
+
+  ```json
+  "check_results": {
+    "results": [
+      {"name": "fmt",       "status": "ok",   "detail": null,     "stage": "before_plan"},
+      {"name": "infracost", "status": "warn", "detail": "exit 1", "stage": "after_plan"},
+      {"name": "smoke",     "status": "warn", "detail": "timed out after 600s", "stage": "after_apply"}
+    ],
+    "checks": [
+      {"name": "infracost", "status": "warn", "detail": "exit 1", "stage": "after_plan"},
+      {"name": "smoke",     "status": "warn", "detail": "timed out after 600s", "stage": "after_apply"}
+    ]
+  }
+  ```
 
 ---
 
@@ -878,6 +902,11 @@ At `applying → finished`, parsing of `outputs.json`:
 5. parent failed → branch stopped, run group = partial_failure
 6. downstream env protected → stops at unconfirmed (never bypassed)
 ```
+
+Steps 4–5 are **not implemented yet**: each finished upstream apply triggers its downstream runs on
+its own (a downstream with two parents can run twice), and no run group is marked `partial_failure`.
+A cascade run is routed like any other plan (§4.2): it auto-confirms only on an `autodeploy`,
+unprotected environment, with no mock and no `warn` check.
 
 Resolution of inputs at claim time (fresh values), snapshot frozen in `resolved_inputs`.
 
@@ -969,7 +998,7 @@ Changing an environment's `branch` (`PATCH`) clears `head_sha`, `head_updated_at
 - *Level 2 — concerns you*: `affects_project_root` = at least one commit ahead modifies files under `project_root` (GitHub/GitLab compare API). If unavailable: NULL, the UI stays at level 1.
 
 **Effects**:
-- `↑N` chip on the env cell (DESIGN.md §5.1) and the env header; attenuated variant if `affects_project_root = false` ("the branch moved ahead, but not this folder").
+- `↑N` chip on the env cell (DESIGN.md §5.1) and the env header; attenuated variant if `affects_project_root = false` ("the branch moved ahead, but not this folder"). **Not in the UI yet**, nor the banner below: today staleness is the API's `stale`/`commits_ahead` fields.
 - **Obsolete `unconfirmed` run**: if `head_sha` advances while a plan awaits confirmation, banner on the run page — "plan computed on `abc1234`, the branch advanced by N commits" — with a *Re-plan* action (discard + new run on the head). Confirmation remains **possible** (applying a specific commit is legitimate) but the obsolescence is impossible to miss.
 - No automatic action: staleness is information, never a trigger (that is the role of webhooks).
 - `GET /api/v1/environments/{id}` exposes `head_sha`, `commits_ahead`, `affects_project_root`, `stale`.
@@ -1033,13 +1062,13 @@ Recommended pattern: `plan_role_arn` = ReadOnly role (+ S3 module access), `appl
 
 ### 10.4 Worker side
 
-The worker exchanges nothing itself in the simple case: it writes the token to a file and exports `AWS_WEB_IDENTITY_TOKEN_FILE` + `AWS_ROLE_ARN` + `AWS_ROLE_SESSION_NAME=stackd-{run_id}` — the AWS SDK in the providers does the AssumeRoleWithWebIdentity natively. The session name = run_id → **CloudTrail traces every AWS action back to the run** (and therefore back to the human who confirmed: complete audit loop).
+The worker exchanges nothing itself in the simple case: it writes the token to a file and exports `AWS_WEB_IDENTITY_TOKEN_FILE` + `AWS_ROLE_ARN` + `AWS_ROLE_SESSION_NAME=stackd-{run_id}` (+ `AWS_REGION` when the integration sets one) to tofu and platform hooks only — never repo hooks — and the file exists only while one of them runs (§8.3) — the AWS SDK in the providers does the AssumeRoleWithWebIdentity natively. The session name = run_id → **CloudTrail traces every AWS action back to the run** (and therefore back to the human who confirmed: complete audit loop).
 
 Fallback: no `cloud_integration` → classic static variables (variable set `aws-credentials`), current behavior.
 
 ### 10.5 Priority and coexistence
 
-If a `cloud_integration` exists AND static `AWS_*` variables are resolved → the OIDC variables win, config warning displayed (a classic source of confusion).
+If a `cloud_integration` exists AND static `AWS_*` variables are resolved → the OIDC variables win, config warning displayed (a classic source of confusion). **Not implemented yet**: no warning is displayed, and the agent only sets the OIDC variables on top of the run's — a static `AWS_ACCESS_KEY_ID`/`AWS_SECRET_ACCESS_KEY` stays in tofu's environment, where the AWS SDK's own precedence normally picks it before the web identity token. Do not resolve both on one environment.
 
 ---
 
@@ -1095,8 +1124,9 @@ s3://stackd-<org>/
 To adopt a stack that already has remote state into Stackd-managed state (`managed_state: true`):
 `POST /api/v1/environments/{env_id}/state/import-session` (admin) mints a short-lived (30 min),
 run-less `rw` state token and returns a ready-to-use `http` backend config. The operator migrates
-their current state with one standard command — `tofu init -migrate-state -backend-config=...` —
-which `LOCK`s, uploads the state via §11.2 (stored as a `state_version` with
+their current state with one standard command — `TF_HTTP_ADDRESS=… TF_HTTP_PASSWORD=… tofu init
+-migrate-state`, the settings as `TF_HTTP_*` environment variables, never `-backend-config` (tofu
+writes those, the token included, into `.terraform/`) — which `LOCK`s, uploads the state via §11.2 (stored as a `state_version` with
 `created_by_run_id = NULL`), then `UNLOCK`s. Audited as `state.import_session_created`; the address
 uses the public URL (the operator runs locally). Once migrated, the committed code must declare **no**
 `backend` block: on a managed-state env the agent adds its own `backend "http" {}` (§7.4), and a
@@ -1237,16 +1267,16 @@ Specified but **not served yet**: `GET /api/v1/runs/{id}/logs/download` (§5.2) 
 | Cloud credentials | **OIDC workload by default**: tokens signed per run/phase, trust policies on claims, session name = run_id (CloudTrail ↔ Stackd audit). Static = fallback |
 | OIDC signing key | KMS or encrypted volume (`oidc_signing_keys` §3.11), rotation with overlap, short token TTL. `sub` wildcard allowed **only** on the stack segment; never on `tier` nor `phase` (§10.3) |
 | Static secrets | AES-256-GCM, write-only, decrypted at claim, masked in the logs |
-| Hooks | platform hooks not bypassable by PR; repo hooks without `sensitive_env` **nor cloud credentials** by default; repo hooks forbidden at the `*_apply` stages on tier=prod; masking of sensitive values in their stdout; timeout; execution in the run's container (§8.3) |
+| Hooks | platform hooks not bypassable by PR; repo hooks without `sensitive_env` **nor cloud credentials**, with an allowlisted env, a masked `plan.json`, and no saved plan, tfvars, OIDC token file or repo token on disk while they run; the agent's `STACKD_*` settings reach no hook nor tofu; masking of sensitive values in their stdout; 10 min timeout killing the process group; a failing `fail` check stops the job at any stage (§8.3). Not implemented yet: repo hooks forbidden at the `*_apply` stages on tier=prod (pending a decision), execution in the run's container (§7.4) |
 | Mocks | apply forbidden by default (`allow_mock_apply=false`), badge, audit `mock_consumed` |
 | External secrets | provider bootstrap credential AES-256-GCM write-only (`secret_sources.bootstrap_secret_encrypted` §15.1); live values fetched at claim, never persisted, masked; **fallback value (static or break-glass override) forbids apply by default** (`allow_fallback_apply=false`), badge, audit `secret.fallback_used` (§15) |
-| Workers | revocable tokens, no incoming port, labels (isolated prod pool); tool binaries verified by checksum/signature (§7.4, supply-chain) |
+| Workers | revocable tokens, no incoming port, labels (isolated prod pool); tool binaries verified by checksum/signature (§7.4, supply-chain) — **not implemented yet** (the runner images verify their binary at build; the agent runs the one on its PATH) |
 | State | S3 SSE-KMS via API only; per-job state tokens scoped `ro` (proposed runs, read-only commands) / `plan` (lock, never write) / `rw` (apply, mutating command, import session), refused once their run is terminal; handed to tofu only, as `TF_HTTP_*` env (§11.2); audited force-unlock |
 | Saved plans | the reviewed `plan.tfplan` is AES-256-GCM-encrypted by the API (AAD bound to its S3 key), served only to the run's apply job, applied as-is (never re-planned), deleted on any terminal state (§7.3, §11.3) |
 | Outbound notifications | https only; the host must resolve to public addresses only; the POST dials the vetted IP (Host/SNI/certificate stay on the hostname), ignores env proxies (`HTTPS_PROXY`…) by design, never follows redirects |
 | Apply permissions | tier per env × `allowed_tiers` set per user (§2.4, configurable catalog, non-linear); distinct `can_destroy`; double lock with the OIDC trust policy on the tier name |
 | Protected envs | autodeploy forbidden, 4-eyes (automatic on a tier flagged `requires_four_eyes`, e.g. `prod`), never bypassed (cascade included); the *right* to apply comes from the tier, not from `protected` |
-| Proposed runs | plan-only, state RO, secrets not injected by default, mocks allowed |
+| Proposed runs | plan-only, state RO, mocks allowed; secrets not injected by default — **not implemented yet**: a proposed run's job gets the environment's `sensitive_env`, sensitive tfvars and plan-role OIDC credentials like any plan job, and repo code runs inside tofu (§7.4) |
 | Webhooks | HMAC SHA-256 (secret per repo, `stacks.webhook_secret_encrypted` §3.1), anti-replay 5 min |
 | Sessions | access JWT 15 min in Bearer header; refresh httpOnly `SameSite=Strict` + CSRF double-submit, rotation with reuse detection → family revocation (§2.5) |
 | Encryption at rest | AES-256-GCM, random 96-bit nonce per value, never reused (§1) |
@@ -1257,10 +1287,10 @@ Specified but **not served yet**: `GET /api/v1/runs/{id}/logs/download` (§5.2) 
 
 ## 14. Tests — minimal strategy
 
-- **API unit tests**: transitions (`can_apply` per tier including apply-everywhere-except-prod, `can_destroy`, auto 4-eyes on a `requires_four_eyes` tier **and its human-triggerer-only scope**, mock-apply blocking, warn → forced confirmation), 6-layer variable resolution + provenance (space-scoped attachments), hook merging (platform→repo order, exclusion of `*_apply` repo hooks on prod), cycle detection, multi-parent cascade, mock resolution (real > mock > error), signature/claims of workload tokens (tier segment in the `sub`, wildcard limited to the stack segment), Google id_token validation, **refresh rotation + reuse detection → family revocation**.
+- **API unit tests**: transitions (`can_apply` per tier including apply-everywhere-except-prod, `can_destroy`, auto 4-eyes on a `requires_four_eyes` tier **and its human-triggerer-only scope**, mock-apply blocking, warn → forced confirmation), 6-layer variable resolution + provenance (space-scoped attachments), hook merging (platform→repo order; the exclusion of `*_apply` repo hooks on prod once decided, §8.3), check results kept with their stage across the plan and apply jobs, an `after_apply` failure recording outputs and clearing drift without cascading, cycle detection, multi-parent cascade (once built, §9.2), mock resolution (real > mock > error), signature/claims of workload tokens (tier segment in the `sub`, wildcard limited to the stack segment), Google id_token validation, **refresh rotation + reuse detection → family revocation**.
 - **Integration**: Postgres testcontainers; **concurrent claim → only one wins, the loser catches `23505` and re-polls**; HTTP backend with real `tofu` + Garage; log idempotency; **masking of sensitive values (`tfvars` + env) in a hook's stdout**; `after_plan` hook that reads plan.json; **WS fan-out via `LISTEN/NOTIFY`**; **single execution of a periodic task under advisory lock with 2 replicas**; AssumeRoleWithWebIdentity against a mock STS (moto).
 - **E2E**: the live compose stack + fixture repos (built-in `terraform_data`, no provider) → on a throwaway copy of the demo graph, a 2-stack cascade **with mocks** (mocked plan → upstream apply → real cascade), the role/mock gates, and the `run.confirmed` audit actor (DEV §7).
-- **Agent**: exit codes, secret masking, saved-plan upload and fail-closed apply, commit pinning, the `TF_HTTP_*` backend env (tofu only), the command time budget from `cred_phase`, token encoding in clone URLs, writing the OIDC token and exporting the env vars.
+- **Agent**: exit codes (a plan only on 0/2) and the plan JSON failing closed, secret masking and the masked `plan.json`, hooks at every stage and from both sources (`fail` stops the job, `warn` goes on, the timeout kills the process group), what a repo hook can read (no saved plan, tfvars, OIDC token file or repo token; an allowlisted env), the `STACKD_*`-free env of tofu and platform hooks, saved-plan upload and fail-closed apply, commit pinning, the `TF_HTTP_*` backend env (tofu only), the command time budget from `cred_phase`, token encoding in clone URLs, writing the OIDC token and exporting the env vars.
 
 ---
 

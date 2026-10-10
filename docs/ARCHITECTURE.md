@@ -122,7 +122,7 @@ sequenceDiagram
     A->>S: fetch + decrypt
     A-->>W: plan.tfplan (missing or unreadable → the job fails closed, no re-plan)
     Note over W: before_apply · apply plan.tfplan · output -json · after_apply
-    W->>A: phase_finished (outputs)
+    W->>A: phase_finished (outputs, apply-stage checks)
     A->>A: transition() → finished (saved plan deleted), then cascade downstream
 ```
 
@@ -131,6 +131,12 @@ mint time: `ro` (a PR or drift plan, a read-only command: read only, no lock), `
 read and lock while planning, never write), `rw` (an apply or a mutating command: write; TTL = the
 apply budget + grace). A token whose run has ended can no longer write or lock. The worker hands it
 to tofu only, as `TF_HTTP_*` environment variables — hooks never see it.
+
+**Hooks and checks.** Platform hooks run first, then the repo's `.stackd.yml` hooks; a repo hook gets
+no secret (an allowlisted env, a masked `plan.json`, no tfvars or token file on disk). Every check
+result, with the stage it ran at, is kept on the run (`check_results`). A failing `fail` check stops
+the job at its stage; a failing `after_apply` check fails the run after the infrastructure changed:
+its outputs are recorded, nothing cascades.
 
 **Apply affinity.** A confirmed run is reserved for the worker that planned it for 60 s, then any
 compatible worker takes it. Nothing is carried over in the workspace: the apply always starts from a
