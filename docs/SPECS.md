@@ -780,8 +780,9 @@ else:                                        # command job (§4.3): no hooks, no
 ws.cleanup()
 ```
 
-The tofu subcommands that reach the state (`init`, `plan`, `apply`, `output`, a command) get
-`tofu_env`; `show` of the local plan file does not need it. Hooks get the platform env (platform
+Every tofu subcommand gets `tofu_env` — those that reach the state (`init`, `plan`, `apply`,
+`output`, a command) need it, and the two `show` of the local plan file run with it too, so none
+of them sees the agent's own settings. Hooks get the platform env (platform
 hooks) or the stripped repo env (§8.3), never the `TF_HTTP_*` settings. Subprocesses without an
 explicit budget are capped at 2 h by the agent's watchdog.
 
