@@ -162,6 +162,8 @@ created_at, updated_at
 
 Why not Terraform workspaces: weak isolation (shared code/backend/credentials, state suffix), easy targeting mistakes. A Stackd environment = physically separate state, variables, protections and its own worker pool.
 
+**Deletion.** Deleting an environment — or a stack, which takes its environments with it — is refused with **409 `Active run`** (problem+json carrying `run_id`) while one of them has a run in an active state (§3.5): the cascade would remove that run outside `transition()` (§4.2) while a worker executes it. Queued runs go with their environment. The variable-set attachments targeting what is deleted are removed in the same transaction (§3.4).
+
 ### 3.3 `variables` — stack and environment level
 
 ```
@@ -227,6 +229,8 @@ variable_set_attachments (
 A set's **selector** (`{label: value}`) auto-attaches it to every environment whose effective labels (`stack.labels` + `env.labels`, env wins on conflict) contain all of its key=value pairs — equality AND-match, no operators (deliberately not the deferred OPA engine, PLAN §7). It sits at the same weakest layer as `auto_attach`; explicit attachments remain stronger.
 
 **Attachments stay in the set's space.** Attaching to a `stack` or `environment` requires the target to belong to the variable set's space **and** the caller to be a `writer` there; otherwise it is refused with `400 Cross-space attachment` (`403` if the caller lacks write access on the target). A tier is a global catalog row (no space), so a `tier` attachment applies only to environments of that tier **inside the set's own space**. Resolution also ignores any explicit attachment whose set belongs to another space (defense in depth).
+
+**No orphan attachments.** Since there is no FK, deleting a stack or an environment removes the attachments targeting it — for a stack, also those targeting its environments — in the deletion's transaction, each audited `variable_set.detached` (context `reason`: `stack_deleted` | `environment_deleted`).
 
 At equal name and kind, the upper layer overrides. Two sources outside resolution are added at claim time: upstream outputs (`dependency:`) and mocks (`mock`) — see §9.
 

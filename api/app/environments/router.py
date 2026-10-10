@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import Annotated
 
 from fastapi import APIRouter, Depends
-from sqlalchemy import select, update
+from sqlalchemy import ColumnElement, and_, delete, or_, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -18,13 +18,23 @@ from app.auth.deps import CurrentUser, require_role
 from app.config import get_settings
 from app.crypto import decrypt
 from app.db import get_session
-from app.enums import AuditActorKind, Role, RunState, RunType, VariableKind
+from app.enums import (
+    ACTIVE_STATES,
+    AttachmentTarget,
+    AuditActorKind,
+    Role,
+    RunState,
+    RunType,
+    VariableKind,
+)
 from app.environments.schemas import EnvironmentCreate, EnvironmentOut, EnvironmentUpdate
 from app.errors import ProblemException
 from app.models.environment import Environment
 from app.models.run import Run
 from app.models.stack import Stack
 from app.models.tier import Tier
+from app.models.user import User
+from app.models.variable_set import VariableSetAttachment
 from app.ratelimit import rate_limit
 from app.spaces import guard_env_id, guard_stack_id
 from app.stacks.git import clone_shallow, enforce_clone_budget, ls_remote_sha
@@ -96,6 +106,89 @@ async def _require_tier(session: AsyncSession, name: str) -> None:
     exists = (await session.execute(select(Tier).where(Tier.name == name))).scalar_one_or_none()
     if exists is None:
         raise ProblemException(422, "Unknown tier", f"No tier named '{name}'. Define it first.")
+
+
+async def lock_envs_for_deletion(
+    session: AsyncSession, *criteria: ColumnElement[bool]
+) -> list[uuid.UUID]:
+    """Lock the envs about to be deleted (a stack's, or one) and refuse with 409 while any has an
+    active run (§3.5): the DB cascade would delete that run outside `transition()` (§4.2), leaving
+    a worker executing a run that no longer exists. A claim locks its env row too (FOR UPDATE OF e
+    SKIP LOCKED, §7.2), so no run starts on these envs until the deletion commits. Returns their
+    ids. Queued runs aren't executing anywhere: they go with their env."""
+    env_ids = list(
+        (await session.execute(select(Environment.id).where(*criteria).with_for_update()))
+        .scalars()
+        .all()
+    )
+    if env_ids:
+        active = (
+            await session.execute(
+                select(Run.id, Run.environment_id)
+                .where(Run.environment_id.in_(env_ids), Run.state.in_(ACTIVE_STATES))
+                .limit(1)
+            )
+        ).first()
+        if active is not None:
+            raise ProblemException(
+                409,
+                "Active run",
+                "A run is in progress on this environment: cancel or discard it, or let it "
+                "finish, before deleting.",
+                run_id=str(active.id),
+                environment_id=str(active.environment_id),
+            )
+    return env_ids
+
+
+async def detach_deleted_targets(
+    session: AsyncSession,
+    user: User,
+    *,
+    env_ids: Sequence[uuid.UUID],
+    stack_id: uuid.UUID | None = None,
+) -> None:
+    """Variable-set attachments are polymorphic, with no FK (§3.4): remove those targeting the
+    envs (and stack) being deleted, in the deletion's transaction, each audited as a detachment."""
+    targets = [
+        and_(
+            VariableSetAttachment.target_kind == AttachmentTarget.environment,
+            VariableSetAttachment.target_id.in_(env_ids),
+        )
+    ]
+    if stack_id is not None:
+        targets.append(
+            and_(
+                VariableSetAttachment.target_kind == AttachmentTarget.stack,
+                VariableSetAttachment.target_id == stack_id,
+            )
+        )
+    detached = await session.execute(
+        delete(VariableSetAttachment)
+        .where(or_(*targets))
+        .returning(
+            VariableSetAttachment.variable_set_id,
+            VariableSetAttachment.target_kind,
+            VariableSetAttachment.target_id,
+        )
+        .execution_options(synchronize_session=False)
+    )
+    reason = "stack_deleted" if stack_id is not None else "environment_deleted"
+    for set_id, target_kind, target_id in detached.all():
+        await record_audit(
+            session,
+            action="variable_set.detached",
+            actor_kind=AuditActorKind.user,
+            actor_id=user.id,
+            actor_email=user.email,
+            target_kind="variable_set",
+            target_id=set_id,
+            context={
+                "target_kind": target_kind.value,
+                "target_id": str(target_id),
+                "reason": reason,
+            },
+        )
 
 
 @router.get("/stacks/{stack_id}/environments", response_model=list[EnvironmentOut])
@@ -197,6 +290,8 @@ async def update_environment(
 @router.delete("/environments/{env_id}", status_code=204, dependencies=[Writer])
 async def delete_environment(env_id: uuid.UUID, user: CurrentUser, session: DbSession) -> None:
     env = await guard_env_id(session, user, env_id, min_role=Role.writer)
+    await lock_envs_for_deletion(session, Environment.id == env.id)
+    await detach_deleted_targets(session, user, env_ids=[env.id])
     ctx = _env_audit_ctx(env)
     await session.delete(env)
     await record_audit(
