@@ -62,3 +62,6 @@ Thumbs.db
 
 # ── Docs site build (MkDocs) ───────────────────────────────────────────────
 site/
+
+# Showcase video: hosted outside git (rendered from docs/showcase/video-src)
+docs/showcase/*.mp4
