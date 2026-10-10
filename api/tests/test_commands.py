@@ -76,3 +76,42 @@ async def test_command_run_lifecycle(client: httpx.AsyncClient) -> None:
     )
     actions = {e["action"] for e in audit.json()}
     assert {"run.command_triggered", "run.command_executed"} <= actions
+
+
+def _state_token_ttl(payload: dict) -> int:
+    from app.statebackend.tokens import decode_state_token
+
+    claims = decode_state_token(payload["backend"]["password"])
+    return claims["exp"] - claims["iat"]
+
+
+async def test_mutating_command_gets_apply_window_state_token(client: httpx.AsyncClient) -> None:
+    """A mutating command holds apply credentials from its claim (§4.3), so its read-write state
+    token must expire with the apply window — not the 6 h plan window — or a reclaimed command's
+    worker could keep writing state over the next run's (split-brain)."""
+    from app.config import get_settings
+
+    admin = await login(client, "admin")
+    wh = await register_worker(client, admin, "cmd-ttl-pool")
+    stack = await make_stack(client, admin, "cmd-ttl-mutating")
+    env = await make_env(client, admin, stack, "dev", "dev")
+    run = (await _command(client, admin, env, "state rm", ["aws_s3_bucket.old"])).json()
+
+    claim = await client.post("/worker/v1/jobs/claim", headers=wh)
+    assert claim.status_code == 200, claim.text
+    payload = claim.json()
+    assert payload["job_id"] == run["id"]
+    assert payload["phase"] == "command"
+    assert _state_token_ttl(payload) == get_settings().apply_reclaim_window_seconds
+
+
+async def test_readonly_command_keeps_long_state_token(client: httpx.AsyncClient) -> None:
+    admin = await login(client, "admin")
+    wh = await register_worker(client, admin, "cmd-ttl-ro-pool")
+    stack = await make_stack(client, admin, "cmd-ttl-readonly")
+    env = await make_env(client, admin, stack, "dev", "dev")
+    await _command(client, admin, env, "state list")
+
+    claim = await client.post("/worker/v1/jobs/claim", headers=wh)
+    assert claim.status_code == 200, claim.text
+    assert _state_token_ttl(claim.json()) == 6 * 3600

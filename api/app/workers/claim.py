@@ -97,6 +97,16 @@ async def claim_one(session: AsyncSession, worker: Worker, affinity_seconds: int
     return run
 
 
+def holds_apply_credentials(run: Run) -> bool:
+    """True when the run's claimed job holds apply (write) credentials: an apply, or a mutating
+    command run (§4.3). The ONE definition of a "mutating job", shared by the job's credential
+    phase (apply OIDC role + cap, apply-window state token) and the worker-lost reclaim cutoff
+    (scheduler), so a job's write credentials expire by the time another run can take its env."""
+    if run.type == RunType.command:
+        return is_mutating((run.command or {}).get("name", ""))
+    return run.state == RunState.applying
+
+
 def _is_hcl_tfvar(rv: ResolvedVariable) -> bool:
     """True when a terraform var must be written verbatim to the HCL tfvars file (§3.4, Phase D): an
     `hcl`-typed var with a value. It is then excluded from the JSON tfvars to avoid a double
@@ -184,15 +194,10 @@ async def build_job_payload(session: AsyncSession, run: Run) -> dict:
     if stack.repo_auth_kind != RepoAuthKind.none and stack.repo_secret_encrypted is not None:
         repo_credentials["token"] = decrypt(stack.repo_secret_encrypted)
 
-    if run.type == RunType.command:
-        phase = JobPhase.command
-        # A mutating subcommand gets the apply role; a read-only one the (read-only) plan role.
-        cred_phase = (
-            JobPhase.apply if is_mutating((run.command or {}).get("name", "")) else JobPhase.plan
-        )
-    else:
-        phase = JobPhase.plan if run.state == RunState.preparing else JobPhase.apply
-        cred_phase = phase
+    # An apply or a mutating subcommand gets the apply role; a plan or a read-only subcommand the
+    # (read-only) plan role. A plan/apply job's type is its credential phase.
+    cred_phase = JobPhase.apply if holds_apply_credentials(run) else JobPhase.plan
+    phase = JobPhase.command if run.type == RunType.command else cred_phase
 
     # Managed state (§11): hand the worker a scoped HTTP backend (RO for proposed runs).
     settings = get_settings()
@@ -202,11 +207,12 @@ async def build_job_payload(session: AsyncSession, run: Run) -> dict:
 
         scope = "ro" if run.type == RunType.proposed else "rw"
         base = settings.internal_url.rstrip("/")  # worker-reachable, not the public URL
-        # An apply's state token lives only for the apply budget + grace so a reaped/partitioned
-        # worker loses state-write access shortly after the API reclaims its run (§4.2). Plan/RO
-        # tokens keep the generous window.
+        # A job holding apply credentials (an apply, or a mutating command) gets a state token that
+        # lives only for the apply budget + grace — the same window as its OIDC cap and its
+        # worker-lost reclaim cutoff (§4.2) — so a reaped/partitioned worker loses state-write
+        # access before another run can take the env. Plan/read-only jobs keep the generous window.
         state_ttl = (
-            settings.apply_reclaim_window_seconds if run.state == RunState.applying else 6 * 3600
+            settings.apply_reclaim_window_seconds if cred_phase == JobPhase.apply else 6 * 3600
         )
         token = mint_state_token(
             environment_id=env.id, run_id=run.id, scope=scope, ttl_seconds=state_ttl

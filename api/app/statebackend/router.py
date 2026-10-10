@@ -3,7 +3,7 @@ from __future__ import annotations
 import base64
 import json
 import uuid
-from typing import Annotated
+from typing import Annotated, Any
 
 import jwt
 from fastapi import APIRouter, Depends, Request, Response
@@ -14,10 +14,11 @@ from app.audit import record_audit
 from app.auth.deps import CurrentUser, require_role
 from app.config import get_settings
 from app.db import get_session
-from app.enums import AuditActorKind, Role
+from app.enums import ACTIVE_STATES, AuditActorKind, Role
 from app.errors import ProblemException
 from app.ids import uuid7
 from app.models.environment import Environment
+from app.models.run import Run
 from app.models.state import StateLock, StateVersion
 from app.spaces import guard_env_id
 from app.statebackend.store import get_object, put_object, state_key
@@ -47,6 +48,27 @@ def _require_env(claims: dict, env_id: uuid.UUID) -> None:
 def _require_rw(claims: dict) -> None:
     if claims.get("scope") != "rw":
         raise ProblemException(403, "Read-only", "This run holds a read-only state token.")
+
+
+async def _require_active_run(session: AsyncSession, claims: dict[str, Any]) -> None:
+    """Defense in depth (§4.2/§11.2): a run-scoped token writes state or takes the lock only while
+    its run is active. Once the run is terminal (e.g. failed as worker_lost and its env handed to
+    the next run), a partitioned worker's still-unexpired token must not write over the new run's
+    state. FOR SHARE: a concurrent transition to terminal waits for this write instead of
+    interleaving with it. Run-less import-session tokens (§11.4) are bounded by their own short TTL.
+    UNLOCK stays ungated so a reclaimed run can still release the lock it holds, not strand it."""
+    run_id = claims.get("run_id")
+    if run_id is None:
+        return
+    state = (
+        await session.execute(
+            select(Run.state).where(Run.id == uuid.UUID(run_id)).with_for_update(read=True)
+        )
+    ).scalar_one_or_none()
+    if state not in ACTIVE_STATES:
+        raise ProblemException(
+            403, "Run not active", "This state token's run has ended; it can no longer write."
+        )
 
 
 async def _latest(session: AsyncSession, env_id: uuid.UUID) -> StateVersion | None:
@@ -79,6 +101,7 @@ async def post_state(
     claims = _token_claims(request)
     _require_env(claims, env_id)
     _require_rw(claims)
+    await _require_active_run(session, claims)
 
     lock = await session.get(StateLock, env_id)
     if lock is not None and ID and lock.lock_id != ID:
@@ -120,6 +143,7 @@ async def lock_state(env_id: uuid.UUID, request: Request, session: DbSession) ->
     claims = _token_claims(request)
     _require_env(claims, env_id)
     _require_rw(claims)
+    await _require_active_run(session, claims)
     info = json.loads(await request.body() or b"{}")
 
     existing = await session.get(StateLock, env_id)
