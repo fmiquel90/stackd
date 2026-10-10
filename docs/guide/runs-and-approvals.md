@@ -86,8 +86,9 @@ An environment with `autodeploy` auto-confirms when the plan is clean — **but 
 requires four-eyes.
 
 Every [hook](hooks.md) result is kept on the run with the stage it ran at, from the plan job and
-then the apply job: `check_results.results` lists them all (`ok`, `warn`, `fail`),
-`check_results.checks` only the ones that warned or failed — what the run page shows. A `fail`
+then the apply job: `check_results.results` lists them all (`ok`, `warn`, `fail`) — what the run
+page shows, with each one's stage — and `check_results.checks` only the ones that warned or
+failed. A `fail`
 check fails the run at its stage; a failing `before_apply` check means nothing is applied. See
 [Hooks — check results](hooks.md#check-results).
 

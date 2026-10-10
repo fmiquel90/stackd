@@ -25,7 +25,7 @@ The aesthetic draws on **technical drawings and engineering schematics**: deep s
 
 ### 2.2 Signature element: the **phase rail**
 
-THE memorable thing about the interface: a **vertical rail** present on every run page, which materializes the state machine (queued → preparing → planning → checking → unconfirmed → applying → finished; `checking` only appears if checks exist, `confirmed` is transient and is displayed as the start of the applying segment). Each segment:
+THE memorable thing about the interface: a **vertical rail** present on every run page, which materializes the state machine (queued → preparing → planning → checking → unconfirmed → applying → finished; `checking` only appears if the plan ran `after_plan` hooks, `confirmed` is transient and is displayed as the start of the applying segment). Each segment:
 
 - semantic color code (cf. §3.2), the active segment animated with a discreet pulse (the only ambient animation in the app);
 - clickable: navigates directly to the log section for that phase;
