@@ -3,46 +3,46 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
 import { type StackPatch, stacks } from "@/api/resources";
 import type { RepoAuthKind, Stack, Tool } from "@/api/types";
+import { useSpaces } from "@/app/SpaceContext";
 import { useIsAdmin } from "@/auth/session";
+import { Button as UiButton } from "@/ui/Button";
+import { TypeNameDialog } from "@/ui/TypeNameDialog";
 import { Button, Card, Field, LabelsEditor, Select, TextInput } from "@/components/ui";
 
-// Deleting a stack cascades its environments, runs and state — high impact, so we gate it behind a
-// type-the-name confirmation (friction proportional to risk, DESIGN §5.2).
+// Deleting a stack cascades its environments, runs and state — high impact, so it sits behind the
+// typed name (DESIGN §5.7 friction table).
 function DeleteStackPanel({ stackId, name }: { stackId: string; name: string }) {
   const qc = useQueryClient();
   const navigate = useNavigate();
-  const [typed, setTyped] = useState("");
-  const remove = useMutation({
-    mutationFn: () => stacks.remove(stackId),
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["stacks"] });
-      navigate("/stacks");
-    },
-  });
+  const { spacePath } = useSpaces();
   return (
-    <Card>
-      <div className="mb-1 text-[13px] font-medium text-st-failed">Danger zone</div>
-      <div className="mb-2 text-[12px] text-muted">
-        Deleting this stack removes all its environments, runs, state history and config. This cannot be
-        undone.
+    <section
+      aria-labelledby="stack-danger"
+      className="flex flex-col gap-2 rounded-base border border-st-failed p-3"
+    >
+      <h2 id="stack-danger" className="text-section font-semibold">
+        Danger zone
+      </h2>
+      <p className="text-[12px] text-muted">
+        Deleting this stack removes all its environments, runs, state history and configuration. This cannot
+        be undone.
+      </p>
+      <div>
+        <TypeNameDialog
+          trigger={<UiButton variant="danger">Delete stack {name}</UiButton>}
+          title={`Delete ${name}`}
+          consequence="Removes the stack with every environment, run and state version it holds."
+          name={name}
+          confirmLabel={`Delete ${name}`}
+          onConfirm={() =>
+            stacks.remove(stackId).then(() => {
+              qc.invalidateQueries({ queryKey: ["stacks"] });
+              navigate(spacePath());
+            })
+          }
+        />
       </div>
-      <div className="flex items-end gap-2">
-        <Field label={`Type "${name}" to confirm`}>
-          <TextInput value={typed} onChange={(e) => setTyped(e.target.value)} />
-        </Field>
-        <button
-          type="button"
-          className="ui-btn rounded-base px-3 py-1.5 text-[13px] font-medium disabled:opacity-50 border border-st-failed text-st-failed"
-          disabled={typed !== name || remove.isPending}
-          onClick={() => remove.mutate()}
-        >
-          Delete stack
-        </button>
-      </div>
-      {remove.isError && (
-        <div className="mt-2 font-data text-[12px] text-st-failed">{(remove.error as Error).message}</div>
-      )}
-    </Card>
+    </section>
   );
 }
 

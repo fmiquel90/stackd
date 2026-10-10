@@ -63,13 +63,8 @@ export function HooksPanel({ scope, id }: { scope: HookScope; id: string }) {
                 <div className="flex min-w-0 flex-wrap items-center gap-2">
                   <Badge>{h.stage}</Badge>
                   <span className="font-data text-[13px] font-medium">{h.name}</span>
-                  <Badge
-                    color={
-                      h.on_failure === "warn" ? "var(--color-state-unconfirmed)" : "var(--color-state-failed)"
-                    }
-                  >
-                    on fail: {h.on_failure}
-                  </Badge>
+                  {/* Configuration, not an outcome: neutral (amber is reserved for decisions). */}
+                  <Badge>on fail: {h.on_failure}</Badge>
                 </div>
                 <div className="flex shrink-0 items-center gap-1">
                   <Button onClick={() => setEditingId(h.id)}>

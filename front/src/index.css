@@ -40,10 +40,6 @@
   --color-df-update: var(--color-diff-update);
   --color-df-read: var(--color-diff-read);
 
-  /* Legacy utility names used by pre-redesign pages (removed at the end of stage 4). */
-  --color-signal: var(--color-focus);
-  --color-st-unconfirmed: var(--color-state-decision);
-
   --font-sans: "IBM Plex Sans", system-ui, sans-serif;
   --font-mono: "JetBrains Mono", ui-monospace, monospace;
 
@@ -143,20 +139,6 @@ body {
 .graph-canvas .react-flow__node:focus-visible {
   outline: 2px solid var(--color-focus);
   outline-offset: 2px;
-}
-
-/* Interactive affordance for legacy buttons (pre-redesign pages). */
-.ui-btn {
-  cursor: pointer;
-  transition:
-    filter 0.12s ease,
-    opacity 0.12s ease;
-}
-.ui-btn:hover:not(:disabled) {
-  filter: brightness(1.18);
-}
-.ui-btn:disabled {
-  cursor: not-allowed;
 }
 
 /* The only ambient animation in the app: the active phase segment (DESIGN §2.2). */

@@ -40,10 +40,9 @@ export default tseslint.config(
         "error",
         { controlComponents: ["Input", "NativeSelect", "Checkbox"], depth: 3 },
       ],
-      // "warn" while the pre-redesign pages still carry inline colours; switched to "error" once
-      // every screen is migrated (redesign stage 4).
+      // Colour lives in tokens only (CLAUDE §4, DESIGN §8): an inline colour style is an error.
       "no-restricted-syntax": [
-        "warn",
+        "error",
         {
           selector: `JSXAttribute[name.name='style'] Property[key.name=${COLOR_PROPS}]`,
           message: "No inline colour style: use the token utilities (DESIGN §8).",

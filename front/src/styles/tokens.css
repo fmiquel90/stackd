@@ -79,9 +79,4 @@
   --color-diff-replace: var(--color-state-failed);
   --color-diff-update: var(--color-text-primary);
   --color-diff-read: var(--color-text-secondary);
-
-  /* Legacy names kept while the pre-redesign pages are migrated (removed at the end of stage 4). */
-  --color-state-unconfirmed: var(--color-state-decision);
-  --color-decision: var(--color-state-decision);
-  --color-accent: var(--color-focus);
 }

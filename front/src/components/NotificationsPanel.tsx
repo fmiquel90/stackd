@@ -23,7 +23,7 @@ const STATES: NotificationState[] = ["unconfirmed", "finished", "failed"];
 
 // Each fire-on state pairs a token color with its label (color is never the only signal).
 const STATE_COLOR: Record<NotificationState, string> = {
-  unconfirmed: "var(--color-state-unconfirmed)",
+  unconfirmed: "var(--color-state-decision)",
   finished: "var(--color-state-finished)",
   failed: "var(--color-state-failed)",
 };
