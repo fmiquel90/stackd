@@ -53,9 +53,8 @@ import { useTheme } from "./theme";
 const OverviewPage = lazy(() =>
   import("@/features/overview/OverviewPage").then((m) => ({ default: m.OverviewPage })),
 );
-const StackDetailPage = lazy(() =>
-  import("@/pages/StackDetailPage").then((m) => ({ default: m.StackDetailPage })),
-);
+const StackRoute = lazy(() => import("@/features/stacks/StackPage").then((m) => ({ default: m.StackRoute })));
+const EnvPage = lazy(() => import("@/features/environments/EnvPage").then((m) => ({ default: m.EnvPage })));
 const RunPage = lazy(() => import("@/features/runs/RunPage").then((m) => ({ default: m.RunPage })));
 const QueuePage = lazy(() => import("@/pages/QueuePage").then((m) => ({ default: m.QueuePage })));
 const HealthPage = lazy(() => import("@/pages/HealthPage").then((m) => ({ default: m.HealthPage })));
@@ -486,17 +485,6 @@ function LegacyStackRedirect() {
   );
 }
 
-/** Resolve `/s/:space/stacks/:stack` (names) to the stack id. */
-function StackByName() {
-  const { stack: name = "" } = useParams();
-  const { current } = useSpaces();
-  const list = useQuery({ queryKey: ["stacks"], queryFn: stacks.list });
-  if (!list.data || !current) return <PageLoading />;
-  const stack = list.data.find((s) => s.space_id === current.id && s.name === name);
-  if (!stack) return <NotFound what={`No stack named ${name} in ${current.name}.`} />;
-  return <StackDetailPage stackId={stack.id} />;
-}
-
 function SpaceRedirect({ to }: { to: string }) {
   const { spacePath, loading, current } = useSpaces();
   if (loading || !current) return <PageLoading />;
@@ -541,9 +529,8 @@ function AppRoutes() {
           </>
         }
       />
-      <Route path="/s/:space/stacks/:stack" element={<StackByName />} />
-      {/* The environment page arrives with the stage-4 screens; until then the stack page. */}
-      <Route path="/s/:space/stacks/:stack/envs/:env" element={<StackByName />} />
+      <Route path="/s/:space/stacks/:stack" element={<StackRoute />} />
+      <Route path="/s/:space/stacks/:stack/envs/:env" element={<EnvPage />} />
       <Route path="/s/:space/graph" element={<GraphPage />} />
       <Route path="/s/:space/variable-sets" element={<VariableSetsPage />} />
       <Route path="/runs/:runId" element={<RunPage />} />

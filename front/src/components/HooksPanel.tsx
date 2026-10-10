@@ -72,30 +72,20 @@ export function HooksPanel({ scope, id }: { scope: HookScope; id: string }) {
                   </Badge>
                 </div>
                 <div className="flex shrink-0 items-center gap-1">
-                  <button
-                    type="button"
-                    aria-label="Edit hook"
-                    className="ui-btn rounded-base px-1.5 py-1"
-                    onClick={() => setEditingId(h.id)}
-                    style={{ color: "var(--color-text-secondary)" }}
-                  >
-                    <Pencil size={14} strokeWidth={1.75} aria-hidden />
-                  </button>
+                  <Button onClick={() => setEditingId(h.id)}>
+                    <Pencil size={13} strokeWidth={1.75} aria-hidden /> Edit
+                  </Button>
                   <DeleteButton label="Delete hook" onClick={() => remove.mutate(h.id)} />
                 </div>
               </div>
-              <div
-                className="font-data mt-2 truncate text-[11px]"
-                style={{ color: "var(--color-text-secondary)" }}
-                title={h.command}
-              >
+              <div className="font-data mt-2 truncate text-[11px] text-muted" title={h.command}>
                 {h.command}
               </div>
             </ItemTile>
           ),
         )}
         {data && data.length === 0 && (
-          <span className="font-data text-[12px]" style={{ color: "var(--color-text-secondary)" }}>
+          <span className="font-data text-[12px] text-muted">
             No platform hooks. These are non-bypassable by a PR.
           </span>
         )}

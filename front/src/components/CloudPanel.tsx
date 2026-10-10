@@ -45,11 +45,7 @@ export function CloudPanel({ envId }: { envId: string }) {
       <div className="mb-2 flex items-center gap-3">
         <span className="text-[13px] font-medium">Cloud integration (OIDC)</span>
         <span
-          className="font-data rounded-badge px-1.5 text-[12px]"
-          style={{
-            color: configured ? "var(--color-state-finished)" : "var(--color-text-secondary)",
-            border: "1px solid var(--color-border)",
-          }}
+          className={`rounded-badge border border-control px-1.5 font-data text-[12px] ${configured ? "text-primary" : "text-muted"}`}
         >
           {configured ? "dynamic credentials" : "not configured (static fallback)"}
         </span>
@@ -57,10 +53,7 @@ export function CloudPanel({ envId }: { envId: string }) {
 
       {/* Editing OIDC roles is admin-only (server enforces it on PUT/DELETE/test). Others see it read-only. */}
       {!isAdmin ? (
-        <div
-          className="font-data flex flex-col gap-1 text-[12px]"
-          style={{ color: "var(--color-text-secondary)" }}
-        >
+        <div className="font-data flex flex-col gap-1 text-[12px] text-muted">
           {configured ? (
             <>
               <div>plan role: {data!.plan_role_arn}</div>
@@ -113,16 +106,14 @@ export function CloudPanel({ envId }: { envId: string }) {
             )}
           </form>
           {test.data && (
-            <p className="font-data mt-2 text-[12px]" style={{ color: "var(--color-state-finished)" }}>
-              assumed: {test.data.assumed_role}
-            </p>
+            <p className="font-data mt-2 text-[12px] text-st-finished">assumed: {test.data.assumed_role}</p>
           )}
           {test.error instanceof ApiError && (
-            <p className="font-data mt-2 text-[12px]" style={{ color: "var(--color-state-failed)" }}>
+            <p className="font-data mt-2 text-[12px] text-st-failed">
               {test.error.detail ?? test.error.title}
             </p>
           )}
-          <p className="mt-2 text-[12px]" style={{ color: "var(--color-text-secondary)" }}>
+          <p className="mt-2 text-[12px] text-muted">
             Plan and apply assume different roles; the token{" "}
             <span className="font-data">sub=run:tier:stack:phase</span>.
           </p>

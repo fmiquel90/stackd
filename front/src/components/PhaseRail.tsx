@@ -60,11 +60,7 @@ export function PhaseRail({ phases, variant = "vertical", onSelect }: PhaseRailP
         return (
           <li key={p.key} className="relative flex gap-3 pb-4 last:pb-0">
             {i < phases.length - 1 && (
-              <span
-                aria-hidden
-                className="absolute left-[7px] top-4 bottom-0 w-px"
-                style={{ backgroundColor: "var(--color-border)" }}
-              />
+              <span aria-hidden className="absolute left-[7px] top-4 bottom-0 w-px bg-line" />
             )}
             <span
               aria-hidden
@@ -89,11 +85,7 @@ export function PhaseRail({ phases, variant = "vertical", onSelect }: PhaseRailP
                 <Icon size={13} strokeWidth={1.5} aria-hidden />
                 {p.label}
               </span>
-              {p.meta && (
-                <span className="font-data text-[12px]" style={{ color: "var(--color-text-secondary)" }}>
-                  {p.meta}
-                </span>
-              )}
+              {p.meta && <span className="font-data text-[12px] text-muted">{p.meta}</span>}
             </button>
           </li>
         );

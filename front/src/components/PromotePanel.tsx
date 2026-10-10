@@ -25,7 +25,7 @@ export function PromotePanel({
   if (siblings.length === 0) {
     return (
       <Card>
-        <div className="text-[12px]" style={{ color: "var(--color-text-secondary)" }}>
+        <div className="text-[12px] text-muted">
           No sibling environment to promote from — add another environment to this stack.
         </div>
       </Card>
@@ -35,7 +35,7 @@ export function PromotePanel({
   return (
     <Card>
       <div className="mb-1 text-[13px] font-medium">Promote to this environment</div>
-      <div className="mb-2 text-[12px]" style={{ color: "var(--color-text-secondary)" }}>
+      <div className="mb-2 text-[12px] text-muted">
         Re-deploy the exact commit currently applied on another environment of this stack here. The apply is
         gated as usual (tier + four-eyes) at confirmation.
       </div>
@@ -60,9 +60,7 @@ export function PromotePanel({
         </Button>
       </form>
       {promote.isError && (
-        <div className="mt-2 font-data text-[12px]" style={{ color: "var(--color-state-failed)" }}>
-          {(promote.error as Error).message}
-        </div>
+        <div className="mt-2 font-data text-[12px] text-st-failed">{(promote.error as Error).message}</div>
       )}
     </Card>
   );

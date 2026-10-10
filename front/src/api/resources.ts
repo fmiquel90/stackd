@@ -248,8 +248,8 @@ export const comments = {
 export const runs = {
   list: (envId: string) => api<Run[]>(`/environments/${envId}/runs`),
   get: (id: string) => api<Run>(`/runs/${id}`),
-  trigger: (envId: string, type: "tracked" | "destroy" = "tracked") =>
-    api<Run>(`/environments/${envId}/runs`, { body: { type } }),
+  trigger: (envId: string, type: "tracked" | "destroy" = "tracked", withDownstream = false) =>
+    api<Run>(`/environments/${envId}/runs`, { body: { type, with_downstream: withDownstream } }),
   confirm: (id: string) => api<Run>(`/runs/${id}/confirm`, { method: "POST" }),
   discard: (id: string) => api<Run>(`/runs/${id}/discard`, { method: "POST" }),
   cancel: (id: string) => api<Run>(`/runs/${id}/cancel`, { method: "POST" }),

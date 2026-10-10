@@ -56,8 +56,7 @@ export function NotificationBell({ userId }: { userId: string }) {
         type="button"
         onClick={toggle}
         aria-label={`Notifications${unread ? ` (${unread} unread)` : ""}`}
-        className="ui-btn relative flex items-center"
-        style={{ color: "var(--color-text-secondary)" }}
+        className="ui-btn relative flex items-center text-muted"
       >
         <Bell size={16} strokeWidth={1.75} aria-hidden />
         {unread > 0 && (
@@ -84,8 +83,7 @@ export function NotificationBell({ userId }: { userId: string }) {
             {hasRead && (
               <button
                 type="button"
-                className="ui-btn text-[11px]"
-                style={{ color: "var(--color-text-secondary)" }}
+                className="ui-btn text-[11px] text-muted"
                 onClick={() => clearRead.mutate()}
                 disabled={clearRead.isPending}
               >
@@ -106,26 +104,21 @@ export function NotificationBell({ userId }: { userId: string }) {
                   className="ui-btn flex flex-1 flex-col items-start rounded-base px-2 py-1.5 text-left"
                 >
                   <span className="text-[12px]">{describe(n)}</span>
-                  <span className="font-data text-[11px]" style={{ color: "var(--color-text-secondary)" }}>
+                  <span className="font-data text-[11px] text-muted">
                     {new Date(n.created_at).toLocaleString()}
                   </span>
                 </button>
                 <button
                   type="button"
                   aria-label="Dismiss notification"
-                  className="ui-btn shrink-0 px-1.5 py-1.5"
-                  style={{ color: "var(--color-text-secondary)" }}
+                  className="ui-btn shrink-0 px-1.5 py-1.5 text-muted"
                   onClick={() => remove.mutate(n.id)}
                 >
                   <X size={13} strokeWidth={1.75} aria-hidden />
                 </button>
               </div>
             ))}
-            {items.length === 0 && (
-              <span className="px-2 py-3 text-[12px]" style={{ color: "var(--color-text-secondary)" }}>
-                Nothing yet.
-              </span>
-            )}
+            {items.length === 0 && <span className="px-2 py-3 text-[12px] text-muted">Nothing yet.</span>}
           </div>
         </div>
       )}

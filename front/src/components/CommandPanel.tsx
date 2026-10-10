@@ -46,7 +46,7 @@ export function CommandPanel({ envId }: { envId: string }) {
   return (
     <Card>
       <div className="mb-1 text-[13px] font-medium">Run a command</div>
-      <div className="mb-2 text-[12px]" style={{ color: "var(--color-text-secondary)" }}>
+      <div className="mb-2 text-[12px] text-muted">
         One allowlisted subcommand on the worker (import, state surgery, …). Read-only commands need writer;
         mutating ones require apply rights.
       </div>
@@ -87,9 +87,7 @@ export function CommandPanel({ envId }: { envId: string }) {
         </Button>
       </form>
       {run.isError && (
-        <div className="mt-2 font-data text-[12px]" style={{ color: "var(--color-state-failed)" }}>
-          {(run.error as Error).message}
-        </div>
+        <div className="mt-2 font-data text-[12px] text-st-failed">{(run.error as Error).message}</div>
       )}
     </Card>
   );

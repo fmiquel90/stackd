@@ -21,10 +21,8 @@ function DeleteStackPanel({ stackId, name }: { stackId: string; name: string }) 
   });
   return (
     <Card>
-      <div className="mb-1 text-[13px] font-medium" style={{ color: "var(--color-state-failed)" }}>
-        Danger zone
-      </div>
-      <div className="mb-2 text-[12px]" style={{ color: "var(--color-text-secondary)" }}>
+      <div className="mb-1 text-[13px] font-medium text-st-failed">Danger zone</div>
+      <div className="mb-2 text-[12px] text-muted">
         Deleting this stack removes all its environments, runs, state history and config. This cannot be
         undone.
       </div>
@@ -34,8 +32,7 @@ function DeleteStackPanel({ stackId, name }: { stackId: string; name: string }) 
         </Field>
         <button
           type="button"
-          className="ui-btn rounded-base px-3 py-1.5 text-[13px] font-medium disabled:opacity-50"
-          style={{ border: "1px solid var(--color-state-failed)", color: "var(--color-state-failed)" }}
+          className="ui-btn rounded-base px-3 py-1.5 text-[13px] font-medium disabled:opacity-50 border border-st-failed text-st-failed"
           disabled={typed !== name || remove.isPending}
           onClick={() => remove.mutate()}
         >
@@ -43,9 +40,7 @@ function DeleteStackPanel({ stackId, name }: { stackId: string; name: string }) 
         </button>
       </div>
       {remove.isError && (
-        <div className="mt-2 font-data text-[12px]" style={{ color: "var(--color-state-failed)" }}>
-          {(remove.error as Error).message}
-        </div>
+        <div className="mt-2 font-data text-[12px] text-st-failed">{(remove.error as Error).message}</div>
       )}
     </Card>
   );
@@ -207,35 +202,22 @@ function StackGeneralForm({ stack }: { stack: Stack }) {
             <Button type="button" onClick={() => check.mutate()} disabled={check.isPending}>
               Check repository
             </Button>
-            {save.isSuccess && (
-              <span className="font-data text-[12px]" style={{ color: "var(--color-state-finished)" }}>
-                saved
-              </span>
-            )}
+            {save.isSuccess && <span className="font-data text-[12px] text-st-finished">saved</span>}
           </div>
         </form>
 
         {save.isError && (
-          <div className="mt-2 font-data text-[12px]" style={{ color: "var(--color-state-failed)" }}>
-            {(save.error as Error).message}
-          </div>
+          <div className="mt-2 font-data text-[12px] text-st-failed">{(save.error as Error).message}</div>
         )}
         {check.data && (
           <div className="mt-2 font-data text-[12px]">
-            <span
-              style={{ color: check.data.ok ? "var(--color-state-finished)" : "var(--color-state-failed)" }}
-            >
-              {check.data.ok ? "reachable" : "unreachable"}
+            <span className={check.data.ok ? "text-primary" : "text-st-failed"}>
+              {check.data.ok ? "✓ reachable" : "✕ unreachable"}
             </span>
             {check.data.branches.length > 0 && (
-              <span style={{ color: "var(--color-text-secondary)" }}>
-                {" "}
-                · {check.data.branches.length} branches
-              </span>
+              <span className="text-muted"> · {check.data.branches.length} branches</span>
             )}
-            {check.data.detail && (
-              <span style={{ color: "var(--color-text-secondary)" }}> · {check.data.detail}</span>
-            )}
+            {check.data.detail && <span className="text-muted"> · {check.data.detail}</span>}
           </div>
         )}
       </Card>

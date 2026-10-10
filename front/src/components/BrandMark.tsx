@@ -5,17 +5,17 @@
 export function BrandMark({ size = 18 }: { size?: number }) {
   return (
     <svg width={size} height={size} viewBox="0 0 24 24" fill="none" aria-hidden>
-      <path d="M12 2.5 21 7l-9 4.5L3 7l9-4.5Z" fill="var(--color-accent)" />
+      <path d="M12 2.5 21 7l-9 4.5L3 7l9-4.5Z" fill="var(--color-brand)" />
       <path
         d="M3 11l9 4.5L21 11"
-        stroke="var(--color-accent)"
+        stroke="var(--color-brand)"
         strokeWidth="2"
         strokeLinejoin="round"
         opacity="0.7"
       />
       <path
         d="M3 15l9 4.5L21 15"
-        stroke="var(--color-accent)"
+        stroke="var(--color-brand)"
         strokeWidth="2"
         strokeLinejoin="round"
         opacity="0.45"
@@ -35,7 +35,7 @@ export function Brand({
     <span className="inline-flex items-center gap-2">
       <BrandMark size={markSize} />
       <span className={`${textClass} font-semibold tracking-[-0.01em]`}>
-        Stack<span style={{ color: "var(--color-accent)" }}>D</span>
+        Stack<span className="text-logo">D</span>
       </span>
     </span>
   );

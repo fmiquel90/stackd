@@ -54,20 +54,12 @@ export function Walkthrough({ onDone }: { onDone: () => void }) {
       className="fixed inset-0 z-50 flex items-center justify-center p-6"
       style={{ backgroundColor: "var(--color-overlay)" }}
     >
-      <div
-        className="w-full max-w-[520px] rounded-base p-7"
-        style={{ backgroundColor: "var(--color-bg-surface)", border: "1px solid var(--color-border)" }}
-      >
-        <div
-          className="font-data text-[12px] uppercase tracking-wide"
-          style={{ color: "var(--color-accent)" }}
-        >
+      <div className="w-full max-w-[520px] rounded-base p-7 bg-surface border border-line">
+        <div className="font-data text-[12px] uppercase tracking-wide text-primary underline underline-offset-2">
           {step.eyebrow}
         </div>
         <h2 className="mt-2 text-[20px] font-semibold tracking-[-0.01em]">{step.title}</h2>
-        <p className="mt-3 text-[14px]" style={{ color: "var(--color-text-secondary)", lineHeight: 1.6 }}>
-          {step.body}
-        </p>
+        <p className="mt-3 text-[14px] text-muted leading-[1.6]">{step.body}</p>
 
         <div className="mt-6 flex items-center justify-between">
           <div className="flex items-center gap-1.5" aria-hidden>
@@ -97,12 +89,7 @@ export function Walkthrough({ onDone }: { onDone: () => void }) {
           </div>
         </div>
 
-        <button
-          type="button"
-          onClick={onDone}
-          className="mt-4 text-[12px]"
-          style={{ color: "var(--color-text-secondary)" }}
-        >
+        <button type="button" onClick={onDone} className="mt-4 text-[12px] text-muted">
           Skip
         </button>
       </div>

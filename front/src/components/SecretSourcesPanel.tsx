@@ -50,7 +50,7 @@ export function SecretSourcesPanel({ spaceId }: { spaceId: string }) {
   return (
     <Card>
       <div className="mb-1 text-[13px] font-medium">Secret sources</div>
-      <div className="mb-2 text-[12px]" style={{ color: "var(--color-text-secondary)" }}>
+      <div className="mb-2 text-[12px] text-muted">
         Inject variable values straight from a secrets manager. A variable points at a source via a
         provider-specific reference (for {PROVIDERS[form.provider].label}:{" "}
         <span className="font-data">{PROVIDERS[form.provider].refExample}</span>); the value is fetched live
@@ -66,17 +66,14 @@ export function SecretSourcesPanel({ spaceId }: { spaceId: string }) {
                 <Badge>{PROVIDERS[s.provider]?.label ?? s.provider}</Badge>
               </div>
               <div className="flex shrink-0 items-center gap-2">
-                <button
-                  type="button"
-                  className="ui-btn rounded-base px-2 py-1 text-[12px]"
+                <Button
                   onClick={() => {
                     setRotatingId((cur) => (cur === s.id ? null : s.id));
                     setNewSecret("");
                   }}
-                  style={{ border: "1px solid var(--color-border)", color: "var(--color-text-secondary)" }}
                 >
                   Rotate token
-                </button>
+                </Button>
                 <DeleteButton label={`Delete ${s.name}`} onClick={() => remove.mutate(s.id)} />
               </div>
             </div>
@@ -106,16 +103,8 @@ export function SecretSourcesPanel({ spaceId }: { spaceId: string }) {
             )}
           </ItemTile>
         ))}
-        {!data && (
-          <span className="text-[12px]" style={{ color: "var(--color-text-secondary)" }}>
-            Loading…
-          </span>
-        )}
-        {data && data.length === 0 && (
-          <span className="text-[12px]" style={{ color: "var(--color-text-secondary)" }}>
-            No secret source yet.
-          </span>
-        )}
+        {!data && <span className="text-[12px] text-muted">Loading…</span>}
+        {data && data.length === 0 && <span className="text-[12px] text-muted">No secret source yet.</span>}
       </div>
 
       <form
@@ -161,7 +150,7 @@ export function SecretSourcesPanel({ spaceId }: { spaceId: string }) {
       </form>
 
       {(create.isError || remove.isError || rotate.isError) && (
-        <div className="mt-2 font-data text-[12px]" style={{ color: "var(--color-state-failed)" }}>
+        <div className="mt-2 font-data text-[12px] text-st-failed">
           {((create.error ?? remove.error ?? rotate.error) as Error).message}
         </div>
       )}

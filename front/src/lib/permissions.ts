@@ -116,3 +116,13 @@ export function whoMayConfirm(
     parts.push(`other than ${triggererEmail ?? "the person who triggered it"}`);
   return parts.join(" ");
 }
+
+/** "Needs you" for an env summary's primary run — the cell-level form of `runRights(...).needsYou`. */
+export function needsYouOn(
+  run: Run | null,
+  env: Environment,
+  tier: TierDef | undefined,
+  me: User | null | undefined,
+): boolean {
+  return !!run && !!me && run.state === "unconfirmed" && runRights(run, env, tier, me).needsYou;
+}
