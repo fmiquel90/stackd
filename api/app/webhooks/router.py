@@ -7,7 +7,7 @@ from datetime import UTC, datetime
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, Header, Request
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.crypto import decrypt
@@ -112,39 +112,47 @@ async def github_webhook(
         after = payload.get("after")
         # A push that deletes the branch has an all-zero `after`: no head to record, nothing to run.
         deleted = payload.get("deleted") is True or (isinstance(after, str) and _is_zero_sha(after))
+        # Staleness (§9.6): head_sha always advances, even when no run is triggered. A deleted
+        # branch has no head any more, so nothing to be behind; stamped now so a poll that read the
+        # old head meanwhile doesn't restore it.
+        head: dict[str, str | None] = (
+            {"head_sha": None, "commits_ahead": None, "affects_project_root": None}
+            if deleted
+            else {"head_sha": after}
+        )
+        now = datetime.now(UTC)
         for stack in stacks:
-            envs = (
+            # Guarded on the pushed branch when written, so an env re-pointed meanwhile gets
+            # neither this head nor a run; the row lock it takes keeps them on it until commit.
+            env_ids = (
                 (
                     await session.execute(
-                        select(Environment).where(
-                            Environment.stack_id == stack.id, Environment.branch == branch
-                        )
+                        update(Environment)
+                        .where(Environment.stack_id == stack.id, Environment.branch == branch)
+                        .values(head_updated_at=now, **head)
+                        .returning(Environment.id)
+                        .execution_options(synchronize_session=False)
                     )
                 )
                 .scalars()
                 .all()
             )
+            if deleted or not env_ids or not _touches_root(payload, stack.project_root):
+                continue
+            envs = (
+                (await session.execute(select(Environment).where(Environment.id.in_(env_ids))))
+                .scalars()
+                .all()
+            )
             for env in envs:
-                if deleted:
-                    # Staleness (§9.6): the branch has no head any more, so nothing to be behind;
-                    # stamped now so a poll that read the old head meanwhile doesn't restore it.
-                    env.head_sha = None
-                    env.commits_ahead = None
-                    env.affects_project_root = None
-                    env.head_updated_at = datetime.now(UTC)
-                    continue
-                # Staleness (§9.6): head_sha always advances, even when no run is triggered.
-                env.head_sha = after
-                env.head_updated_at = datetime.now(UTC)
-                if _touches_root(payload, stack.project_root):
-                    await trigger_run(
-                        session,
-                        env,
-                        run_type=RunType.tracked,
-                        triggered_by=TriggeredBy.webhook,
-                        commit_sha=after,
-                    )
-                    triggered += 1
+                await trigger_run(
+                    session,
+                    env,
+                    run_type=RunType.tracked,
+                    triggered_by=TriggeredBy.webhook,
+                    commit_sha=after,
+                )
+                triggered += 1
         await session.commit()
 
     elif x_github_event == "pull_request":
