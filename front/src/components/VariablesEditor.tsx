@@ -78,7 +78,10 @@ export function VariablesEditor({
                 <DeleteButton label={`Delete ${v.name}`} onClick={() => removeMut.mutate(v.id)} />
               </div>
             </div>
-            <div className="font-data mt-2 truncate text-[12px]" style={{ color: "var(--color-text-secondary)" }}>
+            <div
+              className="font-data mt-2 truncate text-[12px]"
+              style={{ color: "var(--color-text-secondary)" }}
+            >
               {v.sensitive ? "•••" : (v.value ?? "")}
             </div>
           </ItemTile>
@@ -107,7 +110,11 @@ export function VariablesEditor({
           </Select>
         </Field>
         <Field label="Name">
-          <TextInput value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} required />
+          <TextInput
+            value={form.name}
+            onChange={(e) => setForm({ ...form, name: e.target.value })}
+            required
+          />
         </Field>
         <Field label="Value">
           <TextInput

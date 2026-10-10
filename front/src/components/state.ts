@@ -1,12 +1,4 @@
-import {
-  Ban,
-  Check,
-  CirclePause,
-  Clock,
-  Loader,
-  X,
-  type LucideIcon,
-} from "lucide-react";
+import { Ban, Check, CirclePause, Clock, Loader, X, type LucideIcon } from "lucide-react";
 
 // Run state machine (SPECS §4). `confirmed` is transitory — rendered as the start of `applying`.
 export type RunState =

@@ -40,9 +40,7 @@ describe("CheckList", () => {
 
   it("falls back to `checks` for an older run, without a stage", () => {
     render(
-      <CheckList
-        checkResults={{ checks: [{ name: "tfsec", status: "fail", detail: "2 high findings" }] }}
-      />,
+      <CheckList checkResults={{ checks: [{ name: "tfsec", status: "fail", detail: "2 high findings" }] }} />,
     );
     const row = rowOf("tfsec");
     expect(within(row).getByText("fail")).toBeInTheDocument();
@@ -94,9 +92,7 @@ describe("checkEntries", () => {
 
 describe("ranAfterPlanHooks (the rail's Checking segment)", () => {
   it("is true when any result ran at after_plan, even an ok one", () => {
-    expect(
-      ranAfterPlanHooks({ results: [{ name: "tfsec", status: "ok", stage: "after_plan" }] }),
-    ).toBe(true);
+    expect(ranAfterPlanHooks({ results: [{ name: "tfsec", status: "ok", stage: "after_plan" }] })).toBe(true);
   });
 
   it("is false when no hook ran at after_plan, even with warnings at other stages", () => {

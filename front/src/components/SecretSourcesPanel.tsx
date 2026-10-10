@@ -53,8 +53,8 @@ export function SecretSourcesPanel({ spaceId }: { spaceId: string }) {
       <div className="mb-2 text-[12px]" style={{ color: "var(--color-text-secondary)" }}>
         Inject variable values straight from a secrets manager. A variable points at a source via a
         provider-specific reference (for {PROVIDERS[form.provider].label}:{" "}
-        <span className="font-data">{PROVIDERS[form.provider].refExample}</span>); the value is
-        fetched live at run time and never stored here.
+        <span className="font-data">{PROVIDERS[form.provider].refExample}</span>); the value is fetched live
+        at run time and never stored here.
       </div>
 
       <div className="flex flex-col gap-2">
@@ -135,9 +135,7 @@ export function SecretSourcesPanel({ spaceId }: { spaceId: string }) {
         <Field label="Provider">
           <Select
             value={form.provider}
-            onChange={(e) =>
-              setForm({ ...form, provider: e.target.value as NewSecretSource["provider"] })
-            }
+            onChange={(e) => setForm({ ...form, provider: e.target.value as NewSecretSource["provider"] })}
           >
             {(Object.entries(PROVIDERS) as [SecretProvider, (typeof PROVIDERS)[SecretProvider]][]).map(
               ([value, meta]) => (

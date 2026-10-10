@@ -7,7 +7,17 @@ import {
   type NotificationKind,
   type NotificationState,
 } from "@/api/resources";
-import { Badge, Button, Card, Checkbox, DeleteButton, Field, ItemTile, Select, TextInput } from "@/components/ui";
+import {
+  Badge,
+  Button,
+  Card,
+  Checkbox,
+  DeleteButton,
+  Field,
+  ItemTile,
+  Select,
+  TextInput,
+} from "@/components/ui";
 
 const STATES: NotificationState[] = ["unconfirmed", "finished", "failed"];
 
@@ -55,9 +65,7 @@ export function NotificationsPanel({ scope, id }: { scope: HookScope; id: string
   const flipState = (s: NotificationState) =>
     setForm((f) => ({
       ...f,
-      on_states: f.on_states.includes(s)
-        ? f.on_states.filter((x) => x !== s)
-        : [...f.on_states, s],
+      on_states: f.on_states.includes(s) ? f.on_states.filter((x) => x !== s) : [...f.on_states, s],
     }));
 
   return (
@@ -77,9 +85,7 @@ export function NotificationsPanel({ scope, id }: { scope: HookScope; id: string
                     width: 8,
                     height: 8,
                     borderRadius: 4,
-                    backgroundColor: t.enabled
-                      ? "var(--color-state-finished)"
-                      : "var(--color-state-queued)",
+                    backgroundColor: t.enabled ? "var(--color-state-finished)" : "var(--color-state-queued)",
                   }}
                 />
                 <span className="font-data text-[13px] font-medium">{t.name}</span>
@@ -90,10 +96,14 @@ export function NotificationsPanel({ scope, id }: { scope: HookScope; id: string
               </div>
               <div className="flex shrink-0 items-center gap-2">
                 {tested[t.id] === "ok" && (
-                  <span className="text-[12px]" style={{ color: "var(--color-state-finished)" }}>sent ✓</span>
+                  <span className="text-[12px]" style={{ color: "var(--color-state-finished)" }}>
+                    sent ✓
+                  </span>
                 )}
                 {tested[t.id] === "fail" && (
-                  <span className="text-[12px]" style={{ color: "var(--color-state-failed)" }}>failed</span>
+                  <span className="text-[12px]" style={{ color: "var(--color-state-failed)" }}>
+                    failed
+                  </span>
                 )}
                 <button
                   type="button"
@@ -148,7 +158,11 @@ export function NotificationsPanel({ scope, id }: { scope: HookScope; id: string
         }}
       >
         <Field label="Name">
-          <TextInput value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} required />
+          <TextInput
+            value={form.name}
+            onChange={(e) => setForm({ ...form, name: e.target.value })}
+            required
+          />
         </Field>
         <Field label="Kind">
           <Select
@@ -165,7 +179,12 @@ export function NotificationsPanel({ scope, id }: { scope: HookScope; id: string
         <Field label="On states">
           <div className="flex items-center gap-3 pb-1">
             {STATES.map((s) => (
-              <Checkbox key={s} checked={form.on_states.includes(s)} onChange={() => flipState(s)} label={s} />
+              <Checkbox
+                key={s}
+                checked={form.on_states.includes(s)}
+                onChange={() => flipState(s)}
+                label={s}
+              />
             ))}
           </div>
         </Field>

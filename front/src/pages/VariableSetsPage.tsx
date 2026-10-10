@@ -40,7 +40,12 @@ function CreateForm({ onDone }: { onDone: () => void }) {
         }}
       >
         <Field label="Name">
-          <TextInput value={name} onChange={(e) => setName(e.target.value)} placeholder="common-aws" required />
+          <TextInput
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            placeholder="common-aws"
+            required
+          />
         </Field>
         <Checkbox className="pb-1.5" checked={autoAttach} onChange={setAutoAttach} label="auto-attach" />
         <Button type="submit" variant="accent" disabled={create.isPending}>
@@ -81,10 +86,20 @@ function SetSettings({ set }: { set: VariableSet }) {
         <Field label="Name">
           <TextInput value={name} onChange={(e) => setName(e.target.value)} required />
         </Field>
-        <Checkbox className="pb-1.5" checked={autoAttach} onChange={setAutoAttach} label="auto-attach (whole space)" />
+        <Checkbox
+          className="pb-1.5"
+          checked={autoAttach}
+          onChange={setAutoAttach}
+          label="auto-attach (whole space)"
+        />
       </div>
       <Field label="Selector — auto-attach to any stack/env whose labels match all of these">
-        <LabelsEditor value={selector} onChange={setSelector} keyPlaceholder="team" valuePlaceholder="payments" />
+        <LabelsEditor
+          value={selector}
+          onChange={setSelector}
+          keyPlaceholder="team"
+          valuePlaceholder="payments"
+        />
       </Field>
       <div className="flex items-center gap-2">
         <Button type="submit" variant="accent" disabled={save.isPending}>
@@ -149,7 +164,9 @@ function AttachmentsPanel({ setId }: { setId: string }) {
           <div className="flex items-center justify-between gap-3">
             <div className="flex min-w-0 items-center gap-2">
               <Badge>{a.target_kind}</Badge>
-              <span className="font-data text-[13px] font-medium">{labelFor(a.target_kind, a.target_id)}</span>
+              <span className="font-data text-[13px] font-medium">
+                {labelFor(a.target_kind, a.target_id)}
+              </span>
             </div>
             <DeleteButton label="Detach" onClick={() => detach.mutate(a.id)} />
           </div>

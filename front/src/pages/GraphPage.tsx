@@ -38,7 +38,12 @@ function EnvNode({ data }: NodeProps) {
   return (
     <div
       className="rounded-base px-3 py-2"
-      style={{ backgroundColor: "var(--color-bg-surface)", border: "1px solid var(--color-border)", minWidth: 170, cursor: "pointer" }}
+      style={{
+        backgroundColor: "var(--color-bg-surface)",
+        border: "1px solid var(--color-border)",
+        minWidth: 170,
+        cursor: "pointer",
+      }}
       title="Open this stack"
     >
       <Handle type="target" position={Position.Left} style={{ background: "var(--color-border)" }} />
@@ -90,7 +95,9 @@ function EdgeRefs({ downstreamEnvId, depId }: { downstreamEnvId: string; depId: 
         {dep.references.map((r) => (
           <tr key={`${r.output_name}-${r.input_name}`}>
             <td className="py-1 pr-4">{r.output_name}</td>
-            <td className="py-1 pr-4" aria-hidden>→</td>
+            <td className="py-1 pr-4" aria-hidden>
+              →
+            </td>
             <td className="py-1 pr-4">{r.input_name}</td>
             <td className="py-1">
               {r.has_mock ? (
@@ -126,10 +133,7 @@ function LinkByNamePanel() {
   });
   const options = stackList ?? [];
 
-  if (!open)
-    return (
-      <Button onClick={() => setOpen(true)}>Auto-link by name</Button>
-    );
+  if (!open) return <Button onClick={() => setOpen(true)}>Auto-link by name</Button>;
 
   return (
     <Card>
@@ -227,7 +231,9 @@ export function GraphPage() {
   const [view, setView] = useState<"graph" | "list">("graph");
   const [filter, setFilter] = useState("");
   // The dependency edge whose references are being inspected (graph edge click / list row toggle).
-  const [openEdge, setOpenEdge] = useState<{ depId: string; downstreamEnvId: string; label: string } | null>(null);
+  const [openEdge, setOpenEdge] = useState<{ depId: string; downstreamEnvId: string; label: string } | null>(
+    null,
+  );
   const { data } = useQuery({ queryKey: ["graph"], queryFn: graphApi.get });
   const stackList = useQuery({ queryKey: ["stacks"], queryFn: stacks.list });
 
@@ -260,7 +266,11 @@ export function GraphPage() {
             value={filter}
             onChange={(e) => setFilter(e.target.value)}
             className="font-data rounded-base px-2 py-1.5 text-[13px]"
-            style={{ border: "1px solid var(--color-border)", backgroundColor: "var(--color-bg-base)", color: "var(--color-text-primary)" }}
+            style={{
+              border: "1px solid var(--color-border)",
+              backgroundColor: "var(--color-bg-base)",
+              color: "var(--color-text-primary)",
+            }}
           />
           <Button onClick={() => setView(view === "graph" ? "list" : "graph")}>
             {view === "graph" ? "List view" : "Graph view"}
@@ -273,7 +283,12 @@ export function GraphPage() {
       {view === "graph" ? (
         <>
           <div
-            style={{ height: "calc(100vh - 180px)", border: "1px solid var(--color-border)", borderRadius: 4, background: "var(--color-bg-base)" }}
+            style={{
+              height: "calc(100vh - 180px)",
+              border: "1px solid var(--color-border)",
+              borderRadius: 4,
+              background: "var(--color-bg-base)",
+            }}
           >
             <ReactFlow
               nodes={rfNodes}
@@ -336,17 +351,25 @@ export function GraphPage() {
                       <tr>
                         <td className="py-1 pr-4">
                           {up ? (
-                            <Link to={`/stacks/${up.stack_id}`} style={{ color: "var(--color-text-primary)" }}>
+                            <Link
+                              to={`/stacks/${up.stack_id}`}
+                              style={{ color: "var(--color-text-primary)" }}
+                            >
                               {label(up)}
                             </Link>
                           ) : (
                             e.upstream.slice(0, 8)
                           )}
                         </td>
-                        <td className="py-1 pr-4" aria-hidden>→</td>
+                        <td className="py-1 pr-4" aria-hidden>
+                          →
+                        </td>
                         <td className="py-1 pr-4">
                           {down ? (
-                            <Link to={`/stacks/${down.stack_id}`} style={{ color: "var(--color-text-primary)" }}>
+                            <Link
+                              to={`/stacks/${down.stack_id}`}
+                              style={{ color: "var(--color-text-primary)" }}
+                            >
                               {label(down)}
                             </Link>
                           ) : (
@@ -362,9 +385,7 @@ export function GraphPage() {
                             style={{ color: "var(--color-accent)" }}
                             onClick={() =>
                               setOpenEdge(
-                                expanded
-                                  ? null
-                                  : { depId: e.id, downstreamEnvId: e.downstream, label: "" },
+                                expanded ? null : { depId: e.id, downstreamEnvId: e.downstream, label: "" },
                               )
                             }
                           >
@@ -372,7 +393,9 @@ export function GraphPage() {
                           </button>
                           {e.has_mock ? <span style={{ color: "var(--color-mock)" }}> · MOCK</span> : null}
                         </td>
-                        <td className="py-1" style={{ color: "var(--color-text-secondary)" }}>{e.policy}</td>
+                        <td className="py-1" style={{ color: "var(--color-text-secondary)" }}>
+                          {e.policy}
+                        </td>
                       </tr>
                       {expanded && (
                         <tr>

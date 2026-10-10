@@ -47,8 +47,8 @@ export function CommandPanel({ envId }: { envId: string }) {
     <Card>
       <div className="mb-1 text-[13px] font-medium">Run a command</div>
       <div className="mb-2 text-[12px]" style={{ color: "var(--color-text-secondary)" }}>
-        One allowlisted subcommand on the worker (import, state surgery, …). Read-only commands need
-        writer; mutating ones require apply rights.
+        One allowlisted subcommand on the worker (import, state surgery, …). Read-only commands need writer;
+        mutating ones require apply rights.
       </div>
       <form
         className="flex flex-wrap items-end gap-2"

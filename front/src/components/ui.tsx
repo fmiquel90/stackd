@@ -46,7 +46,15 @@ export function Badge({
 }
 
 // The uniform delete affordance (Trash2, danger token) for config list items.
-export function DeleteButton({ label, onClick, disabled }: { label: string; onClick: () => void; disabled?: boolean }) {
+export function DeleteButton({
+  label,
+  onClick,
+  disabled,
+}: {
+  label: string;
+  onClick: () => void;
+  disabled?: boolean;
+}) {
   return (
     <button
       type="button"
@@ -201,7 +209,9 @@ export function TextInput(props: InputHTMLAttributes<HTMLInputElement>) {
 }
 
 export function Select(props: SelectHTMLAttributes<HTMLSelectElement>) {
-  return <select {...props} className="font-data rounded-base px-2 py-1.5 text-[13px]" style={controlStyle} />;
+  return (
+    <select {...props} className="font-data rounded-base px-2 py-1.5 text-[13px]" style={controlStyle} />
+  );
 }
 
 export function Card({ children }: { children: ReactNode }) {

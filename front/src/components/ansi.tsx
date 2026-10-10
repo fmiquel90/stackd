@@ -69,9 +69,7 @@ export function AnsiText({ text }: { text: string }) {
         if (seg.style.color) css.color = seg.style.color;
         if (seg.style.bold) css.fontWeight = 600;
         return (
-          <Fragment key={i}>
-            {Object.keys(css).length ? <span style={css}>{clean}</span> : clean}
-          </Fragment>
+          <Fragment key={i}>{Object.keys(css).length ? <span style={css}>{clean}</span> : clean}</Fragment>
         );
       })}
     </>

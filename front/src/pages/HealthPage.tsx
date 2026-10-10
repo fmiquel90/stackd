@@ -44,9 +44,7 @@ function HttpDetail({ e }: { e: LogEntry }) {
       <span style={{ color: "var(--color-text-primary)" }}>
         {e.method} {e.path}
       </span>
-      {e.status !== undefined && (
-        <span style={{ color: statusColor(e.status) }}> → {e.status}</span>
-      )}
+      {e.status !== undefined && <span style={{ color: statusColor(e.status) }}> → {e.status}</span>}
       {e.duration_ms !== undefined && (
         <span style={{ color: slow ? "var(--color-text-primary)" : "var(--color-text-secondary)" }}>
           {" "}
@@ -62,7 +60,8 @@ function DiagnosticsPanel({ workerId, onClose }: { workerId: string; onClose: ()
   const { data } = useQuery({
     queryKey: ["diagnostics", workerId],
     queryFn: () => workers.diagnostics(workerId),
-    refetchInterval: (q) => (q.state.data?.status === "done" || q.state.data?.status === "failed" ? false : 1500),
+    refetchInterval: (q) =>
+      q.state.data?.status === "done" || q.state.data?.status === "failed" ? false : 1500,
   });
   // Fire a fresh request when the panel opens (guard against rapid re-fires queueing requests).
   useEffect(() => {
@@ -89,13 +88,30 @@ function DiagnosticsPanel({ workerId, onClose }: { workerId: string; onClose: ()
       </div>
       {data?.status === "done" ? (
         <div className="font-data flex flex-col gap-1 text-[12px]">
-          <div>platform: {String(r.platform)} · python {String(r.python)} · runner {String(r.runner)}</div>
-          <div>tofu: {tools.tofu} · git: {tools.git}</div>
-          <div>disk: {disk.free_gb}GB free / {disk.total_gb}GB ({disk.used_pct}% used)</div>
-          <div style={{ color: "var(--color-text-secondary)" }}>{envNames.length} env vars (names only — no values)</div>
-          <div className="mt-2" style={{ color: "var(--color-text-secondary)" }}>recent agent logs:</div>
-          <div className="max-h-[200px] overflow-auto p-2" style={{ backgroundColor: "var(--color-bg-base)", borderRadius: 4 }}>
-            {logs.length ? logs.map((l, i) => <div key={i}>{l}</div>) : <span style={{ color: "var(--color-text-secondary)" }}>—</span>}
+          <div>
+            platform: {String(r.platform)} · python {String(r.python)} · runner {String(r.runner)}
+          </div>
+          <div>
+            tofu: {tools.tofu} · git: {tools.git}
+          </div>
+          <div>
+            disk: {disk.free_gb}GB free / {disk.total_gb}GB ({disk.used_pct}% used)
+          </div>
+          <div style={{ color: "var(--color-text-secondary)" }}>
+            {envNames.length} env vars (names only — no values)
+          </div>
+          <div className="mt-2" style={{ color: "var(--color-text-secondary)" }}>
+            recent agent logs:
+          </div>
+          <div
+            className="max-h-[200px] overflow-auto p-2"
+            style={{ backgroundColor: "var(--color-bg-base)", borderRadius: 4 }}
+          >
+            {logs.length ? (
+              logs.map((l, i) => <div key={i}>{l}</div>)
+            ) : (
+              <span style={{ color: "var(--color-text-secondary)" }}>—</span>
+            )}
           </div>
         </div>
       ) : (
@@ -143,13 +159,25 @@ function LogsPanel({ workerId, setWorkerId }: { workerId: string; setWorkerId: (
         {(data?.items ?? []).map((e: LogEntry, i) => (
           <div key={`${e.ts}-${e.logger}-${i}`} className="whitespace-pre-wrap">
             <span style={{ color: "var(--color-text-secondary)" }}>{e.ts.slice(11, 19)} </span>
-            <span style={{ color: LEVEL_COLOR[e.level] ?? "var(--color-text-secondary)" }}>{e.level.padEnd(5)} </span>
+            <span style={{ color: LEVEL_COLOR[e.level] ?? "var(--color-text-secondary)" }}>
+              {e.level.padEnd(5)}{" "}
+            </span>
             <span style={{ color: "var(--color-text-secondary)" }}>{e.logger} </span>
             {e.event ? <span style={{ color: "var(--color-accent)" }}>{e.event} </span> : null}
             {/* For http access logs show method/path/status/duration; otherwise the message. */}
             {e.method !== undefined ? <HttpDetail e={e} /> : e.msg}
-            {e.run_id ? <span style={{ color: "var(--color-text-secondary)" }}> run={String(e.run_id).slice(0, 8)}</span> : null}
-            {e.worker_id ? <span style={{ color: "var(--color-text-secondary)" }}> worker={String(e.worker_id).slice(0, 8)}</span> : null}
+            {e.run_id ? (
+              <span style={{ color: "var(--color-text-secondary)" }}>
+                {" "}
+                run={String(e.run_id).slice(0, 8)}
+              </span>
+            ) : null}
+            {e.worker_id ? (
+              <span style={{ color: "var(--color-text-secondary)" }}>
+                {" "}
+                worker={String(e.worker_id).slice(0, 8)}
+              </span>
+            ) : null}
           </div>
         ))}
         {data && data.items.length === 0 && (
@@ -214,8 +242,8 @@ function PoolsPanel() {
     <Card>
       <div className="mb-1 text-[13px] font-medium">Worker pools</div>
       <div className="mb-2 text-[12px]" style={{ color: "var(--color-text-secondary)" }}>
-        A pool groups workers and carries the registration token agents authenticate with. Create one,
-        then start an agent with its token.
+        A pool groups workers and carries the registration token agents authenticate with. Create one, then
+        start an agent with its token.
       </div>
 
       {created && (
@@ -300,8 +328,16 @@ export function HealthPage() {
       {h && (
         <>
           <div className="grid grid-cols-2 gap-3 md:grid-cols-5">
-            <Metric label="Status" value={h.status} tone={h.status === "ok" ? "var(--color-state-finished)" : "var(--color-state-failed)"} />
-            <Metric label="Database" value={h.checks.database} tone={h.checks.database === "ok" ? "var(--color-state-finished)" : "var(--color-state-failed)"} />
+            <Metric
+              label="Status"
+              value={h.status}
+              tone={h.status === "ok" ? "var(--color-state-finished)" : "var(--color-state-failed)"}
+            />
+            <Metric
+              label="Database"
+              value={h.checks.database}
+              tone={h.checks.database === "ok" ? "var(--color-state-finished)" : "var(--color-state-failed)"}
+            />
             <Metric label="Workers online" value={`${h.workers.online}/${h.workers.total}`} />
             <Metric label="Runs active / queued" value={`${h.runs.active} / ${h.runs.queued}`} />
             <Metric label="Warnings+errors" value={h.log_buffer.recent_warn_error} />
@@ -310,9 +346,9 @@ export function HealthPage() {
           <Card>
             <div className="mb-1 text-[13px] font-medium">Workers</div>
             <div className="mb-3 text-[12px]" style={{ color: "var(--color-text-secondary)" }}>
-              Grouped by pool. A run is routed to a worker whose labels cover the environment's
-              labels — use labels to pin tool, version or architecture. Installed tool versions are
-              visible via Diagnostics.
+              Grouped by pool. A run is routed to a worker whose labels cover the environment's labels — use
+              labels to pin tool, version or architecture. Installed tool versions are visible via
+              Diagnostics.
             </div>
             {h.workers.items.length === 0 ? (
               <p className="text-[13px]" style={{ color: "var(--color-text-secondary)" }}>
@@ -324,7 +360,10 @@ export function HealthPage() {
                   <div key={pool ?? "(no pool)"}>
                     <div className="mb-1 flex flex-wrap items-center gap-2">
                       <span className="text-[13px] font-medium">{pool ?? "(no pool)"}</span>
-                      <span className="font-data text-[12px]" style={{ color: "var(--color-text-secondary)" }}>
+                      <span
+                        className="font-data text-[12px]"
+                        style={{ color: "var(--color-text-secondary)" }}
+                      >
                         {items.filter((w) => w.online).length}/{items.length} online
                       </span>
                       <LabelChips labels={items[0]?.pool_labels ?? null} />
@@ -347,16 +386,27 @@ export function HealthPage() {
                             <td className="py-1 pr-4">
                               <LabelChips labels={w.labels} />
                             </td>
-                            <td className="py-1 pr-4" style={{ color: w.online ? "var(--color-state-finished)" : "var(--color-state-queued)" }}>
+                            <td
+                              className="py-1 pr-4"
+                              style={{
+                                color: w.online ? "var(--color-state-finished)" : "var(--color-state-queued)",
+                              }}
+                            >
                               {w.online ? "online" : w.status}
                             </td>
-                            <td className="py-1 pr-4">{w.seconds_since_heartbeat != null ? `${w.seconds_since_heartbeat}s ago` : "—"}</td>
+                            <td className="py-1 pr-4">
+                              {w.seconds_since_heartbeat != null ? `${w.seconds_since_heartbeat}s ago` : "—"}
+                            </td>
                             <td className="py-1 pr-4">{w.version ?? "—"}</td>
                             <td className="flex gap-2 py-1">
                               <Button
                                 onClick={() => setDiagWorker(w.id)}
                                 disabled={!w.online}
-                                title={w.online ? undefined : "Worker offline — it can't pick up a diagnostics request"}
+                                title={
+                                  w.online
+                                    ? undefined
+                                    : "Worker offline — it can't pick up a diagnostics request"
+                                }
                               >
                                 Diagnostics
                               </Button>

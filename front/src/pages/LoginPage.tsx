@@ -44,7 +44,10 @@ export function LoginPage() {
                   disabled={devLogin.isPending}
                   onClick={() => devLogin.mutate(p.key)}
                   className="ui-btn font-data flex items-center justify-between rounded-base px-3 py-2 text-[12px] disabled:opacity-60"
-                  style={{ backgroundColor: "var(--color-bg-raised)", border: "1px solid var(--color-border)" }}
+                  style={{
+                    backgroundColor: "var(--color-bg-raised)",
+                    border: "1px solid var(--color-border)",
+                  }}
                 >
                   <span>{p.email}</span>
                   <span style={{ color: "var(--color-text-secondary)" }}>{p.role}</span>

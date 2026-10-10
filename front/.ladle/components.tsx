@@ -5,7 +5,12 @@ import "../src/index.css";
 export const Provider: GlobalProvider = ({ children }) => (
   <div
     data-theme="dark"
-    style={{ minHeight: "100vh", padding: 32, backgroundColor: "var(--color-bg-base)", color: "var(--color-text-primary)" }}
+    style={{
+      minHeight: "100vh",
+      padding: 32,
+      backgroundColor: "var(--color-bg-base)",
+      color: "var(--color-text-primary)",
+    }}
   >
     {children}
   </div>

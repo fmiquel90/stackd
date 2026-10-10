@@ -8,7 +8,12 @@ const TOKEN_FILE = "styles/tokens.css";
 const CHECKS = [
   { name: "browser storage", re: /\b(localStorage|sessionStorage)\b/, files: /\.(tsx?|css)$/ },
   // A hex or rgb()/hsl() literal anywhere but the token file (tests may assert on token values).
-  { name: "hard-coded colour", re: /#[0-9a-fA-F]{3,8}\b(?![\w-])|\brgba?\(|\bhsla?\(/, files: /\.(tsx?|css)$/, skip: (f) => f === TOKEN_FILE || /\.test\.tsx?$/.test(f) },
+  {
+    name: "hard-coded colour",
+    re: /#[0-9a-fA-F]{3,8}\b(?![\w-])|\brgba?\(|\bhsla?\(/,
+    files: /\.(tsx?|css)$/,
+    skip: (f) => f === TOKEN_FILE || /\.test\.tsx?$/.test(f),
+  },
 ];
 
 function walk(dir) {

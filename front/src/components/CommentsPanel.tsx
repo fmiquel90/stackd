@@ -18,8 +18,7 @@ export const lineKey = (phase: string, seq: number, line: number) => `${phase}|$
 /** The line key a root comment is anchored to, or null if it's general / resource-anchored. */
 export function commentLineKey(c: RunComment): string | null {
   const a = c.anchor;
-  if (!a || a.kind !== "plan_line" || a.phase == null || a.seq == null || a.line_start == null)
-    return null;
+  if (!a || a.kind !== "plan_line" || a.phase == null || a.seq == null || a.line_start == null) return null;
   return lineKey(a.phase, a.seq, a.line_start);
 }
 

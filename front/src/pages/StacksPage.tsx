@@ -35,7 +35,11 @@ function CreateStackForm({ onDone }: { onDone: () => void }) {
         }}
       >
         <Field label="Name">
-          <TextInput value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} required />
+          <TextInput
+            value={form.name}
+            onChange={(e) => setForm({ ...form, name: e.target.value })}
+            required
+          />
         </Field>
         <Field label="Repository URL">
           <TextInput
@@ -53,7 +57,10 @@ function CreateStackForm({ onDone }: { onDone: () => void }) {
             </Select>
           </Field>
           <Field label="Version">
-            <TextInput value={form.tool_version} onChange={(e) => setForm({ ...form, tool_version: e.target.value })} />
+            <TextInput
+              value={form.tool_version}
+              onChange={(e) => setForm({ ...form, tool_version: e.target.value })}
+            />
           </Field>
         </div>
         <div className="flex items-center gap-2">
@@ -110,23 +117,38 @@ export function StacksPage() {
         <table className="w-full text-left">
           <thead>
             <tr className="font-data text-[12px]" style={{ color: "var(--color-text-secondary)" }}>
-              <th className="border-b px-2.5 py-1.5" style={{ borderColor: "var(--color-border)" }}>NAME</th>
-              <th className="border-b px-2.5 py-1.5" style={{ borderColor: "var(--color-border)" }}>REPO</th>
-              <th className="border-b px-2.5 py-1.5" style={{ borderColor: "var(--color-border)" }}>TOOL</th>
+              <th className="border-b px-2.5 py-1.5" style={{ borderColor: "var(--color-border)" }}>
+                NAME
+              </th>
+              <th className="border-b px-2.5 py-1.5" style={{ borderColor: "var(--color-border)" }}>
+                REPO
+              </th>
+              <th className="border-b px-2.5 py-1.5" style={{ borderColor: "var(--color-border)" }}>
+                TOOL
+              </th>
             </tr>
           </thead>
           <tbody>
             {list.map((s) => (
               <tr key={s.id} style={{ borderColor: "var(--color-border)" }}>
-                <td className="border-b px-2.5 py-1.5 text-[13px]" style={{ borderColor: "var(--color-border)" }}>
+                <td
+                  className="border-b px-2.5 py-1.5 text-[13px]"
+                  style={{ borderColor: "var(--color-border)" }}
+                >
                   <Link to={`/stacks/${s.id}`} style={{ color: "var(--color-accent)" }}>
                     {s.name}
                   </Link>
                 </td>
-                <td className="font-data border-b px-2.5 py-1.5 text-[12px]" style={{ borderColor: "var(--color-border)" }}>
+                <td
+                  className="font-data border-b px-2.5 py-1.5 text-[12px]"
+                  style={{ borderColor: "var(--color-border)" }}
+                >
                   {s.repo_url}
                 </td>
-                <td className="font-data border-b px-2.5 py-1.5 text-[12px]" style={{ borderColor: "var(--color-border)" }}>
+                <td
+                  className="font-data border-b px-2.5 py-1.5 text-[12px]"
+                  style={{ borderColor: "var(--color-border)" }}
+                >
                   {s.tool} {s.tool_version}
                 </td>
               </tr>

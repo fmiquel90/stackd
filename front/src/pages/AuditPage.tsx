@@ -51,10 +51,18 @@ export function AuditPage() {
       <table className="w-full text-left font-data text-[12px]">
         <thead>
           <tr style={{ color: "var(--color-text-secondary)" }}>
-            <th className="border-b px-2.5 py-1.5" style={{ borderColor: "var(--color-border)" }}>WHEN</th>
-            <th className="border-b px-2.5 py-1.5" style={{ borderColor: "var(--color-border)" }}>ACTOR</th>
-            <th className="border-b px-2.5 py-1.5" style={{ borderColor: "var(--color-border)" }}>ACTION</th>
-            <th className="border-b px-2.5 py-1.5" style={{ borderColor: "var(--color-border)" }}>TARGET</th>
+            <th className="border-b px-2.5 py-1.5" style={{ borderColor: "var(--color-border)" }}>
+              WHEN
+            </th>
+            <th className="border-b px-2.5 py-1.5" style={{ borderColor: "var(--color-border)" }}>
+              ACTOR
+            </th>
+            <th className="border-b px-2.5 py-1.5" style={{ borderColor: "var(--color-border)" }}>
+              ACTION
+            </th>
+            <th className="border-b px-2.5 py-1.5" style={{ borderColor: "var(--color-border)" }}>
+              TARGET
+            </th>
           </tr>
         </thead>
         <tbody>
@@ -69,7 +77,9 @@ export function AuditPage() {
               <td className="border-b px-2.5 py-1.5" style={{ borderColor: "var(--color-border)" }}>
                 {e.actor_email ?? e.actor_kind}
               </td>
-              <td className="border-b px-2.5 py-1.5" style={{ borderColor: "var(--color-border)" }}>{e.action}</td>
+              <td className="border-b px-2.5 py-1.5" style={{ borderColor: "var(--color-border)" }}>
+                {e.action}
+              </td>
               <td className="border-b px-2.5 py-1.5" style={{ borderColor: "var(--color-border)" }}>
                 {e.target_kind ?? "—"}
               </td>

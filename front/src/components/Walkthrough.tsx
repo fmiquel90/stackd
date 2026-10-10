@@ -58,7 +58,10 @@ export function Walkthrough({ onDone }: { onDone: () => void }) {
         className="w-full max-w-[520px] rounded-base p-7"
         style={{ backgroundColor: "var(--color-bg-surface)", border: "1px solid var(--color-border)" }}
       >
-        <div className="font-data text-[12px] uppercase tracking-wide" style={{ color: "var(--color-accent)" }}>
+        <div
+          className="font-data text-[12px] uppercase tracking-wide"
+          style={{ color: "var(--color-accent)" }}
+        >
           {step.eyebrow}
         </div>
         <h2 className="mt-2 text-[20px] font-semibold tracking-[-0.01em]">{step.title}</h2>

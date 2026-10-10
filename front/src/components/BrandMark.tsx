@@ -6,13 +6,31 @@ export function BrandMark({ size = 18 }: { size?: number }) {
   return (
     <svg width={size} height={size} viewBox="0 0 24 24" fill="none" aria-hidden>
       <path d="M12 2.5 21 7l-9 4.5L3 7l9-4.5Z" fill="var(--color-accent)" />
-      <path d="M3 11l9 4.5L21 11" stroke="var(--color-accent)" strokeWidth="2" strokeLinejoin="round" opacity="0.7" />
-      <path d="M3 15l9 4.5L21 15" stroke="var(--color-accent)" strokeWidth="2" strokeLinejoin="round" opacity="0.45" />
+      <path
+        d="M3 11l9 4.5L21 11"
+        stroke="var(--color-accent)"
+        strokeWidth="2"
+        strokeLinejoin="round"
+        opacity="0.7"
+      />
+      <path
+        d="M3 15l9 4.5L21 15"
+        stroke="var(--color-accent)"
+        strokeWidth="2"
+        strokeLinejoin="round"
+        opacity="0.45"
+      />
     </svg>
   );
 }
 
-export function Brand({ markSize = 18, textClass = "text-[15px]" }: { markSize?: number; textClass?: string }) {
+export function Brand({
+  markSize = 18,
+  textClass = "text-[15px]",
+}: {
+  markSize?: number;
+  textClass?: string;
+}) {
   return (
     <span className="inline-flex items-center gap-2">
       <BrandMark size={markSize} />

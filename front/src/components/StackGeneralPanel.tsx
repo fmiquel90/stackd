@@ -25,8 +25,8 @@ function DeleteStackPanel({ stackId, name }: { stackId: string; name: string }) 
         Danger zone
       </div>
       <div className="mb-2 text-[12px]" style={{ color: "var(--color-text-secondary)" }}>
-        Deleting this stack removes all its environments, runs, state history and config. This cannot
-        be undone.
+        Deleting this stack removes all its environments, runs, state history and config. This cannot be
+        undone.
       </div>
       <div className="flex items-end gap-2">
         <Field label={`Type "${name}" to confirm`}>
@@ -121,113 +121,124 @@ function StackGeneralForm({ stack }: { stack: Stack }) {
 
   return (
     <div className="flex flex-col gap-4">
-    <Card>
-      <form
-        className="flex flex-col gap-3"
-        onSubmit={(e) => {
-          e.preventDefault();
-          submit();
-        }}
-      >
-        <div className="flex flex-wrap items-end gap-3">
-          <Field label="Name">
-            <TextInput value={form.name} onChange={(e) => set({ name: e.target.value })} required />
-          </Field>
-          <Field label="Tool">
-            <Select value={form.tool} onChange={(e) => set({ tool: e.target.value as Tool })}>
-              <option value="opentofu">opentofu</option>
-              <option value="terraform">terraform</option>
-            </Select>
-          </Field>
-          <Field label="Tool version">
-            <TextInput value={form.tool_version} onChange={(e) => set({ tool_version: e.target.value })} required />
-          </Field>
-        </div>
+      <Card>
+        <form
+          className="flex flex-col gap-3"
+          onSubmit={(e) => {
+            e.preventDefault();
+            submit();
+          }}
+        >
+          <div className="flex flex-wrap items-end gap-3">
+            <Field label="Name">
+              <TextInput value={form.name} onChange={(e) => set({ name: e.target.value })} required />
+            </Field>
+            <Field label="Tool">
+              <Select value={form.tool} onChange={(e) => set({ tool: e.target.value as Tool })}>
+                <option value="opentofu">opentofu</option>
+                <option value="terraform">terraform</option>
+              </Select>
+            </Field>
+            <Field label="Tool version">
+              <TextInput
+                value={form.tool_version}
+                onChange={(e) => set({ tool_version: e.target.value })}
+                required
+              />
+            </Field>
+          </div>
 
-        <Field label="Description">
-          <TextInput value={form.description} onChange={(e) => set({ description: e.target.value })} />
-        </Field>
-
-        <Field label="Labels (matched by variable-set selectors, §3.4)">
-          <LabelsEditor value={form.labels} onChange={(labels) => set({ labels })} />
-        </Field>
-
-        <div className="flex flex-wrap items-end gap-3">
-          <Field label="Repository URL">
-            <TextInput value={form.repo_url} onChange={(e) => set({ repo_url: e.target.value })} required />
+          <Field label="Description">
+            <TextInput value={form.description} onChange={(e) => set({ description: e.target.value })} />
           </Field>
-          <Field label="Project root">
-            <TextInput value={form.project_root} onChange={(e) => set({ project_root: e.target.value })} />
-          </Field>
-        </div>
 
-        <div className="flex flex-wrap items-end gap-3">
-          <Field label="Repo auth">
-            <Select
-              value={form.repo_auth_kind}
-              onChange={(e) => set({ repo_auth_kind: e.target.value as RepoAuthKind })}
-            >
-              <option value="none">none</option>
-              <option value="token">token</option>
-              <option value="deploy_key">deploy_key</option>
-            </Select>
+          <Field label="Labels (matched by variable-set selectors, §3.4)">
+            <LabelsEditor value={form.labels} onChange={(labels) => set({ labels })} />
           </Field>
-          {form.repo_auth_kind !== "none" && (
-            <Field label={`Credential${stack.has_repo_secret ? " (set — leave blank to keep)" : ""}`}>
+
+          <div className="flex flex-wrap items-end gap-3">
+            <Field label="Repository URL">
+              <TextInput value={form.repo_url} onChange={(e) => set({ repo_url: e.target.value })} required />
+            </Field>
+            <Field label="Project root">
+              <TextInput value={form.project_root} onChange={(e) => set({ project_root: e.target.value })} />
+            </Field>
+          </div>
+
+          <div className="flex flex-wrap items-end gap-3">
+            <Field label="Repo auth">
+              <Select
+                value={form.repo_auth_kind}
+                onChange={(e) => set({ repo_auth_kind: e.target.value as RepoAuthKind })}
+              >
+                <option value="none">none</option>
+                <option value="token">token</option>
+                <option value="deploy_key">deploy_key</option>
+              </Select>
+            </Field>
+            {form.repo_auth_kind !== "none" && (
+              <Field label={`Credential${stack.has_repo_secret ? " (set — leave blank to keep)" : ""}`}>
+                <TextInput
+                  type="password"
+                  value={form.repo_secret}
+                  placeholder={stack.has_repo_secret ? "••••••••" : "token / deploy key"}
+                  onChange={(e) => set({ repo_secret: e.target.value })}
+                />
+              </Field>
+            )}
+          </div>
+
+          {/* Webhook HMAC secret (§5) — admin-only. Write-only: blank keeps the stored value. */}
+          {isAdmin && (
+            <Field label={`Webhook secret${stack.has_webhook_secret ? " (set — leave blank to keep)" : ""}`}>
               <TextInput
                 type="password"
-                value={form.repo_secret}
-                placeholder={stack.has_repo_secret ? "••••••••" : "token / deploy key"}
-                onChange={(e) => set({ repo_secret: e.target.value })}
+                value={form.webhook_secret}
+                placeholder={stack.has_webhook_secret ? "••••••••" : "HMAC secret for GitHub webhooks"}
+                onChange={(e) => set({ webhook_secret: e.target.value })}
               />
             </Field>
           )}
-        </div>
 
-        {/* Webhook HMAC secret (§5) — admin-only. Write-only: blank keeps the stored value. */}
-        {isAdmin && (
-          <Field label={`Webhook secret${stack.has_webhook_secret ? " (set — leave blank to keep)" : ""}`}>
-            <TextInput
-              type="password"
-              value={form.webhook_secret}
-              placeholder={stack.has_webhook_secret ? "••••••••" : "HMAC secret for GitHub webhooks"}
-              onChange={(e) => set({ webhook_secret: e.target.value })}
-            />
-          </Field>
+          <div className="flex items-center gap-2">
+            <Button type="submit" variant="accent" disabled={save.isPending}>
+              Save
+            </Button>
+            <Button type="button" onClick={() => check.mutate()} disabled={check.isPending}>
+              Check repository
+            </Button>
+            {save.isSuccess && (
+              <span className="font-data text-[12px]" style={{ color: "var(--color-state-finished)" }}>
+                saved
+              </span>
+            )}
+          </div>
+        </form>
+
+        {save.isError && (
+          <div className="mt-2 font-data text-[12px]" style={{ color: "var(--color-state-failed)" }}>
+            {(save.error as Error).message}
+          </div>
         )}
-
-        <div className="flex items-center gap-2">
-          <Button type="submit" variant="accent" disabled={save.isPending}>
-            Save
-          </Button>
-          <Button type="button" onClick={() => check.mutate()} disabled={check.isPending}>
-            Check repository
-          </Button>
-          {save.isSuccess && (
-            <span className="font-data text-[12px]" style={{ color: "var(--color-state-finished)" }}>
-              saved
+        {check.data && (
+          <div className="mt-2 font-data text-[12px]">
+            <span
+              style={{ color: check.data.ok ? "var(--color-state-finished)" : "var(--color-state-failed)" }}
+            >
+              {check.data.ok ? "reachable" : "unreachable"}
             </span>
-          )}
-        </div>
-      </form>
-
-      {save.isError && (
-        <div className="mt-2 font-data text-[12px]" style={{ color: "var(--color-state-failed)" }}>
-          {(save.error as Error).message}
-        </div>
-      )}
-      {check.data && (
-        <div className="mt-2 font-data text-[12px]">
-          <span style={{ color: check.data.ok ? "var(--color-state-finished)" : "var(--color-state-failed)" }}>
-            {check.data.ok ? "reachable" : "unreachable"}
-          </span>
-          {check.data.branches.length > 0 && (
-            <span style={{ color: "var(--color-text-secondary)" }}> · {check.data.branches.length} branches</span>
-          )}
-          {check.data.detail && <span style={{ color: "var(--color-text-secondary)" }}> · {check.data.detail}</span>}
-        </div>
-      )}
-    </Card>
+            {check.data.branches.length > 0 && (
+              <span style={{ color: "var(--color-text-secondary)" }}>
+                {" "}
+                · {check.data.branches.length} branches
+              </span>
+            )}
+            {check.data.detail && (
+              <span style={{ color: "var(--color-text-secondary)" }}> · {check.data.detail}</span>
+            )}
+          </div>
+        )}
+      </Card>
       {isAdmin && <DeleteStackPanel stackId={stackId} name={stackName} />}
     </div>
   );

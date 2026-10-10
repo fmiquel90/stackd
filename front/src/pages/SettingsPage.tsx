@@ -76,9 +76,8 @@ function UsersPanel({ tierNames }: { tierNames: string[] }) {
     <Card>
       <div className="mb-1 text-[13px] font-medium">Users &amp; roles</div>
       <div className="mb-3 text-[12px]" style={{ color: "var(--color-text-secondary)" }}>
-        Role gates what a user may do; <span className="font-data">allowed tiers</span> is the set of
-        tiers they can confirm an apply on — any combination, including all or none. Every change is
-        audited.
+        Role gates what a user may do; <span className="font-data">allowed tiers</span> is the set of tiers
+        they can confirm an apply on — any combination, including all or none. Every change is audited.
       </div>
       <table className="w-full text-left font-data text-[12px]">
         <thead>
@@ -192,15 +191,21 @@ export function SettingsPage() {
         <table className="font-data text-[12px]">
           <tbody>
             <tr>
-              <td className="py-1 pr-6" style={{ color: "var(--color-text-secondary)" }}>environment</td>
+              <td className="py-1 pr-6" style={{ color: "var(--color-text-secondary)" }}>
+                environment
+              </td>
               <td>{data?.env ?? "—"}</td>
             </tr>
             <tr>
-              <td className="py-1 pr-6" style={{ color: "var(--color-text-secondary)" }}>version</td>
+              <td className="py-1 pr-6" style={{ color: "var(--color-text-secondary)" }}>
+                version
+              </td>
               <td>{data?.version ?? "—"}</td>
             </tr>
             <tr>
-              <td className="py-1 pr-6" style={{ color: "var(--color-text-secondary)" }}>database</td>
+              <td className="py-1 pr-6" style={{ color: "var(--color-text-secondary)" }}>
+                database
+              </td>
               <td>{data?.checks.database ?? "—"}</td>
             </tr>
           </tbody>

@@ -24,8 +24,17 @@ import { Button, Card, TextInput } from "@/components/ui";
 
 const TERMINAL: RunState[] = ["finished", "failed", "discarded", "canceled"];
 const ORDER: Record<RunState, number> = {
-  queued: 0, preparing: 1, planning: 2, checking: 3, unconfirmed: 4,
-  confirmed: 5, applying: 6, finished: 7, failed: 7, discarded: 7, canceled: 7,
+  queued: 0,
+  preparing: 1,
+  planning: 2,
+  checking: 3,
+  unconfirmed: 4,
+  confirmed: 5,
+  applying: 6,
+  finished: 7,
+  failed: 7,
+  discarded: 7,
+  canceled: 7,
 };
 
 function buildPhases(run: Run): Phase[] {
@@ -76,8 +85,7 @@ export function RunPage() {
   const { data: run } = useQuery({
     queryKey: ["run", runId],
     queryFn: () => runs.get(runId),
-    refetchInterval: (q) =>
-      q.state.data && !TERMINAL.includes(q.state.data.state) ? 10000 : false,
+    refetchInterval: (q) => (q.state.data && !TERMINAL.includes(q.state.data.state) ? 10000 : false),
   });
   const logs = useQuery({
     queryKey: ["run-logs", runId],
@@ -181,7 +189,10 @@ export function RunPage() {
             >
               Confirm
             </Button>
-            <Button disabled={run.state !== "unconfirmed" || discard.isPending} onClick={() => discard.mutate()}>
+            <Button
+              disabled={run.state !== "unconfirmed" || discard.isPending}
+              onClick={() => discard.mutate()}
+            >
               Discard
             </Button>
           </div>
@@ -215,7 +226,14 @@ export function RunPage() {
               >
                 Confirm {run.type === "destroy" ? "destroy" : "apply"}
               </Button>
-              <Button onClick={() => { setConfirming(false); setTyped(""); }}>Cancel</Button>
+              <Button
+                onClick={() => {
+                  setConfirming(false);
+                  setTyped("");
+                }}
+              >
+                Cancel
+              </Button>
             </div>
           </Card>
         )}
@@ -289,7 +307,9 @@ export function RunPage() {
                         <MessageSquarePlus size={13} strokeWidth={1.75} aria-hidden />
                       </button>
                       <span className="min-w-0">
-                        <span style={{ color: "var(--color-text-secondary)" }}>{chunk.section ?? chunk.phase} </span>
+                        <span style={{ color: "var(--color-text-secondary)" }}>
+                          {chunk.section ?? chunk.phase}{" "}
+                        </span>
                         <AnsiText text={l.msg} />
                       </span>
                     </div>

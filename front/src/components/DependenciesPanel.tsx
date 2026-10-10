@@ -60,9 +60,16 @@ export function DependenciesPanel({ envId }: { envId: string }) {
             <span style={{ color: "var(--color-accent)" }}>{labelFor(d.upstream_env_id)}</span>
             <span style={{ color: "var(--color-text-secondary)" }}>{d.trigger_policy}</span>
             <span style={{ color: "var(--color-text-secondary)" }}>
-              {d.references.map((r) => `${r.output_name}→${r.input_name}${r.has_mock ? " (mock)" : ""}`).join(", ")}
+              {d.references
+                .map((r) => `${r.output_name}→${r.input_name}${r.has_mock ? " (mock)" : ""}`)
+                .join(", ")}
             </span>
-            <button type="button" aria-label="Delete dependency" onClick={() => remove.mutate(d.id)} style={{ color: "var(--color-text-secondary)" }}>
+            <button
+              type="button"
+              aria-label="Delete dependency"
+              onClick={() => remove.mutate(d.id)}
+              style={{ color: "var(--color-text-secondary)" }}
+            >
               <X size={13} strokeWidth={1.75} aria-hidden />
             </button>
           </div>
@@ -95,16 +102,30 @@ export function DependenciesPanel({ envId }: { envId: string }) {
           </Select>
         </Field>
         <Field label="Output">
-          <TextInput value={form.output_name} onChange={(e) => setForm({ ...form, output_name: e.target.value })} required />
+          <TextInput
+            value={form.output_name}
+            onChange={(e) => setForm({ ...form, output_name: e.target.value })}
+            required
+          />
         </Field>
         <Field label="→ Input (TF_VAR)">
-          <TextInput value={form.input_name} onChange={(e) => setForm({ ...form, input_name: e.target.value })} required />
+          <TextInput
+            value={form.input_name}
+            onChange={(e) => setForm({ ...form, input_name: e.target.value })}
+            required
+          />
         </Field>
         <Field label="Mock (optional)">
-          <TextInput value={form.mock_value} onChange={(e) => setForm({ ...form, mock_value: e.target.value })} />
+          <TextInput
+            value={form.mock_value}
+            onChange={(e) => setForm({ ...form, mock_value: e.target.value })}
+          />
         </Field>
         <Field label="Trigger">
-          <Select value={form.trigger_policy} onChange={(e) => setForm({ ...form, trigger_policy: e.target.value })}>
+          <Select
+            value={form.trigger_policy}
+            onChange={(e) => setForm({ ...form, trigger_policy: e.target.value })}
+          >
             <option value="on_output_change">on_output_change</option>
             <option value="always">always</option>
             <option value="never">never</option>

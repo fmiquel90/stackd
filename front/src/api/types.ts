@@ -187,11 +187,7 @@ export interface LogChunk {
 }
 
 export type NotificationKindInbox =
-  | "approval_request"
-  | "run_finished"
-  | "run_failed"
-  | "comment_reply"
-  | "mention";
+  "approval_request" | "run_finished" | "run_failed" | "comment_reply" | "mention";
 
 export interface UserNotification {
   id: string;

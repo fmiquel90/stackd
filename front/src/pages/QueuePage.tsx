@@ -18,10 +18,18 @@ export function QueuePage() {
       <table className="w-full text-left font-data text-[12px]">
         <thead>
           <tr style={{ color: "var(--color-text-secondary)" }}>
-            <th className="border-b px-2.5 py-1.5" style={{ borderColor: "var(--color-border)" }}>RUN</th>
-            <th className="border-b px-2.5 py-1.5" style={{ borderColor: "var(--color-border)" }}>STATE</th>
-            <th className="border-b px-2.5 py-1.5" style={{ borderColor: "var(--color-border)" }}>WORKER</th>
-            <th className="border-b px-2.5 py-1.5" style={{ borderColor: "var(--color-border)" }}>BLOCKED BY</th>
+            <th className="border-b px-2.5 py-1.5" style={{ borderColor: "var(--color-border)" }}>
+              RUN
+            </th>
+            <th className="border-b px-2.5 py-1.5" style={{ borderColor: "var(--color-border)" }}>
+              STATE
+            </th>
+            <th className="border-b px-2.5 py-1.5" style={{ borderColor: "var(--color-border)" }}>
+              WORKER
+            </th>
+            <th className="border-b px-2.5 py-1.5" style={{ borderColor: "var(--color-border)" }}>
+              BLOCKED BY
+            </th>
           </tr>
         </thead>
         <tbody>
@@ -32,7 +40,9 @@ export function QueuePage() {
                   {q.run_id.slice(0, 8)}
                 </Link>
               </td>
-              <td className="border-b px-2.5 py-1.5" style={{ borderColor: "var(--color-border)" }}>{q.state}</td>
+              <td className="border-b px-2.5 py-1.5" style={{ borderColor: "var(--color-border)" }}>
+                {q.state}
+              </td>
               <td className="border-b px-2.5 py-1.5" style={{ borderColor: "var(--color-border)" }}>
                 {q.worker_id ? q.worker_id.slice(0, 8) : "—"}
               </td>

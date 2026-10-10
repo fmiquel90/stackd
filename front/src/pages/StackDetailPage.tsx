@@ -25,7 +25,17 @@ import { SecretSourcesPanel } from "@/components/SecretSourcesPanel";
 import { StackGeneralPanel } from "@/components/StackGeneralPanel";
 import { StatePanel } from "@/components/StatePanel";
 import { VariablesEditor } from "@/components/VariablesEditor";
-import { Button, Card, Checkbox, Field, LabelsEditor, PageTitle, Select, Tabs, TextInput } from "@/components/ui";
+import {
+  Button,
+  Card,
+  Checkbox,
+  Field,
+  LabelsEditor,
+  PageTitle,
+  Select,
+  Tabs,
+  TextInput,
+} from "@/components/ui";
 
 function ResolvedVariables({ envId }: { envId: string }) {
   const { data, isLoading } = useQuery({
@@ -34,7 +44,11 @@ function ResolvedVariables({ envId }: { envId: string }) {
   });
   if (isLoading) return <span className="font-data text-[12px]">Loading…</span>;
   if (!data || data.length === 0)
-    return <span className="font-data text-[12px]" style={{ color: "var(--color-text-secondary)" }}>No variables resolved.</span>;
+    return (
+      <span className="font-data text-[12px]" style={{ color: "var(--color-text-secondary)" }}>
+        No variables resolved.
+      </span>
+    );
   return (
     <table className="w-full text-left">
       <tbody>
@@ -127,8 +141,8 @@ function EnvInputs({ envId }: { envId: string }) {
           <DiscoverInputsButton envId={envId} />
         </div>
         <div className="mb-2 text-[12px]" style={{ color: "var(--color-text-secondary)" }}>
-          Specific to this environment — overrides the stack-level variable of the same name.
-          “Discover inputs” scaffolds the repo's required variables here with empty placeholders.
+          Specific to this environment — overrides the stack-level variable of the same name. “Discover
+          inputs” scaffolds the repo's required variables here with empty placeholders.
         </div>
         <VariablesEditor
           queryKey={["env-vars", envId]}
@@ -150,7 +164,12 @@ function CreateEnvForm({ stackId, onDone }: { stackId: string; onDone: () => voi
   const qc = useQueryClient();
   const catalog = useQuery({ queryKey: ["tiers"], queryFn: tiers.list });
   const tierNames = (catalog.data ?? []).map((t) => t.name);
-  const [form, setForm] = useState<NewEnvironment>({ name: "", tier: "", branch: "main", managed_state: true });
+  const [form, setForm] = useState<NewEnvironment>({
+    name: "",
+    tier: "",
+    branch: "main",
+    managed_state: true,
+  });
   // Live list of the repo's branches so the branch is picked, not typed blind (falls back to a free
   // text input when the repo can't be reached). git ls-remote on open — cached for a minute.
   const repo = useQuery({
@@ -186,7 +205,11 @@ function CreateEnvForm({ stackId, onDone }: { stackId: string; onDone: () => voi
         }}
       >
         <Field label="Name">
-          <TextInput value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} required />
+          <TextInput
+            value={form.name}
+            onChange={(e) => setForm({ ...form, name: e.target.value })}
+            required
+          />
         </Field>
         <Field label="Tier">
           <Select value={tier} onChange={(e) => setForm({ ...form, tier: e.target.value })} required>
@@ -221,8 +244,8 @@ function CreateEnvForm({ stackId, onDone }: { stackId: string; onDone: () => voi
         </Button>
       </form>
       <div className="mt-2 text-[12px]" style={{ color: "var(--color-text-secondary)" }}>
-        Managed state: Terraform talks to the platform's HTTP backend (state stored & locked by Stackd,
-        SPECS §11). Uncheck to keep your own backend configured in the repo.
+        Managed state: Terraform talks to the platform's HTTP backend (state stored & locked by Stackd, SPECS
+        §11). Uncheck to keep your own backend configured in the repo.
       </div>
       {create.isError && (
         <div className="mt-2 font-data text-[12px]" style={{ color: "var(--color-state-failed)" }}>
@@ -284,22 +307,18 @@ function RefreshHeadButton({ env }: { env: Environment }) {
       disabled={refresh.isPending}
       style={{ border: "1px solid var(--color-border)", color: "var(--color-text-secondary)" }}
     >
-      <RefreshCw size={14} strokeWidth={1.75} aria-hidden className={refresh.isPending ? "animate-spin" : undefined} />
+      <RefreshCw
+        size={14}
+        strokeWidth={1.75}
+        aria-hidden
+        className={refresh.isPending ? "animate-spin" : undefined}
+      />
     </button>
   );
 }
 
 type EnvTab =
-  | "inputs"
-  | "deps"
-  | "hooks"
-  | "notify"
-  | "cloud"
-  | "state"
-  | "command"
-  | "promote"
-  | "settings"
-  | "danger";
+  "inputs" | "deps" | "hooks" | "notify" | "cloud" | "state" | "command" | "promote" | "settings" | "danger";
 
 const ENV_TABS: { key: EnvTab; label: string }[] = [
   { key: "inputs", label: "Inputs" },
@@ -392,8 +411,16 @@ function EnvSettingsPanel({ env }: { env: Environment }) {
           </div>
         )}
         <div className="mt-3 flex flex-wrap gap-x-5 gap-y-2">
-          <Checkbox checked={form.protected ?? false} onChange={(v) => set({ protected: v })} label="protected" />
-          <Checkbox checked={form.autodeploy ?? false} onChange={(v) => set({ autodeploy: v })} label="autodeploy" />
+          <Checkbox
+            checked={form.protected ?? false}
+            onChange={(v) => set({ protected: v })}
+            label="protected"
+          />
+          <Checkbox
+            checked={form.autodeploy ?? false}
+            onChange={(v) => set({ autodeploy: v })}
+            label="autodeploy"
+          />
           <Checkbox
             checked={form.require_second_pair_of_eyes ?? false}
             onChange={(v) => set({ require_second_pair_of_eyes: v })}
@@ -599,8 +626,8 @@ function SettingsTab({ stackId, spaceId }: { stackId: string; spaceId: string })
       {tab === "variables" && (
         <Card>
           <div className="mb-2 text-[12px]" style={{ color: "var(--color-text-secondary)" }}>
-            Common to every environment of this stack (an env-level variable of the same name
-            overrides it — see resolution order in each env's Inputs tab).
+            Common to every environment of this stack (an env-level variable of the same name overrides it —
+            see resolution order in each env's Inputs tab).
           </div>
           <VariablesEditor
             queryKey={["stack-vars", stackId]}

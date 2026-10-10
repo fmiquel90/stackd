@@ -28,9 +28,7 @@ const QueuePage = lazy(() => import("@/pages/QueuePage").then((m) => ({ default:
 const HealthPage = lazy(() => import("@/pages/HealthPage").then((m) => ({ default: m.HealthPage })));
 const AuditPage = lazy(() => import("@/pages/AuditPage").then((m) => ({ default: m.AuditPage })));
 const GraphPage = lazy(() => import("@/pages/GraphPage").then((m) => ({ default: m.GraphPage })));
-const SettingsPage = lazy(() =>
-  import("@/pages/SettingsPage").then((m) => ({ default: m.SettingsPage })),
-);
+const SettingsPage = lazy(() => import("@/pages/SettingsPage").then((m) => ({ default: m.SettingsPage })));
 const VariableSetsPage = lazy(() =>
   import("@/pages/VariableSetsPage").then((m) => ({ default: m.VariableSetsPage })),
 );
@@ -81,7 +79,15 @@ function NavRail() {
 
 // Top-level sections that have a real index route — only these segments are linkified (a segment
 // like "runs" has no list page, so it stays plain text; the run page carries its own back-link).
-const NAVIGABLE_ROOTS = new Set(["stacks", "graph", "audit", "workers", "variable-sets", "settings", "queue"]);
+const NAVIGABLE_ROOTS = new Set([
+  "stacks",
+  "graph",
+  "audit",
+  "workers",
+  "variable-sets",
+  "settings",
+  "queue",
+]);
 
 function Crumb({ children }: { children: ReactNode }) {
   return (
@@ -110,7 +116,10 @@ function RunBreadcrumb({ runId }: { runId: string }) {
   });
   const linkStyle = { color: "var(--color-text-primary)" };
   return (
-    <div className="font-data flex items-center gap-1.5 text-[12px]" style={{ color: "var(--color-text-secondary)" }}>
+    <div
+      className="font-data flex items-center gap-1.5 text-[12px]"
+      style={{ color: "var(--color-text-secondary)" }}
+    >
       <Link to="/stacks" style={{ color: "var(--color-text-secondary)" }}>
         {current?.name ?? "default"}
       </Link>
@@ -143,7 +152,10 @@ function Breadcrumb() {
   const segments = pathname.split("/").filter(Boolean);
   if (segments[0] === "runs" && segments[1]) return <RunBreadcrumb runId={segments[1]} />;
   return (
-    <div className="font-data flex items-center gap-1.5 text-[12px]" style={{ color: "var(--color-text-secondary)" }}>
+    <div
+      className="font-data flex items-center gap-1.5 text-[12px]"
+      style={{ color: "var(--color-text-secondary)" }}
+    >
       <Link to="/stacks" style={{ color: "var(--color-text-secondary)" }}>
         {current?.name ?? "default"}
       </Link>
@@ -197,7 +209,11 @@ function SpaceSwitcher() {
       value={current?.id ?? ""}
       onChange={(e) => setCurrentId(e.target.value)}
       className="font-data rounded-base px-2 py-1 text-[12px]"
-      style={{ border: "1px solid var(--color-border)", backgroundColor: "var(--color-bg-raised)", color: "var(--color-text-primary)" }}
+      style={{
+        border: "1px solid var(--color-border)",
+        backgroundColor: "var(--color-bg-raised)",
+        color: "var(--color-text-primary)",
+      }}
     >
       {list.map((s) => (
         <option key={s.id} value={s.id}>
@@ -253,27 +269,24 @@ function AppShellInner({ user }: { user: User }) {
         <main className="mx-auto w-full max-w-[1440px] flex-1 overflow-auto p-6">
           <Suspense
             fallback={
-              <p
-                className="font-data text-[12px]"
-                style={{ color: "var(--color-text-secondary)" }}
-              >
+              <p className="font-data text-[12px]" style={{ color: "var(--color-text-secondary)" }}>
                 Loading…
               </p>
             }
           >
-          <Routes>
-            <Route path="/" element={<Navigate to="/stacks" replace />} />
-            <Route path="/stacks" element={<StacksPage />} />
-            <Route path="/stacks/:stackId" element={<StackDetailPage />} />
-            <Route path="/runs/:runId" element={<RunPage />} />
-            <Route path="/queue" element={<QueuePage />} />
-            <Route path="/workers" element={<HealthPage />} />
-            <Route path="/audit" element={<AuditPage />} />
-            <Route path="/graph" element={<GraphPage />} />
-            <Route path="/variable-sets" element={<VariableSetsPage />} />
-            <Route path="/settings" element={<SettingsPage />} />
-            <Route path="*" element={<StacksPage />} />
-          </Routes>
+            <Routes>
+              <Route path="/" element={<Navigate to="/stacks" replace />} />
+              <Route path="/stacks" element={<StacksPage />} />
+              <Route path="/stacks/:stackId" element={<StackDetailPage />} />
+              <Route path="/runs/:runId" element={<RunPage />} />
+              <Route path="/queue" element={<QueuePage />} />
+              <Route path="/workers" element={<HealthPage />} />
+              <Route path="/audit" element={<AuditPage />} />
+              <Route path="/graph" element={<GraphPage />} />
+              <Route path="/variable-sets" element={<VariableSetsPage />} />
+              <Route path="/settings" element={<SettingsPage />} />
+              <Route path="*" element={<StacksPage />} />
+            </Routes>
           </Suspense>
         </main>
       </div>
