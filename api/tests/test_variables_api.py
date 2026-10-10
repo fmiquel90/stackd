@@ -150,6 +150,36 @@ async def test_sensitive_variable_is_write_only(client: httpx.AsyncClient) -> No
     assert "super-secret" not in created.text
 
 
+async def test_unflagging_a_secret_requires_a_new_value(client: httpx.AsyncClient) -> None:
+    h = await _admin(client)
+    stack_id = await _stack(client, h, "unflag-stack")
+    var_id = (
+        await client.post(
+            f"/api/v1/stacks/{stack_id}/variables",
+            headers=h,
+            json={
+                "kind": "environment",
+                "name": "API_KEY",
+                "value": "old-secret",
+                "sensitive": True,
+            },
+        )
+    ).json()["id"]
+    url = f"/api/v1/stacks/{stack_id}/variables/{var_id}"
+
+    # Unflagging alone would stop masking the kept secret in run logs: refused, nothing changes.
+    refused = await client.patch(url, headers=h, json={"sensitive": False})
+    assert refused.status_code == 422
+    listed = (await client.get(f"/api/v1/stacks/{stack_id}/variables", headers=h)).json()
+    assert next(v for v in listed if v["id"] == var_id)["sensitive"] is True
+
+    # With a replacement value it goes through, and the old secret never comes back.
+    replaced = await client.patch(url, headers=h, json={"sensitive": False, "value": "public"})
+    assert replaced.status_code == 200
+    assert replaced.json()["value"] == "public" and replaced.json()["sensitive"] is False
+    assert "old-secret" not in replaced.text
+
+
 async def test_attached_set_delete_requires_detach(client: httpx.AsyncClient) -> None:
     h = await _admin(client)
     stack_id = await _stack(client, h, "detach-stack")
