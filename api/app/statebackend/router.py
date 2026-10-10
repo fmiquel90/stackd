@@ -127,9 +127,12 @@ async def post_state(
     _require_rw(claims)
     await _require_run_phase(session, claims)
 
+    # While the state is locked only its holder writes, naming the lock in `?ID=` as tofu does when
+    # it holds one: no ID or another one gets the holder, like a LOCK conflict. Unlocked state takes
+    # an ID-less write (`tofu -lock=false`).
     lock = await session.get(StateLock, env_id)
-    if lock is not None and ID and lock.lock_id != ID:
-        raise ProblemException(423, "Locked", "Lock ID mismatch.")
+    if lock is not None and ID != lock.lock_id:
+        return _locked(lock)
 
     body = await request.body()
     doc = json.loads(body)

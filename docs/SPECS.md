@@ -934,7 +934,7 @@ S3 for the bytes, HTTP for the interface: per-job scoped tokens (§11.2) without
 | Method | Endpoint | Behavior |
 |---|---|---|
 | `GET` | `/state/v1/{env_id}` | any scope; 200 + latest state, 404 otherwise |
-| `POST` | `/state/v1/{env_id}?ID=<lock_id>` | **`rw` scope only**; an `ID` that is not the held lock's → **423**, refuses regressive serial (409), **403** once the token's run is no longer active, upload S3, `state_version` linked to the run (`NULL` for an import session) |
+| `POST` | `/state/v1/{env_id}?ID=<lock_id>` | **`rw` scope only**; while a lock is held, a missing `ID` or one that is not the held lock's → **423** + holder (no lock held: an ID-less write is accepted — `tofu -lock=false`), refuses regressive serial (409), **403** once the token's run is no longer active, upload S3, `state_version` linked to the run (`NULL` for an import session) |
 | `LOCK` | `/state/v1/{env_id}/lock` | `plan` or `rw` scope; the body (tofu's lock info) must carry an `ID` (400 otherwise); 200 or **423** + holder; **403** once the token's run is no longer active — and, for a `plan` token, once its run has left the plan phase |
 | `UNLOCK` | `/state/v1/{env_id}/lock` | `plan` or `rw` scope (a `ro` token never locks); releases the lock only for its holder: the body's `ID` must be the held lock's — missing or different → **423** + holder, like a `LOCK` conflict (tofu always sends the lock info it locked with; `tofu force-unlock <id>` sends that id); 200 if nothing is held; still allowed after the run ended |
 

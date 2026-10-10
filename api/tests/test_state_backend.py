@@ -435,3 +435,45 @@ async def test_unlock_requires_the_holders_lock_id(client: httpx.AsyncClient) ->
     forced = await client.delete(f"/api/v1/environments/{env_id}/state/lock", headers=admin)
     assert forced.status_code == 204
     assert (await _lock(holder, held)).status_code == 200
+
+
+async def test_post_requires_the_holders_lock_id_while_locked(client: httpx.AsyncClient) -> None:
+    """While the state is locked, only a POST naming the held lock (`?ID=`, as tofu sends when it
+    holds one) writes: no ID or another one gets 423 + the holder, like a LOCK conflict, and writes
+    nothing. Unlocked, an ID-less POST still writes (`tofu -lock=false`)."""
+    from app.statebackend.tokens import mint_state_token
+
+    admin = await login(client, "admin")
+    stack = await make_stack(client, admin, "state-post-lock-id")
+    env_id = await make_env(client, admin, stack, "dev", "dev")
+    holder = mint_state_token(environment_id=uuid.UUID(env_id), scope="rw", ttl_seconds=3600)
+    other = mint_state_token(environment_id=uuid.UUID(env_id), scope="rw", ttl_seconds=3600)
+    held = json.dumps({"ID": "holder-lock", "Operation": "OperationTypeApply"})
+
+    async def _serials() -> list[int]:
+        versions = await client.get(f"/api/v1/environments/{env_id}/state/versions", headers=admin)
+        return [v["serial"] for v in versions.json()]
+
+    with mock_aws():
+        unlocked = await client.post(
+            f"/state/v1/{env_id}", headers=_basic(other), content=_state_doc(1)
+        )
+        assert unlocked.status_code == 200  # no lock held: `-lock=false` writes
+        lock = await client.request(
+            "LOCK", f"/state/v1/{env_id}/lock", headers=_basic(holder), content=held
+        )
+        assert lock.status_code == 200
+
+        for query in ("", "?ID=", "?ID=another-lock"):
+            refused = await client.post(
+                f"/state/v1/{env_id}{query}", headers=_basic(other), content=_state_doc(2)
+            )
+            assert refused.status_code == 423, query
+            assert refused.json()["ID"] == "holder-lock"  # the holder, as on a LOCK conflict
+        assert await _serials() == [1]
+
+        written = await client.post(
+            f"/state/v1/{env_id}?ID=holder-lock", headers=_basic(holder), content=_state_doc(2)
+        )
+        assert written.status_code == 200
+        assert await _serials() == [2, 1]
