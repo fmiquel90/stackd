@@ -502,6 +502,61 @@ async def test_refresh_head_holds_no_transaction_across_git(
     assert (r.json()["branch"], r.json()["head_sha"]) == ("other", "aaa111")
 
 
+async def test_refresh_head_is_audited(
+    client: httpx.AsyncClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A manual head refresh is a mutating action: audited `environment.head_refreshed` with the
+    branch and the old and new head. A refresh that records nothing (env re-pointed meanwhile)
+    isn't."""
+    from sqlalchemy import update
+
+    from app.db import SessionLocal
+    from app.environments import router
+    from app.models.environment import Environment
+
+    fake = _FakeLsRemote()
+    monkeypatch.setattr(router, "ls_remote_sha", fake)
+    admin = await login(client, "admin")
+    repo = _repo()
+    env_id = await _env(client, admin, await _stack(client, admin, repo), "e", "main")
+    url = f"/api/v1/environments/{env_id}/refresh-head"
+
+    async def _audited() -> list[dict]:
+        events = await client.get(
+            "/api/v1/audit",
+            headers=admin,
+            params={"action": "environment.head_refreshed", "target_id": env_id},
+        )
+        return [
+            {k: e["context"][k] for k in ("branch", "old_sha", "new_sha")}
+            | {"by": e["actor_email"]}
+            for e in reversed(events.json())
+        ]
+
+    fake.heads = {(repo, "main"): "aaa111"}
+    assert (await client.post(url, headers=admin)).status_code == 200
+    fake.heads = {(repo, "main"): "bbb222"}
+    assert (await client.post(url, headers=admin)).status_code == 200
+    by = "admin@dev.local"
+    assert await _audited() == [
+        {"branch": "main", "old_sha": None, "new_sha": "aaa111", "by": by},
+        {"branch": "main", "old_sha": "aaa111", "new_sha": "bbb222", "by": by},
+    ]
+
+    async def _repoint() -> None:
+        async with SessionLocal() as session:
+            await session.execute(
+                update(Environment)
+                .where(Environment.id == uuid.UUID(env_id))
+                .values(branch="other")
+            )
+            await session.commit()
+
+    fake.on_call = _repoint
+    assert (await client.post(url, headers=admin)).status_code == 200
+    assert len(await _audited()) == 2  # nothing recorded, nothing audited
+
+
 async def test_changing_branch_resets_the_recorded_head(client: httpx.AsyncClient) -> None:
     """The recorded head belongs to the tracked branch: re-pointing the env to another branch
     clears it (and the staleness fields), so `stale` isn't computed against the old branch. A PATCH

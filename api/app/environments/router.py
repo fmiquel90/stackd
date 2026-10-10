@@ -388,11 +388,35 @@ async def refresh_head(env_id: uuid.UUID, user: CurrentUser, session: DbSession)
     if sha is None:
         raise ProblemException(422, "Head refresh failed", "Could not read the branch head.")
     # Only while the env still tracks that branch: one re-pointed meanwhile isn't tracking it.
-    await session.execute(
-        update(Environment)
-        .where(Environment.id == env.id, Environment.branch == branch)
-        .values(head_sha=sha, head_updated_at=datetime.now(UTC))
-    )
+    # Locked, so the audited old head is the one this refresh replaces.
+    current = (
+        await session.execute(
+            select(Environment.head_sha)
+            .where(Environment.id == env.id, Environment.branch == branch)
+            .with_for_update()
+        )
+    ).first()
+    if current is not None:
+        await session.execute(
+            update(Environment)
+            .where(Environment.id == env.id)
+            .values(head_sha=sha, head_updated_at=datetime.now(UTC))
+        )
+        await record_audit(
+            session,
+            action="environment.head_refreshed",
+            actor_kind=AuditActorKind.user,
+            actor_id=user.id,
+            actor_email=user.email,
+            target_kind="environment",
+            target_id=env.id,
+            context={
+                **_env_audit_ctx(env),
+                "branch": branch,
+                "old_sha": current.head_sha,
+                "new_sha": sha,
+            },
+        )
     await session.commit()
     await session.refresh(env)
     return await _env_out(session, env)

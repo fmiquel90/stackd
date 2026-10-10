@@ -481,6 +481,7 @@ ip, user_agent nullable, created_at
 ```
 auth.login / auth.logout / auth.domain_denied / auth.refresh_reuse_detected
 stack.* / environment.* (created|updated|deleted)
+environment.head_refreshed                    # manual head refresh (§9.6) — context: branch, old_sha, new_sha
 variable.* (created|updated|deleted)          # context: name, sensitive — NEVER the value
 variable_set.* (created|updated|deleted|attached|detached)
 hook.* (created|updated|deleted)
@@ -835,7 +836,7 @@ No applied run yet (or a last run with no pinned commit) → `stale = false`: th
 **Updating `head_sha`** (from most precise to fallback):
 1. **Push webhook** (Phase 5): immediate update of all envs tracking the branch — even if the webhook does not trigger a run (`project_root` filtering), it always updates `head_sha` — on the envs still tracking that branch when it is written (guarded update: an env re-pointed meanwhile gets neither the head nor a run). A push that **deletes** the branch (`deleted: true`, all-zero `after`) triggers no run and never records the zero SHA: it clears `head_sha`, `commits_ahead` and `affects_project_root` (so the env is not `stale`), stamping `head_updated_at` with the receipt time.
 2. **Fallback polling**: `git ls-remote` per (repo, branch) every 15 min (`stackd_head_poll_interval`; periodic task, deduplicated by repo across the stacks sharing it — and by their repo credentials, so no stack's head is read with another stack's token) — covers absent or lost webhooks. Only envs whose head was not observed within the interval (by a webhook, a manual refresh or a previous poll, on any replica) are polled; a head recorded by a webhook while the poll runs is never overwritten. No DB transaction is held across the git calls, which run concurrently (at most 8 at a time); a failing repo is logged (never its token) and retried at the next poll, without blocking the others. The poll runs as a task of its own (still under its advisory lock, §7.5), so git calls outlasting a scheduler tick never delay the other periodic tasks; a poll still running when the next one is due skips that one.
-3. **Manual**: `POST /api/v1/environments/{id}/refresh-head`. Like the poll, it holds no DB transaction across its git call, and does not record the head if the env was re-pointed to another branch meanwhile.
+3. **Manual**: `POST /api/v1/environments/{id}/refresh-head`. Like the poll, it holds no DB transaction across its git call, and does not record the head if the env was re-pointed to another branch meanwhile. The recorded refresh is audited `environment.head_refreshed` (branch, old and new SHA) in the same transaction.
 
 Changing an environment's `branch` (`PATCH`) clears `head_sha`, `head_updated_at`, `commits_ahead` and `affects_project_root`: the recorded head was the old branch's, and the env is then due at the next poll.
 
