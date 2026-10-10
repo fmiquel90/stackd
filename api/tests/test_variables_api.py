@@ -7,6 +7,8 @@ import tempfile
 
 import httpx
 
+from tests.conftest_phase2 import login
+
 
 def _make_repo(tf: str) -> str:
     """A throwaway git repo (branch main) with a single main.tf — cloned by discover-inputs."""
@@ -284,6 +286,107 @@ async def test_attach_set_to_tier(client: httpx.AsyncClient) -> None:
         await client.get(f"/api/v1/environments/{dev_env}/resolved-variables", headers=h)
     ).json()
     assert "endpoint" not in {v["name"] for v in dev_vars}
+
+
+async def _stack_in_new_space(
+    client: httpx.AsyncClient, admin: dict[str, str], space_name: str
+) -> tuple[str, str]:
+    """(space_id, stack_id) for a fresh space — bob/alice are NOT members of it."""
+    space = await client.post("/api/v1/spaces", headers=admin, json={"name": space_name})
+    assert space.status_code == 201, space.text
+    r = await client.post(
+        "/api/v1/stacks",
+        headers=admin,
+        json={
+            "space_id": space.json()["id"],
+            "name": f"{space_name}-stack",
+            "repo_url": "file:///repos/x",
+            "tool_version": "1.12.0",
+        },
+    )
+    assert r.status_code == 201, r.text
+    return space.json()["id"], r.json()["id"]
+
+
+async def _resolved_names(client: httpx.AsyncClient, h: dict[str, str], env_id: str) -> set[str]:
+    r = await client.get(f"/api/v1/environments/{env_id}/resolved-variables", headers=h)
+    assert r.status_code == 200, r.text
+    return {v["name"] for v in r.json()}
+
+
+async def test_attach_refuses_target_in_another_space(client: httpx.AsyncClient) -> None:
+    import uuid
+
+    from app.db import SessionLocal
+    from app.enums import AttachmentTarget
+    from app.models.variable_set import VariableSetAttachment
+
+    admin = await _admin(client)
+    bob = await login(client, "bob")  # writer in the default space only
+    _, stack_b = await _stack_in_new_space(client, admin, "vars-other")
+    env_b = await _env(client, admin, stack_b, "dev", "dev")
+
+    # bob's set lives in the default space, where he may write.
+    vset = (await client.post("/api/v1/variable-sets", headers=bob, json={"name": "bob-x"})).json()
+    await client.post(
+        f"/api/v1/variable-sets/{vset['id']}/variables",
+        headers=bob,
+        json={"kind": "terraform", "name": "injected", "value": "from-default"},
+    )
+    url = f"/api/v1/variable-sets/{vset['id']}/attachments"
+    for kind, target in (("stack", stack_b), ("environment", env_b)):
+        # Not a writer in the target's space → refused by the target guard.
+        r = await client.post(url, headers=bob, json={"target_kind": kind, "target_id": target})
+        assert r.status_code == 403, f"{kind}: {r.status_code} {r.text}"
+        # Even a caller who can write both spaces cannot bridge them.
+        r = await client.post(url, headers=admin, json={"target_kind": kind, "target_id": target})
+        assert r.status_code == 400, f"{kind}: {r.status_code} {r.text}"
+        assert r.json()["title"] == "Cross-space attachment"
+    assert (await client.get(url, headers=admin)).json() == []
+    assert "injected" not in await _resolved_names(client, admin, env_b)
+
+    # Defense in depth: a cross-space row that predates the check never reaches resolution.
+    async with SessionLocal() as s:
+        s.add(
+            VariableSetAttachment(
+                variable_set_id=uuid.UUID(vset["id"]),
+                target_kind=AttachmentTarget.environment,
+                target_id=uuid.UUID(env_b),
+                priority=0,
+            )
+        )
+        await s.commit()
+    assert "injected" not in await _resolved_names(client, admin, env_b)
+
+
+async def test_tier_attachment_is_scoped_to_the_set_space(client: httpx.AsyncClient) -> None:
+    # A tier is a global catalog row; a space's set attached to it reaches that tier's envs in the
+    # set's own space only — never another space's (fail-closed reading of §3.4).
+    admin = await _admin(client)
+    prod = next(
+        t for t in (await client.get("/api/v1/tiers", headers=admin)).json() if t["name"] == "prod"
+    )
+    _, stack_b = await _stack_in_new_space(client, admin, "vars-tier-other")
+    env_b = await _env(client, admin, stack_b, "prod", "prod")
+    env_a = await _env(client, admin, await _stack(client, admin, "vars-tier-home"), "prod", "prod")
+
+    vset = (
+        await client.post("/api/v1/variable-sets", headers=admin, json={"name": "tier-scoped"})
+    ).json()
+    await client.post(
+        f"/api/v1/variable-sets/{vset['id']}/variables",
+        headers=admin,
+        json={"kind": "terraform", "name": "tier_scoped_endpoint", "value": "home"},
+    )
+    attach = await client.post(
+        f"/api/v1/variable-sets/{vset['id']}/attachments",
+        headers=admin,
+        json={"target_kind": "tier", "target_id": prod["id"]},
+    )
+    assert attach.status_code == 201, attach.text
+
+    assert "tier_scoped_endpoint" in await _resolved_names(client, admin, env_a)
+    assert "tier_scoped_endpoint" not in await _resolved_names(client, admin, env_b)
 
 
 def test_parse_inputs_unit() -> None:
