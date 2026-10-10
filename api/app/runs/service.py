@@ -246,7 +246,8 @@ async def confirm_run(session: AsyncSession, run: Run, user: User) -> Run:
         )
 
     # 4-eyes (§2.4): triggerer ≠ confirmer when the env's tier requires it (was hardcoded to prod;
-    # now a per-tier flag), or when the env opts in. Human triggers only.
+    # now a per-tier flag), when the env is `protected` (CLAUDE.md §4: it forces confirmation +
+    # 4-eyes, never who may apply), or when the env opts in. Human triggers only.
     from sqlalchemy import select
 
     from app.models.tier import Tier
@@ -257,7 +258,7 @@ async def confirm_run(session: AsyncSession, run: Run, user: User) -> Run:
     # Fail closed: a four-eyes requirement is a security control, so an env pointing at a missing
     # tier row (should be impossible via the API, but never silently weaken) forces four-eyes.
     tier_four_eyes = tier_def.requires_four_eyes if tier_def else True
-    needs_four_eyes = tier_four_eyes or env.require_second_pair_of_eyes
+    needs_four_eyes = tier_four_eyes or env.protected or env.require_second_pair_of_eyes
     if (
         needs_four_eyes
         and run.triggered_by == TriggeredBy.manual

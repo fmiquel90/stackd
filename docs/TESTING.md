@@ -132,7 +132,7 @@ all. Counts in parentheses include parametrized cases and drift as tests are add
 | `test_tiers.py` (4) | Tier catalog: name charset (OIDC `sub` safety), `allowed_tiers` validated, deleting a tier strips grants, a tier in use can't be deleted. |
 | `test_users.py` (3) | User listing is admin-only; the `@mention` directory is readable by anyone; tier/destroy changes are audited. |
 | `test_audit.py` (2) | Mutations land in `/audit`, filter by action, CSV export columns; export is admin-only. |
-| `test_runs.py` (9) | Run lifecycle; one active run per env under concurrency (`23505`); tier gate; four-eyes; autodeploy and `warn` forcing `unconfirmed`; confirm only from `unconfirmed`; mock block; repo token masked in the claim; the claim carries `cred_phase`. |
+| `test_runs.py` (10) | Run lifecycle; one active run per env under concurrency (`23505`); tier gate; four-eyes on a `requires_four_eyes` tier and on a `protected` env; autodeploy and `warn` forcing `unconfirmed`; confirm only from `unconfirmed`; mock block; repo token masked in the claim; the claim carries `cred_phase`. |
 | `test_commit_pin.py` (6) | An unpinned run is pinned to the commit its plan checked out and the apply gets it; staleness then works for a manual run; a pinned SHA must match (`commit_mismatch` fails the run); a ref is re-pinned to its SHA; a malformed SHA → 400. |
 | `test_saved_plan.py` (10) | The plan is stored encrypted and served only to the run's apply job; it can't be replaced after the plan phase; a blob moved to another run's key doesn't decrypt; no saved plan → nothing served; proposed runs save none; destroy runs plan with `-destroy`; 64 MiB cap; deleted once the run is terminal, kept if that transition rolls back. |
 | `test_commands.py` (8) | Command runs: allowlist, read-only for writers, mutating needs `can_apply`, lifecycle + audit; mutating → `rw` token with the apply-window TTL, read-only → `ro` token with the 6 h TTL. |
@@ -218,7 +218,7 @@ The tier gate (an approver without `prod`) and staleness stay manual checks (DEV
 
 ## 5. Counts
 
-Roughly **279 API tests** (38 files), **179 worker tests** (15 files), **1 e2e scenario** and
+Roughly **280 API tests** (38 files), **179 worker tests** (15 files), **1 e2e scenario** and
 **9 front unit tests**, parametrized cases included. The numbers move with every change; count them
 instead of trusting this page:
 

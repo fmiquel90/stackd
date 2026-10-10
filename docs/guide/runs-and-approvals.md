@@ -67,10 +67,11 @@ different role, tier set or destroy right than your instance defaults.
 
 ## Four-eyes
 
-On an environment whose tier is flagged `requires_four_eyes` (the seeded `prod`), or any env with
-`require_second_pair_of_eyes`, the person who **triggered** the run cannot be the one who
-**confirms** it — another authorized approver must. It only applies to runs a human triggered: a
-webhook or cascade run has no triggerer to oppose, so any authorized approver can confirm it.
+On an environment whose tier is flagged `requires_four_eyes` (the seeded `prod`), a `protected`
+environment, or any env with `require_second_pair_of_eyes`, the person who **triggered** the run
+cannot be the one who **confirms** it — another authorized approver must. It only applies to runs
+a human triggered: a webhook or cascade run has no triggerer to oppose, so any authorized approver
+can confirm it.
 
 ## Friction proportional to risk
 
@@ -81,7 +82,8 @@ is a misclick safeguard only — it never bypasses `can_apply` (still evaluated 
 ## Autodeploy & checks
 
 An environment with `autodeploy` auto-confirms when the plan is clean — **but a `warn` check forces
-`unconfirmed`** so a human still sees it. A `protected` environment can never autodeploy.
+`unconfirmed`** so a human still sees it. A `protected` environment can never autodeploy, and
+requires four-eyes.
 
 Every [hook](hooks.md) result is kept on the run with the stage it ran at, from the plan job and
 then the apply job: `check_results.results` lists them all (`ok`, `warn`, `fail`),

@@ -46,8 +46,8 @@ Space                  a team or project boundary: who can see and do what
    minted for this job only. Hooks check the plan.
 3. **The run waits for a human** (unless the environment autodeploys a clean plan). An approver
    allowed on that tier reads the diff, the checks and every input with its origin, then confirms
-   or discards. If the tier requires four-eyes, that approver can't be the person who started the
-   run.
+   or discards. If the tier or the environment requires four-eyes, that approver can't be the
+   person who started the run.
 4. **A worker runs the apply job**: it applies the saved plan — exactly what was reviewed, on the
    same commit.
 5. **If the outputs changed, dependent environments re-plan** under their own approval rules.
@@ -275,10 +275,10 @@ someone a different role, tier set or destroy right there than their instance de
 Extra rules:
 
 - **Destroy** (`type=destroy`) additionally requires `can_destroy=true` — a separate, explicit right.
-- **Four-eyes**: on a tier flagged `requires_four_eyes` (the seeded `prod`), or when the
-  environment sets `require_second_pair_of_eyes`, **someone other than the person who triggered
-  the run must confirm it**. It only bites human-triggered runs — a webhook or cascade run has no
-  human to oppose.
+- **Four-eyes**: on a tier flagged `requires_four_eyes` (the seeded `prod`), on a `protected`
+  environment, or when the environment sets `require_second_pair_of_eyes`, **someone other than
+  the person who triggered the run must confirm it**. It only bites human-triggered runs — a
+  webhook or cascade run has no human to oppose.
 - **Mock block**: a run that consumed mock outputs cannot be applied unless `allow_mock_apply=true`
   (see §9).
 
@@ -607,7 +607,7 @@ Targets are deleted with their stack or environment.
 | **Job** | what a worker executes for a run: the plan job, the apply job, or a command job |
 | **`transition()`** | the only thing that changes a run's state |
 | **Tier** | configurable catalog; gates apply via the user's `allowed_tiers` set (not ordered) |
-| **Four-eyes** | the person who triggered a run can't confirm it, on a `requires_four_eyes` tier or when the environment requires it |
+| **Four-eyes** | the person who triggered a run can't confirm it, on a `requires_four_eyes` tier, a `protected` environment, or when the environment requires it |
 | **Hook** | shell step at a lifecycle stage; platform (governance, trusted) or repo (no secrets) |
 | **Check** | a hook's result (`ok`, `warn`, `fail`), kept on the run with its stage |
 | **Worker** | stateless agent that pulls and runs jobs |
