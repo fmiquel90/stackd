@@ -122,7 +122,10 @@ def test_a_plan_that_did_not_exit_0_or_2_fails_the_job(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path, rc: int, error: str
 ) -> None:
     client, tofu = _run(monkeypatch, tmp_path, "plan", rc)
-    assert client.events[-1] == ("job_failed", {"phase": "plan", "result": {"error": error}})
+    assert client.events[-1] == (
+        "job_failed",
+        {"phase": "plan", "result": {"error": error, "checks": []}},
+    )
     assert not any(kind == "phase_finished" for kind, _ in client.events)
     assert "plan.tfplan" not in client.uploads
     assert tofu == ["init", "plan"]  # not even shown
@@ -168,5 +171,8 @@ def test_a_plan_without_its_json_document_fails_the_job(
     # The after_plan checks would otherwise read `{}` — and pass on an empty plan.
     client, _tofu = _run(monkeypatch, tmp_path, "plan", 2, show_json)
     error = f"plan JSON unavailable, not checked: `tofu show -json` {reason}"
-    assert client.events[-1] == ("job_failed", {"phase": "plan", "result": {"error": error}})
+    assert client.events[-1] == (
+        "job_failed",
+        {"phase": "plan", "result": {"error": error, "checks": []}},
+    )
     assert client.uploads == {}  # neither plan.json nor the saved plan

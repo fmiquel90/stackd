@@ -79,13 +79,19 @@ def _run(
     on_failure: str,
     command: str = "exit 3",
     at: list[str] | None = None,
+    fail_at: str | None = None,
 ) -> tuple[_Client, list[str]]:
     """Run the job holding `stage`, with one hook there (or at each stage of `at`) running
-    `command`. Returns the client and the tofu subcommands that ran."""
+    `command`. Returns the client and the tofu subcommands that ran. `fail_at` fails one step
+    besides the hooks: a tofu subcommand (`init`, `plan`, `apply`), the plan's `show -json`
+    (`show`), or the `plan.json` upload (`upload`, an error the job doesn't catch); the job then
+    runs as the agent does (`_run_job`), which reports an uncaught error."""
     tofu: list[str] = []
 
     def fake_stream_json(cmd: list[str], cwd: Path, env: dict, **kw: Any) -> tuple:
         tofu.append(cmd[1])
+        if cmd[1] == fail_at:
+            return 1, []
         if cmd[1] == "plan":
             out = next(a.removeprefix("-out=") for a in cmd if a.startswith("-out="))
             Path(out).write_bytes(b"PK-plan")
@@ -94,6 +100,8 @@ def _run(
 
     def fake_subprocess_run(cmd: list[str], **kw: Any) -> subprocess.CompletedProcess[str]:
         tofu.append(cmd[1])
+        if fail_at == "show" and cmd[1:3] == ["show", "-json"]:
+            return subprocess.CompletedProcess(cmd, 1, "", "Error: unreadable plan")
         stdout = json.dumps(OUTPUTS) if cmd[1] == "output" else "{}"
         return subprocess.CompletedProcess(cmd, 0, stdout, "")
 
@@ -101,7 +109,7 @@ def _run(
 
     def fake_run_command(cmd: list[str], *args: Any, **kw: Any) -> int:
         tofu.append(cmd[1])
-        return 0
+        return 1 if cmd[1] == fail_at else 0
 
     monkeypatch.setattr(main, "run_command", fake_run_command)
     monkeypatch.setattr(main, "stream_json_command", fake_stream_json)
@@ -130,7 +138,16 @@ def _run(
     }
     client = _Client()
     settings = SimpleNamespace(workspace_root=str(tmp_path), leak_action="warn")
-    getattr(main, handler)(cast(ApiClient, client), job, cast(Settings, settings))
+    if fail_at is None:
+        getattr(main, handler)(cast(ApiClient, client), job, cast(Settings, settings))
+        return client, tofu
+    if fail_at == "upload":
+
+        def refuse(*args: Any) -> None:
+            raise RuntimeError("upload refused: 503")
+
+        monkeypatch.setattr(client, "upload_artifact", refuse)
+    main._run_job(cast(ApiClient, client), job, cast(Settings, settings))
     return client, tofu
 
 
@@ -245,6 +262,30 @@ def test_a_hooks_background_process_does_not_outlive_it(
     finally:
         with contextlib.suppress(ProcessLookupError):
             os.kill(pid, signal.SIGKILL)
+
+
+@pytest.mark.parametrize(
+    ("fail_at", "phase", "ran"),
+    [
+        ("init", "init", ["before_init"]),
+        ("plan", "plan", ["before_init", "after_init", "before_plan"]),
+        ("show", "plan", ["before_init", "after_init", "before_plan"]),  # no plan JSON
+        ("upload", "plan", ["before_init", "after_init", "before_plan"]),  # an uncaught error
+        ("apply", "apply", ["before_apply"]),
+    ],
+)
+def test_a_job_failing_on_no_check_reports_the_checks_it_ran(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, fail_at: str, phase: str, ran: list[str]
+) -> None:
+    # §8.3: whatever ends the job, its job_failed carries the check results of the stages that
+    # ran, for the API to record them and audit a warning among them.
+    stages = [s for s, (handler, _) in _STAGES.items() if handler == _STAGES[ran[0]][0]]
+    client, _tofu = _run(monkeypatch, tmp_path, ran[0], "repo", "warn", at=stages, fail_at=fail_at)
+    kind, kw = client.events[-1]
+    assert (kind, kw["phase"]) == ("job_failed", phase), client.events
+    assert kw["result"]["error"]
+    warned = {"name": "check", "status": "warn", "detail": "exit 3"}
+    assert kw["result"]["checks"] == [{**warned, "stage": s} for s in ran]
 
 
 @pytest.mark.parametrize("phase", ["plan", "apply"])

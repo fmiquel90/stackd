@@ -280,7 +280,25 @@ def _init_cmd(
     return cmd
 
 
-def handle_plan(client: ApiClient, job: dict, settings: Settings) -> None:
+def _job_failed(
+    client: ApiClient,
+    job_id: str,
+    phase: str | None,
+    checks: list[dict[str, Any]],
+    **result: Any,
+) -> None:
+    """Report the job failed at `phase` with every check result it has so far (§8.3), whatever
+    ended it — a failing check, a tofu error, a timeout, the plan JSON: the API records them, and
+    audits a warning among them, as it does a finished job's."""
+    client.event(job_id, "job_failed", phase=phase, result={**result, "checks": checks})
+
+
+def handle_plan(
+    client: ApiClient, job: dict, settings: Settings, checks: list[dict[str, Any]] | None = None
+) -> None:
+    """The plan job (§7.4). `checks` collects its check results, for the caller to report too
+    should the job end on an uncaught error."""
+    checks = [] if checks is None else checks
     job_id = job["job_id"]
     env_info = job["environment"]
     masker = Masker(job.get("mask_values", []))
@@ -307,7 +325,6 @@ def handle_plan(client: ApiClient, job: dict, settings: Settings) -> None:
             **job.get("env", {}),
         }  # no secrets / cloud creds to repo hooks (§8.3)
         tf_env = _tofu_env(platform_env, backend)  # + state-backend creds, for tofu only
-        checks: list[dict] = []
 
         # Report the exact commit checked out: the API pins the run to it (or refuses a mismatch
         # with the commit it pinned), and the apply job clones exactly that SHA (§7.2/§7.3).
@@ -332,9 +349,7 @@ def handle_plan(client: ApiClient, job: dict, settings: Settings) -> None:
             return aborted
 
         if stage("before_init"):
-            return client.event(
-                job_id, "job_failed", phase="before_init", result={"checks": checks}
-            )
+            return _job_failed(client, job_id, "before_init", checks)
         with _tofu_files(ws, cwd, job):
             init_rc = run_command(
                 _init_cmd(tool, backend, job.get("backend_config_file"), job.get("backend_config")),
@@ -345,10 +360,10 @@ def handle_plan(client: ApiClient, job: dict, settings: Settings) -> None:
                 streamer=streamer,
             )
         if init_rc != 0:
-            return client.event(job_id, "job_failed", phase="init", result={"error": "init failed"})
+            return _job_failed(client, job_id, "init", checks, error="init failed")
         for name in ("after_init", "before_plan"):
             if stage(name):
-                return client.event(job_id, "job_failed", phase=name, result={"checks": checks})
+                return _job_failed(client, job_id, name, checks)
 
         # `-json`: stream readable @message lines while collecting structured events (change_summary
         # for the counts, diagnostics for the real error message). detailed-exitcode: 0=no changes,
@@ -381,13 +396,8 @@ def handle_plan(client: ApiClient, job: dict, settings: Settings) -> None:
             # Only 0 and 2 are a plan: anything else — an error, the watchdog's kill (124), a
             # signal — fails the job closed, never passes for "no changes".
             error = _exit_error("plan", code, _DEFAULT_TIMEOUT_SECONDS, events)
-            return client.event(
-                job_id,
-                "job_failed",
-                phase="plan",
-                # Mask: a tofu diagnostic can echo a sensitive variable value verbatim (§5.1).
-                result={"error": masker.mask(error)},
-            )
+            # Mask: a tofu diagnostic can echo a sensitive variable value verbatim (§5.1).
+            return _job_failed(client, job_id, "plan", checks, error=masker.mask(error))
         has_changes = code == 2
         summary = _summary_from_events(events)
 
@@ -416,9 +426,7 @@ def handle_plan(client: ApiClient, job: dict, settings: Settings) -> None:
         unusable = _plan_json_unusable(show)
         if unusable:
             error = f"plan JSON unavailable, not checked: `{tool} show -json` {unusable}"
-            return client.event(
-                job_id, "job_failed", phase="plan", result={"error": masker.mask(error)}
-            )
+            return _job_failed(client, job_id, "plan", checks, error=masker.mask(error))
         plan_doc = show.stdout
         # It lists the run's variable values in clear (§8.3): the artifact, and what repo hooks
         # read, is a copy with every sensitive value masked.
@@ -433,11 +441,8 @@ def handle_plan(client: ApiClient, job: dict, settings: Settings) -> None:
         leak = _secret_leak_in_outputs(plan_doc, masker)
         if leak:
             if settings.leak_action == "fail":
-                return client.event(
-                    job_id,
-                    "job_failed",
-                    phase="plan",
-                    result={"error": f"secret_leak_suspected: {leak}"},
+                return _job_failed(
+                    client, job_id, "plan", checks, error=f"secret_leak_suspected: {leak}"
                 )
             checks.append(
                 {"name": "secret_leak_suspected", "status": "warn", "detail": leak, "stage": "plan"}
@@ -473,7 +478,7 @@ def handle_plan(client: ApiClient, job: dict, settings: Settings) -> None:
             )
             checks.extend({**r, "stage": "after_plan"} for r in results)
         if aborted:
-            return client.event(job_id, "job_failed", phase="after_plan", result={"checks": checks})
+            return _job_failed(client, job_id, "after_plan", checks)
 
         client.event(
             job_id,
@@ -488,7 +493,11 @@ def handle_plan(client: ApiClient, job: dict, settings: Settings) -> None:
         ws.cleanup()
 
 
-def handle_apply(client: ApiClient, job: dict, settings: Settings) -> None:
+def handle_apply(
+    client: ApiClient, job: dict, settings: Settings, checks: list[dict[str, Any]] | None = None
+) -> None:
+    """The apply job (§7.3/§7.4). `checks` as in `handle_plan`."""
+    checks = [] if checks is None else checks
     job_id = job["job_id"]
     env_info = job["environment"]
     masker = Masker(job.get("mask_values", []))
@@ -501,12 +510,8 @@ def handle_apply(client: ApiClient, job: dict, settings: Settings) -> None:
         # plan job's report (§7.2) — never on wherever the branch head has moved since.
         commit_sha = env_info.get("commit_sha")
         if not commit_sha:
-            return client.event(
-                job_id,
-                "job_failed",
-                phase="apply",
-                result={"error": "apply refused: the run has no pinned commit; trigger a new plan"},
-            )
+            error = "apply refused: the run has no pinned commit; trigger a new plan"
+            return _job_failed(client, job_id, "apply", checks, error=error)
         cwd = ws.git_clone(
             env_info["repo_url"],
             commit_sha,
@@ -521,7 +526,6 @@ def handle_apply(client: ApiClient, job: dict, settings: Settings) -> None:
         platform_env = _run_env(ws, job)
         repo_env = {**_repo_environ(), **job.get("env", {})}
         tf_env = _tofu_env(platform_env, backend)  # + state-backend creds, for tofu only
-        checks: list[dict[str, Any]] = []
 
         def stage(name: str) -> bool:
             """As in the plan job (§8.3): True when an `on_failure: fail` hook failed. Every result is
@@ -549,7 +553,7 @@ def handle_apply(client: ApiClient, job: dict, settings: Settings) -> None:
                 streamer=streamer,
             )
         if init_rc != 0:
-            return client.event(job_id, "job_failed", phase="init", result={"error": "init failed"})
+            return _job_failed(client, job_id, "init", checks, error="init failed")
         # The saved plan the human reviewed (§7.4). Missing or unreadable → the apply fails closed:
         # it never re-plans, so it can only ever apply what was reviewed.
         try:
@@ -558,17 +562,11 @@ def handle_apply(client: ApiClient, job: dict, settings: Settings) -> None:
         except Exception as exc:  # noqa: BLE001 — any refusal or transport error: fail closed
             saved_plan, refusal = b"", str(exc)
         if refusal:
-            return client.event(
-                job_id,
-                "job_failed",
-                phase="apply",
-                result={"error": masker.mask(f"saved plan unavailable, not applied: {refusal}")},
-            )
+            error = masker.mask(f"saved plan unavailable, not applied: {refusal}")
+            return _job_failed(client, job_id, "apply", checks, error=error)
         # A failing before_apply hook fails the job before tofu runs: nothing is applied.
         if stage("before_apply"):
-            return client.event(
-                job_id, "job_failed", phase="before_apply", result={"checks": checks}
-            )
+            return _job_failed(client, job_id, "before_apply", checks)
         # Written only now, after the before_apply hooks (a repo hook can't swap it), and removed
         # right after the apply (after_apply repo hooks never see its secrets).
         plan_file = ws.write_plan(cwd, saved_plan)
@@ -596,13 +594,8 @@ def handle_apply(client: ApiClient, job: dict, settings: Settings) -> None:
                 if code == 124
                 else (_apply_error(events) or "apply failed")
             )
-            return client.event(
-                job_id,
-                "job_failed",
-                phase="apply",
-                # Mask: a tofu diagnostic can echo a sensitive variable value verbatim (§5.1).
-                result={"error": masker.mask(error)},
-            )
+            # Mask: a tofu diagnostic can echo a sensitive variable value verbatim (§5.1).
+            return _job_failed(client, job_id, "apply", checks, error=masker.mask(error))
         with _tofu_files(ws, cwd, job, tfvars=False):
             out = subprocess.run(
                 [tool, "output", "-json"], cwd=cwd, env=tf_env, capture_output=True, text=True
@@ -620,12 +613,7 @@ def handle_apply(client: ApiClient, job: dict, settings: Settings) -> None:
         # cascades from it. But the infra has changed: its outputs, read before the hooks ran,
         # are reported so the API records them (§9.1).
         if stage("after_apply"):
-            return client.event(
-                job_id,
-                "job_failed",
-                phase="after_apply",
-                result={"checks": checks, "outputs": outputs},
-            )
+            return _job_failed(client, job_id, "after_apply", checks, outputs=outputs)
         client.event(job_id, "phase_finished", result={"outputs": outputs, "checks": checks})
     finally:
         ws.cleanup()
@@ -766,11 +754,12 @@ def _run_job(client: ApiClient, job: dict, settings: Settings) -> None:
         "claimed job",
         extra={"event": "agent.claimed", "run_id": job["job_id"], "phase": job["phase"]},
     )
+    checks: list[dict[str, Any]] = []  # the job's check results so far (§8.3)
     try:
         if job["phase"] == "plan":
-            handle_plan(client, job, settings)
+            handle_plan(client, job, settings, checks)
         elif job["phase"] == "apply":
-            handle_apply(client, job, settings)
+            handle_apply(client, job, settings, checks)
         else:
             handle_command_run(client, job, settings)
         log.info("job done", extra={"event": "agent.done", "run_id": job["job_id"]})
@@ -782,7 +771,8 @@ def _run_job(client: ApiClient, job: dict, settings: Settings) -> None:
         log.error("job failed", extra={"event": "agent.failed", "run_id": jid, "error": detail})
         if jid:
             try:
-                client.event(jid, "job_failed", phase=jphase, result={"error": detail})
+                # With the checks run so far: an error ending the job doesn't lose them (§8.3).
+                _job_failed(client, jid, jphase, checks, error=detail)
             except Exception as report_exc:  # noqa: BLE001 — e.g. the API already failed the run
                 log.warning(
                     "job_failed not accepted",

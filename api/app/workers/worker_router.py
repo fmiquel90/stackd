@@ -357,8 +357,12 @@ async def post_event(
         failed_check = any(c.get("status") == "fail" for c in checks)
         action = "run.check_failed" if failed_check else "run.apply_failed"
         failed_fields: dict[str, Any] = {"error": result.get("error") or body.phase or "job failed"}
-        if checks:  # the failing check, and the job's others: recorded like a finished job's
+        if checks:
+            # The job's checks so far, whatever ended it (a failing check, a tofu error, a
+            # timeout…): recorded, and a warning among them audited, like a finished job's (§8.3)
+            # — in the failure's transaction.
             failed_fields["check_results"] = _check_results(run, checks)
+            await _audit_warned_checks(session, worker, run, checks)
         await transition(
             session,
             run,

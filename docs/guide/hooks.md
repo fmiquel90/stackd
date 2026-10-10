@@ -86,7 +86,7 @@ Every hook result is kept on the run, with the stage it ran at, across the plan 
 
 `results` lists every check (`ok`, `warn`, `fail`); `checks` only the ones that need attention,
 which is what the run page shows. A job that fails on something other than a check (a tofu error,
-for example) records no check results.
+for example) still records the checks of the stages that ran, and a warning among them is audited.
 
 ## What hooks can see
 
