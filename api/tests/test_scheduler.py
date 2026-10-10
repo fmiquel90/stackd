@@ -4,8 +4,73 @@ import uuid
 from datetime import UTC, datetime, timedelta
 
 import httpx
+import pytest
 
 from tests.conftest_phase2 import event, login, make_env, make_stack, register_worker
+
+
+async def test_scheduler_lock_survives_task_commit(client: httpx.AsyncClient) -> None:
+    """§7.5: the tasks commit mid-way, which hands the session's connection back to the pool. The
+    advisory lock must still be released on the connection that took it — otherwise the unlock
+    misses, the lock leaks on a pooled connection and later ticks silently skip the task."""
+    from sqlalchemy import text
+    from sqlalchemy.exc import DBAPIError
+    from sqlalchemy.ext.asyncio import AsyncSession
+
+    from app.db import SessionLocal
+    from app.scheduler.tasks import _with_lock
+
+    key = 74999  # not one of the real task keys
+    ran: list[datetime] = []
+
+    async def task(session: AsyncSession, now: datetime) -> None:
+        await session.execute(text("SELECT 1"))
+        await session.commit()  # the session's connection goes back to the pool
+        await session.execute(text("SELECT 1"))
+        await session.commit()
+        ran.append(now)
+
+    async def held() -> int:
+        async with SessionLocal() as session:
+            return (
+                await session.execute(
+                    text(
+                        "SELECT count(*) FROM pg_locks WHERE locktype = 'advisory'"
+                        " AND classid = 0 AND objid = :k AND objsubid = 1"
+                    ).bindparams(k=key)
+                )
+            ).scalar_one()
+
+    # Several idle pooled connections, so a checkout after the task's commit gets another one
+    # than the connection the session started on (QueuePool hands them out FIFO).
+    warm = [SessionLocal() for _ in range(3)]
+    for session in warm:
+        await session.execute(text("SELECT 1"))
+    for session in warm:
+        await session.close()
+
+    for _ in range(2):
+        async with SessionLocal() as session:
+            await _with_lock(session, key, task)
+        assert await held() == 0
+    assert len(ran) == 2
+
+    # Another replica holding the key still makes this tick skip the task (runs once, §7.5).
+    async with SessionLocal() as other:
+        await other.execute(text("SELECT pg_advisory_lock(:k)").bindparams(k=key))
+        async with SessionLocal() as session:
+            await _with_lock(session, key, task)
+        await other.execute(text("SELECT pg_advisory_unlock(:k)").bindparams(k=key))
+    assert len(ran) == 2
+
+    # A task that fails its session: the task's own error surfaces and the lock is still released.
+    async def failing(session: AsyncSession, now: datetime) -> None:
+        await session.execute(text("SELECT 1 / 0"))
+
+    async with SessionLocal() as session:
+        with pytest.raises(DBAPIError, match="division by zero"):
+            await _with_lock(session, key, failing)
+    assert await held() == 0
 
 
 async def test_worker_lost_fails_active_run(client: httpx.AsyncClient) -> None:

@@ -7,7 +7,7 @@ from sqlalchemy import select, text, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import get_settings
-from app.db import SessionLocal
+from app.db import SessionLocal, get_sessionmaker
 from app.drift.service import detect_drift
 from app.enums import ACTIVE_STATES, RunEventActor, RunState, WorkerStatus
 from app.logging import get_logger
@@ -93,15 +93,23 @@ async def detect_worker_lost(session: AsyncSession, now: datetime) -> int:
 
 
 async def _with_lock(session: AsyncSession, key: int, coro) -> None:  # type: ignore[no-untyped-def]
-    got = (
-        await session.execute(text("SELECT pg_try_advisory_lock(:k)").bindparams(k=key))
-    ).scalar()
-    if not got:
-        return
-    try:
-        await coro(session, datetime.now(UTC))
-    finally:
-        await session.execute(text("SELECT pg_advisory_unlock(:k)").bindparams(k=key))
+    """Run `coro(session, now)` only if no other replica holds `key` (§7.5). The session-level
+    advisory lock lives on a dedicated connection held for the task's whole run, never on the
+    task's session: the tasks commit mid-way, which hands the session's connection back to the
+    pool, so an unlock through the session could land on another pooled connection, miss, and leak
+    the lock (later ticks would then silently skip the task). AUTOCOMMIT keeps the lock connection
+    idle rather than idle-in-transaction, and the unlock runs even if the task's session failed."""
+    engine = get_sessionmaker().kw["bind"]  # the shared AsyncEngine (same pool as the session)
+    async with engine.execution_options(isolation_level="AUTOCOMMIT").connect() as lock_conn:
+        got = (
+            await lock_conn.execute(text("SELECT pg_try_advisory_lock(:k)").bindparams(k=key))
+        ).scalar()
+        if not got:
+            return
+        try:
+            await coro(session, datetime.now(UTC))
+        finally:
+            await lock_conn.execute(text("SELECT pg_advisory_unlock(:k)").bindparams(k=key))
 
 
 async def scheduler_loop() -> None:
