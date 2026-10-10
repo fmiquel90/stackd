@@ -79,7 +79,7 @@ The "apply everywhere except prod" need depends on the targeted environment, not
 - Apply rule: `confirm` allowed iff `role ∈ {approver, admin}` **AND** `env.tier ∈ allowed_tiers` (set membership). Example: Bob `{dev, staging}` confirms in dev/staging, denied in prod; Alice `{dev, staging, prod}` confirms everywhere; a user `{dev, prod}` skips staging.
 - `users.can_destroy` — a run `type=destroy` (trigger AND confirm) requires `can_destroy=true` **in addition** to the tier rule. A destruction is more dangerous than an apply: a distinct, explicit right.
 
-**Relationship with `protected`**: we **decouple** sensitivity and access right. `environments.protected` carries only its own effects — forcing confirmation (no autodeploy) and enabling 4-eyes; *who* can confirm comes from the tier set. An env can be `tier=prod` without being `protected` and vice versa.
+**Relationship with `protected`**: we **decouple** sensitivity and access right. `environments.protected` carries only its own effects — forcing confirmation (no autodeploy) and enabling 4-eyes; *who* can confirm comes from the tier set. An env can be `tier=prod` without being `protected` and vice versa. **Code today, pending a decision**: `protected` only forces confirmation; four-eyes comes from the tier's `requires_four_eyes` or the env's `require_second_pair_of_eyes`, never from `protected` (CLAUDE.md §4 says `protected` forces it too).
 
 **4-eyes / tier consistency**: a tier with `requires_four_eyes=true` (seeded on `prod`; was hardcoded to the prod tier, now a per-tier flag) forces self-confirmation off by default (the triggerer ≠ the confirmer), as does the per-env `require_second_pair_of_eyes`. The check **fails closed**: if an env points at a tier that no longer exists in the catalog, four-eyes is required rather than silently dropped.
 
@@ -148,7 +148,8 @@ id uuid PK, stack_id FK, name text unique(stack),       -- dev, staging, prod
 tier text references tiers.name,   -- §2.4: carries the apply/destroy permissions (catalog, not enum)
 branch text,                       -- branch tracked by THIS env
 autodeploy bool,                   -- forced false if protected
-protected bool,                    -- §2.4: forces confirmation + 4-eyes (NOT the access control → tier)
+protected bool,                    -- §2.4: forces confirmation (+ 4-eyes as specified; not in code
+                                   --   yet, §2.4) — NOT the access control → tier
 require_second_pair_of_eyes bool,
 managed_state bool,
 allow_mock_apply bool default false,  -- §9.3: allow the apply of a run having consumed mocks

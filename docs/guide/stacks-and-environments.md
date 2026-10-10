@@ -56,8 +56,8 @@ curl -s -X POST localhost:8000/api/v1/stacks/$STACK/environments \
 
 - **`tier`** (a configurable catalog, e.g. `dev`/`staging`/`prod`/`qa`) — carries apply/destroy permissions: `can_apply` requires `env.tier ∈ user.allowed_tiers`. See [Runs & approvals](runs-and-approvals.md).
 - **`branch`** — the branch this environment tracks for staleness and webhook-driven runs.
-- **`protected`** — forces confirmation and 4-eyes; it is **not** the access control (that is `tier`).
-- **`require_second_pair_of_eyes`** — the triggerer cannot confirm (already implied on a tier flagged `requires_four_eyes`, like the seeded `prod`; useful on staging).
+- **`protected`** — forces confirmation (never autodeploys); it is **not** the access control (that is `tier`). It does not by itself require four-eyes: use a tier flagged `requires_four_eyes` or `require_second_pair_of_eyes`.
+- **`require_second_pair_of_eyes`** — four-eyes: the person who triggered a run cannot confirm it (already implied on a tier flagged `requires_four_eyes`, like the seeded `prod`; useful on staging).
 - **`managed_state`** — when true, Terraform talks to Stackd's HTTP backend (state bytes in S3) and the repo must declare **no** `backend` block: the worker adds `backend "http" {}` itself. Set `false` to keep your own `backend "s3"`. See [Concepts §8](../CONCEPTS.md#8-managed-state-s3-behind-an-http-backend).
 - **`allow_mock_apply`** — allow applying a run that consumed mock outputs (default `false`). See [Dependencies & mocks](dependencies-and-mocks.md).
 - **`labels`** — JSON tags used to target a worker pool.
