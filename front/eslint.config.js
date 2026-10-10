@@ -35,6 +35,11 @@ export default tseslint.config(
       // Focus moved by autoFocus is fine when the field appears because the user just asked for it
       // (open a composer, open the confirm popover) — DESIGN §7 forbids only focus moved by events.
       "jsx-a11y/no-autofocus": "off",
+      // Our form primitives render a real <input>/<select>: a <label> wrapping them is associated.
+      "jsx-a11y/label-has-associated-control": [
+        "error",
+        { controlComponents: ["Input", "NativeSelect", "Checkbox"], depth: 3 },
+      ],
       // "warn" while the pre-redesign pages still carry inline colours; switched to "error" once
       // every screen is migrated (redesign stage 4).
       "no-restricted-syntax": [

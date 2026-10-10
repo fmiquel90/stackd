@@ -120,8 +120,10 @@ Wherever an environment is summarised — the overview matrix (`EnvCell`), the s
 node, the ⌘K results — it is summarised by **one rule**, implemented once (`lib/envSummary.ts`) and
 unit-tested:
 
-1. **Primary run** = the environment's **active run** if any (non-terminal state; unique per env,
-   SPECS §3.5). If that run is `proposed` it is shown with a `PR` marker, since it occupies the env.
+1. **Primary run** = the environment's **active run** if any: the run holding the env (non-terminal,
+   unique per env, SPECS §3.5), else a `queued` one — the uniqueness index excludes `queued`, so a run
+   queued behind an unconfirmed plan must never hide that plan. If the primary run is `proposed` it is
+   shown with a `PR` marker, since it occupies the env.
 2. Otherwise, the **last terminal `tracked` or `destroy` run whose outcome is not DISCARDED or
    CANCELED**. `proposed` runs (PR plans), drift-check runs (`triggered_by=schedule`) and `command`
    runs **never** stand for the env.
@@ -425,7 +427,7 @@ Overview · demo                                       filter [ app____ ]  state
 
 **Attention zone** (pinned above the matrix, never auto-collapsed while it holds a *needs you* item):
 
-- Groups, in order: **Needs you** (unconfirmed, the user can confirm), **Waiting on someone** (unconfirmed, the user cannot confirm — with the missing condition in words), **Failed** (env's primary run failed), **Drift** (`drifted` or check error), **Blocked** (primary run mocked or fallback with apply not allowed), **Stale plans** (unconfirmed run whose commit ≠ env head). A row appears in the first matching group only.
+- Groups, in order: **Needs you** (unconfirmed, the user can confirm), **Waiting on someone** (unconfirmed, the user cannot confirm — with the missing condition in words), **Failed** (env's primary run failed), **Drift** (`drifted` or check error), **Blocked** (primary run mocked or fallback with apply not allowed). A row appears in the first matching group only. A stale plan (unconfirmed run whose commit ≠ env head) is a `↑ stale plan` tag on its row — every unconfirmed run already falls in one of the first three groups.
 - Row: summary glyph + `stack / env` + badge + plan summary + who/age + the reason or next step + Enter target (the run page, Plan tab for decisions, Logs tab at first error for failures, env page for drift).
 - Empty zone: one line, "Nothing needs attention in demo." — not hidden, so its absence is never ambiguous.
 

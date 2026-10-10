@@ -37,7 +37,12 @@ const byNewest = (a: Run, b: Run) => b.created_at.localeCompare(a.created_at);
 
 export function summarizeEnv(env: Environment, runs: Run[]): EnvSummary {
   const sorted = [...runs].sort(byNewest);
-  const activeRun = sorted.find((r) => isActive(r.state)) ?? null;
+  // The run that holds the env (unique per env, SPECS §3.5 — the index excludes `queued`) wins over a
+  // queued one: a queued run behind an unconfirmed plan must not hide the pending decision.
+  const activeRun =
+    sorted.find((r) => isActive(r.state) && r.state !== "queued") ??
+    sorted.find((r) => r.state === "queued") ??
+    null;
   const primary = activeRun ?? sorted.find(isRealOutcome) ?? null;
   const deployed = sorted.find((r) => r.type === "tracked" && r.state === "finished");
 

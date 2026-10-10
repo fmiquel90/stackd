@@ -104,6 +104,18 @@ describe("envSummary (DESIGN §2.3)", () => {
     expect(s.primary?.id).toBe("r1");
     expect(s.active).toBe(true);
   });
+  it("prefers the run holding the env over a queued one behind it", () => {
+    const pending = makeRun({
+      id: "held",
+      state: "unconfirmed",
+      used_mocks: true,
+      created_at: "2026-10-10T20:00:00Z",
+    });
+    const queued = makeRun({ id: "q", state: "queued", created_at: "2026-10-10T20:05:00Z" });
+    const s = summarizeEnv(env, [queued, pending]);
+    expect(s.primary?.id).toBe("held");
+    expect(s.modifiers.mocked).toBe(true);
+  });
   it("ignores PR plans and drift checks once idle", () => {
     const applied = makeRun({
       id: "a",

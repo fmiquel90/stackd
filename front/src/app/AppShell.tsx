@@ -46,10 +46,13 @@ import { CommandPalette } from "./CommandPalette";
 import { KeyboardProvider, useHotkeys, useKeyboardSettings } from "./keyboard";
 import { NAV } from "./nav";
 import { SpaceProvider, useEntitySpace, useSpaces } from "./SpaceContext";
+import { useSpaceEnvs } from "@/features/data/spaceEnvs";
 import { useTheme } from "./theme";
 
 // Route-level code splitting: each page is its own chunk; the graph stack loads only on /graph.
-const StacksPage = lazy(() => import("@/pages/StacksPage").then((m) => ({ default: m.StacksPage })));
+const OverviewPage = lazy(() =>
+  import("@/features/overview/OverviewPage").then((m) => ({ default: m.OverviewPage })),
+);
 const StackDetailPage = lazy(() =>
   import("@/pages/StackDetailPage").then((m) => ({ default: m.StackDetailPage })),
 );
@@ -88,11 +91,25 @@ function NavLinks({ user, onNavigate }: { user: User; onNavigate?: () => void })
               <n.icon size={17} strokeWidth={1.5} aria-hidden />
               {n.label}
               {n.label === "Workers" && <WorkersCount />}
+              {n.label === "Overview" && <NeedsYouCount user={user} />}
             </NavLink>
           </li>
         );
       })}
     </ul>
+  );
+}
+
+/** Decisions that need the viewer in the current space (DESIGN §4) — the reserved human signal. */
+function NeedsYouCount({ user }: { user: User }) {
+  const { current } = useSpaces();
+  const { needsYou } = useSpaceEnvs(current?.id, user);
+  if (!needsYou.length) return null;
+  return (
+    <span className="ml-auto inline-flex h-5 min-w-5 items-center justify-center rounded-badge bg-st-decision px-1 font-data text-[11px] text-onfill">
+      {needsYou.length}
+      <span className="sr-only"> decision{needsYou.length > 1 ? "s" : ""} need you</span>
+    </span>
   );
 }
 
@@ -520,7 +537,7 @@ function AppRoutes() {
         element={
           <>
             <UnknownSpace />
-            <StacksPage />
+            <OverviewPage />
           </>
         }
       />
