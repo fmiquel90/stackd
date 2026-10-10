@@ -95,10 +95,11 @@ async def detect_drift(session: AsyncSession, now: datetime) -> int:
 
 
 async def _notify_drift(session: AsyncSession, env: Environment, run: Run) -> None:
-    """In-app notification to every eligible approver for the env's tier (§17), like an approval
-    request. Fired once per transition into drift (the caller debounces)."""
+    """In-app notification to every user who could approve an apply on this env (§17) — same
+    audience as an approval request (space access + can_apply). Fired once per transition into
+    drift (the caller debounces)."""
     ctx = {"environment_id": str(env.id), "environment": env.name, "tier": env.tier}
-    for uid in await eligible_approver_ids(session, env.tier):
+    for uid in await eligible_approver_ids(session, env):
         await notify(session, uid, "drift_detected", run_id=run.id, context=ctx)
 
 

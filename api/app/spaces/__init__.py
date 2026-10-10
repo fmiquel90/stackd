@@ -11,6 +11,7 @@ from app.spaces.service import (
     membership_from_defaults,
     require_space_access,
     resolve_target_space,
+    users_with_space_access,
 )
 
 __all__ = [
@@ -26,4 +27,5 @@ __all__ = [
     "membership_from_defaults",
     "require_space_access",
     "resolve_target_space",
+    "users_with_space_access",
 ]

@@ -67,6 +67,29 @@ async def require_space_access(
     return membership
 
 
+async def users_with_space_access(
+    session: AsyncSession, space_id: uuid.UUID
+) -> list[tuple[User, SpaceMembership | None]]:
+    """Bulk form of `require_space_access` (reader floor): every enabled user who reaches the
+    space — a member of it, or an instance admin — paired with their membership (None for an
+    admin without one), so a caller can evaluate effective permissions (`can_apply`) for the whole
+    audience without a query per user. Keep the predicate in step with `require_space_access`."""
+    rows = (
+        await session.execute(
+            select(User, SpaceMembership)
+            .outerjoin(
+                SpaceMembership,
+                (SpaceMembership.user_id == User.id) & (SpaceMembership.space_id == space_id),
+            )
+            .where(
+                User.disabled.is_(False),
+                SpaceMembership.id.is_not(None) | (User.role == Role.admin),
+            )
+        )
+    ).all()
+    return [(u, m) for u, m in rows]
+
+
 async def guard_stack(
     session: AsyncSession, user: User, stack: Stack, *, min_role: Role = Role.reader
 ) -> SpaceMembership | None:
