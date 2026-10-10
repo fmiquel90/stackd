@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import json
+import os
+import signal
 import subprocess
 import threading
 import time
@@ -14,6 +16,13 @@ from agent.masking import Masker
 # Upper bound on any single subprocess so a hung tofu/hook can't pin a worker forever (the apply
 # phase is the longest legitimate one). Exit 124 mirrors coreutils `timeout`.
 _DEFAULT_TIMEOUT_SECONDS = 2 * 60 * 60
+# A hook's own cap (§8.3): 10 min, which the worker's operator may change. Past it the hook is
+# killed and fails, by its `on_failure`.
+_HOOK_TIMEOUT_SECONDS = 10 * 60
+
+
+def _hook_timeout() -> int:
+    return int(os.environ.get("STACKD_HOOK_TIMEOUT_SECONDS") or _HOOK_TIMEOUT_SECONDS)
 
 
 class LogStreamer:
@@ -49,7 +58,8 @@ def _stream_proc(
 ) -> int:
     """Run a command, applying `transform` to each output line before streaming it (return None to
     skip a line, or a list to expand one line into several). A watchdog kills the process past
-    `timeout` (exit 124, like coreutils `timeout`)."""
+    `timeout` (exit 124, like coreutils `timeout`) — its whole process group: a hook's children,
+    tofu's providers, which would otherwise outlive it and hold its output open."""
     proc = subprocess.Popen(
         cmd,
         cwd=cwd,
@@ -58,12 +68,16 @@ def _stream_proc(
         stderr=subprocess.STDOUT,
         text=True,
         bufsize=1,
+        start_new_session=True,
     )
     killed = {"v": False}
 
     def _kill() -> None:
         killed["v"] = True
-        proc.kill()
+        try:
+            os.killpg(proc.pid, signal.SIGKILL)
+        except ProcessLookupError:
+            pass
 
     timer = threading.Timer(timeout, _kill)
     timer.start()
@@ -180,13 +194,15 @@ def run_hooks(
     platform_files: Callable[[], AbstractContextManager[object]] = nullcontext,
 ) -> tuple[list[dict], bool]:
     """Run a stage's hooks. Returns (check_results, aborted). A `fail` hook aborts; `warn` continues
-    but is surfaced and will force manual confirmation (§8.3). Repo hooks get `repo_env` (no
+    but is surfaced and will force manual confirmation (§8.3). A hook running past its timeout
+    (`STACKD_HOOK_TIMEOUT_SECONDS`, 10 min) is killed and fails the same way. Repo hooks get `repo_env` (no
     secrets / cloud creds); platform hooks get `platform_env`, and run inside `platform_files()`
     (the secret files only they may read, on disk only while one of them runs)."""
     results: list[dict] = []
     for hook in hooks:
         section = f"hook:{hook['name']}"
         repo = hook.get("source") == "repo"
+        timeout = _hook_timeout()
         with nullcontext() if repo else platform_files():
             code = run_command(
                 ["sh", "-c", hook["command"]],
@@ -195,13 +211,15 @@ def run_hooks(
                 phase=phase,
                 section=section,
                 streamer=streamer,
+                timeout=timeout,
             )
         if code == 0:
             results.append({"name": hook["name"], "status": "ok", "detail": None})
             continue
         on_failure = hook.get("on_failure", "fail")
         status = "fail" if on_failure == "fail" else "warn"
-        results.append({"name": hook["name"], "status": status, "detail": f"exit {code}"})
+        detail = f"timed out after {timeout}s" if code == 124 else f"exit {code}"
+        results.append({"name": hook["name"], "status": status, "detail": detail})
         if status == "fail":
             return results, True
     return results, False

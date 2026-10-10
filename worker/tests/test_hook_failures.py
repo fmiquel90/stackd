@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import json
 import subprocess
+import time
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, cast
@@ -67,10 +68,15 @@ class _Workspace(Workspace):
 
 
 def _run(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, stage: str, source: str, on_failure: str
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    stage: str,
+    source: str,
+    on_failure: str,
+    command: str = "exit 3",
 ) -> tuple[_Client, list[str]]:
-    """Run the job holding `stage`, with one hook there that exits 3. Returns the client and the
-    tofu subcommands that ran."""
+    """Run the job holding `stage`, with one hook there running `command`. Returns the client and
+    the tofu subcommands that ran."""
     tofu: list[str] = []
 
     def fake_stream_json(cmd: list[str], cwd: Path, env: dict, **kw: Any) -> tuple:
@@ -96,7 +102,7 @@ def _run(
     monkeypatch.setattr(main, "stream_json_command", fake_stream_json)
     monkeypatch.setattr(main.subprocess, "run", fake_subprocess_run)
 
-    hook = {"name": "check", "command": "exit 3", "on_failure": on_failure}
+    hook = {"name": "check", "command": command, "on_failure": on_failure}
     _Workspace.repo_hooks = {stage: [hook]} if source == "repo" else {}
     handler, _ = _STAGES[stage]
     job = {
@@ -148,3 +154,28 @@ def test_a_warning_hook_lets_the_job_finish_and_is_reported(
     kind, kw = client.events[-1]
     assert kind == "phase_finished", client.events
     assert kw["result"]["checks"] == [{"name": "check", "status": "warn", "detail": "exit 3"}]
+
+
+@pytest.mark.parametrize("on_failure", ["fail", "warn"])
+@pytest.mark.parametrize("source", ["platform", "repo"])
+def test_a_hook_past_its_timeout_is_killed_and_fails_by_its_on_failure(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, source: str, on_failure: str
+) -> None:
+    # §8.3: a hook has its own timeout (10 min by default). Its child process (`sleep`) is killed
+    # with it: it would otherwise keep the hook's output open until it ends.
+    monkeypatch.setenv("STACKD_HOOK_TIMEOUT_SECONDS", "1")
+    started = time.monotonic()
+    client, tofu = _run(
+        monkeypatch, tmp_path, "before_apply", source, on_failure, "sleep 5; echo LATE"
+    )
+    assert time.monotonic() - started < 4
+    check = {"name": "check", "status": on_failure, "detail": "timed out after 1s"}
+    if on_failure == "fail":
+        assert client.events[-1] == (
+            "job_failed",
+            {"phase": "before_apply", "result": {"checks": [check]}},
+        )
+        assert "apply" not in tofu
+    else:
+        kind, kw = client.events[-1]
+        assert kind == "phase_finished" and kw["result"]["checks"] == [check]
