@@ -530,33 +530,60 @@ Heartbeat = downstream command channel. No incoming connection. **In-flight coun
 POST /worker/v1/jobs/claim?wait=25
 → 204 if nothing
 → 200 {
-    "job_id": "...",
-    "phase": "plan" | "apply",   # job execution type — do not confuse with the
-                                 # fine-grained phases of the run (§4) or of the logs (§5): a
-                                 # "plan" job covers preparing+planning+checking
+    "job_id": "...",                       # = the run id
+    "phase": "plan" | "apply" | "command", # JOB type (what the agent executes) — do not confuse
+                                           # with the fine-grained phases of the run (§4) or of the
+                                           # logs (§5): a "plan" job covers preparing+planning+
+                                           # checking, an "apply" job applying, a "command" job
+                                           # (§4.3) preparing+running
+    "cred_phase": "plan" | "apply",        # CREDENTIAL phase of the job: "apply" iff it holds
+                                           # apply credentials — an apply job or a MUTATING command
+                                           # (§4.3); a plan job or a read-only command → "plan".
+                                           # Picks the OIDC role (§10.2), the state-token TTL and
+                                           # scope (§11.2), and the agent's time budget for a
+                                           # command (absent/unknown → the agent assumes "apply")
+    "apply_timeout_seconds": 900,          # hard budget (§4.2, `stackd_apply_timeout_seconds`):
+                                           # the agent kills `apply`, and a cred_phase=apply command,
+                                           # past it
+    "refresh_only": false,                 # true for a drift run (§19): plan with -refresh-only
+    "command": {"name": "state rm", "args": ["aws_s3_bucket.old"]},   # command jobs only, else null
     "environment": { "id", "name": "prod", "stack_name": "core-network",
-      "repo_url", "commit_sha", "project_root", "tool", "tool_version" },
-    "repo_credentials": { "kind": "token", "token": "<decrypted, memory TTL>" },
-    "env": { ... },                        # resolution sets→stack→env (§3.4)
-    "sensitive_env": { ... },              # never logged
-    "tfvars_json": { ... },
-    "hooks": {                             # §8: merge platform + .stackd.yml
+      "repo_url", "commit_sha", "branch", "project_root",
+      "tool": "opentofu" | "terraform", "tool_version" },
+    "repo_credentials": { "kind": "none" | "token" | "deploy_key",
+                          "token": "<decrypted, memory TTL>" },   # token only if kind≠none and set
+    "env": { ... },                        # environment-kind variables, resolution
+                                           # sets→stack→env (§3.4)
+    "sensitive_env": { ... },              # sensitive environment-kind variables — never logged,
+                                           # never given to repo hooks (§8.3)
+    "tfvars_json": { ... },                # terraform variables (JSON), with the dependency
+                                           # inputs / mocks (§9.3) merged in
+    "hcl_tfvars": { "tags": "{ team = \"core\" }" },  # hcl-typed variables, written verbatim (§3.4)
+    "mask_values": [ "..." ],              # literal secrets the agent masks in ALL logs (§5.1):
+                                           # sensitive values, state/OIDC/repo tokens
+    "hooks": {                             # §8: PLATFORM hooks by stage — the agent appends the
+                                           # repo's .stackd.yml hooks after them
       "after_plan": [ {"name": "infracost", "command": "...", "on_failure": "warn",
                        "source": "platform"} ]
     },
-    "backend": { "type": "http", "address": ".../state/v1/<env_id>",
-                 "lock_address", "unlock_address",
+    "backend": { "type": "http", "address": ".../state/v1/<env_id>",   # managed state (§11),
+                 "lock_address", "unlock_address",                     # else null; no lock_* keys
+                 "lock_method": "LOCK", "unlock_method": "UNLOCK",     # for a `ro` token (§11.2)
                  "username": "env", "password": "<state_token scoped+TTL>" },
-    "cloud_credentials": {                 # §10, if cloud_integration configured
+    "backend_config_file": null,           # unmanaged state only (§11.3): -backend-config=<file>
+    "backend_config": null,                # unmanaged state only (§11.3): -backend-config=k=v
+    "cloud_credentials": {                 # §10, if cloud_integration configured, else null
       "provider": "aws",
       "oidc_token": "<signed workload JWT>",
-      "role_arn": "arn:aws:iam::123:role/stackd-prod-plan",   # role of THE phase
+      "role_arn": "arn:aws:iam::123:role/stackd-prod-plan",   # role of the cred_phase
       "region": "eu-west-1"
     },
-    "resolved_inputs": { "TF_VAR_vpc_id": "vpc-0abc..." },
-    "mock_inputs": { "TF_VAR_nlb_dns": "mock.example.internal" }   # §9.3
+    "resolved_inputs": { "TF_VAR_vpc_id": "vpc-0abc..." },          # informational: already
+    "mock_inputs": { "TF_VAR_nlb_dns": "mock.example.internal" }    # in tfvars_json (§9.3)
   }
 ```
+
+Three distinct notions, never to be conflated (CLAUDE.md §7): the **job phase** (`phase`, the execution type), the **credential phase** (`cred_phase`, which credentials the job holds — the single definition is `holds_apply_credentials(run)`, shared with the worker-lost reclaim cutoff §7.5), and the **run state** (§4, the fine-grained `preparing`/`planning`/… the run moves through, which the logs also use as their phase). A plan or apply job's credential phase equals its job phase; a command job's depends on the command. The agent never re-derives the credential phase from the command name: it reads `cred_phase`.
 
 Atomic claim:
 
@@ -892,19 +919,27 @@ terraform ──(backend "http")──▶ API Stackd ──(boto3, SSE-KMS)─�
                                     └─▶ Postgres: state_versions, state_locks, audit
 ```
 
-S3 for the bytes, HTTP for the interface: per-run scoped tokens without distributed AWS credentials, visible locking, audit, refusal of a regressive serial.
+S3 for the bytes, HTTP for the interface: per-job scoped tokens (§11.2) without distributed AWS credentials, visible locking, audit, refusal of a regressive serial.
 
 ### 11.2 Endpoints
 
 | Method | Endpoint | Behavior |
 |---|---|---|
-| `GET` | `/state/v1/{env_id}` | 200 + latest state, 404 otherwise |
-| `POST` | `/state/v1/{env_id}?ID=<lock_id>` | verifies lock, refuses regressive serial (409), **403** once the token's run is no longer active, upload S3, `state_version` linked to the run, audit |
-| `LOCK` | `/state/v1/{env_id}/lock` | 200 or **423** + holder; **403** once the token's run is no longer active |
-| `UNLOCK` | `/state/v1/{env_id}/lock` | requires `rw` scope (a `ro` proposed-run token never locks); verifies lock_id; still allowed after the run ended |
+| `GET` | `/state/v1/{env_id}` | any scope; 200 + latest state, 404 otherwise |
+| `POST` | `/state/v1/{env_id}?ID=<lock_id>` | **`rw` scope only**; verifies lock, refuses regressive serial (409), **403** once the token's run is no longer active, upload S3, `state_version` linked to the run, audit |
+| `LOCK` | `/state/v1/{env_id}/lock` | `plan` or `rw` scope; 200 or **423** + holder; **403** once the token's run is no longer active — and, for a `plan` token, once its run has left the plan phase |
+| `UNLOCK` | `/state/v1/{env_id}/lock` | `plan` or `rw` scope (a `ro` token never locks); verifies lock_id; still allowed after the run ended |
 | `DELETE` | `/state/v1/{env_id}` | admin, soft-delete, audited |
 
-Auth: Basic, password = JWT scoped `{env_id, run_id, scope, exp}`. Scope `ro` for proposed runs. `exp`: the apply window (`apply_reclaim_window_seconds`, §3.7) for a job holding apply credentials (an apply, or a mutating command run §4.3), 6 h otherwise.
+Auth: Basic, password = JWT `{env_id, run_id, scope, typ: "state", iat, exp}`, minted at the claim (§7.2) for **one job**, not for the whole run. Its `scope` is fixed at mint time from the job, so a run's plan token and its apply token are different tokens with different rights:
+
+| Scope | Minted for | May call |
+|---|---|---|
+| `ro` | a **proposed** run's plan job (PR plan, drift §19) and a **read-only command** job (`output`, `show`, `state list/show`, `validate`, `providers`, §4.3) | `GET` only. Its `backend` block carries **no** `lock_address`/`unlock_address`, so tofu's http backend never locks (a `LOCK` would get 403); these commands never lock anyway |
+| `plan` | the **plan job** of a `tracked`/`destroy` run (`cred_phase = plan`) | `GET`, `LOCK` (only while the run is `preparing`/`planning`/`checking`), `UNLOCK` — **never `POST`**: `tofu plan`, `-refresh-only` included, takes the lock but never persists state |
+| `rw` | a job **holding apply credentials** (`cred_phase = apply`): an **apply** job or a **mutating command** job (§4.3); and the run-less import session (§11.4) | `GET`, `LOCK`, `UNLOCK`, `POST` |
+
+Only an `rw` token writes state: no plan, not even with a leaked or stale plan token, can write state, including during that same run's apply. A plan token cannot take the lock from under that apply either. `exp`: the apply window (`apply_reclaim_window_seconds`, §3.7) for an `rw` job token, 6 h for `ro`/`plan`; 30 min for an import session.
 
 A **run-scoped** token writes state (`POST`) or takes the lock (`LOCK`) only while its run is active: once the run is terminal (e.g. failed as `worker_lost` and its env handed to the next run), a partitioned worker's still-unexpired token gets **403** (defense in depth on top of the TTL). `UNLOCK` stays allowed, so a reclaimed run can still release the lock it holds. Run-less import-session tokens (§11.4) are unaffected — bounded by their own short TTL.
 
