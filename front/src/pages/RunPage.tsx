@@ -8,6 +8,7 @@ import { useEntityStream } from "@/api/stream";
 import { useSession } from "@/auth/session";
 import type { CommentAnchor, Run, RunComment, RunState } from "@/api/types";
 import { AnsiText } from "@/components/ansi";
+import { CheckList, ranAfterPlanHooks } from "@/components/CheckList";
 import {
   CommentComposer,
   CommentsPanel,
@@ -28,7 +29,9 @@ const ORDER: Record<RunState, number> = {
 };
 
 function buildPhases(run: Run): Phase[] {
-  const hasChecks = Boolean(run.check_results?.checks?.length);
+  // `checking` exists iff the plan ran after_plan hooks (SPECS §4.2); their results arrive with the
+  // plan job's end, so a run in `checking` right now shows the segment before they are in.
+  const hasChecks = run.state === "checking" || ranAfterPlanHooks(run.check_results);
   const bad = ["failed", "discarded", "canceled"].includes(run.state);
   const cur = ORDER[run.state];
   const segs = [
@@ -227,17 +230,7 @@ export function RunPage() {
           <PlanSummary run={run} />
         </Card>
 
-        {run.check_results?.checks?.length ? (
-          <Card>
-            <div className="mb-2 text-[13px] font-medium">Checks</div>
-            {run.check_results.checks.map((c) => (
-              <div key={c.name} className="font-data text-[12px]">
-                {c.name}: <span style={{ color: c.status === "warn" ? "var(--color-state-unconfirmed)" : "var(--color-state-failed)" }}>{c.status}</span>{" "}
-                {c.detail}
-              </div>
-            ))}
-          </Card>
-        ) : null}
+        <CheckList checkResults={run.check_results} />
 
         {run.variable_provenance && Object.keys(run.variable_provenance).length > 0 && (
           <Card>
