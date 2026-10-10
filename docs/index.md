@@ -24,6 +24,14 @@ Stackd is the **self-hosted middle ground**: the API is the single source of tru
 stateless and disposable, every state change is one auditable event, and cloud credentials expire
 with the run.
 
+## The model in one paragraph
+
+A **space** holds **stacks**: a stack is your code (a Git repo and a folder). Each stack is deployed
+as several **environments** (`dev`, `prod`…), each with its own state, variables and rules. Every
+change to an environment is a **run**: plan, human review, apply. A worker executes a run as
+**jobs** — a plan job, then an apply job once someone confirms. Each environment's **tier** decides
+who may confirm.
+
 ## Start here
 
 - 🚀 **[Getting started](guide/getting-started.md)** — bring the stack up and drive your first run.
@@ -34,5 +42,6 @@ with the run.
 - 🔑 **[Cloud credentials (OIDC)](guide/cloud-credentials.md)** — per-job roles, no static keys.
 - 🏗️ **[Architecture](ARCHITECTURE.md)** — how it works inside, with diagrams.
 
-New to the model? The **[Concepts](CONCEPTS.md)** guide explains everything with worked examples.
-For the exhaustive technical truth, see the **[Specification](SPECS.md)**.
+New to the model? The **[Concepts](CONCEPTS.md)** guide starts with a one-page glossary, then
+explains everything with worked examples. For the exhaustive technical truth, see the
+**[Specification](SPECS.md)**.
