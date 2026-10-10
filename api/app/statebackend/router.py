@@ -300,17 +300,21 @@ async def create_import_session(env_id: uuid.UUID, user: CurrentUser, session: D
         "username": "env",
         "password": token,
     }
-    init_args = " ".join(f'-backend-config="{k}={v}"' for k, v in backend.items())
+    # Passed as TF_HTTP_* env, not -backend-config: tofu persists -backend-config values (the
+    # token included) into .terraform/, while env settings never touch disk.
+    env_args = " ".join(f'TF_HTTP_{k.upper()}="{v}"' for k, v in backend.items())
     return {
         "expires_in": _IMPORT_TTL_SECONDS,
         "current_serial": latest.serial if latest else None,
         "backend": {"type": "http", **backend},
         "instructions": [
-            'Replace your stack\'s backend block with: terraform { backend "http" {} }',
+            "In a local checkout only (do not commit it), temporarily replace your stack's "
+            'backend block with: terraform { backend "http" {} }',
             f"Run once to migrate your current state into Stackd:\n"
-            f"  tofu init -migrate-state {init_args}",
-            "After it succeeds, future runs use the managed backend automatically. The token "
-            f"expires in {_IMPORT_TTL_SECONDS // 60} minutes.",
+            f"  {env_args} tofu init -migrate-state",
+            "Then remove the backend block from the repository: Stackd injects its own backend on "
+            "every run, and a committed backend block makes runs fail at init. The token expires "
+            f"in {_IMPORT_TTL_SECONDS // 60} minutes.",
         ],
     }
 

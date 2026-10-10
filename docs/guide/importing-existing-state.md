@@ -58,15 +58,19 @@ curl -s -X POST localhost:8000/api/v1/environments/$ENV_ID/state/import-session 
 to `terraform { backend "http" {} }`, then run once:
 
 ```bash
-tofu init -migrate-state \
-  -backend-config="address=$ADDRESS" \
-  -backend-config="lock_address=$ADDRESS/lock" \
-  -backend-config="unlock_address=$ADDRESS/lock" \
-  -backend-config="lock_method=LOCK" \
-  -backend-config="unlock_method=UNLOCK" \
-  -backend-config="username=env" \
-  -backend-config="password=$TOKEN"
+TF_HTTP_ADDRESS="$ADDRESS" \
+TF_HTTP_LOCK_ADDRESS="$ADDRESS/lock" \
+TF_HTTP_UNLOCK_ADDRESS="$ADDRESS/lock" \
+TF_HTTP_LOCK_METHOD=LOCK \
+TF_HTTP_UNLOCK_METHOD=UNLOCK \
+TF_HTTP_USERNAME=env \
+TF_HTTP_PASSWORD="$TOKEN" \
+tofu init -migrate-state
 ```
+
+The settings go through `TF_HTTP_*` environment variables rather than `-backend-config`: tofu writes
+`-backend-config` values, the token included, into `.terraform/`, while environment variables never
+touch disk.
 
 Terraform LOCKs, uploads your current state through Stackd's backend (stored as a `state_version`),
 then UNLOCKs.

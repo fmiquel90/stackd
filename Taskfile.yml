@@ -32,6 +32,7 @@ tasks:
       - task: s3
       - "{{.COMPOSE}} --profile git up -d --wait"
       - task: migrate
+      - task: seed-fixtures
       - task: seed
 
   dev-aws:
@@ -41,6 +42,7 @@ tasks:
       - task: s3
       - "{{.COMPOSE}} --profile aws up -d --wait"
       - task: migrate
+      - task: seed-fixtures
       - task: seed
 
   dev-aws-creds:
@@ -52,6 +54,7 @@ tasks:
       - task: s3
       - "{{.COMPOSE}} -f deploy/docker-compose.dev.aws.yml up -d --wait"
       - task: migrate
+      - task: seed-fixtures
       - task: seed
 
   s3:

@@ -36,8 +36,8 @@ log. **Stackd gives you the same guarantees on your own infrastructure.**
 
 | | |
 |---|---|
-| ✅ **Every change is reviewed** | Each run stops after `plan`. Someone allowed to approve reads the diff and confirms; sensitive tiers can require a second approver. The apply then runs exactly the reviewed plan. |
-| 🔐 **No static cloud keys** | Each run receives short-lived cloud credentials (OIDC) that expire with it. Nothing to store, leak or rotate. |
+| ✅ **Every change is reviewed** | Each run stops after `plan`. Someone allowed to approve reads the diff and confirms; sensitive tiers can require that someone other than the person who triggered the run confirms it. The apply then runs exactly the reviewed plan. |
+| 🔐 **No static cloud keys** | With a cloud integration (AWS today), each job gets short-lived OIDC credentials — one role to plan, another to apply — that expire on their own. Nothing to store, leak or rotate. |
 | 📜 **A complete audit trail** | Who triggered, approved and applied what, on which commit, is recorded with every action. |
 | 🧬 **Environments that depend on each other** | One environment's outputs feed the next (network → app). When an upstream apply changes them, the dependents re-plan. |
 | 🏠 **Runs where your infrastructure lives** | Self-hosted. Workers pull their work over outbound HTTPS: no inbound ports, and no third party holding your state. |
@@ -46,7 +46,7 @@ log. **Stackd gives you the same guarantees on your own infrastructure.**
 ## How it works
 
 1. **A push, a pull request or a click starts a run.** Pull requests get a read-only plan, posted
-   back to the PR.
+   back to the PR (GitHub).
 2. **A worker on your infrastructure plans the change**, using credentials minted for this run only.
 3. **The run waits for a human.** The reviewer sees the diff, the checks and every input with its
    origin, then confirms or discards.
@@ -66,7 +66,7 @@ What the reviewer sees:
 │                    │         network_name  = core-net-prod       [dependency]  │
 │                    │         db_password   = ••••••••            [env · secret] │
 ├────────────────────┴─────────────────────────────────────────────────────────┤
-│  ⚠ prod · second approval required      [ Discard ]     [ Confirm & apply ▸ ]  │
+│  ⚠ prod · four-eyes required            [ Discard ]     [ Confirm & apply ▸ ]  │
 └────────────────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -76,17 +76,19 @@ What the reviewer sees:
 > `pnpm` (via corepack).
 
 ```bash
-task dev    # brings up the full stack, migrates and seeds demo data
+task dev    # brings up the full stack (incl. local S3), migrates and seeds demo data
 ```
 
 Open **<http://localhost:5173>** and use **Dev login** as `admin`, `alice` or `bob`. No cloud
 account is needed: the demo stacks run real OpenTofu against local fixtures.
 
 ```bash
-task test   # unit and integration tests (real Postgres)
+task test   # API tests (real Postgres) and front unit tests
 task e2e    # the full plan → approve → apply → cascade scenario
 task reset  # start from scratch
 ```
+
+The worker agent has its own suite: `cd worker && uv run pytest`.
 
 ## Learn more
 

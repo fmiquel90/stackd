@@ -66,8 +66,8 @@ async def _wait_new_run(http, h, env_id: str, exclude: set[str], *, timeout_s: f
 
 
 async def test_full_scenario(http: httpx.AsyncClient, graph: dict[str, str]) -> None:
-    bob = await _login(http, "bob")  # writer, max_apply_tier=staging
-    alice = await _login(http, "alice")  # approver, max_apply_tier=prod
+    bob = await _login(http, "bob")  # writer, allowed_tiers={dev, staging}
+    alice = await _login(http, "alice")  # approver, allowed_tiers={dev, staging, prod}
     admin = await _login(http, "admin")
 
     net_dev, net_prod = graph["network/dev"], graph["network/prod"]
