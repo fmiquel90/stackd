@@ -236,6 +236,8 @@ def handle_plan(client: ApiClient, job: dict, settings: Settings) -> None:
         )
 
         def stage(name: str) -> bool:
+            """A stage's hooks (§8.3): True when an `on_failure: fail` hook failed — the job fails
+            at that stage, before the next tofu step. A `warn` one is reported in the checks."""
             results, aborted = run_hooks(
                 hooks.get(name, []),
                 cwd,
@@ -262,8 +264,9 @@ def handle_plan(client: ApiClient, job: dict, settings: Settings) -> None:
             )
         if init_rc != 0:
             return client.event(job_id, "job_failed", phase="init", result={"error": "init failed"})
-        stage("after_init")
-        stage("before_plan")
+        for name in ("after_init", "before_plan"):
+            if stage(name):
+                return client.event(job_id, "job_failed", phase=name, result={"checks": checks})
 
         # `-json`: stream readable @message lines while collecting structured events (change_summary
         # for the counts, diagnostics for the real error message). detailed-exitcode: 0=no changes,
@@ -427,6 +430,21 @@ def handle_apply(client: ApiClient, job: dict, settings: Settings) -> None:
         }
         repo_env = {**_repo_environ(), **job.get("env", {})}
         tf_env = _tofu_env(platform_env, backend)  # + state-backend creds, for tofu only
+        checks: list[dict[str, Any]] = []
+
+        def stage(name: str) -> bool:
+            """As in the plan job (§8.3): True when an `on_failure: fail` hook failed. A `warn` one
+            is reported in the checks — the run is already confirmed, it can't go back to it."""
+            results, aborted = run_hooks(
+                hooks.get(name, []),
+                cwd,
+                platform_env=platform_env,
+                repo_env=repo_env,
+                phase="applying",
+                streamer=streamer,
+            )
+            checks.extend(r for r in results if r["status"] != "ok")
+            return aborted
 
         with _tfvars(ws, cwd, job):
             init_rc = run_command(
@@ -453,14 +471,11 @@ def handle_apply(client: ApiClient, job: dict, settings: Settings) -> None:
                 phase="apply",
                 result={"error": masker.mask(f"saved plan unavailable, not applied: {refusal}")},
             )
-        run_hooks(
-            hooks.get("before_apply", []),
-            cwd,
-            platform_env=platform_env,
-            repo_env=repo_env,
-            phase="applying",
-            streamer=streamer,
-        )
+        # A failing before_apply hook fails the job before tofu runs: nothing is applied.
+        if stage("before_apply"):
+            return client.event(
+                job_id, "job_failed", phase="before_apply", result={"checks": checks}
+            )
         # Written only now, after the before_apply hooks (a repo hook can't swap it), and removed
         # right after the apply (after_apply repo hooks never see its secrets).
         plan_file = ws.write_plan(cwd, saved_plan)
@@ -507,15 +522,13 @@ def handle_apply(client: ApiClient, job: dict, settings: Settings) -> None:
             if leak:
                 streamer.emit("applying", [f"[stackd] secret_leak_suspected: {leak}"])
         outputs = _safe_json(out.stdout) if ok_output else {}
-        run_hooks(
-            hooks.get("after_apply", []),
-            cwd,
-            platform_env=platform_env,
-            repo_env=repo_env,
-            phase="applying",
-            streamer=streamer,
-        )
-        client.event(job_id, "phase_finished", result={"outputs": outputs})
+        # The infra has changed already, but a failing after_apply hook still fails the run, like
+        # at any stage (§8.3): its outputs are not recorded and nothing cascades from it.
+        if stage("after_apply"):
+            return client.event(
+                job_id, "job_failed", phase="after_apply", result={"checks": checks}
+            )
+        client.event(job_id, "phase_finished", result={"outputs": outputs, "checks": checks})
     finally:
         ws.cleanup()
 
