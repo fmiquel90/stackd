@@ -12,6 +12,7 @@ from app.audit import record_audit
 from app.auth.deps import CurrentUser, require_role
 from app.db import get_session
 from app.enums import AttachmentTarget, AuditActorKind, Role
+from app.environments.router import lock_attach_target
 from app.errors import ProblemException
 from app.models.environment import Environment
 from app.models.stack import Stack
@@ -276,6 +277,10 @@ async def attach(
         AttachmentTarget.environment: Environment,
         AttachmentTarget.tier: Tier,
     }[body.target_kind]
+    # No orphan on a racing deletion of the stack/env (§3.4).
+    await lock_attach_target(
+        session, body.target_kind, body.target_id, not_found="Attachment target not found"
+    )
     target = await session.get(target_model, body.target_id)
     if target is None:
         raise ProblemException(404, "Attachment target not found", f"No {body.target_kind.value}.")

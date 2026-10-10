@@ -1,12 +1,15 @@
 """Deleting a stack or an environment (§3.2, §3.4): refused while one of its environments has an
 active run — the cascade would delete that run outside `transition()` — and the variable-set
-attachments targeting what is deleted go with it, in the same transaction."""
+attachments, hooks and notification targets targeting what is deleted go with it, in the same
+transaction; an attach racing the deletion can't leave an orphan either."""
 
 from __future__ import annotations
 
+import asyncio
 import uuid
 
 import httpx
+import pytest
 
 from tests.conftest_phase2 import event, login, make_env, make_stack, register_worker
 
@@ -220,3 +223,76 @@ async def test_deletion_leaves_no_orphan_hooks_or_notification_targets(
             env_b: "stack_deleted",
             stack: "stack_deleted",
         }, action
+
+
+async def _lock_waiters() -> int:
+    """Backends of this database waiting on a row lock."""
+    from sqlalchemy import text
+
+    from app.db import SessionLocal
+
+    async with SessionLocal() as session:
+        return (
+            await session.execute(
+                text(
+                    "SELECT count(*) FROM pg_stat_activity"
+                    " WHERE datname = current_database() AND wait_event_type = 'Lock'"
+                )
+            )
+        ).scalar_one()
+
+
+@pytest.mark.parametrize("attach", ["variable_set", "hook", "notification_target"])
+async def test_attach_racing_a_deletion_leaves_no_orphan(
+    client: httpx.AsyncClient, attach: str
+) -> None:
+    """An attach to an env that a concurrent deletion holds FOR UPDATE waits for it (FOR KEY SHARE
+    on the target), then finds the env gone: 404, nothing attached to a deleted env."""
+    from sqlalchemy import delete, func, select
+
+    from app.db import SessionLocal
+    from app.models.environment import Environment
+    from app.models.hook import Hook
+    from app.models.notification import NotificationTarget
+    from app.models.variable_set import VariableSetAttachment
+
+    admin = await login(client, "admin")
+    suffix = uuid.uuid4().hex[:8]
+    env_id = await make_env(
+        client, admin, await make_stack(client, admin, f"del-race-{suffix}"), "e", "dev"
+    )
+    if attach == "variable_set":
+        vset = (
+            await client.post("/api/v1/variable-sets", headers=admin, json={"name": f"r-{suffix}"})
+        ).json()["id"]
+        url = f"/api/v1/variable-sets/{vset}/attachments"
+        body: dict[str, str] = {"target_kind": "environment", "target_id": env_id}
+        model, column = VariableSetAttachment, VariableSetAttachment.target_id
+    elif attach == "hook":
+        url = f"/api/v1/environments/{env_id}/hooks"
+        body = {"stage": "after_plan", "name": "h", "command": "true"}
+        model, column = Hook, Hook.target_id
+    else:
+        url = f"/api/v1/environments/{env_id}/notifications"
+        body = {"name": "n", "kind": "webhook", "url": "https://hooks.example/x"}
+        model, column = NotificationTarget, NotificationTarget.target_id
+
+    async with SessionLocal() as deletion:  # a deletion in flight: env locked, row deleted
+        await deletion.execute(
+            select(Environment.id).where(Environment.id == uuid.UUID(env_id)).with_for_update()
+        )
+        await deletion.execute(delete(Environment).where(Environment.id == uuid.UUID(env_id)))
+        attaching = asyncio.create_task(client.post(url, headers=admin, json=body))
+        for _ in range(200):  # until the attach waits on the deletion's lock (or is done)
+            if attaching.done() or await _lock_waiters():
+                break
+            await asyncio.sleep(0.025)
+        await deletion.commit()
+    resp = await attaching
+
+    assert resp.status_code == 404, resp.text
+    async with SessionLocal() as session:
+        orphans = await session.execute(
+            select(func.count()).select_from(model).where(column == uuid.UUID(env_id))
+        )
+        assert orphans.scalar_one() == 0
