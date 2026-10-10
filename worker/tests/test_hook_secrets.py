@@ -209,6 +209,11 @@ class _Client:
         return self.uploads[name]
 
 
+def _job_env(tofu: Path) -> dict[str, str]:
+    """The run's `env` variables: the stand-in tofu first on PATH."""
+    return {"PATH": f"{tofu}:{os.environ['PATH']}"}
+
+
 def _job(phase: str, url: str, sha: str | None, tofu: Path, **extra: Any) -> dict:
     return {
         "job_id": "run-1",
@@ -220,7 +225,7 @@ def _job(phase: str, url: str, sha: str | None, tofu: Path, **extra: Any) -> dic
             "branch": "main",
             "project_root": ".",
         },
-        "env": {"PATH": f"{tofu}:{os.environ['PATH']}"},
+        "env": _job_env(tofu),
         "tfvars_json": {"db_password": SECRET, "region": "eu-west-1"},
         "hcl_tfvars": {"tags": f'{{ team = "{HCL_SECRET}" }}'},
         "mask_values": [SECRET, HCL_SECRET, TOKEN, OIDC_TOKEN],
@@ -491,5 +496,45 @@ def test_repo_hooks_get_only_allowlisted_worker_env(
         if k not in _ALLOWED_WORKER_ENV | _SHELL_SET | set(run_env) and not k.startswith("LC_")
     }
     assert others == set(), others  # nothing else of the worker's environment
-    # Platform hooks keep the worker's environment (§8.3).
-    assert {k: platform_env.get(k) for k in secrets} == secrets
+    # Platform hooks keep the worker's environment, but for the agent's own settings (§8.3).
+    host = {k: v for k, v in secrets.items() if not k.startswith("STACKD_")}
+    assert {k: platform_env.get(k) for k in host} == host
+
+
+def test_platform_hooks_get_none_of_the_agents_own_settings(
+    tmp_path: Path, tofu: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # A platform hook is trusted, but it runs check tools a repo configures (their config files in
+    # the checkout): like tofu (§7.4), it gets no STACKD_* setting of the agent's (§8.3)…
+    agent_own = {
+        "STACKD_POOL_TOKEN": "pool-token-1",
+        "STACKD_API_URL": "http://api:8000",
+        "STACKD_ENCRYPTION_KEY": "enc-key-2",
+    }
+    # …but the rest of the worker's environment, the run's variables and its cloud credentials.
+    host = {"INFRACOST_API_KEY": "ico-3", "AWS_PROFILE": "ops"}
+    for name, value in {**agent_own, **host}.items():
+        monkeypatch.setenv(name, value)
+    dump = "env | sed 's/^/PLATFORM {} /'"
+    platform = {
+        stage: [{"name": f"p-{stage}", "command": dump.format(stage), "source": "platform"}]
+        for stage in ("before_init", "after_plan", "before_apply", "after_apply")
+    }
+    url, sha = _repo(tmp_path, {})
+    run_env = {"STACKD_RUN_LABEL": "set by the run"}
+    both = {
+        "hooks": platform,
+        "cloud_credentials": CLOUD,
+        "env": {**_job_env(tofu), **run_env},
+        "sensitive_env": {"DB_PASSWORD": "db-pw-4"},
+    }
+    client = _plan_and_apply(tmp_path, url, sha, tofu, both)
+
+    for stage in platform:
+        prefix = f"PLATFORM {stage} "
+        lines = [line.removeprefix(prefix) for line in client.lines if line.startswith(prefix)]
+        env = dict(line.split("=", 1) for line in lines if "=" in line)
+        assert env, (stage, client.lines)
+        assert not set(agent_own) & set(env), (stage, sorted(env))  # names only, never a value
+        assert {k: env.get(k) for k in {**host, **run_env}} == {**host, **run_env}, stage
+        assert env["DB_PASSWORD"] == "db-pw-4" and env["AWS_ROLE_ARN"] == CLOUD["role_arn"], stage

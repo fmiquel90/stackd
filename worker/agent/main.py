@@ -7,7 +7,7 @@ import subprocess
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
-from collections.abc import Iterator, Mapping
+from collections.abc import Iterator
 from contextlib import AbstractContextManager, ExitStack, contextmanager, nullcontext
 from pathlib import Path
 from typing import Any
@@ -54,15 +54,16 @@ _REPO_ENV_ALLOWLIST = frozenset(
 
 
 # The agent's own settings (config.py, logging.py: the pool token, the API URL, …), and any other
-# platform setting a worker host may carry (STACKD_ENCRYPTION_KEY, …): none of them is tofu's, and
-# repo code runs inside tofu (`data "external"`, provisioners). No provider reads this namespace.
+# platform setting a worker host may carry (STACKD_ENCRYPTION_KEY, …): none of them is for tofu or
+# a platform hook, and repo code runs inside tofu (`data "external"`, provisioners) and feeds the
+# tools platform hooks run (their config files). No provider or tool reads this namespace.
 _WORKER_ENV_PREFIX = "STACKD_"
 
 
-def _tofu_environ() -> dict[str, str]:
-    """Base process env for tofu: the worker's, minus the agent's own settings (§7.4). The rest
-    stays — PATH and locale, proxies and CA, TF_* (plugin cache, …), provider settings — so no
-    provider loses what it needs."""
+def _job_environ() -> dict[str, str]:
+    """Base process env for tofu and platform hooks: the worker's, minus the agent's own settings
+    (§7.4, §8.3). The rest stays — PATH and locale, proxies and CA, TF_* (plugin cache, …),
+    provider settings — so no provider or check tool loses what it needs."""
     return {k: v for k, v in os.environ.items() if not k.startswith(_WORKER_ENV_PREFIX)}
 
 
@@ -172,10 +173,15 @@ def _tool_bin(tool: str) -> str:
 _OIDC_TOKEN_FILE = "oidc_token"
 
 
-def _run_env(ws: Workspace, job: dict[str, Any], base: Mapping[str, str]) -> dict[str, str]:
-    """`base`, then the run's env, its sensitive env and the OIDC workload env (§10.4): what
-    platform hooks (on the worker's whole env) and tofu (on `_tofu_environ`) run with."""
-    return {**base, **job.get("env", {}), **job.get("sensitive_env", {}), **_cloud_env(ws, job)}
+def _run_env(ws: Workspace, job: dict[str, Any]) -> dict[str, str]:
+    """`_job_environ`, then the run's env, its sensitive env and the OIDC workload env (§10.4):
+    what platform hooks run with, and tofu with the state backend's settings on top."""
+    return {
+        **_job_environ(),
+        **job.get("env", {}),
+        **job.get("sensitive_env", {}),
+        **_cloud_env(ws, job),
+    }
 
 
 def _cloud_env(ws: Workspace, job: dict) -> dict[str, str]:
@@ -281,13 +287,12 @@ def handle_plan(client: ApiClient, job: dict, settings: Settings) -> None:
             ws.write_backend_override(cwd)
         hooks = _merge_hooks(job.get("hooks", {}), ws.load_stackd_yml(cwd))
 
-        platform_env = _run_env(ws, job, os.environ)
+        platform_env = _run_env(ws, job)
         repo_env = {
             **_repo_environ(),
             **job.get("env", {}),
         }  # no secrets / cloud creds to repo hooks (§8.3)
-        # No worker setting, + state-backend creds: for tofu only.
-        tf_env = _tofu_env(_run_env(ws, job, _tofu_environ()), backend)
+        tf_env = _tofu_env(platform_env, backend)  # + state-backend creds, for tofu only
         checks: list[dict] = []
 
         # Report the exact commit checked out: the API pins the run to it (or refuses a mismatch
@@ -488,10 +493,9 @@ def handle_apply(client: ApiClient, job: dict, settings: Settings) -> None:
         if backend:
             ws.write_backend_override(cwd)
         hooks = _merge_hooks(job.get("hooks", {}), ws.load_stackd_yml(cwd))
-        platform_env = _run_env(ws, job, os.environ)
+        platform_env = _run_env(ws, job)
         repo_env = {**_repo_environ(), **job.get("env", {})}
-        # No worker setting, + state-backend creds: for tofu only.
-        tf_env = _tofu_env(_run_env(ws, job, _tofu_environ()), backend)
+        tf_env = _tofu_env(platform_env, backend)  # + state-backend creds, for tofu only
         checks: list[dict[str, Any]] = []
 
         def stage(name: str) -> bool:
@@ -635,8 +639,7 @@ def handle_command_run(client: ApiClient, job: dict, settings: Settings) -> None
         backend = job.get("backend")
         if backend:
             ws.write_backend_override(cwd)
-        # No worker setting, + state-backend creds: for tofu only.
-        tf_env = _tofu_env(_run_env(ws, job, _tofu_environ()), backend)
+        tf_env = _tofu_env(_run_env(ws, job), backend)  # + state-backend creds, for tofu only
 
         client.event(job_id, "phase_started", phase="running")
         with _tofu_files(ws, cwd, job):
