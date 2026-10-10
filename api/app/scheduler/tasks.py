@@ -7,7 +7,7 @@ from sqlalchemy import select, text, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import get_settings
-from app.db import SessionLocal, get_sessionmaker
+from app.db import SessionLocal, get_engine
 from app.drift.service import detect_drift
 from app.enums import ACTIVE_STATES, RunEventActor, RunState, WorkerStatus
 from app.logging import get_logger
@@ -99,8 +99,7 @@ async def _with_lock(session: AsyncSession, key: int, coro) -> None:  # type: ig
     pool, so an unlock through the session could land on another pooled connection, miss, and leak
     the lock (later ticks would then silently skip the task). AUTOCOMMIT keeps the lock connection
     idle rather than idle-in-transaction, and the unlock runs even if the task's session failed."""
-    engine = get_sessionmaker().kw["bind"]  # the shared AsyncEngine (same pool as the session)
-    async with engine.execution_options(isolation_level="AUTOCOMMIT").connect() as lock_conn:
+    async with get_engine().execution_options(isolation_level="AUTOCOMMIT").connect() as lock_conn:
         got = (
             await lock_conn.execute(text("SELECT pg_try_advisory_lock(:k)").bindparams(k=key))
         ).scalar()
