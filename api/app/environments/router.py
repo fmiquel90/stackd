@@ -56,14 +56,14 @@ def _scan_clone(
     root = (dest / project_root).resolve()
     if not root.is_relative_to(dest.resolve()):
         raise ProblemException(400, "Invalid project root", None)
-    tf_count = len(tf_files(root))  # regular files only: symlinks are neither counted nor read
+    tf_count = len(tf_files(root, dest))  # exactly the files parse_inputs will read
     if tf_count > max_tf_files:
         raise ProblemException(
             413,
             "Too many Terraform files",
             f"{tf_count} .tf files exceed the discovery cap ({max_tf_files}).",
         )
-    return [i for i in parse_inputs(root) if i.required]
+    return [i for i in parse_inputs(root, dest) if i.required]
 
 
 async def _require_tier(session: AsyncSession, name: str) -> None:

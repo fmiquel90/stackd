@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import shutil
 import stat
 import tempfile
@@ -41,6 +42,27 @@ def _git_error(err: bytes, secret: str | None) -> str | None:
     return _redact(err.decode(errors="replace"), secret).strip()[:500] or None
 
 
+async def _run_git(*args: str) -> tuple[int | None, bytes, bytes]:
+    """Run git non-interactively; callers bound it with `asyncio.timeout`. On timeout (delivered
+    here as a cancellation) git is killed AND reaped before the error propagates — left running, a
+    clone would keep writing into the dir being deleted, and the process would leak."""
+    proc = await asyncio.create_subprocess_exec(
+        "git",
+        *args,
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE,
+        env=_GIT_ENV,
+    )
+    try:
+        out, err = await proc.communicate()
+    except asyncio.CancelledError:
+        with contextlib.suppress(ProcessLookupError):  # it may have just exited on its own
+            proc.kill()
+        await proc.wait()
+        raise
+    return proc.returncode, out, err
+
+
 async def clone_shallow(
     repo_url: str, auth_kind: RepoAuthKind, secret: str | None, branch: str
 ) -> Path:
@@ -49,25 +71,14 @@ async def clone_shallow(
     url = _authed_url(repo_url, auth_kind, secret)
     dest = Path(tempfile.mkdtemp(prefix="stackd-discover-"))
     try:
-        proc = await asyncio.create_subprocess_exec(
-            "git",
-            "clone",
-            "--depth",
-            "1",
-            "--single-branch",
-            "--branch",
-            branch,
-            url,
-            str(dest),
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-            env=_GIT_ENV,
-        )
-        _, err = await asyncio.wait_for(proc.communicate(), timeout=30)
+        async with asyncio.timeout(30):
+            rc, _, err = await _run_git(
+                "clone", "--depth", "1", "--single-branch", "--branch", branch, url, str(dest)
+            )
     except (TimeoutError, FileNotFoundError) as exc:
         await asyncio.to_thread(shutil.rmtree, dest, ignore_errors=True)
         raise ProblemException(502, "Repository clone failed", _redact(str(exc), secret)) from exc
-    if proc.returncode != 0:
+    if rc != 0:
         await asyncio.to_thread(shutil.rmtree, dest, ignore_errors=True)
         raise ProblemException(502, "Repository clone failed", _git_error(err, secret))
     return dest
@@ -98,20 +109,12 @@ async def check_repo(
     """`git ls-remote --heads`: validate reachability + list branches (deploy keys post-MVP)."""
     url = _authed_url(repo_url, auth_kind, secret)
     try:
-        proc = await asyncio.create_subprocess_exec(
-            "git",
-            "ls-remote",
-            "--heads",
-            url,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-            env=_GIT_ENV,
-        )
-        out, err = await asyncio.wait_for(proc.communicate(), timeout=15)
+        async with asyncio.timeout(15):
+            rc, out, err = await _run_git("ls-remote", "--heads", url)
     except (TimeoutError, FileNotFoundError) as exc:
         return False, [], _redact(f"git unavailable or timed out: {exc}", secret)
 
-    if proc.returncode != 0:
+    if rc != 0:
         return False, [], _git_error(err, secret) or "repository unreachable"
 
     branches = [
@@ -128,19 +131,11 @@ async def ls_remote_sha(
     """HEAD sha of a single branch (staleness polling / manual refresh, §9.6)."""
     url = _authed_url(repo_url, auth_kind, secret)
     try:
-        proc = await asyncio.create_subprocess_exec(
-            "git",
-            "ls-remote",
-            url,
-            f"refs/heads/{branch}",
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-            env=_GIT_ENV,
-        )
-        out, _ = await asyncio.wait_for(proc.communicate(), timeout=15)
+        async with asyncio.timeout(15):
+            rc, out, _ = await _run_git("ls-remote", url, f"refs/heads/{branch}")
     except (TimeoutError, FileNotFoundError):
         return None
-    if proc.returncode != 0:
+    if rc != 0:
         return None
     line = out.decode().strip()
     return line.split("\t", 1)[0] if line else None
