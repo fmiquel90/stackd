@@ -4,7 +4,7 @@ import asyncio
 import re
 import uuid
 from datetime import UTC, datetime
-from typing import Annotated
+from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, Request, Response
 from sqlalchemy import select, text
@@ -241,13 +241,12 @@ async def _pin_commit(session: AsyncSession, worker: Worker, run: Run, reported:
     return sha
 
 
-async def _decide_after_plan(session: AsyncSession, worker: Worker, run: Run, result: dict) -> None:
-    """Plan finished: set summary/checks, route to finished / unconfirmed / confirmed (§4.2)."""
-    checks = result.get("checks", [])
-    warn = any(c.get("status") == "warn" for c in checks)
-    fields = {"plan_summary": result.get("summary"), "check_results": {"checks": checks}}
-
-    if warn:
+async def _audit_warned_checks(
+    session: AsyncSession, worker: Worker, run: Run, checks: list[dict[str, Any]]
+) -> bool:
+    """Audit `run.check_warned` (§8.3) when any of `checks` warned; True if one did."""
+    warned = [c.get("name") for c in checks if c.get("status") == "warn"]
+    if warned:
         await record_audit(
             session,
             action="run.check_warned",
@@ -255,8 +254,16 @@ async def _decide_after_plan(session: AsyncSession, worker: Worker, run: Run, re
             actor_id=worker.id,
             target_kind="run",
             target_id=run.id,
-            context={"checks": [c.get("name") for c in checks if c.get("status") == "warn"]},
+            context={"checks": warned},
         )
+    return bool(warned)
+
+
+async def _decide_after_plan(session: AsyncSession, worker: Worker, run: Run, result: dict) -> None:
+    """Plan finished: set summary/checks, route to finished / unconfirmed / confirmed (§4.2)."""
+    checks = result.get("checks", [])
+    fields = {"plan_summary": result.get("summary"), "check_results": {"checks": checks}}
+    warn = await _audit_warned_checks(session, worker, run, checks)
 
     if run.is_drift:
         # A drift plan (§19): record state-vs-reality on the env, then finish like any proposed run.
@@ -359,12 +366,21 @@ async def post_event(
         elif run.state == RunState.applying:
             # Capture outputs (§9.1) then finish, then cascade downstream (§9.2) — same txn.
             await capture_outputs(session, run, result.get("outputs") or {})
+            # Apply-stage checks (before_apply/after_apply warnings, §8.3) join the plan's in
+            # check_results and are audited like them; the run is already confirmed.
+            apply_checks = result.get("checks") or []
+            check_fields: dict[str, Any] | None = None
+            if apply_checks:
+                plan_checks = (run.check_results or {}).get("checks") or []
+                check_fields = {"check_results": {"checks": [*plan_checks, *apply_checks]}}
+                await _audit_warned_checks(session, worker, run, apply_checks)
             await transition(
                 session,
                 run,
                 RunState.finished,
                 actor=RunEventActor.worker,
                 actor_id=worker.id,
+                fields=check_fields,
                 audit_action="run.applied",
                 audit_context={"environment_id": str(run.environment_id), "commit": run.commit_sha},
             )
