@@ -365,6 +365,10 @@ version in the design; the API change would make it exact or cheaper.
 | A8 | Theme preference on the profile (`PATCH /auth/me`) | `prefers-color-scheme` + in-memory override (lost on reload), as DESIGN §8 allows | §2.2 users, §12 Auth |
 | A9 | Audit readable by non-admins, scoped to their spaces | Hide Audit from non-admins and say why on direct access | §2.4 residual, §6.4 |
 | A10 | Log download (`GET /runs/{id}/logs/download`) | Client-side "save as text" from what is loaded | §5.2 |
+| A11 | Queue entries with `created_at`, `claimed_at`, the worker name and, for `active_run`, the id of the run holding the env; compute `no_compatible_worker` | One `runs.get` per queue row; the holder is looked up among the queue entries; "no worker online" inferred from `/health` (added in stage 4) | §7.2, §12 Workers |
+| A12 | Dev personas with their `allowed_tiers` on `GET /auth/dev/personas` (dev-only) | Login lists email and role only (added in stage 4) | DEV.md §dev login, §2.4 |
+| A13 | Notification context naming the stack and env for `run_finished` / `run_failed` | One `runs.get` per item while the popover is open, names from the stack/env lists (added in stage 4) | §17 |
+| A14 | Audit paging cursor (`before=<event id>`) | `to` bound on the oldest loaded `created_at`, duplicates dropped (added in stage 4) | §6.4, §12 Audit |
 
 None of these is required to start Stage 3; A1, A2 and A4 are the ones whose stopgaps cost the most
 (text parsing, possibly-wrong reasons, request fan-out on the home page with many stacks).
@@ -381,6 +385,10 @@ front-only redesign):
   so the `↑N` chip can only be the binary "behind" variant SPECS §9.6 allows as a fallback (A6).
 - A run that fails at an `after_plan` check reports `error = "after_plan"` (the stage name) and no
   `plan_summary`, although the plan ran.
+- `GET /queue` reports `apply_affinity_hold` for every `confirmed` run, also after the affinity
+  window has passed (`api/app/workers/pools_router.py:146`); `no_compatible_worker` is never
+  produced. Found in stage 4.
+- A failed `command` run is audited as `run.apply_failed`. Found in stage 4.
 
 ---
 

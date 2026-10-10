@@ -577,6 +577,8 @@ waited more than 2 minutes.
 - Every row resolves names: `stack / env`, run short ID, type, worker name. Ages come from each run's `created_at` (**[today]** one `runs.get` per row; the queue rarely exceeds a few dozen).
 - Blocking reasons in words with a link: `another run is active on this environment → run 01a1276c`, `environment locked`, `no worker compatible with labels {…}`, `apply affinity reservation (worker vm, 38 s left)`.
 - Filter by stack/env/pool (URL).
+- When the run holding the environment is an unconfirmed plan, the reason says so ("a plan on this environment awaits a human decision → run …"): the wait is on a person, not a machine. A claimable run reads "claimable — waiting for the next worker poll", or "no worker is online → workers" when `/health` reports none (needs API work A11 for the exact reason).
+- On phones each run is a card with the same labelled fields as the table columns.
 
 ### 5.6 `/audit`
 
@@ -627,8 +629,8 @@ hooks, notifications, secret sources; URL `?tab=`).
 ### 5.10 Variable sets, settings, login, notifications (new section in v2)
 
 - **Variable sets** (`/s/:space/variable-sets`): one row per set with how it reaches envs (`auto-attach`, `rule: team=payments`, `3 attachments`); the row opens a page with tabs Variables / Attachments / Settings. Delete per §5.7.
-- **Settings** (`/settings`, admin): **Tiers** (name, `requires_four_eyes` with §5.7 friction, position, envs using it, delete per §5.7), **Users & roles** (staged edits, §5.7), **Spaces** (members, per-space role and tiers), **Deployment** (version, environment).
-- **Login**: brand mark, "Sign in with Google"; in dev, the personas show email, role and allowed tiers (they otherwise look alike).
+- **Settings** (`/settings`): **Preferences** for everyone (theme: system / dark / light; single-key shortcuts on/off — in memory, for the tab only, until A8). Admin only: **Tiers** (name, `requires_four_eyes` with §5.7 friction, position, envs using it, delete per §5.7), **Users & roles** (staged edits, §5.7), **Spaces** (members, per-space role and tiers), **Deployment** (version, environment).
+- **Login**: brand mark, "Sign in with Google"; in dev, the personas show email and role, and their allowed tiers once the dev endpoint returns them (needs API work A12).
 - **Notifications** (bell popover, Radix): each item names what and where ("Run failed · demo-dns/dev · 6m"), links to the run (Logs at first error for failures), mark read on open; "Mark all read" / "Clear read". The bell badge counts unread, neutral (not violet, not amber).
 
 ---
