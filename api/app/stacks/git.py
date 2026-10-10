@@ -2,9 +2,10 @@ from __future__ import annotations
 
 import asyncio
 import shutil
+import stat
 import tempfile
 from pathlib import Path
-from urllib.parse import urlsplit, urlunsplit
+from urllib.parse import quote, urlsplit, urlunsplit
 
 from app.enums import RepoAuthKind
 from app.errors import ProblemException
@@ -23,6 +24,21 @@ def _authed_url(repo_url: str, auth_kind: RepoAuthKind, secret: str | None) -> s
             netloc += f":{parts.port}"
         return urlunsplit((parts.scheme, netloc, parts.path, parts.query, parts.fragment))
     return repo_url
+
+
+def _redact(text: str, secret: str | None) -> str:
+    """Mask the repo token in anything git (or the subprocess layer) reports: the authed URL can
+    appear verbatim in git's errors, and the token is write-only (invariant 3). Every message this
+    module surfaces goes through here."""
+    if secret:
+        for form in (secret, quote(secret, safe="")):
+            text = text.replace(form, "•••")
+    return text
+
+
+def _git_error(err: bytes, secret: str | None) -> str | None:
+    # Mask BEFORE truncating, so a cut can never leave a partial token behind.
+    return _redact(err.decode(errors="replace"), secret).strip()[:500] or None
 
 
 async def clone_shallow(
@@ -49,14 +65,11 @@ async def clone_shallow(
         )
         _, err = await asyncio.wait_for(proc.communicate(), timeout=30)
     except (TimeoutError, FileNotFoundError) as exc:
-        shutil.rmtree(dest, ignore_errors=True)
-        raise ProblemException(502, "Repository clone failed", str(exc)) from exc
+        await asyncio.to_thread(shutil.rmtree, dest, ignore_errors=True)
+        raise ProblemException(502, "Repository clone failed", _redact(str(exc), secret)) from exc
     if proc.returncode != 0:
-        msg = err.decode(errors="replace")
-        if secret:  # the authed URL may appear in git's error — never leak the token
-            msg = msg.replace(secret, "•••")
-        shutil.rmtree(dest, ignore_errors=True)
-        raise ProblemException(502, "Repository clone failed", msg.strip()[:500] or None)
+        await asyncio.to_thread(shutil.rmtree, dest, ignore_errors=True)
+        raise ProblemException(502, "Repository clone failed", _git_error(err, secret))
     return dest
 
 
@@ -66,9 +79,11 @@ def enforce_clone_budget(dest: Path, *, max_mb: int) -> None:
     the caller cleans up `dest`."""
     total = 0
     cap = max_mb * 1024 * 1024
-    for f in dest.rglob("*"):
-        if f.is_file() and not f.is_symlink():
-            total += f.stat().st_size
+    # lstat + no symlink recursion: a symlink (file or dir) is never followed out of the clone.
+    for f in dest.rglob("*", recurse_symlinks=False):
+        st = f.lstat()
+        if stat.S_ISREG(st.st_mode):
+            total += st.st_size
             if total > cap:
                 raise ProblemException(
                     413,
@@ -94,10 +109,10 @@ async def check_repo(
         )
         out, err = await asyncio.wait_for(proc.communicate(), timeout=15)
     except (TimeoutError, FileNotFoundError) as exc:
-        return False, [], f"git unavailable or timed out: {exc}"
+        return False, [], _redact(f"git unavailable or timed out: {exc}", secret)
 
     if proc.returncode != 0:
-        return False, [], err.decode(errors="replace").strip()[:500] or "repository unreachable"
+        return False, [], _git_error(err, secret) or "repository unreachable"
 
     branches = [
         line.split("refs/heads/", 1)[1]

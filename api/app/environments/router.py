@@ -27,7 +27,7 @@ from app.ratelimit import rate_limit
 from app.spaces import guard_env_id, guard_stack_id
 from app.stacks.git import clone_shallow, enforce_clone_budget, ls_remote_sha
 from app.variables.crud import create_variable, get_variable, update_variable, variables_for
-from app.variables.discovery import DiscoveredInput, parse_inputs, placeholder
+from app.variables.discovery import DiscoveredInput, parse_inputs, placeholder, tf_files
 from app.variables.resolution import resolve_variables
 from app.variables.schemas import (
     ResolvedVariableOut,
@@ -51,10 +51,12 @@ def _scan_clone(
     """Size-cap the clone (§H), locate the project root and parse its REQUIRED inputs. Synchronous
     filesystem work — run via asyncio.to_thread, never directly on the event loop."""
     enforce_clone_budget(dest, max_mb=max_mb)
+    # project_root (or a symlinked dir on its way) must resolve inside the clone — a path-wise
+    # check, not a string prefix (`/tmp/x` would otherwise admit `/tmp/x2`).
     root = (dest / project_root).resolve()
-    if not str(root).startswith(str(dest.resolve())):  # project_root must stay inside the repo
+    if not root.is_relative_to(dest.resolve()):
         raise ProblemException(400, "Invalid project root", None)
-    tf_count = sum(1 for _ in root.glob("*.tf"))
+    tf_count = len(tf_files(root))  # regular files only: symlinks are neither counted nor read
     if tf_count > max_tf_files:
         raise ProblemException(
             413,
@@ -361,4 +363,5 @@ async def discover_inputs(env_id: uuid.UUID, user: CurrentUser, session: DbSessi
         await session.commit()
         return {"created": created, "skipped": skipped, "required_total": len(required)}
     finally:
-        shutil.rmtree(dest, ignore_errors=True)
+        # Removing the whole clone is blocking filesystem work too — never on the event loop.
+        await asyncio.to_thread(shutil.rmtree, dest, ignore_errors=True)

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import re
+import stat
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -30,11 +31,26 @@ def _truthy(raw: object) -> bool:
     return raw is True or (isinstance(raw, str) and _unwrap(raw).lower() == "true")
 
 
+def tf_files(root: Path) -> list[Path]:
+    """The root module's *.tf files discovery may open: regular files only, checked with lstat so
+    a symlink is never followed — a cloned `main.tf -> /dev/zero` (or `-> /etc/...`) would
+    otherwise be read out of the clone, past the size budget, until the API runs out of memory.
+    Non-recursive: a symlinked subdirectory is never walked into."""
+    out: list[Path] = []
+    for p in sorted(root.glob("*.tf")):
+        try:
+            if stat.S_ISREG(p.lstat().st_mode):
+                out.append(p)
+        except OSError:
+            continue
+    return out
+
+
 def parse_inputs(root: Path) -> list[DiscoveredInput]:
     """Parse the `variable` blocks of a root module's *.tf files (no terraform run). Last
     declaration of a name wins; unparseable files are skipped rather than aborting discovery."""
     out: dict[str, DiscoveredInput] = {}
-    for tf in sorted(root.glob("*.tf")):
+    for tf in tf_files(root):
         try:
             with tf.open() as f:
                 data = hcl2.load(f)
