@@ -166,6 +166,20 @@ def _apply_error(events: list[dict]) -> str | None:
     return f"{error}: {detail} The reviewed plan was not applied; trigger a new plan."
 
 
+def _plan_json_unusable(show: subprocess.CompletedProcess[str]) -> str | None:
+    """Why `tofu show -json`'s result is no plan document (a failed run, or anything but a JSON
+    object), or None when it is one."""
+    if show.returncode != 0:
+        stderr = (show.stderr or "").splitlines()
+        detail = next((line.strip() for line in stderr if line.strip()), "")
+        return f"exited {show.returncode}" + (f": {detail}" if detail else "")
+    try:
+        doc = json.loads(show.stdout)
+    except ValueError:
+        return "printed no JSON"
+    return None if isinstance(doc, dict) else "printed no plan object"
+
+
 def _tool_bin(tool: str) -> str:
     return "tofu" if tool == "opentofu" else "terraform"
 
@@ -390,13 +404,21 @@ def handle_plan(client: ApiClient, job: dict, settings: Settings) -> None:
                 streamer=streamer,
             )
             show = subprocess.run(
-                [tool, "show", "-json", str(plan_file)],
+                [tool, "show", "-json", "-no-color", str(plan_file)],
                 cwd=cwd,
                 env=tf_env,
                 capture_output=True,
                 text=True,
             )
-        plan_doc = show.stdout if show.returncode == 0 and show.stdout.strip() else "{}"
+        # The after_plan checks and the reviewers read this document: without it, fail closed — a
+        # stand-in `{}` would let every policy pass on an empty plan.
+        unusable = _plan_json_unusable(show)
+        if unusable:
+            error = f"plan JSON unavailable, not checked: `{tool} show -json` {unusable}"
+            return client.event(
+                job_id, "job_failed", phase="plan", result={"error": masker.mask(error)}
+            )
+        plan_doc = show.stdout
         # It lists the run's variable values in clear (§8.3): the artifact, and what repo hooks
         # read, is a copy with every sensitive value masked.
         masked_doc = mask_plan_json(plan_doc, masker)

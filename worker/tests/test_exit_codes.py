@@ -1,6 +1,7 @@
 """tofu exit codes fail closed (SPECS §7.4). With -detailed-exitcode a plan succeeds only on 0 (no
 changes) or 2 (changes): an error, the watchdog's kill (124), a signal (a negative code) or any
-other code fails the job — it never passes for "no changes". An apply or a command fails on any
+other code fails the job — it never passes for "no changes". So does a plan whose JSON document
+(`show -json`, what the after_plan checks read) can't be had. An apply or a command fails on any
 non-zero code."""
 
 from __future__ import annotations
@@ -50,10 +51,15 @@ class _Workspace(Workspace):
 
 
 def _run(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, phase: str, rc: int
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    phase: str,
+    rc: int,
+    show_json: tuple[int, str, str] = (0, "{}", ""),
 ) -> tuple[_Client, list[str]]:
     """Run the `phase` job with tofu faked: init succeeds, the job's main command (plan, apply or
-    the command run's subcommand) exits `rc`. Returns the client and the tofu subcommands run."""
+    the command run's subcommand) exits `rc`, `show -json` gives `show_json` (exit code, stdout,
+    stderr). Returns the client and the tofu subcommands run."""
     tofu: list[str] = []
 
     def fake_stream_json(cmd: list[str], cwd: Path, env: dict, **kw: Any) -> tuple:
@@ -69,6 +75,8 @@ def _run(
 
     def fake_subprocess_run(cmd: list[str], **kw: Any) -> subprocess.CompletedProcess[str]:
         tofu.append(cmd[1])
+        if cmd[1:3] == ["show", "-json"]:
+            return subprocess.CompletedProcess(cmd, *show_json)
         return subprocess.CompletedProcess(cmd, 0, "{}", "")
 
     monkeypatch.setattr(main, "Workspace", _Workspace)
@@ -136,3 +144,29 @@ def test_an_apply_or_command_that_did_not_exit_0_fails_the_job(
 ) -> None:
     client, _tofu = _run(monkeypatch, tmp_path, phase, rc)
     assert client.events[-1][0] == "job_failed", client.events
+
+
+@pytest.mark.parametrize(
+    ("show_json", "reason"),
+    [
+        (
+            (1, "", "\nError: Failed to read the given file as a state or plan file\n\n…"),
+            "exited 1: Error: Failed to read the given file as a state or plan file",
+        ),
+        ((-9, "", ""), "exited -9"),
+        ((0, "", ""), "printed no JSON"),
+        ((0, '{"format_version": "1.2", "resource_chan', ""), "printed no JSON"),
+        ((0, "[]", ""), "printed no plan object"),
+    ],
+)
+def test_a_plan_without_its_json_document_fails_the_job(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    show_json: tuple[int, str, str],
+    reason: str,
+) -> None:
+    # The after_plan checks would otherwise read `{}` — and pass on an empty plan.
+    client, _tofu = _run(monkeypatch, tmp_path, "plan", 2, show_json)
+    error = f"plan JSON unavailable, not checked: `tofu show -json` {reason}"
+    assert client.events[-1] == ("job_failed", {"phase": "plan", "result": {"error": error}})
+    assert client.uploads == {}  # neither plan.json nor the saved plan
