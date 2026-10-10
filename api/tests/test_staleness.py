@@ -3,6 +3,7 @@ task of the scheduler (§7.5)."""
 
 from __future__ import annotations
 
+import asyncio
 import contextlib
 import json
 import logging
@@ -318,50 +319,122 @@ async def test_poll_respects_the_interval(
     assert (await _get(client, admin, env_id))["head_sha"] == "ddd333"
 
 
-async def test_scheduler_loop_polls_heads_at_the_interval(monkeypatch: pytest.MonkeyPatch) -> None:
-    """The loop ticks every 10 s, but the head poll runs once per `stackd_head_poll_interval`,
-    under its own advisory-lock key."""
+class _Clock:
+    t = datetime(2026, 1, 1, tzinfo=UTC)
+
+    @classmethod
+    def now(cls, tz: object = None) -> datetime:
+        return cls.t
+
+
+async def _drive_loop(monkeypatch: pytest.MonkeyPatch, with_lock, ticks: int = 13) -> None:  # type: ignore[no-untyped-def]
+    """Run `scheduler_loop` for `ticks` 10 s ticks of a fake clock, with `with_lock` standing in
+    for `_with_lock`. Each tick yields to the event loop, so a spawned head poll runs meanwhile."""
     from app.config import get_settings
     from app.scheduler import tasks
-
-    class _Clock:
-        t = datetime(2026, 1, 1, tzinfo=UTC)
-
-        @classmethod
-        def now(cls, tz: object = None) -> datetime:
-            return cls.t
 
     class _Stop(Exception):
         pass
 
-    ticks: list[datetime] = []
+    count = 0
 
     async def _sleep(seconds: float) -> None:
-        ticks.append(_Clock.t)
-        if len(ticks) == 13:
+        nonlocal count
+        await asyncio.sleep(0)  # the real one: lets the head-poll task run
+        count += 1
+        if count == ticks:
             raise _Stop
         _Clock.t += timedelta(seconds=seconds)
+
+    _Clock.t = datetime(2026, 1, 1, tzinfo=UTC)
+    monkeypatch.setattr(get_settings(), "stackd_head_poll_interval", 60)
+    monkeypatch.setattr(tasks, "datetime", _Clock)
+    monkeypatch.setattr(
+        tasks, "asyncio", types.SimpleNamespace(sleep=_sleep, create_task=asyncio.create_task)
+    )
+    monkeypatch.setattr(tasks, "SessionLocal", contextlib.nullcontext)
+    monkeypatch.setattr(tasks, "_with_lock", with_lock)
+    with pytest.raises(_Stop):
+        await asyncio.wait_for(tasks.scheduler_loop(), timeout=5)
+
+
+async def test_scheduler_loop_polls_heads_at_the_interval(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The loop ticks every 10 s, but the head poll runs once per `stackd_head_poll_interval`,
+    under its own advisory-lock key."""
+    from app.scheduler import tasks
 
     calls: list[tuple[int, datetime]] = []
 
     async def _with_lock(session, key, coro) -> None:  # type: ignore[no-untyped-def]
         calls.append((key, _Clock.t))
 
-    monkeypatch.setattr(get_settings(), "stackd_head_poll_interval", 60)
-    monkeypatch.setattr(tasks, "datetime", _Clock)
-    monkeypatch.setattr(tasks, "asyncio", types.SimpleNamespace(sleep=_sleep))
-    monkeypatch.setattr(tasks, "SessionLocal", contextlib.nullcontext)
-    monkeypatch.setattr(tasks, "_with_lock", _with_lock)
-
-    with pytest.raises(_Stop):
-        await tasks.scheduler_loop()
+    await _drive_loop(monkeypatch, _with_lock)
 
     start = datetime(2026, 1, 1, tzinfo=UTC)
-    assert ticks[-1] == start + timedelta(seconds=120)  # 13 ticks, 10 s apart
+    assert _Clock.t == start + timedelta(seconds=120)  # 13 ticks, 10 s apart
     polls = [t for key, t in calls if key == tasks._LOCK_HEAD_POLL]
     assert polls == [start, start + timedelta(seconds=60), start + timedelta(seconds=120)]
     worker_lost = [t for key, t in calls if key == tasks._LOCK_WORKER_LOST]
     assert len(worker_lost) == 13  # the other tasks still run every tick
+
+
+async def test_slow_head_poll_never_blocks_the_other_tasks(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The head poll runs as a task of its own: one stuck on git calls doesn't delay worker-lost
+    detection or the other tasks; while it still runs, the next due poll is skipped rather than
+    overlapping it; and it is cancelled with the loop."""
+    from app.scheduler import tasks
+
+    calls: list[tuple[int, datetime]] = []
+    polls: list[datetime] = []
+    cancelled = asyncio.Event()
+
+    async def _with_lock(session, key, coro) -> None:  # type: ignore[no-untyped-def]
+        if key != tasks._LOCK_HEAD_POLL:
+            calls.append((key, _Clock.t))
+            return
+        polls.append(_Clock.t)
+        try:
+            await asyncio.Event().wait()  # git calls that never return
+        except asyncio.CancelledError:
+            cancelled.set()
+            raise
+
+    await _drive_loop(monkeypatch, _with_lock)
+
+    assert polls == [datetime(2026, 1, 1, tzinfo=UTC)]  # the later due polls were skipped
+    assert len([k for k, _ in calls if k == tasks._LOCK_WORKER_LOST]) == 13
+    assert len([k for k, _ in calls if k == tasks._LOCK_NOTIFY]) == 13
+    await asyncio.wait_for(cancelled.wait(), timeout=1)
+
+
+async def test_poll_bounds_its_concurrent_git_calls(
+    client: httpx.AsyncClient, ls_remote: _FakeLsRemote, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The poll's `git ls-remote` calls run concurrently, never more than the bound at once, and
+    every repo still gets its head."""
+    from app.scheduler import tasks
+
+    monkeypatch.setattr(tasks, "_HEAD_POLL_CONCURRENCY", 3, raising=False)
+    admin = await login(client, "admin")
+    repos = [_repo() for _ in range(7)]
+    envs = [await _env(client, admin, await _stack(client, admin, r), "e", "main") for r in repos]
+    ls_remote.heads = {(r, "main"): f"head{i}" for i, r in enumerate(repos)}
+
+    in_flight, peak = 0, 0
+
+    async def _slow_git() -> None:
+        nonlocal in_flight, peak
+        in_flight += 1
+        peak = max(peak, in_flight)
+        await asyncio.sleep(0.02)
+        in_flight -= 1
+
+    ls_remote.on_call = _slow_git
+    await _poll(datetime.now(UTC))
+
+    assert peak == 3
+    heads = [(await _get(client, admin, e))["head_sha"] for e in envs]
+    assert heads == [f"head{i}" for i in range(7)]
 
 
 async def _idle_in_transaction() -> int:

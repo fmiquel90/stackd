@@ -30,6 +30,7 @@ _LOCK_VCS = 74003
 _LOCK_DRIFT = 74004
 _LOCK_HEAD_POLL = 74005
 _TICK_SECONDS = 10  # the scheduler loop's period
+_HEAD_POLL_CONCURRENCY = 8  # `git ls-remote` calls a head poll runs at once (§9.6)
 _log = get_logger("stackd.scheduler")
 
 # Active states in which a worker is executing the run's job — the only ones worker-lost reclaims
@@ -116,8 +117,10 @@ async def poll_branch_heads(session: AsyncSession, now: datetime) -> int:
 
     Only envs whose head wasn't observed within the interval are polled (by a push webhook, a
     manual refresh or a previous poll — on any replica), so a re-run is a no-op. No DB transaction
-    is held across the git calls. A repo that fails is logged (never its token) and skipped: its
-    envs keep their head and are retried at the next poll."""
+    is held across the git calls, which run concurrently — at most `_HEAD_POLL_CONCURRENCY` at a
+    time, so many unreachable repos (15 s timeout each) don't serialize into a very long poll. A
+    repo that fails is logged (never its token) and skipped: its envs keep their head and are
+    retried at the next poll."""
     interval = get_settings().stackd_head_poll_interval
     # One tick of slack: the loop fires this on the first tick past the interval, which must find
     # the envs refreshed by the previous poll (stamped with that poll's `now`) due again.
@@ -163,11 +166,19 @@ async def poll_branch_heads(session: AsyncSession, now: datetime) -> int:
                 continue
         groups.setdefault((repo_url, auth_kind, secrets[stack_id], branch), []).append(env_id)
 
-    heads: list[tuple[str, str, list[uuid.UUID]]] = []
-    for (repo_url, auth_kind, secret, branch), env_ids in groups.items():
+    bound = asyncio.Semaphore(_HEAD_POLL_CONCURRENCY)
+
+    async def _read_head(
+        repo_url: str,
+        auth_kind: RepoAuthKind,
+        secret: str | None,
+        branch: str,
+        env_ids: list[uuid.UUID],
+    ) -> tuple[str, str, list[uuid.UUID]] | None:
         error = "unreachable or no such branch"
         try:
-            sha = await ls_remote_sha(repo_url, auth_kind, secret, branch)
+            async with bound:
+                sha = await ls_remote_sha(repo_url, auth_kind, secret, branch)
         except Exception as exc:  # one failing repo must not abort the others
             sha, error = None, type(exc).__name__  # the type only: a message may carry the URL
         if sha is None:
@@ -180,8 +191,11 @@ async def poll_branch_heads(session: AsyncSession, now: datetime) -> int:
                     "error": error,
                 },
             )
-            continue
-        heads.append((sha, branch, env_ids))
+            return None
+        return sha, branch, env_ids
+
+    read = await asyncio.gather(*(_read_head(*key, env_ids) for key, env_ids in groups.items()))
+    heads = [head for head in read if head is not None]
 
     updated = 0
     for sha, branch, env_ids in heads:
@@ -217,28 +231,45 @@ async def _with_lock(session: AsyncSession, key: int, coro) -> None:  # type: ig
             await lock_conn.execute(text("SELECT pg_advisory_unlock(:k)").bindparams(k=key))
 
 
+async def _head_poll() -> None:
+    """One git staleness poll, under its own advisory lock (on `_with_lock`'s dedicated
+    connection). Run as a task of its own: its git calls can outlast a tick."""
+    try:
+        async with SessionLocal() as session:
+            await _with_lock(session, _LOCK_HEAD_POLL, poll_branch_heads)
+    except Exception as exc:
+        print(f"[scheduler] head poll error: {exc}", flush=True)
+
+
 async def scheduler_loop() -> None:
     """Single background loop; each task is advisory-locked + idempotent (§7.5). A 10s tick keeps
     outbound notifications responsive; worker_lost detection is cheap/idempotent at that rate. The
-    git staleness poll runs once per `stackd_head_poll_interval` only (§9.6)."""
+    git staleness poll runs once per `stackd_head_poll_interval` only (§9.6), in a task of its own
+    so its git calls never delay the other tasks' ticks; a poll still running when the next one is
+    due skips that one."""
     next_head_poll: datetime | None = None
-    while True:
-        try:
-            async with SessionLocal() as session:
-                await _with_lock(session, _LOCK_WORKER_LOST, detect_worker_lost)
-            async with SessionLocal() as session:
-                await _with_lock(session, _LOCK_NOTIFY, dispatch_pending)
-            async with SessionLocal() as session:
-                await _with_lock(session, _LOCK_VCS, dispatch_vcs)
-            async with SessionLocal() as session:
-                await _with_lock(session, _LOCK_DRIFT, detect_drift)
-            now = datetime.now(UTC)
-            if next_head_poll is None or now >= next_head_poll:
-                # Scheduled before it runs, so a failing poll also waits a full interval.
-                interval = get_settings().stackd_head_poll_interval
-                next_head_poll = now + timedelta(seconds=interval)
+    head_poll: asyncio.Task[None] | None = None
+    try:
+        while True:
+            try:
                 async with SessionLocal() as session:
-                    await _with_lock(session, _LOCK_HEAD_POLL, poll_branch_heads)
-        except Exception as exc:
-            print(f"[scheduler] tick error: {exc}", flush=True)
-        await asyncio.sleep(_TICK_SECONDS)
+                    await _with_lock(session, _LOCK_WORKER_LOST, detect_worker_lost)
+                async with SessionLocal() as session:
+                    await _with_lock(session, _LOCK_NOTIFY, dispatch_pending)
+                async with SessionLocal() as session:
+                    await _with_lock(session, _LOCK_VCS, dispatch_vcs)
+                async with SessionLocal() as session:
+                    await _with_lock(session, _LOCK_DRIFT, detect_drift)
+                now = datetime.now(UTC)
+                if next_head_poll is None or now >= next_head_poll:
+                    # Scheduled before it runs, so a failing poll also waits a full interval.
+                    interval = get_settings().stackd_head_poll_interval
+                    next_head_poll = now + timedelta(seconds=interval)
+                    if head_poll is None or head_poll.done():
+                        head_poll = asyncio.create_task(_head_poll())
+            except Exception as exc:
+                print(f"[scheduler] tick error: {exc}", flush=True)
+            await asyncio.sleep(_TICK_SECONDS)
+    finally:
+        if head_poll is not None:
+            head_poll.cancel()  # the loop is cancelled at shutdown: don't leave the poll behind
