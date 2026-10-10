@@ -4,6 +4,7 @@ init command line (tofu persists -backend-config values, the state token include
 
 from __future__ import annotations
 
+from contextlib import AbstractContextManager, nullcontext
 import os
 import subprocess
 from pathlib import Path
@@ -122,11 +123,8 @@ class _FakeWorkspace:
     def head_sha(self) -> str:
         return "a" * 40
 
-    def write_tfvars(self, *args: Any) -> None:
-        pass
-
-    def write_hcl_tfvars(self, *args: Any) -> None:
-        pass
+    def tfvars(self, *args: Any) -> AbstractContextManager[None]:
+        return nullcontext()
 
     def write_backend_override(self, *args: Any) -> None:
         pass

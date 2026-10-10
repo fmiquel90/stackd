@@ -6,6 +6,9 @@ import subprocess
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
+from contextlib import AbstractContextManager
+from pathlib import Path
+from typing import Any
 
 from agent.client import ApiClient
 from agent.config import Settings
@@ -169,6 +172,12 @@ def _tofu_env(base: dict[str, str], backend: dict | None) -> dict[str, str]:
     return env
 
 
+def _tfvars(ws: Workspace, cwd: Path, job: dict[str, Any]) -> AbstractContextManager[None]:
+    """The run's variable files, present in the checkout only while the tofu command it wraps runs:
+    a repo hook, at any stage, never finds them (§8.3)."""
+    return ws.tfvars(cwd, job.get("tfvars_json", {}), job.get("hcl_tfvars", {}))
+
+
 def _init_cmd(
     tool: str,
     backend: dict | None,
@@ -202,8 +211,6 @@ def handle_plan(client: ApiClient, job: dict, settings: Settings) -> None:
             token=_repo_token(job),
             branch=env_info.get("branch"),
         )
-        ws.write_tfvars(cwd, job.get("tfvars_json", {}))
-        ws.write_hcl_tfvars(cwd, job.get("hcl_tfvars", {}))
         backend = job.get("backend")
         if backend:
             ws.write_backend_override(cwd)
@@ -244,8 +251,8 @@ def handle_plan(client: ApiClient, job: dict, settings: Settings) -> None:
             return client.event(
                 job_id, "job_failed", phase="before_init", result={"checks": checks}
             )
-        if (
-            run_command(
+        with _tfvars(ws, cwd, job):
+            init_rc = run_command(
                 _init_cmd(tool, backend, job.get("backend_config_file"), job.get("backend_config")),
                 cwd,
                 tf_env,
@@ -253,8 +260,7 @@ def handle_plan(client: ApiClient, job: dict, settings: Settings) -> None:
                 section=None,
                 streamer=streamer,
             )
-            != 0
-        ):
+        if init_rc != 0:
             return client.event(job_id, "job_failed", phase="init", result={"error": "init failed"})
         stage("after_init")
         stage("before_plan")
@@ -277,14 +283,15 @@ def handle_plan(client: ApiClient, job: dict, settings: Settings) -> None:
             plan_cmd.insert(2, "-refresh-only")
         if job.get("destroy"):
             plan_cmd.insert(2, "-destroy")
-        code, events = stream_json_command(
-            plan_cmd,
-            cwd,
-            tf_env,
-            phase="planning",
-            section=None,
-            streamer=streamer,
-        )
+        with _tfvars(ws, cwd, job):
+            code, events = stream_json_command(
+                plan_cmd,
+                cwd,
+                tf_env,
+                phase="planning",
+                section=None,
+                streamer=streamer,
+            )
         if code == 1:
             return client.event(
                 job_id,
@@ -408,8 +415,6 @@ def handle_apply(client: ApiClient, job: dict, settings: Settings) -> None:
             token=_repo_token(job),
             branch=env_info.get("branch"),
         )
-        ws.write_tfvars(cwd, job.get("tfvars_json", {}))
-        ws.write_hcl_tfvars(cwd, job.get("hcl_tfvars", {}))
         backend = job.get("backend")
         if backend:
             ws.write_backend_override(cwd)
@@ -423,8 +428,8 @@ def handle_apply(client: ApiClient, job: dict, settings: Settings) -> None:
         repo_env = {**_repo_environ(), **job.get("env", {})}
         tf_env = _tofu_env(platform_env, backend)  # + state-backend creds, for tofu only
 
-        if (
-            run_command(
+        with _tfvars(ws, cwd, job):
+            init_rc = run_command(
                 _init_cmd(tool, backend, job.get("backend_config_file"), job.get("backend_config")),
                 cwd,
                 tf_env,
@@ -432,8 +437,7 @@ def handle_apply(client: ApiClient, job: dict, settings: Settings) -> None:
                 section=None,
                 streamer=streamer,
             )
-            != 0
-        ):
+        if init_rc != 0:
             return client.event(job_id, "job_failed", phase="init", result={"error": "init failed"})
         # The saved plan the human reviewed (§7.4). Missing or unreadable → the apply fails closed:
         # it never re-plans, so it can only ever apply what was reviewed.
@@ -464,15 +468,17 @@ def handle_apply(client: ApiClient, job: dict, settings: Settings) -> None:
         # it (exit 124) so a hung apply can't pin the worker or outlive its short-lived credentials.
         apply_timeout = job.get("apply_timeout_seconds") or _DEFAULT_TIMEOUT_SECONDS
         try:
-            code, events = stream_json_command(
-                [tool, "apply", "-input=false", "-json", plan_file.name],
-                cwd,
-                tf_env,
-                phase="applying",
-                section=None,
-                streamer=streamer,
-                timeout=apply_timeout,
-            )
+            # With the run's variables too: tofu refuses a saved plan whose inputs changed (§7.3).
+            with _tfvars(ws, cwd, job):
+                code, events = stream_json_command(
+                    [tool, "apply", "-input=false", "-json", plan_file.name],
+                    cwd,
+                    tf_env,
+                    phase="applying",
+                    section=None,
+                    streamer=streamer,
+                    timeout=apply_timeout,
+                )
         finally:
             plan_file.unlink(missing_ok=True)
         if code != 0:
@@ -545,8 +551,6 @@ def handle_command_run(client: ApiClient, job: dict, settings: Settings) -> None
             token=_repo_token(job),
             branch=env_info.get("branch"),
         )
-        ws.write_tfvars(cwd, job.get("tfvars_json", {}))
-        ws.write_hcl_tfvars(cwd, job.get("hcl_tfvars", {}))
         backend = job.get("backend")
         if backend:
             ws.write_backend_override(cwd)
@@ -559,8 +563,8 @@ def handle_command_run(client: ApiClient, job: dict, settings: Settings) -> None
         tf_env = _tofu_env(platform_env, backend)  # + state-backend creds, for tofu only
 
         client.event(job_id, "phase_started", phase="running")
-        if (
-            run_command(
+        with _tfvars(ws, cwd, job):
+            init_rc = run_command(
                 _init_cmd(tool, backend, job.get("backend_config_file"), job.get("backend_config")),
                 cwd,
                 tf_env,
@@ -568,21 +572,21 @@ def handle_command_run(client: ApiClient, job: dict, settings: Settings) -> None
                 section=None,
                 streamer=streamer,
             )
-            != 0
-        ):
+        if init_rc != 0:
             return client.event(job_id, "job_failed", phase="init", result={"error": "init failed"})
 
         argv = [tool, *str(cmd.get("name", "")).split(), *(cmd.get("args") or [])]
         timeout = _command_timeout(job)
-        code = run_command(
-            argv,
-            cwd,
-            tf_env,
-            phase="running",
-            section=None,
-            streamer=streamer,
-            timeout=timeout,
-        )
+        with _tfvars(ws, cwd, job):
+            code = run_command(
+                argv,
+                cwd,
+                tf_env,
+                phase="running",
+                section=None,
+                streamer=streamer,
+                timeout=timeout,
+            )
         if code != 0:
             error = (
                 f"{cmd.get('name')} exceeded the {timeout}s time budget and was terminated"

@@ -4,6 +4,7 @@ The git tests use a real local repository over file:// (the shallow-clone transp
 
 from __future__ import annotations
 
+from contextlib import AbstractContextManager, nullcontext
 import subprocess
 from pathlib import Path
 from types import SimpleNamespace
@@ -113,11 +114,8 @@ class _FakeWorkspace:
     def head_sha(self) -> str:
         return "c" * 40
 
-    def write_tfvars(self, *args: Any) -> None:
-        pass
-
-    def write_hcl_tfvars(self, *args: Any) -> None:
-        pass
+    def tfvars(self, *args: Any) -> AbstractContextManager[None]:
+        return nullcontext()
 
     def write_backend_override(self, *args: Any) -> None:
         pass

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from contextlib import AbstractContextManager, nullcontext
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -27,11 +28,8 @@ class _FakeWorkspace:
     def git_clone(self, *args: object, **kw: object) -> Path:
         return self.root
 
-    def write_tfvars(self, *args: object) -> None:
-        pass
-
-    def write_hcl_tfvars(self, *args: object) -> None:
-        pass
+    def tfvars(self, *args: object) -> AbstractContextManager[None]:
+        return nullcontext()
 
     def write_backend_override(self, *args: object) -> None:
         pass
