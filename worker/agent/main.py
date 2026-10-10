@@ -407,6 +407,24 @@ def handle_apply(client: ApiClient, job: dict, settings: Settings) -> None:
         ws.cleanup()
 
 
+# Read-only command-run subcommands — mirror of the API's READ_ONLY_COMMANDS (§4.3). The claim
+# payload carries no credential phase, so the name is the signal; anything else is treated as
+# mutating (fail-closed if the API allowlists a new mutating command before the worker knows it).
+_READ_ONLY_COMMANDS = frozenset(
+    {"output", "show", "state list", "state show", "validate", "providers"}
+)
+
+
+def _command_timeout(job: dict) -> int:
+    """Wall-clock cap for a command run's subcommand. A mutating one holds apply credentials (apply
+    OIDC role, apply-window state token) and the API reclaims it after the apply budget + grace
+    (§4.2/§4.3), so it gets the same hard budget as an apply — it must not outlive its credentials
+    or its reclaim window. Read-only commands keep the default cap."""
+    if (job.get("command") or {}).get("name") in _READ_ONLY_COMMANDS:
+        return _DEFAULT_TIMEOUT_SECONDS
+    return job.get("apply_timeout_seconds") or _DEFAULT_TIMEOUT_SECONDS
+
+
 def handle_command_run(client: ApiClient, job: dict, settings: Settings) -> None:
     """Run one allowlisted tofu/terraform subcommand (RunType.command): clone, init, run it.
     No hooks, no plan/apply phases — a one-off operation (import, state rm, …)."""
@@ -452,12 +470,24 @@ def handle_command_run(client: ApiClient, job: dict, settings: Settings) -> None
             return client.event(job_id, "job_failed", phase="init", result={"error": "init failed"})
 
         argv = [tool, *str(cmd.get("name", "")).split(), *(cmd.get("args") or [])]
-        if (
-            run_command(argv, cwd, platform_env, phase="running", section=None, streamer=streamer)
-            != 0
-        ):
+        timeout = _command_timeout(job)
+        code = run_command(
+            argv,
+            cwd,
+            platform_env,
+            phase="running",
+            section=None,
+            streamer=streamer,
+            timeout=timeout,
+        )
+        if code != 0:
+            error = (
+                f"{cmd.get('name')} exceeded the {timeout}s time budget and was terminated"
+                if code == 124
+                else f"{cmd.get('name')} failed"
+            )
             return client.event(
-                job_id, "job_failed", phase="command", result={"error": f"{cmd.get('name')} failed"}
+                job_id, "job_failed", phase="command", result={"error": masker.mask(error)}
             )
         client.event(job_id, "phase_finished", result={"command": cmd.get("name")})
     finally:
