@@ -1292,7 +1292,7 @@ A variable with `secret_source_id` is treated as `sensitive=true` regardless of 
 ### 15.2 Resolution order (real > fallback > error)
 
 At claim build (`build_job_payload`, §7.2), reference variables resolve **after** the existing
-5-layer resolution, by calling the provider:
+layered resolution (§3.4), by calling the provider:
 
 1. **Provider reachable, secret found** → use the live value. `variable_provenance[name] =
    "secret:{source_name}"`. No audit event on success (would be noisy — successes are implicit in
