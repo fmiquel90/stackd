@@ -489,9 +489,10 @@ A Git webhook (HMAC-verified, secret per repo) maps a pushed branch to the envir
 filtered by `project_root`:
 
 - **push** → a `tracked` run per matching environment, and `head_sha` advances.
-- **pull request** → a `proposed` run: plan-only, read-only state, mocks allowed. (Withholding
-  secrets from it is specified but not implemented yet: today it gets the environment's secrets
-  like any plan — see [Runs & approvals](guide/runs-and-approvals.md#proposed-runs-from-a-pr).)
+- **pull request** → a `proposed` run: plan-only, read-only state, mocks allowed, and **no
+  secrets**: the pull request's code runs inside tofu, so it gets none of the environment's
+  sensitive variables — only the read-only plan role — see
+  [Runs & approvals](guide/runs-and-approvals.md#proposed-runs-from-a-pr).
 
 **Staleness** answers "applied ≠ tip of branch": Stackd compares the commit of the last finished
 tracked run (every run is pinned to the commit it planned) to the branch head (`head_sha`, refreshed
@@ -616,6 +617,6 @@ Targets are deleted with their stack or environment.
 | **Cascade** | downstream runs triggered when an upstream apply finishes |
 | **Workload token** | per-job OIDC token, `sub=run:<tier>:<stack>:<phase>` |
 | **Audit** | who-did-what, append-only |
-| **Proposed run** | plan-only run from a PR (`ro` state token; still gets secrets today) |
+| **Proposed run** | plan-only run from a PR (`ro` state token, plan role, no secrets) |
 | **Notification target** | outbound Slack/webhook on a stack or environment, firing on chosen run states |
 | **Outbox** | run-event notifications enqueued in-txn, drained by the scheduler (at-least-once) |

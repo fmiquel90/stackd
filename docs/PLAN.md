@@ -233,7 +233,7 @@ The platform becomes an **OIDC issuer** (the same mechanism as GitHub Actions OI
 
 - [ ] GitHub/GitLab webhook: HMAC, branch → environments mapping, filtering by `project_root`
 - [ ] **Git staleness**: tracking of `head_sha` per env (webhook + ls-remote polling 15 min + manual refresh), `↑N` chip on lagging envs, "stale plan" banner + re-plan on stale unconfirmed runs — see SPECS §9.6 / DESIGN §5.1-5.2 — *status: done: `stale` computed on every env the API returns, background ls-remote polling, audited manual refresh, branch-deletion and re-pointed-branch handling; the `↑N` chip and the stale-plan banner are not in the UI yet*
-- [ ] Push → tracked runs; PR → **proposed runs** plan-only (RO state, secrets not injected by default, mocks allowed) — *status: done, except that a proposed run still gets the environment's secrets and plan role (SPECS §13)*
+- [ ] Push → tracked runs; PR → **proposed runs** plan-only (RO state, secrets not injected by default, mocks allowed) — *status: done (SPECS §13): a proposed run gets no secret, keeping the read-only plan role; the per-env opt-in is not implemented*
 - [ ] (Optional) PR comment: plan summary + check results (warn/fail hooks) — *status: shipped for GitHub (SPECS §18): a commit status and one comment per run, edited in place*
 
 **Deliverable: `git push` → automatic plans + checks visible in the PR.**

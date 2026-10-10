@@ -122,6 +122,21 @@ def _state_scope(run: Run, cred_phase: JobPhase) -> StateScope:
     return "ro" if run.type == RunType.command else "plan"
 
 
+def withholds_secrets(run: Run) -> bool:
+    """True when the run's job gets none of the environment's secrets (§13): a proposed run. Its
+    code is a pull request's, which nobody has reviewed, and repo code runs inside tofu (`data
+    "external"`, provisioners) with everything tofu gets. A drift run is a proposed run too, but it
+    plans the environment's last applied commit (§19.2) — code that already ran with those secrets
+    — so it keeps them. The per-environment opt-in of §13 is not implemented: always withheld."""
+    return run.type == RunType.proposed and not run.is_drift
+
+
+def _is_secret(rv: ResolvedVariable) -> bool:
+    """A sensitive variable, of either kind, or an external secret reference (§15.1: always
+    sensitive, whatever its flag says)."""
+    return rv.sensitive or rv.is_reference
+
+
 def _is_hcl_tfvar(rv: ResolvedVariable) -> bool:
     """True when a terraform var must be written verbatim to the HCL tfvars file (§3.4, Phase D): an
     `hcl`-typed var with a value. It is then excluded from the JSON tfvars to avoid a double
@@ -131,13 +146,21 @@ def _is_hcl_tfvar(rv: ResolvedVariable) -> bool:
 
 async def build_job_payload(session: AsyncSession, run: Run) -> dict:
     """Construct the claim payload (SPECS §7.2). Resolves variables with secrets revealed; the
-    agent masks them in logs. Snapshots provenance onto the run."""
+    agent masks them in logs. Snapshots provenance onto the run. A proposed run gets no secret
+    (§13, `withholds_secrets`)."""
     env = await session.get(Environment, run.environment_id)
     assert env is not None
     stack = await session.get(Stack, env.stack_id)
     assert stack is not None
 
-    resolved = await resolve_variables(session, env, reveal_sensitive=True)
+    withhold = withholds_secrets(run)
+    resolved = await resolve_variables(session, env, reveal_sensitive=not withhold)
+    if withhold:
+        # Dropped before anything below sees them: no sensitive variable reaches `sensitive_env`,
+        # the tfvars, `mask_values` or the provenance snapshot, and no external reference is
+        # fetched. One the plan needs gets no value: tofu falls back to the variable's default in
+        # the repo, or fails with "No value for required variable" — never a stand-in value.
+        resolved = [rv for rv in resolved if not _is_secret(rv)]
 
     # Resolve external secret references (§15): fetch live values, or apply the configured fallback.
     # Raises SecretUnavailable (caught by the claim endpoint → run failed) when a reference can't
@@ -168,7 +191,7 @@ async def build_job_payload(session: AsyncSession, run: Run) -> dict:
             hcl_tfvars[rv.name] = rv.value
         elif rv.kind == VariableKind.terraform:
             tfvars_json[rv.name] = rv.value
-        elif rv.sensitive:
+        elif _is_secret(rv):
             sensitive_env[rv.name] = rv.value
         else:
             env_vars[rv.name] = rv.value
@@ -205,6 +228,8 @@ async def build_job_payload(session: AsyncSession, run: Run) -> dict:
     provenance.update(secret_provenance)  # §15: secret:/secret_fallback:/secret_override:
     run.variable_provenance = provenance
 
+    # The repo token stays with a proposed run: it clones the pull request's commit, and reaches
+    # neither tofu nor a hook (§8.3 — it is in no environment and nowhere under the checkout).
     repo_credentials: dict[str, str | None] = {"kind": stack.repo_auth_kind.value}
     if stack.repo_auth_kind != RepoAuthKind.none and stack.repo_secret_encrypted is not None:
         repo_credentials["token"] = decrypt(stack.repo_secret_encrypted)
@@ -242,12 +267,14 @@ async def build_job_payload(session: AsyncSession, run: Run) -> dict:
                 unlock_method="UNLOCK",
             )
 
-    cloud_credentials = await _cloud_credentials(session, env, stack, run, cred_phase)  # §10
+    # §10: a proposed run keeps its OIDC credentials — those of the plan role, read-only by design
+    # (§10.3: "a PR plan physically cannot modify the infra"), which a plan needs to refresh.
+    cloud_credentials = await _cloud_credentials(session, env, stack, run, cred_phase)
 
     # Literal secret values the agent masks in ALL log output (§5.1) — sensitive variables, the
     # short-lived state-backend and OIDC tokens, and the repo auth token (it rides inside the clone
     # URL, so a failed `git clone` could otherwise echo it to logs).
-    mask_values = [rv.value for rv in resolved if rv.sensitive and rv.value]
+    mask_values = [rv.value for rv in resolved if _is_secret(rv) and rv.value]
     if backend:
         mask_values.append(backend["password"])
     if cloud_credentials and cloud_credentials.get("oidc_token"):

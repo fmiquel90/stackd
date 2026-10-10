@@ -615,9 +615,11 @@ POST /worker/v1/jobs/claim?wait=25
     "env": { ... },                        # environment-kind variables, resolution
                                            # sets→stack→env (§3.4)
     "sensitive_env": { ... },              # sensitive environment-kind variables — never logged,
-                                           # never given to repo hooks (§8.3)
+                                           # never given to repo hooks (§8.3); always empty for a
+                                           # proposed run, which gets no secret at all (§13)
     "tfvars_json": { ... },                # terraform variables (JSON), with the dependency
-                                           # inputs / mocks (§9.3) merged in
+                                           # inputs / mocks (§9.3) merged in — none sensitive for
+                                           # a proposed run (§13)
     "hcl_tfvars": { "tags": "{ team = \"core\" }" },  # hcl-typed variables, written verbatim (§3.4)
     "mask_values": [ "..." ],              # literal secrets the agent masks in ALL logs (§5.1):
                                            # sensitive values, state/OIDC/repo tokens
@@ -1277,7 +1279,7 @@ Specified but **not served yet**: `GET /api/v1/runs/{id}/logs/download` (§5.2) 
 | Outbound notifications | https only; the host must resolve to public addresses only; the POST dials the vetted IP (Host/SNI/certificate stay on the hostname), ignores env proxies (`HTTPS_PROXY`…) by design, never follows redirects |
 | Apply permissions | tier per env × `allowed_tiers` set per user (§2.4, configurable catalog, non-linear); distinct `can_destroy`; double lock with the OIDC trust policy on the tier name |
 | Protected envs | autodeploy forbidden, 4-eyes (automatic on a tier flagged `requires_four_eyes`, e.g. `prod`), never bypassed (cascade included); the *right* to apply comes from the tier, not from `protected` |
-| Proposed runs | plan-only, state RO, mocks allowed; secrets not injected by default — **not implemented yet**: a proposed run's job gets the environment's `sensitive_env`, sensitive tfvars and plan-role OIDC credentials like any plan job, and repo code runs inside tofu (§7.4) |
+| Proposed runs | plan-only, state RO, mocks allowed; **secrets not injected**: repo code runs inside tofu (§7.4), and a pull request's has not been reviewed. The claim drops every sensitive variable, of either kind, and every external secret reference (§15, not even fetched) — so nothing of them is in `sensitive_env`, the tfvars, `mask_values` or the run's `variable_provenance`. One the plan needs gets no value, never a stand-in: tofu uses the variable's default in the repo, or fails with `No value for required variable`. Kept, as a plan needs them: the **plan role**'s OIDC credentials (read-only by design, §10.3 — scope it so), the `ro` state token (the state itself is readable: it can hold secrets of its own), the repo token to clone (it reaches neither tofu nor a hook, §8.3). A drift run (§19), a proposed run of the env's last applied commit, keeps the secrets. Specified, **not implemented — pending a decision**: a per-environment opt-in giving proposed runs the secrets |
 | Webhooks | HMAC SHA-256 (secret per repo, `stacks.webhook_secret_encrypted` §3.1), anti-replay 5 min |
 | Sessions | access JWT 15 min in Bearer header; refresh httpOnly `SameSite=Strict` + CSRF double-submit, rotation with reuse detection → family revocation (§2.5) |
 | Encryption at rest | AES-256-GCM, random 96-bit nonce per value, never reused (§1) |
@@ -1288,7 +1290,7 @@ Specified but **not served yet**: `GET /api/v1/runs/{id}/logs/download` (§5.2) 
 
 ## 14. Tests — minimal strategy
 
-- **API unit tests**: transitions (`can_apply` per tier including apply-everywhere-except-prod, `can_destroy`, auto 4-eyes on a `requires_four_eyes` tier **and its human-triggerer-only scope**, mock-apply blocking, warn → forced confirmation), 6-layer variable resolution + provenance (space-scoped attachments), hook merging (platform→repo order; the exclusion of `*_apply` repo hooks on prod once decided, §8.3), check results kept with their stage across the plan and apply jobs, an `after_apply` failure recording outputs and clearing drift without cascading, cycle detection, multi-parent cascade (once built, §9.2), mock resolution (real > mock > error), signature/claims of workload tokens (tier segment in the `sub`, wildcard limited to the stack segment), Google id_token validation, **refresh rotation + reuse detection → family revocation**.
+- **API unit tests**: transitions (`can_apply` per tier including apply-everywhere-except-prod, `can_destroy`, auto 4-eyes on a `requires_four_eyes` tier **and its human-triggerer-only scope**, mock-apply blocking, warn → forced confirmation), 6-layer variable resolution + provenance (space-scoped attachments), a proposed run's claim payload carrying no secret (a tracked or drift run's still does), hook merging (platform→repo order; the exclusion of `*_apply` repo hooks on prod once decided, §8.3), check results kept with their stage across the plan and apply jobs, an `after_apply` failure recording outputs and clearing drift without cascading, cycle detection, multi-parent cascade (once built, §9.2), mock resolution (real > mock > error), signature/claims of workload tokens (tier segment in the `sub`, wildcard limited to the stack segment), Google id_token validation, **refresh rotation + reuse detection → family revocation**.
 - **Integration**: Postgres testcontainers; **concurrent claim → only one wins, the loser catches `23505` and re-polls**; HTTP backend with real `tofu` + Garage; log idempotency; **masking of sensitive values (`tfvars` + env) in a hook's stdout**; `after_plan` hook that reads plan.json; **WS fan-out via `LISTEN/NOTIFY`**; **single execution of a periodic task under advisory lock with 2 replicas**; AssumeRoleWithWebIdentity against a mock STS (moto).
 - **E2E**: the live compose stack + fixture repos (built-in `terraform_data`, no provider) → on a throwaway copy of the demo graph, a 2-stack cascade **with mocks** (mocked plan → upstream apply → real cascade), the role/mock gates, and the `run.confirmed` audit actor (DEV §7).
 - **Agent**: exit codes (a plan only on 0/2) and the plan JSON failing closed, secret masking and the masked `plan.json`, hooks at every stage and from both sources (`fail` stops the job, `warn` goes on, the timeout kills the process group), what a repo hook can read (no saved plan, tfvars, OIDC token file or repo token; an allowlisted env), the `STACKD_*`-free env of tofu and platform hooks, saved-plan upload and fail-closed apply, commit pinning, the `TF_HTTP_*` backend env (tofu only), the command time budget from `cred_phase`, token encoding in clone URLs, writing the OIDC token and exporting the env vars.
@@ -1675,8 +1677,10 @@ that commit (`is_drift=true`, `triggered_by=schedule`). An env with nothing appl
 ### 19.3 Worker & claim
 
 No new job type: the `proposed` plan runs with **`-refresh-only`** (true drift = state vs reality,
-not state vs code), signalled by `refresh_only` in the claim payload. To keep drift behind user
-work, the claim order-by (§7.2) sorts `is_drift` ascending — a queued user run is always claimed
+not state vs code), signalled by `refresh_only` in the claim payload. Unlike a pull request's
+proposed run, a drift run gets the environment's secrets (§13): it plans the last applied commit,
+reviewed code that already ran with them, and refreshing needs them as much as applying did. To
+keep drift behind user work, the claim order-by (§7.2) sorts `is_drift` ascending — a queued user run is always claimed
 before a background drift run.
 
 ### 19.4 Outcome (applied in the run's `transition()` txn)

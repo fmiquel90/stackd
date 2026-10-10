@@ -141,6 +141,7 @@ all. Counts in parentheses include parametrized cases and drift as tests are add
 | `test_variables_api.py` (12) | Layered resolution and provenance; sensitive values write-only; attached set can't be deleted; selectors on stack/env labels; tier attachments; cross-space attach refused; a tier attachment stays in the set's space; input discovery; backend config file round trip; `protected` forces no autodeploy. |
 | `test_tfvars.py` (4) | `hcl` variables routed to the generated `.auto.tfvars`, everything else to JSON. |
 | `test_secret_sources.py` (8) | External secret references: live value masked, static fallback + apply gate, `error` mode fails closed, break-glass override (needs apply right), source CRUD hides the bootstrap secret, in-use source can't be deleted, a fallback appearing at the apply claim is gated. |
+| `test_proposed_secrets.py` (3) | A proposed run's claim carries no secret — no sensitive variable of either kind, no external reference (not fetched), nothing in `mask_values` or the provenance — and keeps the plan role and the repo token; a tracked run and a drift run still get every secret. |
 | `test_dependencies.py` (10) | Mocks (used, block apply, real value wins, missing → fail), anti-cycle, cascade; `link-by-name` idempotent, skips hand-made and racing edges and in-request cycles; `/graph` hides edges outside the caller's spaces. |
 | `test_hooks.py` (2) | Platform hook CRUD, tagged `platform` in the claim; writer gate. |
 | `test_check_results.py` (4) | Every check result is kept with its stage in `check_results.results`, the warn/fail ones in `checks`: a plan failing on a check records it with the ones before; an apply's checks add to the plan's; a job failing on no check leaves them alone; a run recorded before `results` existed keeps its checks. |
@@ -217,7 +218,7 @@ The tier gate (an approver without `prod`) and staleness stay manual checks (DEV
 
 ## 5. Counts
 
-Roughly **276 API tests** (37 files), **175 worker tests** (15 files), **1 e2e scenario** and
+Roughly **279 API tests** (38 files), **175 worker tests** (15 files), **1 e2e scenario** and
 **9 front unit tests**, parametrized cases included. The numbers move with every change; count them
 instead of trusting this page:
 

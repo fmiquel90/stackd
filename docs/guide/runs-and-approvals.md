@@ -113,11 +113,20 @@ confirm. This is the same-stack counterpart to the cross-stack [cascade](depende
 A pull request triggers a **proposed** run: plan-only, with a read-only state token — a preview
 that is never applied and saves no plan file. See [the Git integration in SPECS](../SPECS.md).
 
-!!! warning "Proposed runs still get secrets"
-    Withholding secrets from proposed runs is specified but **not implemented yet**: a proposed
-    run's job gets the environment's sensitive variables and plan-role cloud credentials like any
-    plan, and the pull request's code runs inside tofu. Only let trusted contributors trigger
-    proposed runs on environments holding real secrets.
+A pull request's code runs inside tofu (`data "external"`, provisioners), and nobody has reviewed
+it yet: a proposed run gets **none of the environment's secrets**. No sensitive variable, of
+either kind, and no [external secret](external-secrets.md) (not even fetched) reaches its job.
+What a plan needs stays: the cloud credentials of the **plan role**, read-only by design (see
+[Cloud credentials](cloud-credentials.md)), the read-only state token and the repo token to clone.
+
+!!! warning "What a proposed run still reaches"
+    A plan that needs a secret gets no value for it: tofu uses the variable's default, or fails
+    with `No value for required variable`. Plan with credentials that need no static secret (the
+    OIDC plan role) for pull requests to plan. The pull request's code can still read the state
+    (secrets a resource keeps there included) and use the plan role: keep that role read-only and
+    away from secret stores. A per-environment opt-in giving proposed runs the secrets is specified
+    but not implemented. A drift check is a proposed run too, of the last applied commit: it keeps
+    the secrets.
 
 ## Triggering over the API
 
