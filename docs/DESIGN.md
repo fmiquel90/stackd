@@ -343,7 +343,7 @@ is reserved to the decision. Zero counts are rendered in `text-secondary` withou
 - **Side nav (208 px, labels always visible — v1 decision kept)**: Overview (count badge = decisions that need *you*), Graph, Queue (count badge = runs waiting > 2 min), Workers, Audit (admin only, §5.6), Variable sets, Settings. At the bottom: the **space switcher** (a Radix dropdown listing spaces with their stack counts) and the user block (email, role, allowed tiers, theme toggle, sign out). Active item: selection mark (§2.1).
 - **Top bar**: entity breadcrumb, connection indicator (`● live` / `◌ reconnecting…`), ⌘K button, notification bell.
 - **Breadcrumb**: built from entities, never from path segments: `space / stack / env / run 01a1276c`. Each segment is a link; the run segment copies the run URL on click.
-- **Responsive**: ≥ 1024 px as above. 768–1023 px: the side nav becomes a drawer opened from a menu button in the top bar. < 768 px: a **bottom bar** with four destinations (Overview, Queue, Notifications, Menu) and the run page's action bar docked above it.
+- **Responsive**: ≥ 1024 px as above. 768–1023 px: the side nav becomes a drawer opened from a menu button in the top bar. < 768 px: a **bottom bar** with three destinations (Overview, Queue, Menu — notifications stay in the top bar at every width) and the run page's action bar docked above it.
 
 ### 4.1 URLs (v2)
 

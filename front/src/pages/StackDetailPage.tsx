@@ -645,8 +645,9 @@ function SettingsTab({ stackId, spaceId }: { stackId: string; spaceId: string })
   );
 }
 
-export function StackDetailPage() {
-  const { stackId = "" } = useParams();
+export function StackDetailPage({ stackId: fromRoute }: { stackId?: string } = {}) {
+  const params = useParams();
+  const stackId = fromRoute ?? params.stackId ?? "";
   const [tab, setTab] = useState<TopTab>("environments");
   const stack = useQuery({ queryKey: ["stack", stackId], queryFn: () => stacks.get(stackId) });
 

@@ -125,8 +125,9 @@ export function LogViewer({
       return;
     }
     const k = e.key;
+    // Keys the viewer consumes are marked handled so global shortcuts skip them.
+    if (["/", "f", "t", "w", "e", "n", "N"].includes(k)) e.preventDefault();
     if (k === "/") {
-      e.preventDefault();
       searchRef.current?.focus();
     } else if (k === "f") setFull((v) => !v);
     else if (k === "t") setTimestamps((v) => !v);
