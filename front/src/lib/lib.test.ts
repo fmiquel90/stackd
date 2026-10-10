@@ -80,6 +80,13 @@ describe("phases", () => {
       "run",
     ]);
   });
+  it("shows durations only on segments that ran", () => {
+    const seg = buildSegments(makeRun({ state: "queued", plan_summary: null }), {
+      planning: 14,
+      applying: 3,
+    });
+    expect(seg.every((s) => s.meta === undefined)).toBe(true);
+  });
   it("puts durations and counts in the metadata", () => {
     const seg = buildSegments(makeRun(), { planning: 14 });
     expect(seg.find((s) => s.key === "plan")?.meta).toBe("14s · +1 ~1 −1");

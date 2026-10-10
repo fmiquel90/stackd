@@ -125,7 +125,9 @@ export function buildSegments(run: Run, durations: PhaseDurations = {}, confirme
     if (noChanges && (key === "decision" || key === "apply")) status = "not_needed";
 
     const seg: Segment = { key, label: LABEL[key], status };
-    const d = (p: string) => (durations[p] !== undefined ? formatDuration(durations[p]!) : undefined);
+    // Durations only for phases that actually ran (never on pending / not-run segments).
+    const ran = status === "done" || status === "active" || status === "failed";
+    const d = (p: string) => (ran && durations[p] !== undefined ? formatDuration(durations[p]!) : undefined);
     switch (key) {
       case "plan":
         seg.logPhase = "planning";

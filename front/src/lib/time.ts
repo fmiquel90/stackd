@@ -36,9 +36,10 @@ export function age(date: Date | string, now: Date = new Date()): string {
   return `${Math.floor(s / DAY)}d`;
 }
 
-/** `8s`, `1m 05s`, `2h 03m`. */
+/** `<1s`, `8s`, `1m 05s`, `2h 03m`. */
 export function formatDuration(seconds: number): string {
   const s = Math.max(0, Math.round(seconds));
+  if (s < 1) return "<1s";
   if (s < MINUTE) return `${s}s`;
   if (s < HOUR) return `${Math.floor(s / MINUTE)}m ${pad(s % MINUTE)}s`;
   return `${Math.floor(s / HOUR)}h ${pad(Math.floor((s % HOUR) / MINUTE))}m`;

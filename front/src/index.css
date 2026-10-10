@@ -1,4 +1,7 @@
 @import "tailwindcss";
+/* Explicit sources: Ladle builds from its own Vite root, where automatic detection misses src/. */
+@source "./";
+@source "../.ladle";
 @import "./styles/tokens.css";
 
 /* Tokens → Tailwind utilities (bg-surface, text-muted, border-control, text-st-failed…). Utility
@@ -78,34 +81,38 @@ body {
   -webkit-font-smoothing: antialiased;
 }
 
-/* "Data is mono" — tabular figures so columns don't dance while streaming (DESIGN §3.3, §7). */
-.font-data {
-  font-family: var(--font-mono);
-  font-variant-numeric: tabular-nums;
-}
+/* Custom classes live in the components layer so Tailwind utilities (in the later utilities layer)
+   can override them, e.g. `eyebrow normal-case`. */
+@layer components {
+  /* "Data is mono" — tabular figures so columns don't dance while streaming (DESIGN §3.3, §7). */
+  .font-data {
+    font-family: var(--font-mono);
+    font-variant-numeric: tabular-nums;
+  }
 
-/* Eyebrow: column headers, field labels, badge labels (DESIGN §3.3). */
-.eyebrow {
-  font-family: var(--font-mono);
-  font-size: 11px;
-  line-height: 16px;
-  font-weight: 500;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
-}
+  /* Eyebrow: column headers, field labels, badge labels (DESIGN §3.3). */
+  .eyebrow {
+    font-family: var(--font-mono);
+    font-size: 11px;
+    line-height: 16px;
+    font-weight: 500;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+  }
 
-/* Visible focus everywhere (DESIGN §7): 2 px focus-token ring, 2 px offset. */
-:focus-visible {
-  outline: 2px solid var(--color-focus);
-  outline-offset: 2px;
-}
+  /* Visible focus everywhere (DESIGN §7): 2 px focus-token ring, 2 px offset. */
+  :focus-visible {
+    outline: 2px solid var(--color-focus);
+    outline-offset: 2px;
+  }
 
-/* Links in prose are neutral and underlined (DESIGN §2.1). */
-a.link {
-  color: var(--color-text-primary);
-  text-decoration: underline;
-  text-decoration-thickness: 1px;
-  text-underline-offset: 2px;
+  /* Links in prose are neutral and underlined (DESIGN §2.1). */
+  a.link {
+    color: var(--color-text-primary);
+    text-decoration: underline;
+    text-decoration-thickness: 1px;
+    text-underline-offset: 2px;
+  }
 }
 
 /* Interactive affordance for legacy buttons (pre-redesign pages). */

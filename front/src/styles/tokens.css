@@ -68,8 +68,11 @@
   --color-mock-tint: #fcebf6;
 }
 
-/* Aliases shared by both themes. */
-:root {
+/* Aliases shared by both themes. Declared on every themed element, not only :root: a var() inside a
+   custom property resolves where it is declared, so a nested [data-theme] subtree (Ladle panels,
+   any themed island) would otherwise inherit the other theme's colours. */
+:root,
+[data-theme] {
   /* Diff tokens (DESIGN §3.5): alias the state values today, separate names so they can diverge. */
   --color-diff-create: var(--color-state-finished);
   --color-diff-destroy: var(--color-state-failed);
