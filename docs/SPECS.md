@@ -575,6 +575,10 @@ POST /worker/v1/jobs/claim?wait=25
                  "lock_address", "unlock_address",                     # else null; no lock_* keys
                  "lock_method": "LOCK", "unlock_method": "UNLOCK",     # for a `ro` token (§11.2)
                  "username": "env", "password": "<state_token scoped+TTL>" },
+                                           # → handed to tofu ONLY, as TF_HTTP_ADDRESS/…/
+                                           # TF_HTTP_PASSWORD env vars, never -backend-config
+                                           # (tofu persists those in .terraform/ and in the saved
+                                           # plan); hooks never get them; inherited TF_HTTP_* dropped
     "backend_config_file": null,           # unmanaged state only (§11.3): -backend-config=<file>
     "backend_config": null,                # unmanaged state only (§11.3): -backend-config=k=v
     "cloud_credentials": {                 # §10, if cloud_integration configured, else null

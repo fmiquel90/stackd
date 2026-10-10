@@ -35,11 +35,14 @@ def _safe_json(raw: str) -> dict:
 # bakes none of these in; this also protects the trusted-dev `local` runner where a mounted ~/.aws
 # can export AWS_* into the worker process.
 _CLOUD_ENV_PREFIXES = ("AWS_", "GOOGLE_", "GCLOUD_", "GCP_", "AZURE_", "ARM_")
+# The HTTP state backend's settings (§11.2): the state token rides in TF_HTTP_PASSWORD.
+_STATE_BACKEND_ENV_PREFIX = "TF_HTTP_"
 
 
 def _repo_environ() -> dict[str, str]:
-    """Base process env for repo hooks, stripped of cloud credentials (§8.3)."""
-    return {k: v for k, v in os.environ.items() if not k.startswith(_CLOUD_ENV_PREFIXES)}
+    """Base process env for repo hooks, stripped of cloud and state-backend credentials (§8.3)."""
+    deny = (*_CLOUD_ENV_PREFIXES, _STATE_BACKEND_ENV_PREFIX)
+    return {k: v for k, v in os.environ.items() if not k.startswith(deny)}
 
 
 def _secret_leak_in_outputs(doc: str, masker: Masker) -> str | None:
@@ -124,6 +127,33 @@ def _cloud_env(ws: Workspace, job: dict) -> dict[str, str]:
     return env
 
 
+# The managed HTTP backend's settings (§11.2) as tofu/terraform read them from the environment.
+_BACKEND_ENV = {
+    "address": "TF_HTTP_ADDRESS",
+    "lock_address": "TF_HTTP_LOCK_ADDRESS",
+    "unlock_address": "TF_HTTP_UNLOCK_ADDRESS",
+    "lock_method": "TF_HTTP_LOCK_METHOD",
+    "unlock_method": "TF_HTTP_UNLOCK_METHOD",
+    "username": "TF_HTTP_USERNAME",
+    "password": "TF_HTTP_PASSWORD",
+}
+
+
+def _tofu_env(base: dict[str, str], backend: dict | None) -> dict[str, str]:
+    """Env for tofu/terraform subprocesses only — never for hooks (§8.3). Managed state passes the
+    platform's HTTP backend through TF_HTTP_*, not `-backend-config`: tofu persists -backend-config
+    values (the state token included) in .terraform/terraform.tfstate, where repo hooks can read
+    them, and in the saved plan. Any inherited TF_HTTP_* is dropped first so neither the worker's
+    env nor a run variable can redirect or weaken the managed backend. Unmanaged: unchanged."""
+    if not backend:
+        return base
+    env = {k: v for k, v in base.items() if not k.startswith(_STATE_BACKEND_ENV_PREFIX)}
+    env.update(
+        {var: str(backend[k]) for k, var in _BACKEND_ENV.items() if backend.get(k) is not None}
+    )
+    return env
+
+
 def _init_cmd(
     tool: str,
     backend: dict | None,
@@ -131,23 +161,13 @@ def _init_cmd(
     backend_config: dict | None = None,
 ) -> list[str]:
     cmd = [tool, "init", "-input=false"]
-    if backend:  # managed state: the platform's HTTP backend
-        for k in (
-            "address",
-            "lock_address",
-            "unlock_address",
-            "lock_method",
-            "unlock_method",
-            "username",
-            "password",
-        ):
-            if backend.get(k) is not None:
-                cmd.append(f"-backend-config={k}={backend[k]}")
-    else:  # unmanaged: the repo's own partial backend — a .config file and/or inline key=value
-        if backend_config_file:
-            cmd.append(f"-backend-config={backend_config_file}")
-        for k, v in (backend_config or {}).items():
-            cmd.append(f"-backend-config={k}={v}")
+    if backend:  # managed state: the platform's HTTP backend, configured via TF_HTTP_* (_tofu_env)
+        return cmd
+    # unmanaged: the repo's own partial backend — a .config file and/or inline key=value
+    if backend_config_file:
+        cmd.append(f"-backend-config={backend_config_file}")
+    for k, v in (backend_config or {}).items():
+        cmd.append(f"-backend-config={k}={v}")
     return cmd
 
 
@@ -183,6 +203,7 @@ def handle_plan(client: ApiClient, job: dict, settings: Settings) -> None:
             **_repo_environ(),
             **job.get("env", {}),
         }  # no secrets / cloud creds to repo hooks (§8.3)
+        tf_env = _tofu_env(platform_env, backend)  # + state-backend creds, for tofu only
         checks: list[dict] = []
 
         client.event(job_id, "phase_started", phase="planning")
@@ -207,7 +228,7 @@ def handle_plan(client: ApiClient, job: dict, settings: Settings) -> None:
             run_command(
                 _init_cmd(tool, backend, job.get("backend_config_file"), job.get("backend_config")),
                 cwd,
-                platform_env,
+                tf_env,
                 phase="planning",
                 section=None,
                 streamer=streamer,
@@ -227,7 +248,7 @@ def handle_plan(client: ApiClient, job: dict, settings: Settings) -> None:
         code, events = stream_json_command(
             plan_cmd,
             cwd,
-            platform_env,
+            tf_env,
             phase="planning",
             section=None,
             streamer=streamer,
@@ -336,12 +357,13 @@ def handle_apply(client: ApiClient, job: dict, settings: Settings) -> None:
             **_cloud_env(ws, job),
         }
         repo_env = {**_repo_environ(), **job.get("env", {})}
+        tf_env = _tofu_env(platform_env, backend)  # + state-backend creds, for tofu only
 
         if (
             run_command(
                 _init_cmd(tool, backend, job.get("backend_config_file"), job.get("backend_config")),
                 cwd,
-                platform_env,
+                tf_env,
                 phase="applying",
                 section=None,
                 streamer=streamer,
@@ -363,7 +385,7 @@ def handle_apply(client: ApiClient, job: dict, settings: Settings) -> None:
         code, events = stream_json_command(
             [tool, "apply", "-input=false", "-json", "-auto-approve"],
             cwd,
-            platform_env,
+            tf_env,
             phase="applying",
             section=None,
             streamer=streamer,
@@ -383,7 +405,7 @@ def handle_apply(client: ApiClient, job: dict, settings: Settings) -> None:
                 result={"error": masker.mask(error)},
             )
         out = subprocess.run(
-            [tool, "output", "-json"], cwd=cwd, env=platform_env, capture_output=True, text=True
+            [tool, "output", "-json"], cwd=cwd, env=tf_env, capture_output=True, text=True
         )
         ok_output = out.returncode == 0
         if ok_output:
@@ -448,13 +470,14 @@ def handle_command_run(client: ApiClient, job: dict, settings: Settings) -> None
             **job.get("sensitive_env", {}),
             **_cloud_env(ws, job),
         }
+        tf_env = _tofu_env(platform_env, backend)  # + state-backend creds, for tofu only
 
         client.event(job_id, "phase_started", phase="running")
         if (
             run_command(
                 _init_cmd(tool, backend, job.get("backend_config_file"), job.get("backend_config")),
                 cwd,
-                platform_env,
+                tf_env,
                 phase="running",
                 section=None,
                 streamer=streamer,
@@ -468,7 +491,7 @@ def handle_command_run(client: ApiClient, job: dict, settings: Settings) -> None
         code = run_command(
             argv,
             cwd,
-            platform_env,
+            tf_env,
             phase="running",
             section=None,
             streamer=streamer,
