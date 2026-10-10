@@ -679,7 +679,7 @@ The scheduler module (PLAN §2.1) carries background tasks that must run **exact
 | Task | Frequency | Effect |
 |---|---|---|
 | `worker_lost` detection | 30 s | heartbeat > 60 s → `offline`; run executing on a worker offline for > 120 s → `failed (worker_lost)` (never `unconfirmed`/`confirmed`, §3.7); a job holding apply credentials (an `applying` run or a mutating command run, §4.3) only after the apply window = budget + grace (§3.7/§4.2) |
-| Git staleness polling | 15 min | `git ls-remote` per (repo, branch), dedup by repo → update `head_sha` (§9.6) |
+| Git staleness polling | 15 min (`stackd_head_poll_interval`) | `git ls-remote` per (repo, branch), dedup by repo → update `head_sha` (§9.6) |
 | Cold log archiving | end of run | `run_logs` → S3 gz, purge hot > 7 d (§5.2) |
 | Refresh token / audit purge | daily | expired families (§2.5), audit > 2 years (§6.1, audited purge) |
 
@@ -823,12 +823,14 @@ network/prod-eu-primary ──▶ network/prod-us-secondary
 ```
 last_applied_sha = commit_sha of the last finished run (type tracked, with apply or no-change)
 env.head_sha     = known head of env.branch
-stale            = head_sha present AND head_sha ≠ last_applied_sha
+stale            = head_sha present AND last_applied_sha present AND head_sha ≠ last_applied_sha
 ```
+
+No applied run yet (or a last run with no pinned commit) → `stale = false`: the applied commit is unknown. Computed for every env the API returns, in one query per request.
 
 **Updating `head_sha`** (from most precise to fallback):
 1. **Push webhook** (Phase 5): immediate update of all envs tracking the branch — even if the webhook does not trigger a run (`project_root` filtering), it always updates `head_sha`.
-2. **Fallback polling**: `git ls-remote` per (repo, branch) every 15 min (periodic task, deduplicated by repo) — covers absent or lost webhooks.
+2. **Fallback polling**: `git ls-remote` per (repo, branch) every 15 min (`stackd_head_poll_interval`; periodic task, deduplicated by repo across the stacks sharing it — and by their repo credentials, so no stack's head is read with another stack's token) — covers absent or lost webhooks. Only envs whose head was not observed within the interval (by a webhook, a manual refresh or a previous poll, on any replica) are polled; a head recorded by a webhook while the poll runs is never overwritten. No DB transaction is held across the git calls; a failing repo is logged (never its token) and retried at the next poll, without blocking the others.
 3. **Manual**: `POST /api/v1/environments/{id}/refresh-head`.
 
 **Two levels of precision**:

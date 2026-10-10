@@ -1,20 +1,25 @@
 from __future__ import annotations
 
 import asyncio
+import uuid
 from datetime import UTC, datetime, timedelta
 
-from sqlalchemy import select, text, update
+from sqlalchemy import or_, select, text, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import get_settings
+from app.crypto import decrypt
 from app.db import SessionLocal, get_engine
 from app.drift.service import detect_drift
-from app.enums import ACTIVE_STATES, RunEventActor, RunState, WorkerStatus
+from app.enums import ACTIVE_STATES, RepoAuthKind, RunEventActor, RunState, WorkerStatus
 from app.logging import get_logger
+from app.models.environment import Environment
 from app.models.run import Run
+from app.models.stack import Stack
 from app.models.worker import Worker
 from app.notifications.dispatcher import dispatch_pending
 from app.runs.transition import transition
+from app.stacks.git import ls_remote_sha
 from app.vcs.dispatcher import dispatch_vcs
 from app.workers.claim import holds_apply_credentials
 
@@ -23,6 +28,8 @@ _LOCK_WORKER_LOST = 74001
 _LOCK_NOTIFY = 74002
 _LOCK_VCS = 74003
 _LOCK_DRIFT = 74004
+_LOCK_HEAD_POLL = 74005
+_TICK_SECONDS = 10  # the scheduler loop's period
 _log = get_logger("stackd.scheduler")
 
 # Active states in which a worker is executing the run's job — the only ones worker-lost reclaims
@@ -101,6 +108,96 @@ async def detect_worker_lost(session: AsyncSession, now: datetime) -> int:
     return len(runs)
 
 
+async def poll_branch_heads(session: AsyncSession, now: datetime) -> int:
+    """Fallback git staleness polling (§7.5, §9.6): one `git ls-remote` per (repo, branch) —
+    deduplicated across the stacks sharing a repo, keyed on their credentials too so no stack's
+    head is read with another stack's token — then record that head on every env tracking it.
+    Returns the number of envs updated.
+
+    Only envs whose head wasn't observed within the interval are polled (by a push webhook, a
+    manual refresh or a previous poll — on any replica), so a re-run is a no-op. No DB transaction
+    is held across the git calls. A repo that fails is logged (never its token) and skipped: its
+    envs keep their head and are retried at the next poll."""
+    interval = get_settings().stackd_head_poll_interval
+    # One tick of slack: the loop fires this on the first tick past the interval, which must find
+    # the envs refreshed by the previous poll (stamped with that poll's `now`) due again.
+    due = or_(
+        Environment.head_updated_at.is_(None),
+        Environment.head_updated_at <= now - timedelta(seconds=interval - _TICK_SECONDS),
+    )
+    rows = (
+        await session.execute(
+            select(
+                Environment.id,
+                Environment.branch,
+                Stack.id,
+                Stack.repo_url,
+                Stack.repo_auth_kind,
+                Stack.repo_secret_encrypted,
+            )
+            .join(Stack, Stack.id == Environment.stack_id)
+            .where(due)
+        )
+    ).all()
+    await session.commit()  # release the read transaction before any git call
+
+    groups: dict[tuple[str, RepoAuthKind, str | None, str], list[uuid.UUID]] = {}
+    secrets: dict[uuid.UUID, str | None] = {}
+    unreadable: set[uuid.UUID] = set()
+    for env_id, branch, stack_id, repo_url, auth_kind, secret_encrypted in rows:
+        if stack_id in unreadable:
+            continue
+        if stack_id not in secrets:
+            try:
+                secrets[stack_id] = decrypt(secret_encrypted) if secret_encrypted else None
+            except Exception as exc:  # undecryptable credentials: skip this stack only
+                unreadable.add(stack_id)
+                _log.warning(
+                    "branch head poll failed",
+                    extra={
+                        "event": "scheduler.head_poll_failed",
+                        "stack_id": str(stack_id),
+                        "error": type(exc).__name__,
+                    },
+                )
+                continue
+        groups.setdefault((repo_url, auth_kind, secrets[stack_id], branch), []).append(env_id)
+
+    heads: list[tuple[str, str, list[uuid.UUID]]] = []
+    for (repo_url, auth_kind, secret, branch), env_ids in groups.items():
+        error = "unreachable or no such branch"
+        try:
+            sha = await ls_remote_sha(repo_url, auth_kind, secret, branch)
+        except Exception as exc:  # one failing repo must not abort the others
+            sha, error = None, type(exc).__name__  # the type only: a message may carry the URL
+        if sha is None:
+            _log.warning(
+                "branch head poll failed",
+                extra={
+                    "event": "scheduler.head_poll_failed",
+                    "environment_ids": [str(e) for e in env_ids],
+                    "branch": branch,
+                    "error": error,
+                },
+            )
+            continue
+        heads.append((sha, branch, env_ids))
+
+    updated = 0
+    for sha, branch, env_ids in heads:
+        # Still due and on that branch: a webhook or manual refresh that landed during the git
+        # calls is fresher, and an env re-pointed to another branch meanwhile isn't tracking it.
+        result = await session.execute(
+            update(Environment)
+            .where(Environment.id.in_(env_ids), Environment.branch == branch, due)
+            .values(head_sha=sha, head_updated_at=now)
+            .returning(Environment.id)
+        )
+        updated += len(result.all())
+    await session.commit()
+    return updated
+
+
 async def _with_lock(session: AsyncSession, key: int, coro) -> None:  # type: ignore[no-untyped-def]
     """Run `coro(session, now)` only if no other replica holds `key` (§7.5). The session-level
     advisory lock lives on a dedicated connection held for the task's whole run, never on the
@@ -122,7 +219,9 @@ async def _with_lock(session: AsyncSession, key: int, coro) -> None:  # type: ig
 
 async def scheduler_loop() -> None:
     """Single background loop; each task is advisory-locked + idempotent (§7.5). A 10s tick keeps
-    outbound notifications responsive; worker_lost detection is cheap/idempotent at that rate."""
+    outbound notifications responsive; worker_lost detection is cheap/idempotent at that rate. The
+    git staleness poll runs once per `stackd_head_poll_interval` only (§9.6)."""
+    next_head_poll: datetime | None = None
     while True:
         try:
             async with SessionLocal() as session:
@@ -133,6 +232,13 @@ async def scheduler_loop() -> None:
                 await _with_lock(session, _LOCK_VCS, dispatch_vcs)
             async with SessionLocal() as session:
                 await _with_lock(session, _LOCK_DRIFT, detect_drift)
+            now = datetime.now(UTC)
+            if next_head_poll is None or now >= next_head_poll:
+                # Scheduled before it runs, so a failing poll also waits a full interval.
+                interval = get_settings().stackd_head_poll_interval
+                next_head_poll = now + timedelta(seconds=interval)
+                async with SessionLocal() as session:
+                    await _with_lock(session, _LOCK_HEAD_POLL, poll_branch_heads)
         except Exception as exc:
             print(f"[scheduler] tick error: {exc}", flush=True)
-        await asyncio.sleep(10)
+        await asyncio.sleep(_TICK_SECONDS)

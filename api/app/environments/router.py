@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import shutil
 import uuid
+from collections.abc import Sequence
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Annotated
@@ -17,10 +18,11 @@ from app.auth.deps import CurrentUser, require_role
 from app.config import get_settings
 from app.crypto import decrypt
 from app.db import get_session
-from app.enums import AuditActorKind, Role, VariableKind
+from app.enums import AuditActorKind, Role, RunState, RunType, VariableKind
 from app.environments.schemas import EnvironmentCreate, EnvironmentOut, EnvironmentUpdate
 from app.errors import ProblemException
 from app.models.environment import Environment
+from app.models.run import Run
 from app.models.stack import Stack
 from app.models.tier import Tier
 from app.ratelimit import rate_limit
@@ -66,6 +68,30 @@ def _scan_clone(
     return [i for i in parse_inputs(root, dest) if i.required]
 
 
+async def _envs_out(session: AsyncSession, envs: Sequence[Environment]) -> list[EnvironmentOut]:
+    """Serialize envs with their git staleness (§9.6). `last_applied_sha` is the commit of each
+    env's last finished tracked run — a tracked run only finishes after an apply or an empty plan —
+    fetched for the whole batch in one query."""
+    last_applied: dict[uuid.UUID, str | None] = {}
+    if envs:
+        rows = await session.execute(
+            select(Run.environment_id, Run.commit_sha)
+            .where(
+                Run.environment_id.in_([e.id for e in envs]),
+                Run.type == RunType.tracked,
+                Run.state == RunState.finished,
+            )
+            .order_by(Run.environment_id, Run.finished_at.desc(), Run.id.desc())
+            .distinct(Run.environment_id)
+        )
+        last_applied = {env_id: sha for env_id, sha in rows.all()}
+    return [EnvironmentOut.of(e, last_applied_sha=last_applied.get(e.id)) for e in envs]
+
+
+async def _env_out(session: AsyncSession, env: Environment) -> EnvironmentOut:
+    return (await _envs_out(session, [env]))[0]
+
+
 async def _require_tier(session: AsyncSession, name: str) -> None:
     exists = (await session.execute(select(Tier).where(Tier.name == name))).scalar_one_or_none()
     if exists is None:
@@ -88,7 +114,7 @@ async def list_environments(
         .scalars()
         .all()
     )
-    return [EnvironmentOut.of(e) for e in rows]
+    return await _envs_out(session, rows)
 
 
 @router.post(
@@ -124,14 +150,14 @@ async def create_environment(
     )
     await session.commit()
     await session.refresh(env)
-    return EnvironmentOut.of(env)
+    return await _env_out(session, env)
 
 
 @router.get("/environments/{env_id}", response_model=EnvironmentOut)
 async def get_environment(
     env_id: uuid.UUID, user: CurrentUser, session: DbSession
 ) -> EnvironmentOut:
-    return EnvironmentOut.of(await guard_env_id(session, user, env_id))
+    return await _env_out(session, await guard_env_id(session, user, env_id))
 
 
 @router.patch("/environments/{env_id}", response_model=EnvironmentOut, dependencies=[Writer])
@@ -158,7 +184,7 @@ async def update_environment(
     )
     await session.commit()
     await session.refresh(env)
-    return EnvironmentOut.of(env)
+    return await _env_out(session, env)
 
 
 @router.delete("/environments/{env_id}", status_code=204, dependencies=[Writer])
@@ -194,7 +220,7 @@ async def refresh_head(env_id: uuid.UUID, user: CurrentUser, session: DbSession)
     env.head_updated_at = datetime.now(UTC)
     await session.commit()
     await session.refresh(env)
-    return EnvironmentOut.of(env)
+    return await _env_out(session, env)
 
 
 # --- environment variables (override slot: stack_id + environment_id both set) ---
