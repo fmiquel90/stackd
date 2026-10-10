@@ -110,7 +110,7 @@ tasks:
 
 A re-run changes nothing. Compose reads `.env` when it creates a container, which is why `task dev` runs the bootstrap before `up`; a stack started before the key existed is recreated by that `up`, since its `.env` values changed. Garage binds IPv4 (`0.0.0.0`, `deploy/garage.toml`), so it also starts on hosts whose kernel has IPv6 disabled. The CI e2e workflow runs the same script.
 
-**Only the `api` holds platform secrets.** The S3 key, `DATABASE_URL`, `STACKD_ENCRYPTION_KEY`, `STACKD_JWT_SECRET` and `GOOGLE_CLIENT_SECRET` come from the shared `.env`, and compose blanks all of them in the `worker`'s environment: the worker reaches plans and states through the API (SPECS §11.1) and needs none of them, and repo hooks inherit the worker's environment.
+**Only the `api` holds platform secrets.** The S3 key, `DATABASE_URL`, `STACKD_ENCRYPTION_KEY`, `STACKD_JWT_SECRET` and `GOOGLE_CLIENT_SECRET` come from the shared `.env`, and compose blanks all of them in the `worker`'s environment: the worker reaches plans and states through the API (SPECS §11.1) and needs none of them, and tofu and platform hooks inherit the worker's environment (minus its own `STACKD_*` settings) — repo code runs inside tofu. Repo hooks only get an allowlist of it (SPECS §8.3).
 
 **`task reset`** runs `down -v` (Postgres **and** Garage volumes), deletes `.dev/pool.token`, then `task dev`. `.env` and `.dev/` keys are kept, so the S3 bootstrap imports the same key into the fresh Garage. The pool token belongs to the wiped database: without it the worker waits (re-reading the file) for the new seed's token instead of registering with a stale one before the migrations have run.
 
@@ -135,7 +135,7 @@ Safeguard: the prod build of the API image **removes the dev_auth module** (not 
 
 ## 4. Git fixture repos
 
-`task seed-fixtures` (`scripts/seed-fixtures.sh`, run on the host by `task dev`, idempotent) creates in `.dev/repos/` two **local and committable** Git repositories (branch `main`). They use only the built-in `terraform_data` resource: no provider to download, `tofu plan/apply` runs fully offline.
+`task seed-fixtures` (`scripts/seed-fixtures.sh`, run on the host by every `dev*` task, idempotent) creates in `.dev/repos/` two **local and committable** Git repositories (branch `main`). They use only the built-in `terraform_data` resource: no provider to download, `tofu plan/apply` runs fully offline.
 
 ```
 .dev/repos/demo-network/      # upstream stack
@@ -145,14 +145,14 @@ Safeguard: the prod build of the API image **removes the dev_auth module** (not 
 ```
 
 - The seed stacks point to them with `repo_url: file:///stackd-dev/repos/demo-network` (`.dev/` is mounted at `/stackd-dev` in the API and the worker; `STACKD_SEED_REPO_BASE` overrides the base). `repo_auth_kind: none`. The fixtures carry no `.stackd.yml`.
-- **Simulate "a PR is merged"** without GitHub: `task push-change` commits a change in demo-network → staleness polling (reduced to **15 s** in dev via `STACKD_HEAD_POLL_INTERVAL`) makes the `↑1` chip appear on an env that already has a finished tracked run. Perfect for testing the "apply at 9am, merge at 9:15am" scenario.
+- **Simulate "a PR is merged"** without GitHub: `task push-change` commits a change in demo-network → staleness polling (reduced to **15 s** in dev via `STACKD_HEAD_POLL_INTERVAL`) turns `stale` to `true` (`GET /api/v1/environments/{id}`) on an env that already has a finished tracked run. The `↑1` chip of DESIGN §5.1 is not in the UI yet. Perfect for testing the "apply at 9am, merge at 9:15am" scenario.
 - **Real webhooks**: `task dev-git` launches Gitea (profile `git`, port 3000). Pushing the fixtures to it and configuring its webhook to the API are manual for now (no `seed-gitea` or `webhook` task yet).
 
 ---
 
 ## 5. Worker in dev
 
-- Launched by compose with `STACKD_RUNNER=local`: terraform commands run directly inside the worker container (image including OpenTofu + jq + git). **No Docker-in-Docker** — the `docker` runner is not exercised in dev (there is no `test-runner-docker` task yet).
+- Launched by compose with `STACKD_RUNNER=local`: terraform commands run directly inside the worker container (image including OpenTofu + jq + git). **No Docker-in-Docker** — the `docker` runner is not implemented in the agent yet (SPECS §7.4), so there is nothing to exercise in dev.
 - Tool binaries: **OpenTofu and Terraform** pre-installed in the dev image (no download on first run). A stack's `tool` picks which one runs — no separate "terraform worker", any dev worker handles both.
 - Agent hot reload (watchfiles): modifying `worker/` cleanly restarts the poll loop (the current job finishes).
 - Multi-workers to test concurrency and affinity: `docker compose -f deploy/docker-compose.dev.yml up -d --scale worker=3`, or `STACKD_MAX_CONCURRENT_JOBS` for several jobs per worker.
@@ -172,7 +172,7 @@ Safeguard: the prod build of the API image **removes the dev_auth module** (not 
 task dev-aws-creds      # = docker compose -f docker-compose.dev.yml -f docker-compose.dev.aws.yml up
 ```
 
-Use it **instead of `task dev`** whenever you want AWS creds in the worker — a plain `task dev` (or any `docker compose up` without the overlay) recreates the worker **without** the mount. It mounts `~/.aws` **read-only** into the worker. The provider's `profile = "..."` then resolves from your `~/.aws/{config,credentials}` (the worker runs terraform with the container env; `_cloud_env` only injects OIDC vars for environments that have a cloud-integration, so a plain dev env falls back to these creds). For SSO profiles, run `aws sso login` first (the cached token under `~/.aws` is mounted too); for a default profile, add `AWS_PROFILE=<name>` to `.env`. **Dev-only, never in prod or CI**; this tests your Terraform, not the platform's OIDC exchange.
+Use it **instead of `task dev`** whenever you want AWS creds in the worker — a plain `task dev` (or any `docker compose up` without the overlay) recreates the worker **without** the mount. It mounts `~/.aws` **read-only** into the worker. The provider's `profile = "..."` then resolves from your `~/.aws/{config,credentials}` (the worker runs terraform with the container env, minus its own `STACKD_*` settings; `_cloud_env` only injects OIDC vars for environments that have a cloud-integration, so a plain dev env falls back to these creds). For SSO profiles, run `aws sso login` first (the cached token under `~/.aws` is mounted too); for a default profile, add `AWS_PROFILE=<name>` to `.env`. **Dev-only, never in prod or CI**; this tests your Terraform, not the platform's OIDC exchange.
 
 **Workload OIDC in dev**: the issuer runs (JWKS on `localhost:8000/oidc/jwks`, tokens signed per claim) — we test the **generation and claims** of the tokens (unit tests, `api/tests/test_oidc.py`). The real STS exchange is tested against a real AWS sandbox account, not locally: documented as out of scope for dev mode.
 
@@ -211,7 +211,7 @@ space "demo"
  9. audit                                              → run.confirmed lists alice@dev.local
 ```
 
-If the 9 steps pass, the core of the product works. It is also the demo script to run through in front of someone. Two checks stay **manual** (not in the automated scenario): staleness (`task push-change`, then the `↑1` chip within 15 s on an env that has a finished run) and the tier gate (an approver without `prod` in their set, see §3).
+If the 9 steps pass, the core of the product works. It is also the demo script to run through in front of someone. Two checks stay **manual** (not in the automated scenario): staleness (`task push-change`, then `stale: true` within 15 s on an env that has a finished run) and the tier gate (an approver without `prod` in their set, see §3).
 
 Every tracked plan goes through S3 (saved encrypted after the plan, downloaded by the apply, deleted when the run ends), so the scenario needs the provisioned Garage (§2). `task e2e` depends on `task dev`, which provisions it. CI (`.github/workflows/e2e.yml`) runs the same `scripts/bootstrap-s3.sh` before it brings up `postgres garage api worker`.
 
@@ -235,7 +235,7 @@ Every tracked plan goes through S3 (saved encrypted after the plan, downloaded b
 | Out of scope for local dev | Where it is tested |
 |---|---|
 | Real STS exchange (workload OIDC) | AWS sandbox account + provided Terraform module |
-| Docker runner (per-container isolation) | not covered yet (no dedicated task or CI job) |
+| Docker runner (per-container isolation) | not implemented yet (SPECS §7.4) |
 | Real GitHub/GitLab webhooks | Gitea (git profile) covers 95%; the rest in staging |
 | Load (N workers × M runs) | not covered yet (no load scenario) |
 | Light theme / mobile responsive | Ladle stories + manual review |

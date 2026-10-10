@@ -111,7 +111,9 @@ Tests that need the scheduler's tasks (worker loss, head polling, drift) call th
 Worker tests import agent modules directly (`agent.main`, `agent.workspace`, `agent.runner`,
 `agent.masking`, `agent.diagnostics`…) and fake the API client where a job is driven end to end.
 No DB and no external network: the clone tests run real `git` against local repositories (one
-dials a closed loopback port).
+dials a closed loopback port, `test_hook_secrets.py` serves one over a loopback HTTP server). Hooks
+run for real (`sh -c`); tofu is a stand-in script, except in the one test that runs the real
+OpenTofu when `tofu` is on the `PATH` (skipped otherwise).
 
 ---
 
@@ -135,12 +137,14 @@ all. Counts in parentheses include parametrized cases and drift as tests are add
 | `test_saved_plan.py` (10) | The plan is stored encrypted and served only to the run's apply job; it can't be replaced after the plan phase; a blob moved to another run's key doesn't decrypt; no saved plan → nothing served; proposed runs save none; destroy runs plan with `-destroy`; 64 MiB cap; deleted once the run is terminal, kept if that transition rolls back. |
 | `test_commands.py` (8) | Command runs: allowlist, read-only for writers, mutating needs `can_apply`, lifecycle + audit; mutating → `rw` token with the apply-window TTL, read-only → `ro` token with the 6 h TTL. |
 | `test_promote.py` (5) | Promotion pins the source's applied commit (audited); needs an applied source; refuses cross-stack; distinct 404 for a missing source vs target; the source stays space-gated. |
-| `test_deletion.py` (5) | Stack/env deletion refused (409) while a run is active, allowed once it is terminal; attachments, hooks and notification targets removed with their target (audited); an attach racing a deletion leaves no orphan. |
+| `test_deletion.py` (7) | Stack/env deletion refused (409) while a run is active, allowed once it is terminal; attachments, hooks and notification targets removed with their target (audited); an attach racing a deletion leaves no orphan (variable set, hook, notification target). |
 | `test_variables_api.py` (12) | Layered resolution and provenance; sensitive values write-only; attached set can't be deleted; selectors on stack/env labels; tier attachments; cross-space attach refused; a tier attachment stays in the set's space; input discovery; backend config file round trip; `protected` forces no autodeploy. |
 | `test_tfvars.py` (4) | `hcl` variables routed to the generated `.auto.tfvars`, everything else to JSON. |
 | `test_secret_sources.py` (8) | External secret references: live value masked, static fallback + apply gate, `error` mode fails closed, break-glass override (needs apply right), source CRUD hides the bootstrap secret, in-use source can't be deleted, a fallback appearing at the apply claim is gated. |
 | `test_dependencies.py` (10) | Mocks (used, block apply, real value wins, missing → fail), anti-cycle, cascade; `link-by-name` idempotent, skips hand-made and racing edges and in-request cycles; `/graph` hides edges outside the caller's spaces. |
 | `test_hooks.py` (2) | Platform hook CRUD, tagged `platform` in the claim; writer gate. |
+| `test_check_results.py` (4) | Every check result is kept with its stage in `check_results.results`, the warn/fail ones in `checks`: a plan failing on a check records it with the ones before; an apply's checks add to the plan's; a job failing on no check leaves them alone; a run recorded before `results` existed keeps its checks. |
+| `test_apply_stage_hooks.py` (6) | `before_apply`/`after_apply` checks are recorded and audited (`run.check_warned`); an apply without checks keeps the plan's; a failing `after_apply` hook records the outputs, clears the drift and cascades nothing; a failed apply records no outputs and leaves the drift. |
 | `test_state_backend.py` (13) | HTTP state backend (moto S3): LOCK/POST/GET/UNLOCK and serial regression; `ro` tokens can't write or unlock, `plan` tokens lock but can't write, proposed runs never lock; env scoping; TTL follows the credential phase; a terminal run's token can't write; UNLOCK and a locked POST need the holder's lock ID; import session (adopt, admin-only, managed state only). |
 | `test_oidc.py` (4) | Issuer metadata + JWKS; the plan token's `sub`; apply uses the apply role; AssumeRole against moto STS. |
 | `test_scheduler.py` (4) | The advisory lock survives a task's commit (dedicated connection); worker loss fails an executing run, waits the apply window for a mutating command, spares `unconfirmed`/`confirmed` runs. |
@@ -184,12 +188,15 @@ The tier gate (an approver without `prod`) and staleness stay manual checks (DEV
 |---|---|
 | `test_saved_plan.py` (10) | The plan job uploads the plan it showed, before the `after_plan` hooks; destroy runs plan with `-destroy`; the apply job applies exactly the saved plan, fails closed without a usable one, reports a stale plan clearly; the plan file is never written through a checked-out symlink; the API's refusal reaches the job error. |
 | `test_commit_pin.py` (7) | An unpinned clone takes the env branch head; a pinned SHA off the default tip and a pinned ref are checked out exactly; an unknown commit fails at fetch; the plan reports its commit; an apply without a pinned commit fails closed. |
-| `test_backend_env.py` (9) | The managed backend reaches tofu only via `TF_HTTP_*` (never `-backend-config`), with no lock address for a read-only job; inherited `TF_HTTP_*` dropped; unmanaged unchanged; repo hooks never get it, in plan, apply and command jobs. |
+| `test_backend_env.py` (12) | The managed backend reaches tofu only via `TF_HTTP_*` (never `-backend-config`), with no lock address for a read-only job; inherited `TF_HTTP_*` dropped; unmanaged unchanged; repo hooks never get it, in plan, apply and command jobs; tofu's environment carries none of the agent's `STACKD_*` settings, in all three jobs. |
+| `test_hook_failures.py` (31) | At every stage and from both sources: a `fail` hook fails the job at its stage, a `warn` one lets it finish and is reported; a failing `before_apply` hook stops the apply; a hook past `STACKD_HOOK_TIMEOUT_SECONDS` is killed and fails by its `on_failure`; every check result is reported with its stage, in plan and apply jobs. |
+| `test_hook_secrets.py` (8) | What a repo hook can read: no saved plan, raw plan JSON, tfvars, OIDC token file or repo token in the workspace; a masked `plan.json` at `after_plan` (platform hooks get the raw one); symlinks a repo plants never receive a secret; the clone leaves no token under `.git/`; repo hooks get only the allowlisted worker env, platform hooks none of the agent's `STACKD_*` settings; command runs still read the tfvars; the real OpenTofu end to end. |
+| `test_exit_codes.py` (17) | A plan succeeds only on exit 0 or 2: an error, the watchdog's kill (124), a signal or any other code fails the job with the reason; an apply or command fails on any non-zero code; a plan without its JSON document (`show -json` failed or printed no JSON object) fails closed. |
 | `test_command_run.py` (14) | A command's time budget follows `cred_phase`: apply budget when mutating, default cap when read-only, apply budget when missing (fail closed); an over-budget command fails with a clear message. |
 | `test_authed_url.py` (45) | The repo token is percent-encoded into the clone URL (git dials the real host); other URLs unchanged; a failed clone masks both token forms. |
 | `test_init_cmd.py` (6) | The `init` command for managed state and for unmanaged partial backends (file, inline map, both). |
 | `test_security.py` (6) | Repo-hook env stripped of cloud credentials and sensitive values; the cleartext tripwire on plan and output JSON. |
-| `test_masking.py` (6) | Masking (all secrets, longest first); platform hooks before repo hooks; plan summary and first error from tofu's JSON events. |
+| `test_masking.py` (8) | Masking (all secrets, longest first); platform hooks before repo hooks; plan summary and first error from tofu's JSON events; the masked plan JSON hides every sensitive value and keeps the rest, and a non-JSON document is masked as text. |
 | `test_workspace.py` (6) | `hcl` tfvars written verbatim; token injection into HTTPS clone URLs. |
 | `test_concurrency.py` (3) | The in-flight counter; `STACKD_MAX_CONCURRENT_JOBS` default and floor. |
 | `test_runner_diag.py` (1) | A tofu diagnostic is expanded to its detail and location. |
@@ -210,7 +217,7 @@ The tier gate (an approver without `prod`) and staleness stay manual checks (DEV
 
 ## 5. Counts
 
-Roughly **265 API tests** (35 files), **115 worker tests** (12 files), **1 e2e scenario** and
+Roughly **276 API tests** (37 files), **175 worker tests** (15 files), **1 e2e scenario** and
 **9 front unit tests**, parametrized cases included. The numbers move with every change; count them
 instead of trusting this page:
 
