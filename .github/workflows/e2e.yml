@@ -26,10 +26,16 @@ jobs:
       - name: Generate .env + dev keys
         run: bash scripts/bootstrap-env.sh
 
-      # Only the services e2e needs: Postgres + API + worker (demo envs use local state, so no
-      # Garage; no front). Builds the api/worker images.
+      # Every tracked plan is stored (encrypted) in S3 for its apply, so e2e needs a provisioned
+      # Garage: layout, access key (written into .env), bucket. Same script as `task dev`; it runs
+      # before the API container exists, since compose reads .env when it creates it.
+      - name: Provision dev S3 (Garage)
+        run: bash scripts/bootstrap-s3.sh
+
+      # Only the services e2e needs: Postgres + Garage + API + worker (no front). Builds the
+      # api/worker images.
       - name: Bring up the stack
-        run: $COMPOSE up -d --wait postgres api worker
+        run: $COMPOSE up -d --wait postgres garage api worker
 
       - name: Migrate
         run: $COMPOSE exec -T api uv run alembic upgrade head

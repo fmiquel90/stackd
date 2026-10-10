@@ -1,4 +1,5 @@
 # Local-dev Garage (S3). Secrets here are for local development only.
+# Layout, access key and bucket are provisioned by scripts/bootstrap-s3.sh (`task dev`).
 metadata_dir = "/var/lib/garage/meta"
 data_dir = "/var/lib/garage/data"
 db_engine = "lmdb"

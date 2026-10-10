@@ -24,7 +24,7 @@ Everything else (Postgres, Garage, the worker protocol, hooks, mocks, staleness)
 # deploy/docker-compose.dev.yml
 services:
   postgres:        # 18, port 5432, named volume
-  garage:          # local S3 (Garage), S3 API on :3900, admin CLI `garage` ; stackd bucket auto-created at seed
+  garage:          # local S3 (Garage), S3 API on :3900, admin CLI `garage` ; layout, key and stackd bucket provisioned by `task dev`
   api:             # uv run uvicorn --reload, mounts ./api, port 8000
   front:           # vite dev server, mounts ./front, port 5173, proxy /api → api
   worker:          # agent in --reload mode (watchfiles), runner=local (§5)
@@ -34,10 +34,12 @@ services:
 ```
 
 ```bash
-task dev            # compose up (base services) + migrations + seed
+task dev            # S3 bootstrap + compose up (base services) + migrations + seed
 task dev-git        # + Gitea (webhook testing)
 task dev-aws        # + LocalStack
 task seed           # (re)creates the demo data, idempotent
+task s3             # provision the dev S3 (Garage layout, key into .env, bucket), idempotent; part of dev
+task s3-ls          # list the dev bucket (managed states, saved plans)
 task reset          # down -v + dev : start from scratch
 task logs           # aggregated colored logs (api, worker)
 task test           # pytest + vitest
@@ -55,12 +57,18 @@ vars:
 
 tasks:
   dev:
-    desc: Complete local stack (compose + migrations + seed)
+    desc: Complete local stack (compose + S3 bootstrap + migrations + seed)
     deps: [env]
     cmds:
+      - task: s3                    # before `up`: compose reads the S3 key from .env at creation
       - "{{.COMPOSE}} up -d --wait"
       - task: migrate
+      - task: seed-fixtures
       - task: seed
+
+  s3:
+    desc: Provision the dev S3 (Garage layout, access key into .env, bucket; idempotent)
+    cmds: [bash scripts/bootstrap-s3.sh]
 
   env:
     desc: Generates .env and dev keys on first launch
@@ -82,10 +90,18 @@ tasks:
   e2e:
     desc: Complete §7 scenario (non-regression)
     deps: [dev]
-    cmds: [pytest tests/e2e -v]
+    cmds: ["{{.COMPOSE}} exec -T api uv run pytest e2e -v"]
 ```
 
 `.env.example` → `.env` copied automatically by `task dev`: dev keys (encryption key, JWT secret, OIDC keypair) **generated on first launch** and stored in `.dev/` (gitignored). No secret value committed, no manual entry.
+
+**Dev S3 (Garage)**: the API keeps managed states and every tracked/destroy run's saved plan (encrypted; deleted when the run ends) in S3, so a plan with changes needs a provisioned Garage. `task s3` (`scripts/bootstrap-s3.sh`, run by every `dev*` task) brings `garage` up and, checking before each step:
+
+1. assigns the single-node layout (zone `dc1`) and applies it;
+2. writes a generated access key into `.env` (`S3_ACCESS_KEY` / `S3_SECRET_KEY`) **only when both are empty**, then imports it into Garage if Garage lacks it;
+3. creates the `S3_BUCKET` bucket (`stackd`) and grants the key read/write/owner on it.
+
+A re-run changes nothing. `task reset` wipes Garage's volumes but keeps `.env`, so the next bootstrap imports the same key again. Compose reads `.env` when it creates a container, which is why `task dev` runs the bootstrap before `up`; a stack started before the key existed is recreated by that `up`, since its `.env` values changed. Only the `api` container gets the key: the worker reaches plans and states through the API (SPECS §11.1), and compose blanks the key in the worker's environment, which repo hooks inherit.
 
 ---
 
@@ -186,6 +202,8 @@ space "demo"
 
 If the 9 steps pass, the core of the product works. It is also the demo script to run through in front of someone.
 
+Every tracked plan goes through S3 (saved encrypted after the plan, downloaded by the apply, deleted when the run ends), so the scenario needs the provisioned Garage (§2). `task e2e` depends on `task dev`, which provisions it. CI (`.github/workflows/e2e.yml`) runs the same `scripts/bootstrap-s3.sh` before it brings up `postgres garage api worker`.
+
 `task e2e` never runs on the seeded `demo-*` stacks themselves. It first builds a **throwaway copy** of the demo graph through the public API, as admin, in the `demo` space: `e2e-<MMDDhhmmss>-<tag>-network` and `e2e-<MMDDhhmmss>-<tag>-app`, with the same repos, branches, project roots, tiers, settings, variable-set attachments and dependency + mock. Permissions are per space, so bob and alice keep exactly the rights the steps rely on. Every run therefore starts from never-applied environments (step 4 always sees the mock): the scenario is **re-runnable on a used database without `task reset`**, and the seeded graph stays as a demo left it. At the end it ends what is still active through the API (cancels queued runs, discards unconfirmed plans) and deletes the copy. If the scenario failed or a run is still in flight, it keeps the copy for inspection, named in a warning; its unique name never blocks the next run.
 
 ---
@@ -196,7 +214,7 @@ If the 9 steps pass, the core of the product works. It is also the demo script t
 - **Shortened timings** in dev: heartbeat 5 s, offline 15 s, staleness poll 15 s, apply affinity 10 s — asynchronous behaviors are tested without waiting.
 - **Front**: MSW (Mock Service Worker) optional to develop the UI without a backend (`pnpm dev:mock`) — the handlers replay runs/logs fixtures, including a "running" run that streams. Useful for iterating on the viewer and the rail without triggering real runs.
 - **Storybook/Ladle**: `pnpm storybook` — the identity components (PhaseRail, StateBadge, LogViewer with ANSI fixture) are developed in isolation.
-- **DB**: `task psql` (shell), `task db-reset` (drop + migrations + seed). The local S3 storage (Garage) is inspected via the `aws s3 --endpoint-url http://localhost:3900` CLI or `task s3-ls`; no web console (Garage is administered via CLI).
+- **DB**: `task psql` (shell), `task db-reset` (drop + migrations + seed). The local S3 storage (Garage) is inspected via `task s3-ls` (lists the bucket with the API's own settings), or the `aws s3 --endpoint-url http://localhost:3900 --region garage` CLI with the key from `.env`; no web console (Garage is administered via its CLI: `docker compose -f deploy/docker-compose.dev.yml exec garage /garage status`).
 - **Realistic log data**: the demo-network fixture includes a 10 s `time_sleep` resource — runs last long enough to see streaming, follow-tail and cancellation.
 
 ---
