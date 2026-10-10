@@ -14,7 +14,7 @@ from app.audit import record_audit
 from app.auth.deps import CurrentUser, require_role
 from app.config import get_settings
 from app.db import get_session
-from app.enums import ACTIVE_STATES, AuditActorKind, Role
+from app.enums import ACTIVE_STATES, AuditActorKind, Role, RunState
 from app.errors import ProblemException
 from app.ids import uuid7
 from app.models.environment import Environment
@@ -45,18 +45,35 @@ def _require_env(claims: dict, env_id: uuid.UUID) -> None:
         raise ProblemException(403, "Forbidden", "Token not scoped to this environment.")
 
 
-def _require_rw(claims: dict) -> None:
+def _require_rw(claims: dict[str, Any]) -> None:
+    """POST: only an `rw` token writes state — a job holding apply credentials (an apply or a
+    mutating command, §4.3) or a run-less import session (§11.4). A plan job's `plan` token and a
+    `ro` token never do, so no plan (nor a stale/leaked plan token) can write state (§11.2)."""
     if claims.get("scope") != "rw":
-        raise ProblemException(403, "Read-only", "This run holds a read-only state token.")
+        raise ProblemException(403, "Read-only", "This state token cannot write state.")
 
 
-async def _require_active_run(session: AsyncSession, claims: dict[str, Any]) -> None:
+def _require_lock_scope(claims: dict[str, Any]) -> None:
+    """LOCK/UNLOCK: `tofu plan` takes the lock, so a plan job's `plan` token may lock as well as an
+    `rw` one. A `ro` token (proposed run, read-only command) is handed no lock address and never
+    locks, so it must not lock nor unlock (§11.2)."""
+    if claims.get("scope") not in ("plan", "rw"):
+        raise ProblemException(403, "Read-only", "This state token cannot lock state.")
+
+
+# A plan job runs while its run is preparing / planning / checking (§7.2): its `plan` token may
+# take the lock only then, never while that same run waits for confirmation or applies.
+_PLAN_PHASE_STATES = frozenset({RunState.preparing, RunState.planning, RunState.checking})
+
+
+async def _require_run_phase(session: AsyncSession, claims: dict[str, Any]) -> None:
     """Defense in depth (§4.2/§11.2): a run-scoped token writes state or takes the lock only while
-    its run is active. Once the run is terminal (e.g. failed as worker_lost and its env handed to
-    the next run), a partitioned worker's still-unexpired token must not write over the new run's
-    state. FOR SHARE: a concurrent transition to terminal waits for this write instead of
-    interleaving with it. Run-less import-session tokens (§11.4) are bounded by their own short TTL.
-    UNLOCK stays ungated so a reclaimed run can still release the lock it holds, not strand it."""
+    its run is active — and a `plan` token only during its run's plan phase. Once the run is
+    terminal (e.g. failed as worker_lost and its env handed to the next run), a partitioned
+    worker's still-unexpired token must not write over the new run's state. FOR SHARE: a
+    concurrent transition to terminal waits for this write instead of interleaving with it.
+    Run-less import-session tokens (§11.4) are bounded by their own short TTL. UNLOCK stays ungated
+    so a reclaimed run can still release the lock it holds, not strand it."""
     run_id = claims.get("run_id")
     if run_id is None:
         return
@@ -65,7 +82,14 @@ async def _require_active_run(session: AsyncSession, claims: dict[str, Any]) -> 
             select(Run.state).where(Run.id == uuid.UUID(run_id)).with_for_update(read=True)
         )
     ).scalar_one_or_none()
-    if state not in ACTIVE_STATES:
+    if claims.get("scope") == "plan":
+        if state not in _PLAN_PHASE_STATES:
+            raise ProblemException(
+                403,
+                "Plan phase over",
+                "This plan job's state token is only valid during its run's plan phase.",
+            )
+    elif state not in ACTIVE_STATES:
         raise ProblemException(
             403, "Run not active", "This state token's run has ended; it can no longer write."
         )
@@ -101,7 +125,7 @@ async def post_state(
     claims = _token_claims(request)
     _require_env(claims, env_id)
     _require_rw(claims)
-    await _require_active_run(session, claims)
+    await _require_run_phase(session, claims)
 
     lock = await session.get(StateLock, env_id)
     if lock is not None and ID and lock.lock_id != ID:
@@ -142,8 +166,8 @@ async def post_state(
 async def lock_state(env_id: uuid.UUID, request: Request, session: DbSession) -> Response:
     claims = _token_claims(request)
     _require_env(claims, env_id)
-    _require_rw(claims)
-    await _require_active_run(session, claims)
+    _require_lock_scope(claims)
+    await _require_run_phase(session, claims)
     info = json.loads(await request.body() or b"{}")
 
     existing = await session.get(StateLock, env_id)
@@ -160,7 +184,7 @@ async def lock_state(env_id: uuid.UUID, request: Request, session: DbSession) ->
 async def unlock_state(env_id: uuid.UUID, request: Request, session: DbSession) -> Response:
     claims = _token_claims(request)
     _require_env(claims, env_id)
-    _require_rw(claims)  # a read-only token (proposed runs) never locks, so it must not unlock
+    _require_lock_scope(claims)  # a `ro` token never locks, so it must not unlock
     info = json.loads(await request.body() or b"{}")
     existing = await session.get(StateLock, env_id)
     if existing is None:

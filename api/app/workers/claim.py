@@ -26,6 +26,7 @@ from app.models.stack import Stack
 from app.models.worker import Worker
 from app.runs.commands import is_mutating
 from app.runs.transition import transition
+from app.statebackend.tokens import StateScope, mint_state_token
 from app.variables.resolution import ResolvedVariable, provenance_snapshot, resolve_variables
 from app.workers.hooks import platform_hooks
 
@@ -105,6 +106,19 @@ def holds_apply_credentials(run: Run) -> bool:
     if run.type == RunType.command:
         return is_mutating((run.command or {}).get("name", ""))
     return run.state == RunState.applying
+
+
+def _state_scope(run: Run, cred_phase: JobPhase) -> StateScope:
+    """The job's state-token scope, bound at mint time (§11.2): only a job holding apply credentials
+    writes state. A plan job reads and locks — `tofu plan` (`-refresh-only` included) takes the lock
+    but never persists state. A proposed run (drift included) and a read-only command only read:
+    they are handed no lock address, and `output`/`show`/`state list|show`/`providers`/`validate`
+    never lock anyway."""
+    if run.type == RunType.proposed:
+        return "ro"
+    if cred_phase == JobPhase.apply:
+        return "rw"
+    return "ro" if run.type == RunType.command else "plan"
 
 
 def _is_hcl_tfvar(rv: ResolvedVariable) -> bool:
@@ -199,13 +213,11 @@ async def build_job_payload(session: AsyncSession, run: Run) -> dict:
     cred_phase = JobPhase.apply if holds_apply_credentials(run) else JobPhase.plan
     phase = JobPhase.command if run.type == RunType.command else cred_phase
 
-    # Managed state (§11): hand the worker a scoped HTTP backend (RO for proposed runs).
+    # Managed state (§11): hand the worker an HTTP backend with a job-scoped state token.
     settings = get_settings()
     backend = None
     if env.managed_state:
-        from app.statebackend.tokens import mint_state_token
-
-        scope = "ro" if run.type == RunType.proposed else "rw"
+        scope = _state_scope(run, cred_phase)
         base = settings.internal_url.rstrip("/")  # worker-reachable, not the public URL
         # A job holding apply credentials (an apply, or a mutating command) gets a state token that
         # lives only for the apply budget + grace — the same window as its OIDC cap and its
@@ -218,16 +230,16 @@ async def build_job_payload(session: AsyncSession, run: Run) -> dict:
             environment_id=env.id, run_id=run.id, scope=scope, ttl_seconds=state_ttl
         )
         addr = f"{base}/state/v1/{env.id}"
-        backend = {
-            "type": "http",
-            "address": addr,
-            "lock_address": f"{addr}/lock",
-            "unlock_address": f"{addr}/lock",
-            "lock_method": "LOCK",
-            "unlock_method": "UNLOCK",
-            "username": "env",
-            "password": token,
-        }
+        backend = {"type": "http", "address": addr, "username": "env", "password": token}
+        if scope != "ro":
+            # A `ro` job gets no lock address: tofu's http backend then skips locking altogether
+            # instead of sending a LOCK its token is refused (which failed every proposed plan).
+            backend.update(
+                lock_address=f"{addr}/lock",
+                unlock_address=f"{addr}/lock",
+                lock_method="LOCK",
+                unlock_method="UNLOCK",
+            )
 
     cloud_credentials = await _cloud_credentials(session, env, stack, run, cred_phase)  # §10
 
