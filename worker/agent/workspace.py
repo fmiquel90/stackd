@@ -105,6 +105,19 @@ class Workspace:
             # failed authenticated clone can never leak it, in either form.
             msg = _redact(msg, token)
             raise RuntimeError(f"git clone failed: {msg}")
+        if clone_url != repo_url:
+            # git saved the authed URL as origin's in .git/config, where any repo hook could read
+            # the token (§8.3): point origin back at the token-free URL. The pinned fetch below is
+            # handed the authed URL itself.
+            reset = subprocess.run(
+                ["git", "remote", "set-url", "origin", repo_url],
+                cwd=self.path / "repo",
+                capture_output=True,
+                text=True,
+            )
+            if reset.returncode != 0:
+                msg = _redact(reset.stderr.strip() or reset.stdout.strip(), token)
+                raise RuntimeError(f"git remote set-url failed: {msg}")
         if commit_sha:
             if not _SAFE_REF.match(commit_sha):
                 raise RuntimeError(f"invalid commit ref: {commit_sha!r}")
@@ -112,7 +125,7 @@ class Workspace:
             # commit (a full SHA, or a ref), then check out what was fetched (FETCH_HEAD — a
             # fetched branch or tag gets no local ref to check out by name).
             fetch = subprocess.run(
-                ["git", "fetch", "--depth", "1", "origin", commit_sha],
+                ["git", "fetch", "--depth", "1", clone_url, commit_sha],
                 cwd=self.path / "repo",
                 capture_output=True,
                 text=True,

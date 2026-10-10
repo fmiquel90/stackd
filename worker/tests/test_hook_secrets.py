@@ -1,27 +1,36 @@
 """What a repo hook can read (SPECS §8.3). It runs repo-controlled code in the job's checkout, so
 nothing secret may be there while it runs: not the saved plan, nor tofu's raw plan JSON (repo hooks
-read a masked plan.json), nor the run's tfvars. Real git, real Workspace, real hooks (`sh -c`); tofu
-is a stand-in script that behaves just enough like it — or the real one, when it is installed."""
+read a masked plan.json), nor the run's tfvars, nor the repo token. Real git (over HTTP with a token,
+where it matters), real Workspace, real hooks (`sh -c`); tofu is a stand-in script that behaves just
+enough like it — or the real one, when it is installed."""
 
 from __future__ import annotations
 
+import base64
 import json
 import os
 import shutil
 import subprocess
+import threading
+from collections.abc import Iterator
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, cast
+from urllib.parse import quote
 
 import pytest
 
 import agent.main as main
 from agent.client import ApiClient
 from agent.config import Settings
+from agent.workspace import Workspace
 
 SECRET = "hunter2-<&>-s3cr3t"
 HCL_SECRET = "hcl-s3cr3t"  # in an hcl-typed variable, written to its own .auto.tfvars (§3.4)
 TFVARS_FILES = ["stackd.auto.tfvars.json", "zzz_stackd.auto.tfvars"]
+TOKEN = "ghp_t0k@en/%25"  # the repo token: on disk, git would hold it percent-encoded
+TOKEN_FORMS = [TOKEN, quote(TOKEN, safe="")]
 # What `tofu show -json` prints for the plan: the variable values in clear, sensitive ones included.
 RAW_PLAN_JSON = {
     "variables": {"db_password": {"value": SECRET}, "region": {"value": "eu-west-1"}},
@@ -73,6 +82,71 @@ def tofu(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     (home / "plan.json").write_text(json.dumps(RAW_PLAN_JSON))
     monkeypatch.setenv("FAKE_TOFU", str(home))
     return home
+
+
+class _GitHttp(BaseHTTPRequestHandler):
+    """Smart-HTTP git (`git http-backend`, as CGI) serving the repositories under `root`, behind
+    Basic auth: only the repo token gets in, like a private repository."""
+
+    root = Path()
+
+    def _serve(self) -> None:
+        expected = base64.b64encode(f"x-access-token:{TOKEN}".encode()).decode()
+        if self.headers.get("Authorization") != f"Basic {expected}":
+            self.send_response(401)
+            self.send_header("WWW-Authenticate", 'Basic realm="git"')
+            self.send_header("Content-Length", "0")
+            self.end_headers()
+            return
+        path, _, query = self.path.partition("?")
+        body = self.rfile.read(int(self.headers.get("Content-Length") or 0))
+        cgi = subprocess.run(
+            ["git", "http-backend"],
+            input=body,
+            capture_output=True,
+            env={
+                "PATH": os.environ["PATH"],
+                "GIT_PROJECT_ROOT": str(self.root),
+                "GIT_HTTP_EXPORT_ALL": "1",
+                "REMOTE_USER": "x-access-token",
+                "REQUEST_METHOD": self.command,
+                "PATH_INFO": path,
+                "QUERY_STRING": query,
+                "CONTENT_TYPE": self.headers.get("Content-Type", ""),
+                "CONTENT_LENGTH": str(len(body)),
+                "HTTP_CONTENT_ENCODING": self.headers.get("Content-Encoding", ""),
+                "GIT_PROTOCOL": self.headers.get("Git-Protocol", ""),
+            },
+        )
+        head, _, payload = cgi.stdout.partition(b"\r\n\r\n")
+        headers = [line.decode().split(":", 1) for line in head.split(b"\r\n") if line]
+        status = next((int(v.split()[0]) for k, v in headers if k.lower() == "status"), 200)
+        self.send_response(status)
+        for k, v in headers:
+            if k.lower() != "status":
+                self.send_header(k, v.strip())
+        self.send_header("Content-Length", str(len(payload)))
+        self.end_headers()
+        self.wfile.write(payload)
+
+    do_GET = do_POST = _serve
+
+    def log_message(self, *args: Any) -> None:
+        pass
+
+
+@pytest.fixture
+def git_http(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[str]:
+    """The base URL of a private git server for the repositories under tmp_path (`_repo` makes
+    one at `<url>/src`). git_clone inherits os.environ: no proxy between it and the loopback."""
+    for var in ("HTTPS_PROXY", "https_proxy", "HTTP_PROXY", "http_proxy", "ALL_PROXY", "all_proxy"):
+        monkeypatch.delenv(var, raising=False)
+    handler = type("_Handler", (_GitHttp,), {"root": tmp_path})
+    server = ThreadingHTTPServer(("127.0.0.1", 0), handler)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    yield f"http://127.0.0.1:{server.server_address[1]}"
+    server.shutdown()
+    server.server_close()
 
 
 def _git(cwd: Path, *args: str) -> str:
@@ -140,20 +214,23 @@ def _job(phase: str, url: str, sha: str | None, tofu: Path, **extra: Any) -> dic
         "env": {"PATH": f"{tofu}:{os.environ['PATH']}"},
         "tfvars_json": {"db_password": SECRET, "region": "eu-west-1"},
         "hcl_tfvars": {"tags": f'{{ team = "{HCL_SECRET}" }}'},
-        "mask_values": [SECRET, HCL_SECRET],
+        "mask_values": [SECRET, HCL_SECRET, TOKEN],
         **extra,
     }
 
 
-def _plan_and_apply(tmp_path: Path, url: str, sha: str, tofu: Path, **plan: Any) -> _Client:
+def _plan_and_apply(
+    tmp_path: Path, url: str, sha: str, tofu: Path, repo_credentials: Any = None, **plan: Any
+) -> _Client:
     client = _Client()
     api = cast(ApiClient, client)
     settings = cast(
         Settings, SimpleNamespace(workspace_root=str(tmp_path / "ws"), leak_action="warn")
     )
-    main.handle_plan(api, _job("plan", url, None, tofu, save_plan=True, **plan), settings)
+    creds = {"repo_credentials": repo_credentials}
+    main.handle_plan(api, _job("plan", url, None, tofu, save_plan=True, **creds, **plan), settings)
     assert client.events[-1][0] == "phase_finished", client.events
-    main.handle_apply(api, _job("apply", url, sha, tofu), settings)
+    main.handle_apply(api, _job("apply", url, sha, tofu, **creds), settings)
     assert client.events[-1][0] == "phase_finished", client.events
     return client
 
@@ -176,11 +253,15 @@ def _calls(tofu: Path) -> list[str]:
     return [c for c in (tofu / "calls").read_text().splitlines() if not c.startswith("wrote ")]
 
 
-def test_repo_hooks_find_no_secret_in_the_workspace(tmp_path: Path, tofu: Path) -> None:
-    needles = ["RAW-PLAN", SECRET, HCL_SECRET]
+def test_repo_hooks_find_no_secret_in_the_workspace(
+    tmp_path: Path, tofu: Path, git_http: str
+) -> None:
+    needles = ["RAW-PLAN", SECRET, HCL_SECRET, *TOKEN_FORMS]
     scan = _scan_hook(tmp_path, needles, ["plan.tfplan", *TFVARS_FILES])
-    url, sha = _repo(tmp_path, {stage: [f"{scan} {stage}"] for stage in STAGES})
-    client = _plan_and_apply(tmp_path, url, sha, tofu)
+    _, sha = _repo(tmp_path, {stage: [f"{scan} {stage}"] for stage in STAGES})
+    # A private repository: both jobs clone it with the token (the apply also fetches its commit).
+    creds = {"kind": "token", "token": TOKEN}
+    client = _plan_and_apply(tmp_path, f"{git_http}/src", sha, tofu, repo_credentials=creds)
 
     scans = [line for line in client.lines if line.startswith("SCAN ")]
     assert scans == [f"SCAN {stage} hits=[] files=[]" for stage in STAGES], client.lines
@@ -307,3 +388,20 @@ def test_real_tofu_plans_applies_and_runs_commands(tmp_path: Path) -> None:
             cast(Settings, SimpleNamespace(workspace_root=str(tmp_path / "ws"))),
         )
         assert client.events[-1] == ("phase_finished", {"result": {"command": name}}), name
+
+
+def test_clone_keeps_no_token_in_the_checkout(tmp_path: Path, git_http: str) -> None:
+    _, sha = _repo(tmp_path, {})
+    _git(tmp_path / "src", "commit", "-q", "--allow-empty", "-m", "c2")  # the pinned one isn't tip
+    url = f"{git_http}/src"
+    ws = Workspace(str(tmp_path / "ws"), "job")
+    ws.git_clone(url, sha, ".", token=TOKEN, branch="main")
+
+    assert ws.head_sha() == sha  # the pinned commit, fetched with the token
+    hits = subprocess.run(
+        ["grep", "-rlaF", *(f"-e{form}" for form in TOKEN_FORMS), str(ws.path)],
+        capture_output=True,
+        text=True,
+    )
+    assert hits.stdout == "", hits.stdout  # nowhere: not in .git/config, FETCH_HEAD, reflogs, …
+    assert _git(ws.path / "repo", "remote", "get-url", "origin") == url
