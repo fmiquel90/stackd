@@ -427,3 +427,44 @@ async def test_refresh_head_holds_no_transaction_across_git(
     r = await client.post(f"/api/v1/environments/{env_id}/refresh-head", headers=admin)
     assert r.status_code == 200, r.text
     assert (r.json()["branch"], r.json()["head_sha"]) == ("other", "aaa111")
+
+
+async def test_changing_branch_resets_the_recorded_head(client: httpx.AsyncClient) -> None:
+    """The recorded head belongs to the tracked branch: re-pointing the env to another branch
+    clears it (and the staleness fields), so `stale` isn't computed against the old branch. A PATCH
+    that keeps the branch leaves it alone."""
+    from sqlalchemy import update
+
+    from app.db import SessionLocal
+    from app.models.environment import Environment
+
+    admin = await login(client, "admin")
+    wh = await register_worker(client, admin, "pool-stale-branch")
+    env_id = await _env(client, admin, await _stack(client, admin, _repo()), "e", "main")
+    await _run(client, admin, wh, env_id, "aaa111")
+    await _set_head(env_id, "bbb222")
+    async with SessionLocal() as session:
+        await session.execute(
+            update(Environment)
+            .where(Environment.id == uuid.UUID(env_id))
+            .values(commits_ahead=3, affects_project_root=True)
+        )
+        await session.commit()
+
+    async def _patch(body: dict) -> dict:
+        r = await client.patch(f"/api/v1/environments/{env_id}", headers=admin, json=body)
+        assert r.status_code == 200, r.text
+        return r.json()
+
+    kept = await _patch({"branch": "main", "position": 1})
+    assert (kept["head_sha"], kept["commits_ahead"], kept["stale"]) == ("bbb222", 3, True)
+
+    moved = await _patch({"branch": "release"})
+    assert moved["branch"] == "release"
+    assert moved["head_sha"] is None
+    assert moved["commits_ahead"] is None
+    assert moved["affects_project_root"] is None
+    assert moved["stale"] is False
+    async with SessionLocal() as session:
+        env = await session.get(Environment, uuid.UUID(env_id))
+        assert env is not None and env.head_updated_at is None  # due at the next head poll

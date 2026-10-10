@@ -168,6 +168,13 @@ async def update_environment(
     changes = body.model_dump(exclude_unset=True)
     if "tier" in changes:
         await _require_tier(session, changes["tier"])
+    if "branch" in changes and changes["branch"] != env.branch:
+        # Staleness (§9.6): the recorded head is the old branch's, so `stale` must not compare
+        # against it. No head_updated_at makes the env due at the next head poll.
+        env.head_sha = None
+        env.head_updated_at = None
+        env.commits_ahead = None
+        env.affects_project_root = None
     for field, value in changes.items():
         setattr(env, field, value)
     if env.protected:

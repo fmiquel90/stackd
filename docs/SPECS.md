@@ -833,6 +833,8 @@ No applied run yet (or a last run with no pinned commit) → `stale = false`: th
 2. **Fallback polling**: `git ls-remote` per (repo, branch) every 15 min (`stackd_head_poll_interval`; periodic task, deduplicated by repo across the stacks sharing it — and by their repo credentials, so no stack's head is read with another stack's token) — covers absent or lost webhooks. Only envs whose head was not observed within the interval (by a webhook, a manual refresh or a previous poll, on any replica) are polled; a head recorded by a webhook while the poll runs is never overwritten. No DB transaction is held across the git calls; a failing repo is logged (never its token) and retried at the next poll, without blocking the others.
 3. **Manual**: `POST /api/v1/environments/{id}/refresh-head`. Like the poll, it holds no DB transaction across its git call, and does not record the head if the env was re-pointed to another branch meanwhile.
 
+Changing an environment's `branch` (`PATCH`) clears `head_sha`, `head_updated_at`, `commits_ahead` and `affects_project_root`: the recorded head was the old branch's, and the env is then due at the next poll.
+
 **Two levels of precision**:
 - *Level 1 — branch ahead*: SHA comparison, always available. `commits_ahead` via the Git provider's compare API if available, otherwise binary "behind" display.
 - *Level 2 — concerns you*: `affects_project_root` = at least one commit ahead modifies files under `project_root` (GitHub/GitLab compare API). If unavailable: NULL, the UI stays at level 1.
