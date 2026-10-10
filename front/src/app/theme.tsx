@@ -7,6 +7,8 @@ interface ThemeCtx {
   /** True when the user overrode the OS preference in this tab (kept in memory only). */
   overridden: boolean;
   toggle: () => void;
+  /** Follow the OS (`null`) or force a theme, for this tab. */
+  setOverride: (t: Theme | null) => void;
 }
 
 const Ctx = createContext<ThemeCtx | null>(null);
@@ -39,7 +41,10 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
   }, [theme]);
 
   const toggle = useCallback(() => setOverride(theme === "dark" ? "light" : "dark"), [theme]);
-  const value = useMemo(() => ({ theme, overridden: override !== null, toggle }), [theme, override, toggle]);
+  const value = useMemo(
+    () => ({ theme, overridden: override !== null, toggle, setOverride }),
+    [theme, override, toggle],
+  );
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
 }
 

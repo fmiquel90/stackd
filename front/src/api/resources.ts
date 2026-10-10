@@ -205,7 +205,7 @@ export interface Attachment {
 
 export const variableSets = {
   list: () => api<VariableSet[]>("/variable-sets"),
-  create: (body: { name: string; description?: string; auto_attach?: boolean }) =>
+  create: (body: { name: string; description?: string; auto_attach?: boolean; space_id?: string }) =>
     api<VariableSet>("/variable-sets", { body }),
   update: (
     id: string,

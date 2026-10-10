@@ -24,8 +24,8 @@ import { environments, observability, runs, stacks } from "@/api/resources";
 import { useConnectionStatus } from "@/api/stream";
 import type { User } from "@/api/types";
 import { useLogout } from "@/auth/session";
-import { Brand } from "@/components/BrandMark";
-import { NotificationBell } from "@/components/NotificationBell";
+import { Brand } from "./Brand";
+import { NotificationBell } from "./NotificationBell";
 import { Button } from "@/ui/Button";
 import { cn } from "@/ui/cn";
 import {
@@ -63,9 +63,14 @@ const WorkersPage = lazy(() =>
 );
 const AuditPage = lazy(() => import("@/features/audit/AuditPage").then((m) => ({ default: m.AuditPage })));
 const GraphPage = lazy(() => import("@/features/graph/GraphPage").then((m) => ({ default: m.GraphPage })));
-const SettingsPage = lazy(() => import("@/pages/SettingsPage").then((m) => ({ default: m.SettingsPage })));
+const SettingsPage = lazy(() =>
+  import("@/features/settings/SettingsPage").then((m) => ({ default: m.SettingsPage })),
+);
 const VariableSetsPage = lazy(() =>
-  import("@/pages/VariableSetsPage").then((m) => ({ default: m.VariableSetsPage })),
+  import("@/features/variableSets/VariableSetsPage").then((m) => ({ default: m.VariableSetsPage })),
+);
+const VariableSetPage = lazy(() =>
+  import("@/features/variableSets/VariableSetsPage").then((m) => ({ default: m.VariableSetPage })),
 );
 
 /* ---------------- Navigation ---------------- */
@@ -366,7 +371,12 @@ function Breadcrumb() {
           </Crumb>
         )}
         {rest[0] === "stacks" && rest[2] === "envs" && rest[3] && <Crumb last>{rest[3]}</Crumb>}
-        {rest[0] !== "stacks" && rest[0] && <Crumb last>{PAGE_TITLES[rest[0]] ?? rest[0]}</Crumb>}
+        {rest[0] !== "stacks" && rest[0] && (
+          <Crumb to={rest[1] ? `${base}/${rest[0]}` : undefined} last={!rest[1]}>
+            {PAGE_TITLES[rest[0]] ?? rest[0]}
+          </Crumb>
+        )}
+        {rest[0] === "variable-sets" && rest[1] && <Crumb last>{rest[1]}</Crumb>}
       </>
     );
   } else {
@@ -551,6 +561,7 @@ function AppRoutes() {
       <Route path="/s/:space/stacks/:stack/envs/:env" element={<EnvPage />} />
       <Route path="/s/:space/graph" element={<GraphPage />} />
       <Route path="/s/:space/variable-sets" element={<VariableSetsPage />} />
+      <Route path="/s/:space/variable-sets/:set" element={<VariableSetPage />} />
       <Route path="/runs/:runId" element={<RunPage />} />
       <Route path="/queue" element={<QueuePage />} />
       <Route path="/workers" element={<WorkersPage />} />

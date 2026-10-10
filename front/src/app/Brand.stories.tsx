@@ -1,4 +1,4 @@
-import { Brand, BrandMark } from "./BrandMark";
+import { Brand, BrandMark } from "./Brand";
 
 export default { title: "Identity / Brand" };
 
