@@ -13,7 +13,7 @@ from app.auth.deps import CurrentUser, require_role
 from app.crypto import decrypt, encrypt
 from app.db import get_session
 from app.enums import AuditActorKind, RepoAuthKind, Role
-from app.environments.router import detach_deleted_targets, lock_envs_for_deletion
+from app.environments.router import drop_target_references, lock_envs_for_deletion
 from app.errors import ProblemException
 from app.models.environment import Environment
 from app.models.stack import Stack
@@ -132,7 +132,7 @@ async def delete_stack(stack_id: uuid.UUID, user: CurrentUser, session: DbSessio
     # Lock the stack first, so no env is added to it meanwhile, then its envs: 409 while one runs.
     await session.execute(select(Stack.id).where(Stack.id == stack.id).with_for_update())
     env_ids = await lock_envs_for_deletion(session, Environment.stack_id == stack.id)
-    await detach_deleted_targets(session, user, env_ids=env_ids, stack_id=stack.id)
+    await drop_target_references(session, user, env_ids=env_ids, stack_id=stack.id)
     name = stack.name
     await session.delete(stack)
     await record_audit(

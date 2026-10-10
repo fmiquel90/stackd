@@ -134,3 +134,89 @@ async def test_deletion_leaves_no_orphan_attachments(client: httpx.AsyncClient) 
         (env_b, "stack_deleted"),
         (stack, "stack_deleted"),
     }
+
+
+async def test_deletion_leaves_no_orphan_hooks_or_notification_targets(
+    client: httpx.AsyncClient,
+) -> None:
+    """Platform hooks and notification targets point at their stack/env with no FK either: they go
+    with the env or stack they target, each audited as a deletion, and other targets' stay."""
+    from sqlalchemy import select
+
+    from app.db import SessionLocal
+    from app.models.hook import Hook
+    from app.models.notification import NotificationTarget
+
+    admin = await login(client, "admin")
+    suffix = uuid.uuid4().hex[:8]
+    stack = await make_stack(client, admin, f"del-refs-{suffix}")
+    env_a = await make_env(client, admin, stack, "a", "dev")
+    env_b = await make_env(client, admin, stack, "b", "dev")
+    other_stack = await make_stack(client, admin, f"del-refs-other-{suffix}")
+    other_env = await make_env(client, admin, other_stack, "o", "dev")
+    targets = {
+        stack: f"/api/v1/stacks/{stack}",
+        env_a: f"/api/v1/environments/{env_a}",
+        env_b: f"/api/v1/environments/{env_b}",
+        other_stack: f"/api/v1/stacks/{other_stack}",
+        other_env: f"/api/v1/environments/{other_env}",
+    }
+    hooks: dict[str, str] = {}
+    notifications: dict[str, str] = {}
+    for target, base in targets.items():
+        hook = await client.post(
+            f"{base}/hooks",
+            headers=admin,
+            json={"stage": "after_plan", "name": f"h-{target}", "command": "true"},
+        )
+        assert hook.status_code == 201, hook.text
+        hooks[hook.json()["id"]] = target
+        nt = await client.post(
+            f"{base}/notifications",
+            headers=admin,
+            json={"name": f"n-{target}", "kind": "webhook", "url": "https://hooks.example/x"},
+        )
+        assert nt.status_code == 201, nt.text
+        notifications[nt.json()["id"]] = target
+
+    async def _remaining() -> tuple[set[str], set[str]]:
+        async with SessionLocal() as session:
+            hook_targets = (
+                await session.execute(
+                    select(Hook.target_id).where(Hook.id.in_([uuid.UUID(h) for h in hooks]))
+                )
+            ).scalars()
+            nt_targets = (
+                await session.execute(
+                    select(NotificationTarget.target_id).where(
+                        NotificationTarget.id.in_([uuid.UUID(n) for n in notifications])
+                    )
+                )
+            ).scalars()
+            return {str(t) for t in hook_targets}, {str(t) for t in nt_targets}
+
+    assert (await client.delete(f"/api/v1/environments/{env_a}", headers=admin)).status_code == 204
+    left = {stack, env_b, other_stack, other_env}
+    assert await _remaining() == (left, left)
+
+    assert (await client.delete(f"/api/v1/stacks/{stack}", headers=admin)).status_code == 204
+    left = {other_stack, other_env}
+    assert await _remaining() == (left, left)
+
+    for action, rows in (("hook.deleted", hooks), ("notification_target.deleted", notifications)):
+        audited = {}
+        for row_id, target in rows.items():
+            events = (
+                await client.get(
+                    "/api/v1/audit", headers=admin, params={"action": action, "target_id": row_id}
+                )
+            ).json()
+            if events:
+                [e] = events
+                assert e["context"]["target_id"] == target
+                audited[target] = e["context"]["reason"]
+        assert audited == {
+            env_a: "environment_deleted",
+            env_b: "stack_deleted",
+            stack: "stack_deleted",
+        }, action

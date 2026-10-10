@@ -162,7 +162,7 @@ created_at, updated_at
 
 Why not Terraform workspaces: weak isolation (shared code/backend/credentials, state suffix), easy targeting mistakes. A Stackd environment = physically separate state, variables, protections and its own worker pool.
 
-**Deletion.** Deleting an environment — or a stack, which takes its environments with it — is refused with **409 `Active run`** (problem+json carrying `run_id`) while one of them has a run in an active state (§3.5): the cascade would remove that run outside `transition()` (§4.2) while a worker executes it. Queued runs go with their environment. The variable-set attachments targeting what is deleted are removed in the same transaction (§3.4).
+**Deletion.** Deleting an environment — or a stack, which takes its environments with it — is refused with **409 `Active run`** (problem+json carrying `run_id`) while one of them has a run in an active state (§3.5): the cascade would remove that run outside `transition()` (§4.2) while a worker executes it. Queued runs go with their environment. Everything that targets what is deleted by `target_kind`/`target_id` (no FK) is removed in the same transaction, each removal audited with a `reason` (`stack_deleted` | `environment_deleted`): variable-set attachments (§3.4, `variable_set.detached`), platform hooks (§8.1, `hook.deleted`) and notification targets (`notification_target.deleted`).
 
 ### 3.3 `variables` — stack and environment level
 

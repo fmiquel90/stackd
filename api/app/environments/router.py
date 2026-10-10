@@ -30,6 +30,8 @@ from app.enums import (
 from app.environments.schemas import EnvironmentCreate, EnvironmentOut, EnvironmentUpdate
 from app.errors import ProblemException
 from app.models.environment import Environment
+from app.models.hook import Hook
+from app.models.notification import NotificationTarget
 from app.models.run import Run
 from app.models.stack import Stack
 from app.models.tier import Tier
@@ -141,31 +143,45 @@ async def lock_envs_for_deletion(
     return env_ids
 
 
-async def detach_deleted_targets(
+async def drop_target_references(
     session: AsyncSession,
     user: User,
     *,
     env_ids: Sequence[uuid.UUID],
     stack_id: uuid.UUID | None = None,
 ) -> None:
-    """Variable-set attachments are polymorphic, with no FK (§3.4): remove those targeting the
-    envs (and stack) being deleted, in the deletion's transaction, each audited as a detachment."""
-    targets = [
-        and_(
-            VariableSetAttachment.target_kind == AttachmentTarget.environment,
-            VariableSetAttachment.target_id.in_(env_ids),
-        )
-    ]
-    if stack_id is not None:
-        targets.append(
-            and_(
-                VariableSetAttachment.target_kind == AttachmentTarget.stack,
-                VariableSetAttachment.target_id == stack_id,
+    """Variable-set attachments (§3.4), platform hooks (§8.1) and notification targets point at a
+    stack or an env by `target_kind`/`target_id`, with no FK: remove those targeting the envs (and
+    stack) being deleted, in the deletion's transaction, each audited like its manual removal."""
+    reason = "stack_deleted" if stack_id is not None else "environment_deleted"
+
+    def _targeting(
+        model: type[VariableSetAttachment] | type[Hook] | type[NotificationTarget],
+    ) -> ColumnElement[bool]:
+        targets = [
+            and_(model.target_kind == AttachmentTarget.environment, model.target_id.in_(env_ids))
+        ]
+        if stack_id is not None:
+            targets.append(
+                and_(model.target_kind == AttachmentTarget.stack, model.target_id == stack_id)
             )
+        return or_(*targets)
+
+    async def _audit(action: str, kind: str, row_id: uuid.UUID, context: dict[str, str]) -> None:
+        await record_audit(
+            session,
+            action=action,
+            actor_kind=AuditActorKind.user,
+            actor_id=user.id,
+            actor_email=user.email,
+            target_kind=kind,
+            target_id=row_id,
+            context={**context, "reason": reason},
         )
-    detached = await session.execute(
+
+    attachments = await session.execute(
         delete(VariableSetAttachment)
-        .where(or_(*targets))
+        .where(_targeting(VariableSetAttachment))
         .returning(
             VariableSetAttachment.variable_set_id,
             VariableSetAttachment.target_kind,
@@ -173,21 +189,43 @@ async def detach_deleted_targets(
         )
         .execution_options(synchronize_session=False)
     )
-    reason = "stack_deleted" if stack_id is not None else "environment_deleted"
-    for set_id, target_kind, target_id in detached.all():
-        await record_audit(
-            session,
-            action="variable_set.detached",
-            actor_kind=AuditActorKind.user,
-            actor_id=user.id,
-            actor_email=user.email,
-            target_kind="variable_set",
-            target_id=set_id,
-            context={
-                "target_kind": target_kind.value,
-                "target_id": str(target_id),
-                "reason": reason,
-            },
+    for set_id, target_kind, target_id in attachments.all():
+        await _audit(
+            "variable_set.detached",
+            "variable_set",
+            set_id,
+            {"target_kind": target_kind.value, "target_id": str(target_id)},
+        )
+    hooks = await session.execute(
+        delete(Hook)
+        .where(_targeting(Hook))
+        .returning(Hook.id, Hook.name, Hook.target_kind, Hook.target_id)
+        .execution_options(synchronize_session=False)
+    )
+    for hook_id, name, target_kind, target_id in hooks.all():
+        await _audit(
+            "hook.deleted",
+            "hook",
+            hook_id,
+            {"name": name, "on": target_kind.value, "target_id": str(target_id)},
+        )
+    notification_targets = await session.execute(
+        delete(NotificationTarget)
+        .where(_targeting(NotificationTarget))
+        .returning(
+            NotificationTarget.id,
+            NotificationTarget.name,
+            NotificationTarget.target_kind,
+            NotificationTarget.target_id,
+        )
+        .execution_options(synchronize_session=False)
+    )
+    for nt_id, name, target_kind, target_id in notification_targets.all():
+        await _audit(
+            "notification_target.deleted",
+            "notification_target",
+            nt_id,
+            {"name": name, "on": target_kind.value, "target_id": str(target_id)},
         )
 
 
@@ -291,7 +329,7 @@ async def update_environment(
 async def delete_environment(env_id: uuid.UUID, user: CurrentUser, session: DbSession) -> None:
     env = await guard_env_id(session, user, env_id, min_role=Role.writer)
     await lock_envs_for_deletion(session, Environment.id == env.id)
-    await detach_deleted_targets(session, user, env_ids=[env.id])
+    await drop_target_references(session, user, env_ids=[env.id])
     ctx = _env_audit_ctx(env)
     await session.delete(env)
     await record_audit(
