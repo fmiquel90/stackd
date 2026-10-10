@@ -10,7 +10,7 @@ from concurrent.futures import ThreadPoolExecutor
 from agent.client import ApiClient
 from agent.config import Settings
 from agent.logging import get_logger, setup as setup_logging
-from agent.masking import Masker
+from agent.masking import Masker, mask_plan_json
 from agent.runner import (
     _DEFAULT_TIMEOUT_SECONDS,
     LogStreamer,
@@ -262,8 +262,17 @@ def handle_plan(client: ApiClient, job: dict, settings: Settings) -> None:
         # `-json`: stream readable @message lines while collecting structured events (change_summary
         # for the counts, diagnostics for the real error message). detailed-exitcode: 0=no changes,
         # 2=changes, 1=error. `-refresh-only` (drift, §19): diff state against real infra only.
-        # `-destroy` (a destroy run): the saved plan carries it to the apply.
-        plan_cmd = [tool, "plan", "-input=false", "-json", "-detailed-exitcode", "-out=plan.tfplan"]
+        # `-destroy` (a destroy run): the saved plan carries it to the apply. The plan file holds
+        # the run's variable values in clear: it is made outside the checkout (§8.3).
+        plan_file = ws.private_path("plan.tfplan")
+        plan_cmd = [
+            tool,
+            "plan",
+            "-input=false",
+            "-json",
+            "-detailed-exitcode",
+            f"-out={plan_file}",
+        ]
         if job.get("refresh_only"):
             plan_cmd.insert(2, "-refresh-only")
         if job.get("destroy"):
@@ -291,7 +300,7 @@ def handle_plan(client: ApiClient, job: dict, settings: Settings) -> None:
         # diff operators expect (the real `terraform plan` output), read from the saved plan file
         # (fast — no refresh, no API calls). `-no-color` so the ANSI doesn't fight the log viewer.
         run_command(
-            [tool, "show", "-no-color", "plan.tfplan"],
+            [tool, "show", "-no-color", str(plan_file)],
             cwd,
             platform_env,
             phase="planning",
@@ -299,18 +308,22 @@ def handle_plan(client: ApiClient, job: dict, settings: Settings) -> None:
             streamer=streamer,
         )
 
-        # plan.json artifact for after_plan hooks (infracost/jq); `show -json` is already machine-readable.
+        # plan.json for after_plan hooks (infracost/jq); `show -json` is already machine-readable.
         show = subprocess.run(
-            [tool, "show", "-json", "plan.tfplan"],
+            [tool, "show", "-json", str(plan_file)],
             cwd=cwd,
             env=platform_env,
             capture_output=True,
             text=True,
         )
         plan_doc = show.stdout if show.returncode == 0 and show.stdout.strip() else "{}"
-        (cwd / "plan.json").write_text(plan_doc)
-        # Mask the artifact too: plan.json can echo sensitive variable values (§8.3 leak note).
-        client.upload_artifact(job_id, "plan.json", masker.mask(plan_doc).encode())
+        # It lists the run's variable values in clear (§8.3): the artifact, and what repo hooks
+        # read, is a copy with every sensitive value masked.
+        masked_doc = mask_plan_json(plan_doc, masker)
+        client.upload_artifact(job_id, "plan.json", masked_doc.encode())
+        # The saved plan, read once now (what was shown above) and removed before any hook runs.
+        saved_plan = plan_file.read_bytes() if has_changes and job.get("save_plan") else b""
+        plan_file.unlink(missing_ok=True)
 
         # Cleartext tripwire (§5.1): the artifact is masked, but a sensitive value surfacing in a
         # non-sensitive output means the repo didn't mark it `sensitive` — flag (or fail) the run.
@@ -328,20 +341,31 @@ def handle_plan(client: ApiClient, job: dict, settings: Settings) -> None:
         # The saved plan (§7.4): the apply job applies exactly this file, the one shown above.
         # Uploaded before any after_plan hook runs, so a repo hook can't swap what gets applied.
         # A run that can't be applied (proposed, drift) or has nothing to apply saves none.
-        if has_changes and job.get("save_plan"):
-            client.upload_artifact(job_id, "plan.tfplan", (cwd / "plan.tfplan").read_bytes())
+        if saved_plan:
+            client.upload_artifact(job_id, "plan.tfplan", saved_plan)
 
         if job.get("hooks", {}).get("after_plan") or ws.load_stackd_yml(cwd).get("after_plan"):
             client.event(job_id, "phase_started", phase="checking")
-        results, aborted = run_hooks(
-            hooks.get("after_plan", []),
-            cwd,
-            platform_env=platform_env,
-            repo_env=repo_env,
-            phase="checking",
-            streamer=streamer,
-        )
-        checks.extend(r for r in results if r["status"] != "ok")
+        # Platform hooks (trusted with the run's secrets, §8.3) read tofu's plan JSON as is; it is
+        # replaced by the masked copy before the first repo hook runs.
+        after_plan = hooks.get("after_plan", [])
+        aborted = False
+        for doc, batch in (
+            (plan_doc, [h for h in after_plan if h.get("source") != "repo"]),
+            (masked_doc, [h for h in after_plan if h.get("source") == "repo"]),
+        ):
+            if not batch or aborted:
+                continue
+            ws.write_plan_json(cwd, doc)
+            results, aborted = run_hooks(
+                batch,
+                cwd,
+                platform_env=platform_env,
+                repo_env=repo_env,
+                phase="checking",
+                streamer=streamer,
+            )
+            checks.extend(r for r in results if r["status"] != "ok")
         if aborted:
             return client.event(job_id, "job_failed", phase="after_plan", result={"checks": checks})
 

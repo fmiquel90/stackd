@@ -44,6 +44,16 @@ def _redact(text: str, token: str | None) -> str:
     return text
 
 
+def _write_new(path: Path, data: bytes) -> Path:
+    """Write `data` to `path` as a new 0600 file: whatever is there (a file, or a symlink pointing
+    out of the workspace) is replaced, never written through."""
+    path.unlink(missing_ok=True)
+    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
+    with os.fdopen(fd, "wb") as f:
+        f.write(data)
+    return path
+
+
 class Workspace:
     """Ephemeral per-job working directory (SPECS §7.4)."""
 
@@ -169,11 +179,19 @@ class Workspace:
         """Write the saved plan the apply job applies (§7.4): 0600 (it holds the run's variable
         values in clear), and as a new file — whatever the checkout has at that path (a file, or a
         symlink pointing out of the workspace) is replaced, never written through."""
-        path = cwd / "plan.tfplan"
+        return _write_new(cwd / "plan.tfplan", data)
+
+    def write_plan_json(self, cwd: Path, doc: str) -> Path:
+        """The plan JSON the after_plan hooks read (§8.3), written like `write_plan`: a symlink a
+        repo planted at `plan.json` can't redirect it out of the tree."""
+        return _write_new(cwd / "plan.json", doc.encode())
+
+    def private_path(self, name: str) -> Path:
+        """A path in the job's workspace but outside the checkout, for a file no repo hook may find
+        in the tree it runs in (the plan job's saved plan, §8.3). Whatever is there is removed
+        first, so a file or symlink a hook left there is never written through."""
+        path = self.path.resolve() / name
         path.unlink(missing_ok=True)
-        fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
-        with os.fdopen(fd, "wb") as f:
-            f.write(data)
         return path
 
     def load_stackd_yml(self, cwd: Path) -> dict[str, list[dict]]:

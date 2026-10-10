@@ -125,6 +125,13 @@ class _FakeWorkspace:
     def write_plan(self, cwd: Path, data: bytes) -> Path:
         return cwd / "plan.tfplan"
 
+    def private_path(self, name: str) -> Path:
+        return self.root / name
+
+    def write_plan_json(self, cwd: Path, doc: str) -> Path:
+        (cwd / "plan.json").write_text(doc)
+        return cwd / "plan.json"
+
     def load_stackd_yml(self, cwd: Path) -> dict:
         return {}
 

@@ -102,14 +102,15 @@ def _job(phase: str, **extra: Any) -> dict:
 def _patch(
     monkeypatch, tofu_calls: list[list[str]], plan_rc: int = 2, apply_result: Any = None
 ) -> dict[str, bytes]:
-    """tofu faked: `plan` writes PLAN to plan.tfplan; `apply` records the bytes of the plan file it
-    was given, at that moment (returned dict, key "bytes"), and returns `apply_result`."""
+    """tofu faked: `plan` writes PLAN where `-out=` says; `apply` records the bytes of the plan file
+    it was given, at that moment (returned dict, key "bytes"), and returns `apply_result`."""
     applied: dict[str, bytes] = {}
 
     def fake_stream_json(cmd: list[str], cwd: Path, env: dict, **kw: Any) -> tuple:
         tofu_calls.append(cmd)
         if cmd[1] == "plan":
-            (cwd / "plan.tfplan").write_bytes(PLAN)
+            out = next(a.removeprefix("-out=") for a in cmd if a.startswith("-out="))
+            (cwd / out).write_bytes(PLAN)
             return plan_rc, []
         applied["bytes"] = (cwd / cmd[-1]).read_bytes()
         return apply_result or (0, [])
@@ -157,7 +158,7 @@ def test_destroy_run_plans_with_destroy(monkeypatch, tmp_path: Path) -> None:
     _FakeWorkspace.repo_hooks = {}
     main.handle_plan(_FakeClient(), _job("plan", destroy=True, save_plan=True), _settings(tmp_path))
     [plan] = [c for c in calls if c[1] == "plan"]
-    assert "-destroy" in plan and "-out=plan.tfplan" in plan
+    assert "-destroy" in plan and f"-out={tmp_path / 'run-1' / 'plan.tfplan'}" in plan
 
 
 # --- apply job ---------------------------------------------------------------------------------
