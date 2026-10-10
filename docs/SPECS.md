@@ -204,8 +204,8 @@ variable_set_attachments (
   id uuid PK,
   variable_set_id FK,
   target_kind enum('stack','environment','tier'),
-  target_id uuid,                   -- stack → all its envs; tier → all envs of that tier
-                                    --   (target_id = tiers.id); environment → this env only
+  target_id uuid,                   -- stack → all its envs; tier → all envs of that tier in the
+                                    --   set's space (target_id = tiers.id); environment → this env only
                                     -- polymorphic (stack OR env) → no DB FK; integrity is app-enforced
   priority int default 0,           -- orders the sets among themselves at resolution
   UNIQUE (variable_set_id, target_kind, target_id)
@@ -225,6 +225,8 @@ variable_set_attachments (
 ```
 
 A set's **selector** (`{label: value}`) auto-attaches it to every environment whose effective labels (`stack.labels` + `env.labels`, env wins on conflict) contain all of its key=value pairs — equality AND-match, no operators (deliberately not the deferred OPA engine, PLAN §7). It sits at the same weakest layer as `auto_attach`; explicit attachments remain stronger.
+
+**Attachments stay in the set's space.** Attaching to a `stack` or `environment` requires the target to belong to the variable set's space **and** the caller to be a `writer` there; otherwise it is refused with `400 Cross-space attachment` (`403` if the caller lacks write access on the target). A tier is a global catalog row (no space), so a `tier` attachment applies only to environments of that tier **inside the set's own space**. Resolution also ignores any explicit attachment whose set belongs to another space (defense in depth).
 
 At equal name and kind, the upper layer overrides. Two sources outside resolution are added at claim time: upstream outputs (`dependency:`) and mocks (`mock`) — see §9.
 
@@ -271,7 +273,7 @@ workers: id, pool_id, name, status(idle|busy|offline), labels jsonb,
          version, last_heartbeat_at, registered_at
 ```
 
-`offline` if heartbeat > 60 s; run in progress on an offline worker → `failed (worker_lost)` after 120 s — **except an `applying` run**, reclaimed only after the apply budget + grace (`stackd_apply_timeout_seconds` + `stackd_apply_lost_grace_seconds`, default 15 min + 5 min) so a healthy long apply is never failed mid-flight and two workers can't apply the same env concurrently (§4.2). Targeting by labels (dedicated prod pool recommended).
+`offline` if heartbeat > 60 s; run in progress on an offline worker → `failed (worker_lost)` after 120 s — **except a job holding apply credentials** (an `applying` run, or a mutating command run §4.3), reclaimed only after the apply window = apply budget + grace (`apply_reclaim_window_seconds` = `stackd_apply_timeout_seconds` + `stackd_apply_lost_grace_seconds`, default 15 min + 5 min) so a healthy long apply is never failed mid-flight and two workers can't write the same env's state concurrently (§4.2). Its state token and apply OIDC token are minted for that same window (§10.2/§11.2), so by the time it is reclaimed they have expired. Targeting by labels (dedicated prod pool recommended).
 
 ### 3.8 Dependencies, outputs and mocks
 
@@ -401,13 +403,13 @@ Terminal: `finished`, `failed`, `discarded`, `canceled`. `canceled`: user on `qu
 | `unconfirmed → confirmed` | user | `can_apply(user, env)` = role∈{approver,admin} AND `env.tier ∈ allowed_tiers` (§2.4); ≠ triggerer if the tier requires four-eyes or 4-eyes; for a `destroy` run: `can_destroy` required; **blocked if `used_mocks` and `allow_mock_apply=false`** |
 | `confirmed → applying` | worker | resume of the workspace (TTL 24 h), otherwise re-plan; re-checks `allow_mock_apply` and the secret-fallback gate against the apply-time resolution (§9.3/§15.5) |
 | `applying → finished` | worker | apply exit 0 + outputs uploaded |
-| `* → failed` | worker/system | exit ≠ 0, hook `fail`, timeouts (prepare 10 / plan 30 / apply 15 min, configurable via `stackd_apply_timeout_seconds`) — the worker hard-kills the process past its budget |
+| `* → failed` | worker/system | exit ≠ 0, hook `fail`, timeouts (prepare 10 / plan 30 / apply 15 min, configurable via `stackd_apply_timeout_seconds`; a mutating command run gets the apply budget, §4.3) — the worker hard-kills the process past its budget |
 
 Single function `transition(run, to_state, actor, payload)`: legality, atomic update guarded on `from_state`, `run_event`, audit event if the action is human or terminal, WS publication, scheduler hooks. The guarded UPDATE uses `RETURNING` (PG18: old + new tuple) to produce the `from→to` `run_event` without a re-read, in the same transaction.
 
 ### 4.3 Command runs
 
-A `RunType.command` run executes **one allowlisted tofu/terraform subcommand** (`import`, `state list/show/rm/mv`, `taint`, `untaint`, `output`, `show`, `validate`, `providers`, `refresh`) instead of the plan→apply flow — for state surgery and adoption that `plan`/`apply` can't express. It is **not** arbitrary shell: the worker runs `<tool> <command> <args>` with the command taken verbatim from the allowlist. Lifecycle: `queued → preparing → running → finished | failed`. The subcommand + args live in `runs.command` (`{name, args}`). Endpoint: `POST /api/v1/environments/{env_id}/commands`. Permissions: read-only commands need `writer`; **mutating** commands (import, state rm/mv, taint, untaint, refresh) require `can_apply(user, env)` — the same gate as an apply. The worker receives the **apply** OIDC role for mutating commands and the (read-only) **plan** role otherwise; the trigger is audited (`run.command_triggered`) and so is completion (`run.command_executed`). `force-unlock` is **not** a command — it has its own endpoint (`DELETE …/state/lock`, §11.2).
+A `RunType.command` run executes **one allowlisted tofu/terraform subcommand** (`import`, `state list/show/rm/mv`, `taint`, `untaint`, `output`, `show`, `validate`, `providers`, `refresh`) instead of the plan→apply flow — for state surgery and adoption that `plan`/`apply` can't express. It is **not** arbitrary shell: the worker runs `<tool> <command> <args>` with the command taken verbatim from the allowlist. Lifecycle: `queued → preparing → running → finished | failed`. The subcommand + args live in `runs.command` (`{name, args}`). Endpoint: `POST /api/v1/environments/{env_id}/commands`. Permissions: read-only commands need `writer`; **mutating** commands (import, state rm/mv, taint, untaint, refresh) require `can_apply(user, env)` — the same gate as an apply. The worker receives the **apply** OIDC role for mutating commands and the (read-only) **plan** role otherwise. A mutating command, like an applying run, **holds apply credentials**: its state token TTL and OIDC cap are the apply window (`apply_reclaim_window_seconds`, §3.7), the worker hard-kills its subcommand past the apply budget (`apply_timeout_seconds` of the claim payload), and worker-lost detection only reclaims it after the apply window (§7.5). The trigger is audited (`run.command_triggered`) and so is completion (`run.command_executed`). `force-unlock` is **not** a command — it has its own endpoint (`DELETE …/state/lock`, §11.2).
 
 ---
 
@@ -649,12 +651,12 @@ The scheduler module (PLAN §2.1) carries background tasks that must run **exact
 
 | Task | Frequency | Effect |
 |---|---|---|
-| `worker_lost` detection | 30 s | heartbeat > 60 s → `offline`; active run on a worker offline for > 120 s → `failed (worker_lost)`; an `applying` run only after the apply budget + grace (§3.7/§4.2) |
+| `worker_lost` detection | 30 s | heartbeat > 60 s → `offline`; active run on a worker offline for > 120 s → `failed (worker_lost)`; a job holding apply credentials (an `applying` run or a mutating command run, §4.3) only after the apply window = budget + grace (§3.7/§4.2) |
 | Git staleness polling | 15 min | `git ls-remote` per (repo, branch), dedup by repo → update `head_sha` (§9.6) |
 | Cold log archiving | end of run | `run_logs` → S3 gz, purge hot > 7 d (§5.2) |
 | Refresh token / audit purge | daily | expired families (§2.5), audit > 2 years (§6.1, audited purge) |
 
-**Single-execution guarantee**: each task takes a dedicated **PG advisory lock** (`pg_try_advisory_lock(<task_key>)`) before running; a replica that does not obtain the lock skips its tick. No permanently elected leader (no external dependency), no double execution. The tasks are **idempotent** anyway (re-running a staleness computation or an archive breaks nothing) — the advisory lock mainly avoids redundant work and races on the `worker_lost` transitions.
+**Single-execution guarantee**: each task takes a dedicated **PG advisory lock** (`pg_try_advisory_lock(<task_key>)`) before running; a replica that does not obtain the lock skips its tick. The lock is session-level, so it is taken and released on a **dedicated connection** held for the task's whole run, separate from the task's own DB session — the tasks commit mid-way, which returns the session's connection to the pool, and an unlock through it could land on another connection and leak the lock. No permanently elected leader (no external dependency), no double execution. The tasks are **idempotent** anyway (re-running a staleness computation or an archive breaks nothing) — the advisory lock mainly avoids redundant work and races on the `worker_lost` transitions.
 
 ---
 
@@ -850,6 +852,8 @@ GET /oidc/jwks                            → public keys (kid, rotation)
 }
 ```
 
+For the `apply` phase — an apply, or a mutating command run (§4.3) — the phase cap is the apply window (`apply_reclaim_window_seconds`, §3.7), so the cloud credentials never outlive the job's worker-lost reclaim cutoff.
+
 > The tier segment in the `sub` (`run:<tier>:...`) is what materializes the **double lock** of §2.4: Stackd refuses the confirmation on the API side *and* the AWS trust policy refuses the AssumeRole if the tier does not match. A prod write role is only assumable by a prod-tier token.
 
 ### 10.3 AWS side (provided: example Terraform module)
@@ -895,12 +899,14 @@ S3 for the bytes, HTTP for the interface: per-run scoped tokens without distribu
 | Method | Endpoint | Behavior |
 |---|---|---|
 | `GET` | `/state/v1/{env_id}` | 200 + latest state, 404 otherwise |
-| `POST` | `/state/v1/{env_id}?ID=<lock_id>` | verifies lock, refuses regressive serial (409), upload S3, `state_version` linked to the run, audit |
-| `LOCK` | `/state/v1/{env_id}/lock` | 200 or **423** + holder |
-| `UNLOCK` | `/state/v1/{env_id}/lock` | requires `rw` scope (a `ro` proposed-run token never locks); verifies lock_id |
+| `POST` | `/state/v1/{env_id}?ID=<lock_id>` | verifies lock, refuses regressive serial (409), **403** once the token's run is no longer active, upload S3, `state_version` linked to the run, audit |
+| `LOCK` | `/state/v1/{env_id}/lock` | 200 or **423** + holder; **403** once the token's run is no longer active |
+| `UNLOCK` | `/state/v1/{env_id}/lock` | requires `rw` scope (a `ro` proposed-run token never locks); verifies lock_id; still allowed after the run ended |
 | `DELETE` | `/state/v1/{env_id}` | admin, soft-delete, audited |
 
-Auth: Basic, password = JWT scoped `{env_id, run_id, scope, exp}`. Scope `ro` for proposed runs.
+Auth: Basic, password = JWT scoped `{env_id, run_id, scope, exp}`. Scope `ro` for proposed runs. `exp`: the apply window (`apply_reclaim_window_seconds`, §3.7) for a job holding apply credentials (an apply, or a mutating command run §4.3), 6 h otherwise.
+
+A **run-scoped** token writes state (`POST`) or takes the lock (`LOCK`) only while its run is active: once the run is terminal (e.g. failed as `worker_lost` and its env handed to the next run), a partitioned worker's still-unexpired token gets **403** (defense in depth on top of the TTL). `UNLOCK` stays allowed, so a reclaimed run can still release the lock it holds. Run-less import-session tokens (§11.4) are unaffected — bounded by their own short TTL.
 
 ### 11.3 S3 layout
 
@@ -1313,8 +1319,10 @@ env flag could make confirm require all threads resolved — deliberately deferr
 mention`. Each row is created **in the same transaction** as its trigger:
 
 - **`transition()`** (§4.2): `→ unconfirmed` fans out `approval_request` to every eligible approver
-  (role ∈ {approver, admin} AND `env.tier ∈ allowed_tiers`, excluding the triggerer); a terminal
-  state notifies the run's human triggerer (`run_finished` / `run_failed`).
+  — the users who pass `can_apply` on the env (§2.4), evaluated with their **effective** space
+  membership (members of the env's space, instance admins included); a `destroy` run additionally
+  requires `can_destroy`; excluding the triggerer. A terminal state notifies the run's human
+  triggerer (`run_finished` / `run_failed`).
 - **comment create** (§16): a reply notifies the root author; `@mention` tokens (matched against a
   user's email local-part or full email) notify the mentioned users. Never the author. The composer
   offers `@` autocomplete from `GET /users/mentionable` (a minimal directory readable by any auth),
@@ -1430,7 +1438,8 @@ before a background drift run.
 ### 19.4 Outcome (applied in the run's `transition()` txn)
 
 On the drift run completing: changes → `drifted` (set `drift_run_id`, audit `environment.drift_detected`
-+ fan out `drift_detected` to eligible approvers, **once** per edge into drift — debounced while it
++ fan out `drift_detected` to the same eligible approvers as `approval_request` (§17.1: `can_apply`
+with effective space membership), **once** per edge into drift — debounced while it
 stays drifted); no changes → `in_sync`; the plan itself failing → `error`. A successful **apply**
 on the env reconciles state with reality → back to `in_sync`, `drift_run_id` cleared
 (`environment.drift_cleared`).
