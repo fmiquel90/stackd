@@ -25,9 +25,18 @@ _LOCK_VCS = 74003
 _LOCK_DRIFT = 74004
 _log = get_logger("stackd.scheduler")
 
+# Active states in which a worker is executing the run's job — the only ones worker-lost reclaims
+# (§3.7). `unconfirmed` waits on a human and `confirmed` on the apply claim: the plan job is over
+# (its workspace is wiped, nothing is left on the worker) and the apply re-clones the run's commit
+# on whichever worker claims it — any worker after the affinity window (§7.2). Workers are
+# disposable, so the plan worker going away must not fail them.
+_AWAITING_STATES = frozenset({RunState.unconfirmed, RunState.confirmed})
+_WORKER_EXECUTING_STATES = ACTIVE_STATES - _AWAITING_STATES
+
 
 async def detect_worker_lost(session: AsyncSession, now: datetime) -> int:
-    """Mark stale workers offline; fail active runs stuck on a dead worker (§3.7, §7.5)."""
+    """Mark stale workers offline; fail runs whose job was executing on a dead worker (§3.7,
+    §7.5). Runs awaiting a human or the apply claim don't depend on their plan worker."""
     settings = get_settings()
     offline_cutoff = now - timedelta(seconds=settings.stackd_worker_offline_seconds)
     await session.execute(
@@ -59,7 +68,7 @@ async def detect_worker_lost(session: AsyncSession, now: datetime) -> int:
             await session.execute(
                 select(Run).where(
                     Run.worker_id.in_(offline_ids),
-                    Run.state.in_(ACTIVE_STATES),
+                    Run.state.in_(_WORKER_EXECUTING_STATES),
                     Run.claimed_at < max(lost_cutoff, apply_cutoff),
                 )
             )

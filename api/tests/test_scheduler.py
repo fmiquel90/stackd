@@ -182,3 +182,66 @@ async def test_worker_lost_mutating_command_waits_apply_window(client: httpx.Asy
     async with SessionLocal() as session:
         assert await detect_worker_lost(session, datetime.now(UTC)) == 1
     assert await _state(mutating) == "failed"
+
+
+async def test_worker_lost_spares_runs_awaiting_human_or_apply(client: httpx.AsyncClient) -> None:
+    """Workers are disposable (§3.7): once its plan job is over, a run waits on a human
+    (`unconfirmed`) or on the apply claim (`confirmed`) and no longer depends on the plan worker —
+    the apply re-clones the run's commit on whichever worker claims it. Losing the plan worker must
+    not fail those runs; a run whose job is still executing on it is reclaimed as before."""
+    from sqlalchemy import update
+
+    from app.config import get_settings
+    from app.db import SessionLocal
+    from app.models.run import Run
+    from app.scheduler.tasks import detect_worker_lost
+
+    admin = await login(client, "admin")
+    wh = await register_worker(client, admin, "pool-lost-await")
+    stack = await make_stack(client, admin, "lost-await-stack")
+    changes = {"has_changes": True, "summary": {"add": 1, "change": 0, "destroy": 0}}
+
+    async def _plan(env_name: str, *, finish: bool) -> str:
+        env_id = await make_env(client, admin, stack, env_name, "dev")
+        run = (
+            await client.post(f"/api/v1/environments/{env_id}/runs", headers=admin, json={})
+        ).json()
+        assert (await client.post("/worker/v1/jobs/claim", headers=wh)).status_code == 200
+        await event(client, wh, run["id"], "phase_started", phase="planning")
+        if finish:
+            await event(client, wh, run["id"], "phase_finished", result=changes)
+        return run["id"]
+
+    unconfirmed = await _plan("awaiting-human", finish=True)
+    confirmed = await _plan("awaiting-apply", finish=True)
+    executing = await _plan("executing", finish=False)  # still planning on the worker
+    # Confirm only now: a confirmed run is claimed first by its plan worker (affinity, §7.2).
+    assert (
+        await client.post(f"/api/v1/runs/{confirmed}/confirm", headers=admin)
+    ).status_code == 200
+
+    await _backdate([unconfirmed, confirmed, executing], claimed_ago=timedelta(hours=1))
+    async with SessionLocal() as session:
+        assert await detect_worker_lost(session, datetime.now(UTC)) == 1
+
+    async def _state(run_id: str) -> str:
+        return (await client.get(f"/api/v1/runs/{run_id}", headers=admin)).json()["state"]
+
+    assert await _state(executing) == "failed"
+    assert await _state(unconfirmed) == "unconfirmed"
+    assert await _state(confirmed) == "confirmed"
+
+    # Past the affinity window, another worker takes the apply of the run the lost worker planned.
+    affinity = get_settings().stackd_apply_affinity_seconds
+    async with SessionLocal() as session:
+        await session.execute(
+            update(Run)
+            .where(Run.id == uuid.UUID(confirmed))
+            .values(confirmed_at=datetime.now(UTC) - timedelta(seconds=affinity + 60))
+        )
+        await session.commit()
+    other = await register_worker(client, admin, "pool-lost-await-2", "w2")
+    claim = await client.post("/worker/v1/jobs/claim", headers=other)
+    assert claim.status_code == 200, claim.text
+    assert claim.json()["job_id"] == confirmed
+    assert claim.json()["phase"] == "apply"

@@ -273,7 +273,7 @@ workers: id, pool_id, name, status(idle|busy|offline), labels jsonb,
          version, last_heartbeat_at, registered_at
 ```
 
-`offline` if heartbeat > 60 s; run in progress on an offline worker → `failed (worker_lost)` after 120 s — **except a job holding apply credentials** (an `applying` run, or a mutating command run §4.3), reclaimed only after the apply window = apply budget + grace (`apply_reclaim_window_seconds` = `stackd_apply_timeout_seconds` + `stackd_apply_lost_grace_seconds`, default 15 min + 5 min) so a healthy long apply is never failed mid-flight and two workers can't write the same env's state concurrently (§4.2). Its state token and apply OIDC token are minted for that same window (§10.2/§11.2), so by the time it is reclaimed they have expired. Targeting by labels (dedicated prod pool recommended).
+`offline` if heartbeat > 60 s; run whose job is executing on an offline worker (`preparing`, `planning`, `checking`, `applying`, `running`) → `failed (worker_lost)` after 120 s — **except a job holding apply credentials** (an `applying` run, or a mutating command run §4.3), reclaimed only after the apply window = apply budget + grace (`apply_reclaim_window_seconds` = `stackd_apply_timeout_seconds` + `stackd_apply_lost_grace_seconds`, default 15 min + 5 min) so a healthy long apply is never failed mid-flight and two workers can't write the same env's state concurrently (§4.2). Its state token and apply OIDC token are minted for that same window (§10.2/§11.2), so by the time it is reclaimed they have expired. `unconfirmed` and `confirmed` runs are **never** reclaimed: their plan job is over and they wait on a human or on the apply claim. The apply needs nothing from the plan worker (absent workspace → re-plan on the run's commit, §4.2) and any worker takes it past the affinity window (§7.2) — workers are disposable, losing the plan worker must not fail them. Targeting by labels (dedicated prod pool recommended).
 
 ### 3.8 Dependencies, outputs and mocks
 
@@ -678,7 +678,7 @@ The scheduler module (PLAN §2.1) carries background tasks that must run **exact
 
 | Task | Frequency | Effect |
 |---|---|---|
-| `worker_lost` detection | 30 s | heartbeat > 60 s → `offline`; active run on a worker offline for > 120 s → `failed (worker_lost)`; a job holding apply credentials (an `applying` run or a mutating command run, §4.3) only after the apply window = budget + grace (§3.7/§4.2) |
+| `worker_lost` detection | 30 s | heartbeat > 60 s → `offline`; run executing on a worker offline for > 120 s → `failed (worker_lost)` (never `unconfirmed`/`confirmed`, §3.7); a job holding apply credentials (an `applying` run or a mutating command run, §4.3) only after the apply window = budget + grace (§3.7/§4.2) |
 | Git staleness polling | 15 min | `git ls-remote` per (repo, branch), dedup by repo → update `head_sha` (§9.6) |
 | Cold log archiving | end of run | `run_logs` → S3 gz, purge hot > 7 d (§5.2) |
 | Refresh token / audit purge | daily | expired families (§2.5), audit > 2 years (§6.1, audited purge) |
