@@ -770,16 +770,18 @@ elif job.phase == "apply":                   # a fresh clone of the pinned commi
     report(phase_finished, outputs=outputs, checks=checks)
 
 else:                                        # command job (§4.3): no hooks, no plan/apply phases
-    write_backend_override(ws); write_tfvars(ws, job.tfvars_json, job.hcl_tfvars)
-    report(phase_started, phase="running"); run(tf, "init", "-input=false")
-    run(tf, *job.command.name.split(), *job.command.args,
-        timeout=default_cap if job.cred_phase == "plan" else job.apply_timeout_seconds)
+    write_backend_override(ws)
+    report(phase_started, phase="running")
+    with with_files(): run(tf, "init", "-input=false")
+    with with_files():
+        run(tf, *job.command.name.split(), *job.command.args,
+            timeout=default_cap if job.cred_phase == "plan" else job.apply_timeout_seconds)
 
 ws.cleanup()
 ```
 
 The tofu subcommands that reach the state (`init`, `plan`, `apply`, `output`, a command) get
-`tf_env`; `show` of the local plan file does not need it. Hooks get the platform env (platform
+`tofu_env`; `show` of the local plan file does not need it. Hooks get the platform env (platform
 hooks) or the stripped repo env (§8.3), never the `TF_HTTP_*` settings. Subprocesses without an
 explicit budget are capped at 2 h by the agent's watchdog.
 
