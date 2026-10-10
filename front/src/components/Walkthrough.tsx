@@ -32,7 +32,7 @@ const STEPS: Step[] = [
   {
     eyebrow: "permissions",
     title: "Tiers, 4-eyes and destroy",
-    body: "Who can apply depends on the environment tier and your ceiling. On prod, the person who triggered a run can’t confirm it (4-eyes), and destroys need an explicit right.",
+    body: "Who can apply depends on your role and on whether the environment’s tier is one of your allowed tiers. On four-eyes tiers and protected environments, the person who triggered a run can’t confirm it, and destroys need an explicit right.",
   },
   {
     eyebrow: "dependencies / health",

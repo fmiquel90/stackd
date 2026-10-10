@@ -127,10 +127,15 @@ export function RunPage() {
 
   if (!run) return <p className="font-data text-[12px]">Loading…</p>;
 
-  // Friction proportional to risk (DESIGN §5.2 / §9): destroy, or a tier that requires four-eyes →
-  // type the env name first. Keyed to the tier's flag (not a hardcoded "prod") now tiers are custom.
+  // Friction proportional to risk (DESIGN §5.2 / §9): destroy, or any env where the API enforces
+  // four-eyes — its tier's flag (not a hardcoded "prod"), `protected`, or the env's own
+  // require_second_pair_of_eyes (CLAUDE.md §4) → type the env name first.
   const tierDef = catalog.data?.find((t) => t.name === env.data?.tier);
-  const highRisk = run.type === "destroy" || Boolean(tierDef?.requires_four_eyes);
+  const highRisk =
+    run.type === "destroy" ||
+    Boolean(tierDef?.requires_four_eyes) ||
+    Boolean(env.data?.protected) ||
+    Boolean(env.data?.require_second_pair_of_eyes);
   const onConfirmClick = () => {
     if (highRisk) setConfirming(true);
     else confirm.mutate();
