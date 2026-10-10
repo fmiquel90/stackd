@@ -186,6 +186,8 @@ space "demo"
 
 If the 9 steps pass, the core of the product works. It is also the demo script to run through in front of someone.
 
+`task e2e` never runs on the seeded `demo-*` stacks themselves. It first builds a **throwaway copy** of the demo graph through the public API, as admin, in the `demo` space: `e2e-<MMDDhhmmss>-<tag>-network` and `e2e-<MMDDhhmmss>-<tag>-app`, with the same repos, branches, project roots, tiers, settings, variable-set attachments and dependency + mock. Permissions are per space, so bob and alice keep exactly the rights the steps rely on. Every run therefore starts from never-applied environments (step 4 always sees the mock): the scenario is **re-runnable on a used database without `task reset`**, and the seeded graph stays as a demo left it. At the end it ends what is still active through the API (cancels queued runs, discards unconfirmed plans) and deletes the copy. If the scenario failed or a run is still in flight, it keeps the copy for inspection, named in a warning; its unique name never blocks the next run.
+
 ---
 
 ## 8. Dev comfort

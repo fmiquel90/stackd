@@ -1,10 +1,9 @@
 """The full non-regression scenario (DEV §7). If this passes against the live stack, the core of
 the product works: plan → confirm → apply, automatic cascade, mock-block, tier + 4-eyes gates.
 
-Run with `task e2e`. Requires the seeded demo graph and a live worker processing jobs.
-`idle_demo_envs` (conftest) first ends the runs an earlier attempt left active, and fails fast with
-a `task reset` hint when the demo envs cannot be made ready: a run still in flight, or
-demo-network/prod already applied by a complete earlier run (step 4 needs it never applied).
+Run with `task e2e`. Requires the seeded demo graph and a live worker processing jobs. Runs on
+`graph` (conftest), a throwaway copy of the demo graph built per run, so it is re-runnable on a
+used database and never touches the seeded stacks.
 """
 
 from __future__ import annotations
@@ -13,7 +12,6 @@ import asyncio
 import time
 
 import httpx
-import pytest
 
 TERMINAL = {"finished", "failed", "discarded", "canceled"}
 
@@ -50,12 +48,6 @@ async def _poll(http, h, run_id: str, target: set[str], *, timeout_s: float = 15
     raise AssertionError(f"timeout waiting for {run_id} → {target}; last={last}")
 
 
-async def _run_ids(http, h, env_id: str) -> set[str]:
-    r = await http.get(f"/api/v1/environments/{env_id}/runs", headers=h)
-    assert r.status_code == 200, r.text
-    return {run["id"] for run in r.json()}
-
-
 async def _latest_run(http, h, env_id: str) -> dict | None:
     r = await http.get(f"/api/v1/environments/{env_id}/runs", headers=h)
     runs = r.json()
@@ -73,16 +65,13 @@ async def _wait_new_run(http, h, env_id: str, exclude: set[str], *, timeout_s: f
     raise AssertionError(f"no new run appeared on {env_id}")
 
 
-@pytest.mark.usefixtures("idle_demo_envs")
-async def test_full_scenario(http: httpx.AsyncClient, envs: dict[str, str]) -> None:
+async def test_full_scenario(http: httpx.AsyncClient, graph: dict[str, str]) -> None:
     bob = await _login(http, "bob")  # writer, max_apply_tier=staging
     alice = await _login(http, "alice")  # approver, max_apply_tier=prod
     admin = await _login(http, "admin")
 
-    net_dev, net_prod = envs["demo-network/dev"], envs["demo-network/prod"]
-    app_dev, app_prod = envs["demo-app/dev"], envs["demo-app/prod"]
-    # Runs from earlier scenario runs: a cascade run below must be a NEW one, never one of these.
-    earlier = {env: await _run_ids(http, bob, env) for env in (app_dev, app_prod)}
+    net_dev, net_prod = graph["network/dev"], graph["network/prod"]
+    app_dev, app_prod = graph["app/dev"], graph["app/prod"]
 
     # 1. bob (writer) triggers network/dev → plan → unconfirmed. A writer may trigger a plan.
     r1 = await _trigger(http, bob, net_dev)
@@ -98,7 +87,7 @@ async def test_full_scenario(http: httpx.AsyncClient, envs: dict[str, str]) -> N
     await _poll(http, alice, r1, {"finished"})
 
     # 3. cascade → app/dev plans with the REAL upstream output injected (no mocks).
-    child = await _wait_new_run(http, bob, app_dev, exclude=earlier[app_dev])
+    child = await _wait_new_run(http, bob, app_dev, exclude=set())
     child = await _poll(http, bob, child["id"], {"unconfirmed", "finished"})
     assert child["used_mocks"] is False
 
@@ -126,7 +115,7 @@ async def test_full_scenario(http: httpx.AsyncClient, envs: dict[str, str]) -> N
     await _poll(http, alice, rnp, {"finished"})
 
     # 8. cascade → app/prod re-runs, this time with the REAL output (no mock).
-    real = await _wait_new_run(http, bob, app_prod, exclude={rp} | earlier[app_prod])
+    real = await _wait_new_run(http, bob, app_prod, exclude={rp})
     real = await _poll(http, bob, real["id"], {"unconfirmed", "finished"})
     assert real["used_mocks"] is False
 
@@ -134,10 +123,3 @@ async def test_full_scenario(http: httpx.AsyncClient, envs: dict[str, str]) -> N
     audit = await http.get("/api/v1/audit", headers=admin, params={"action": "run.confirmed"})
     emails = {e["actor_email"] for e in audit.json()}
     assert "alice@dev.local" in emails  # alice confirmed prod
-
-    # 10. leave the demo envs idle: discard the cascade plans still awaiting confirmation (no
-    # assertion above depends on them staying unconfirmed).
-    for leftover in (child, real):
-        if leftover["state"] == "unconfirmed":
-            d = await http.post(f"/api/v1/runs/{leftover['id']}/discard", headers=alice)
-            assert d.status_code == 200, d.text
