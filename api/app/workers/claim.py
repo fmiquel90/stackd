@@ -257,8 +257,11 @@ async def build_job_payload(session: AsyncSession, run: Run) -> dict:
     return {
         "job_id": str(run.id),
         "phase": phase.value,
-        # Hard apply budget (§4.2): the worker kills `apply` past this. API-owned so the cap and the
-        # worker-lost reclaim window can never drift apart.
+        # The job's credential phase (§4.3/§7.2): "apply" when it holds apply credentials (an apply,
+        # a mutating command), else "plan". Sent explicitly so the worker never re-derives it.
+        "cred_phase": cred_phase.value,
+        # Hard apply budget (§4.2): the worker kills `apply` — and a cred_phase=apply command — past
+        # this. API-owned so the cap and the worker-lost reclaim window can never drift apart.
         "apply_timeout_seconds": settings.stackd_apply_timeout_seconds,
         "refresh_only": run.is_drift,  # §19: drift plan uses `-refresh-only` (state vs reality)
         "command": run.command,  # set only for RunType.command jobs

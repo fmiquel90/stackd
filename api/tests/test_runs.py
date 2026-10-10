@@ -191,3 +191,40 @@ async def test_repo_token_is_masked_in_claim(client: httpx.AsyncClient) -> None:
     payload = (await client.post("/worker/v1/jobs/claim", headers=wh)).json()
     assert payload["repo_credentials"]["token"] == "ghp_supersecrettoken"
     assert "ghp_supersecrettoken" in payload["mask_values"]  # so the agent redacts it in logs
+
+
+async def test_claim_payload_carries_credential_phase(client: httpx.AsyncClient) -> None:
+    """The claim payload names the job's credential phase explicitly (§7.2): "apply" for a job
+    holding apply credentials (an apply, a mutating command), "plan" otherwise. The worker sizes a
+    command's time budget from it rather than from its own copy of the API's command lists."""
+    admin = await login(client, "admin")
+    wh = await register_worker(client, admin, "pool-cred-phase")
+    stack = await make_stack(client, admin, "cred-phase-stack")
+    env_id = await make_env(client, admin, stack, "dev", "dev")
+
+    run = (await client.post(f"/api/v1/environments/{env_id}/runs", headers=admin, json={})).json()
+    plan = (await client.post("/worker/v1/jobs/claim", headers=wh)).json()
+    assert (plan["phase"], plan["cred_phase"]) == ("plan", "plan")
+    await event(client, wh, run["id"], "phase_started", phase="planning")
+    await event(client, wh, run["id"], "phase_finished", result=CHANGES)
+    confirm = await client.post(f"/api/v1/runs/{run['id']}/confirm", headers=admin)
+    assert confirm.status_code == 200, confirm.text
+    apply = (await client.post("/worker/v1/jobs/claim", headers=wh)).json()
+    assert (apply["phase"], apply["cred_phase"]) == ("apply", "apply")
+    await event(client, wh, run["id"], "phase_finished")  # run finished → the env is free again
+
+    for command, args, cred_phase in (
+        ("output", [], "plan"),  # read-only
+        ("state rm", ["aws_s3_bucket.old"], "apply"),  # mutating
+    ):
+        cmd = await client.post(
+            f"/api/v1/environments/{env_id}/commands",
+            headers=admin,
+            json={"command": command, "args": args},
+        )
+        assert cmd.status_code == 201, cmd.text
+        job = (await client.post("/worker/v1/jobs/claim", headers=wh)).json()
+        assert job["job_id"] == cmd.json()["id"]
+        assert (job["phase"], job["cred_phase"]) == ("command", cred_phase), command
+        await event(client, wh, job["job_id"], "phase_started", phase="running")
+        await event(client, wh, job["job_id"], "phase_finished", result={"command": command})

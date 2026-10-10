@@ -407,20 +407,14 @@ def handle_apply(client: ApiClient, job: dict, settings: Settings) -> None:
         ws.cleanup()
 
 
-# Read-only command-run subcommands — mirror of the API's READ_ONLY_COMMANDS (§4.3). The claim
-# payload carries no credential phase, so the name is the signal; anything else is treated as
-# mutating (fail-closed if the API allowlists a new mutating command before the worker knows it).
-_READ_ONLY_COMMANDS = frozenset(
-    {"output", "show", "state list", "state show", "validate", "providers"}
-)
-
-
 def _command_timeout(job: dict) -> int:
-    """Wall-clock cap for a command run's subcommand. A mutating one holds apply credentials (apply
-    OIDC role, apply-window state token) and the API reclaims it after the apply budget + grace
-    (§4.2/§4.3), so it gets the same hard budget as an apply — it must not outlive its credentials
-    or its reclaim window. Read-only commands keep the default cap."""
-    if (job.get("command") or {}).get("name") in _READ_ONLY_COMMANDS:
+    """Wall-clock cap for a command run's subcommand, from the job's credential phase as the API
+    sent it (`cred_phase`, §7.2). A mutating command holds apply credentials (apply OIDC role,
+    apply-window state token) and the API reclaims it after the apply budget + grace (§4.2/§4.3),
+    so it gets the same hard budget as an apply — it must not outlive its credentials or its
+    reclaim window. Only an explicit `cred_phase: "plan"` (a read-only command) keeps the default
+    cap: an absent or unknown value (an older API) fails closed to the apply budget."""
+    if job.get("cred_phase") == "plan":
         return _DEFAULT_TIMEOUT_SECONDS
     return job.get("apply_timeout_seconds") or _DEFAULT_TIMEOUT_SECONDS
 
