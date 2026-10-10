@@ -362,3 +362,68 @@ async def test_scheduler_loop_polls_heads_at_the_interval(monkeypatch: pytest.Mo
     assert polls == [start, start + timedelta(seconds=60), start + timedelta(seconds=120)]
     worker_lost = [t for key, t in calls if key == tasks._LOCK_WORKER_LOST]
     assert len(worker_lost) == 13  # the other tasks still run every tick
+
+
+async def _idle_in_transaction() -> int:
+    """Connections of this database sitting idle inside an open transaction."""
+    from sqlalchemy import text
+
+    from app.db import SessionLocal
+
+    async with SessionLocal() as session:
+        return (
+            await session.execute(
+                text(
+                    "SELECT count(*) FROM pg_stat_activity WHERE datname = current_database()"
+                    " AND state LIKE 'idle in transaction%'"
+                )
+            )
+        ).scalar_one()
+
+
+async def test_refresh_head_holds_no_transaction_across_git(
+    client: httpx.AsyncClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The manual refresh reads the branch head with no DB transaction open (§9.6), then records
+    it — unless the env was re-pointed to another branch meanwhile."""
+    from app.environments import router
+
+    fake = _FakeLsRemote()
+    monkeypatch.setattr(router, "ls_remote_sha", fake)
+    admin = await login(client, "admin")
+    repo = _repo()
+    env_id = await _env(client, admin, await _stack(client, admin, repo), "e", "main")
+    fake.heads = {(repo, "main"): "aaa111", (repo, "other"): "bbb222"}
+
+    idle: list[int] = []
+
+    async def _no_txn() -> None:
+        idle.append(await _idle_in_transaction())
+
+    fake.on_call = _no_txn
+    r = await client.post(f"/api/v1/environments/{env_id}/refresh-head", headers=admin)
+    assert r.status_code == 200, r.text
+    assert r.json()["head_sha"] == "aaa111"
+    assert idle == [0]
+
+    # The env is re-pointed to another branch while git is being read: the old branch's new head
+    # isn't recorded on it.
+    async def _repoint() -> None:
+        from sqlalchemy import update
+
+        from app.db import SessionLocal
+        from app.models.environment import Environment
+
+        async with SessionLocal() as session:
+            await session.execute(
+                update(Environment)
+                .where(Environment.id == uuid.UUID(env_id))
+                .values(branch="other")
+            )
+            await session.commit()
+
+    fake.heads[(repo, "main")] = "ccc333"
+    fake.on_call = _repoint
+    r = await client.post(f"/api/v1/environments/{env_id}/refresh-head", headers=admin)
+    assert r.status_code == 200, r.text
+    assert (r.json()["branch"], r.json()["head_sha"]) == ("other", "aaa111")

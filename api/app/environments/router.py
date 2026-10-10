@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import Annotated
 
 from fastapi import APIRouter, Depends
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -213,11 +213,19 @@ async def refresh_head(env_id: uuid.UUID, user: CurrentUser, session: DbSession)
     stack = await session.get(Stack, env.stack_id)
     assert stack is not None
     secret = decrypt(stack.repo_secret_encrypted) if stack.repo_secret_encrypted else None
-    sha = await ls_remote_sha(stack.repo_url, stack.repo_auth_kind, secret, env.branch)
+    branch = env.branch
+    # No DB transaction is held across the git call (§9.6): end the read one first (the session
+    # doesn't expire on commit, so env and stack stay loaded).
+    await session.commit()
+    sha = await ls_remote_sha(stack.repo_url, stack.repo_auth_kind, secret, branch)
     if sha is None:
         raise ProblemException(422, "Head refresh failed", "Could not read the branch head.")
-    env.head_sha = sha
-    env.head_updated_at = datetime.now(UTC)
+    # Only while the env still tracks that branch: one re-pointed meanwhile isn't tracking it.
+    await session.execute(
+        update(Environment)
+        .where(Environment.id == env.id, Environment.branch == branch)
+        .values(head_sha=sha, head_updated_at=datetime.now(UTC))
+    )
     await session.commit()
     await session.refresh(env)
     return await _env_out(session, env)
