@@ -53,7 +53,7 @@ const StacksPage = lazy(() => import("@/pages/StacksPage").then((m) => ({ defaul
 const StackDetailPage = lazy(() =>
   import("@/pages/StackDetailPage").then((m) => ({ default: m.StackDetailPage })),
 );
-const RunPage = lazy(() => import("@/pages/RunPage").then((m) => ({ default: m.RunPage })));
+const RunPage = lazy(() => import("@/features/runs/RunPage").then((m) => ({ default: m.RunPage })));
 const QueuePage = lazy(() => import("@/pages/QueuePage").then((m) => ({ default: m.QueuePage })));
 const HealthPage = lazy(() => import("@/pages/HealthPage").then((m) => ({ default: m.HealthPage })));
 const AuditPage = lazy(() => import("@/pages/AuditPage").then((m) => ({ default: m.AuditPage })));

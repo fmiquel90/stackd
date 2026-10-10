@@ -32,10 +32,10 @@ describe("CheckList", () => {
     expect(within(rowOf("smoke")).getByText("after_apply")).toBeInTheDocument();
   });
 
-  it("lists a passing check from `results` with an ok label and icon, not color alone", () => {
+  it("lists a passing check from `results` with an ok label and glyph, not color alone", () => {
     render(<CheckList checkResults={WITH_RESULTS} />);
-    const status = within(rowOf("fmt")).getByText("ok");
-    expect(status.querySelector("svg")).not.toBeNull();
+    const badge = within(rowOf("fmt")).getByText("ok").closest("span") as HTMLElement;
+    expect(badge).toHaveTextContent("✓");
   });
 
   it("falls back to `checks` for an older run, without a stage", () => {

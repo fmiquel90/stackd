@@ -208,7 +208,11 @@ export function Banner({
 export function Kbd({ children }: { children: ReactNode }) {
   return (
     // Inherits the surrounding text colour so it stays legible on filled buttons (amber, red, primary).
-    <kbd className="inline-flex h-5 min-w-5 items-center justify-center rounded-badge border border-current px-1 font-data text-[11px] font-normal">
+    // Visual hint only: the control carries the shortcut in aria-keyshortcuts (not in its name).
+    <kbd
+      aria-hidden
+      className="inline-flex h-5 min-w-5 items-center justify-center rounded-badge border border-current px-1 font-data text-[11px] font-normal"
+    >
       {children}
     </kbd>
   );

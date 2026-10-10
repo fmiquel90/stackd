@@ -254,6 +254,9 @@ export const runs = {
   discard: (id: string) => api<Run>(`/runs/${id}/discard`, { method: "POST" }),
   cancel: (id: string) => api<Run>(`/runs/${id}/cancel`, { method: "POST" }),
   logs: (id: string) => api<LogChunk[]>(`/runs/${id}/logs`),
+  /** Chunks of one phase after a seq — the incremental fetch a WS log signal triggers (SPECS §5.3). */
+  logsAfter: (id: string, phase: string, afterSeq: number) =>
+    api<LogChunk[]>(`/runs/${id}/logs?phase=${encodeURIComponent(phase)}&after_seq=${afterSeq}`),
   command: (envId: string, command: string, args: string[]) =>
     api<Run>(`/environments/${envId}/commands`, { body: { command, args } }),
   promote: (targetEnvId: string, fromEnvId: string) =>

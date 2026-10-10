@@ -122,6 +122,8 @@ export function RunActionBar(props: RunActionBarProps) {
 
   const confirmBtn = (
     <Button
+      data-action="confirm"
+      aria-keyshortcuts="c"
       variant="decision"
       size={mobile ? "touch" : "md"}
       className={mobile ? "flex-1" : undefined}
@@ -253,6 +255,8 @@ export function RunActionBar(props: RunActionBarProps) {
         >
           {rights.cancel.visible && (
             <Button
+              data-action="cancel"
+              aria-keyshortcuts="x"
               variant="ghost"
               size={mobile ? "touch" : "md"}
               disabled={rights.cancel.reasons.length > 0}
@@ -265,6 +269,8 @@ export function RunActionBar(props: RunActionBarProps) {
           )}
           {rights.discard.visible && (
             <Button
+              data-action="discard"
+              aria-keyshortcuts="d"
               variant="secondary"
               size={mobile ? "touch" : "md"}
               disabled={rights.discard.reasons.length > 0}
