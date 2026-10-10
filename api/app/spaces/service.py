@@ -104,11 +104,18 @@ async def guard_stack_id(
 
 
 async def guard_env_id(
-    session: AsyncSession, user: User, env_id: uuid.UUID, *, min_role: Role = Role.reader
+    session: AsyncSession,
+    user: User,
+    env_id: uuid.UUID,
+    *,
+    min_role: Role = Role.reader,
+    not_found: str = "Environment not found",
 ) -> Environment:
+    """`not_found` titles the 404 so a route taking two env ids (e.g. promote's source) can tell
+    the client which one is missing; the membership gate is identical either way."""
     env = await session.get(Environment, env_id)
     if env is None:
-        raise ProblemException(404, "Environment not found", None)
+        raise ProblemException(404, not_found, None)
     await guard_env(session, user, env, min_role=min_role)
     return env
 
