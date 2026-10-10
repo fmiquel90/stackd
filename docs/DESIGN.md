@@ -425,7 +425,7 @@ Overview · demo                                       filter [ app____ ]  state
 
 **Attention zone** (pinned above the matrix, never auto-collapsed while it holds a *needs you* item):
 
-- Groups, in order: **Needs you** (unconfirmed, the user can confirm), **Waiting on someone** (unconfirmed, the user cannot act — with the missing condition in words), **Failed** (env's primary run failed), **Drift** (`drifted` or check error), **Blocked** (primary run mocked or fallback with apply not allowed), **Stale plans** (unconfirmed run whose commit ≠ env head). A row appears in the first matching group only.
+- Groups, in order: **Needs you** (unconfirmed, the user can confirm), **Waiting on someone** (unconfirmed, the user cannot confirm — with the missing condition in words), **Failed** (env's primary run failed), **Drift** (`drifted` or check error), **Blocked** (primary run mocked or fallback with apply not allowed), **Stale plans** (unconfirmed run whose commit ≠ env head). A row appears in the first matching group only.
 - Row: summary glyph + `stack / env` + badge + plan summary + who/age + the reason or next step + Enter target (the run page, Plan tab for decisions, Logs tab at first error for failures, env page for drift).
 - Empty zone: one line, "Nothing needs attention in demo." — not hidden, so its absence is never ambiguous.
 
