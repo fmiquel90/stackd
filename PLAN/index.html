@@ -765,6 +765,33 @@
   
   
     <li class="md-nav__item">
+      <a href="../ARCHITECTURE/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Architecture
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../api/" class="md-nav__link">
         
   
@@ -807,10 +834,10 @@
       
         
         
-        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5" checked>
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_6" checked>
         
           
-          <label class="md-nav__link" for="__nav_5" id="__nav_5_label" tabindex="">
+          <label class="md-nav__link" for="__nav_6" id="__nav_6_label" tabindex="">
             
   
   
@@ -828,8 +855,8 @@
             <span class="md-nav__icon md-icon"></span>
           </label>
         
-        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_5_label" aria-expanded="true">
-          <label class="md-nav__title" for="__nav_5">
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_6_label" aria-expanded="true">
+          <label class="md-nav__title" for="__nav_6">
             <span class="md-nav__icon md-icon"></span>
             
   
@@ -1799,7 +1826,7 @@ Goal: a self-hostable Terraform orchestration platform with multi-environment st
 <tr>
 <td>Scheduled drift detection</td>
 <td>Requires a robust scheduler</td>
-<td>Phase 7+</td>
+<td>Phase 7+ — <em>shipped post-MVP (SPECS §19)</em></td>
 </tr>
 <tr>
 <td>Multi-IaC (Pulumi, CloudFormation)</td>
@@ -1923,7 +1950,7 @@ Goal: a self-hostable Terraform orchestration platform with multi-environment st
 <ul>
 <li><strong>Physical storage: S3</strong> (durability, versioning, lifecycle, SSE-KMS).</li>
 <li><strong>Terraform interface: the platform's HTTP backend</strong>, which writes/reads in S3:</li>
-<li><strong>Credentials</strong>: per-run scoped tokens (RO for PRs), no IAM rights on the states bucket distributed to workers.</li>
+<li><strong>Credentials</strong>: per-job scoped tokens (<code>ro</code> for PR plans and read-only commands, <code>plan</code> that locks but never writes, <code>rw</code> for applies and mutating commands), no IAM rights on the states bucket distributed to workers.</li>
 <li><strong>Locking</strong> in Postgres, visible in the UI, one-click force-unlock (audited).</li>
 <li><strong>Audit &amp; versions</strong>: each write linked to the run that produced it.</li>
 <li><strong>Control</strong>: rejection of regressive serial, managed retention.</li>
@@ -1933,7 +1960,7 @@ Goal: a self-hostable Terraform orchestration platform with multi-environment st
 <p>The platform becomes an <strong>OIDC issuer</strong> (the same mechanism as GitHub Actions OIDC):</p>
 <ul>
 <li>The API exposes <code>/.well-known/openid-configuration</code> + public JWKS.</li>
-<li>On each job claim, the API signs a <strong>workload token</strong> with rich claims: <code>sub=run:{env}:{stack}:{phase}</code>, <code>environment</code>, <code>stack</code>, <code>run_id</code>, <code>phase</code> (plan/apply), short TTL.</li>
+<li>On each job claim, the API signs a <strong>workload token</strong> with rich claims: <code>sub=run:{tier}:{stack}:{phase}</code>, <code>environment</code>, <code>tier</code>, <code>stack</code>, <code>run_id</code>, <code>phase</code> (plan/apply), short TTL.</li>
 <li>On the AWS side: an OIDC Identity Provider + IAM roles whose trust policy filters on these claims. Example: the prod apply role is only assumable if <code>sub</code> matches <code>run:prod:*:apply</code>.</li>
 <li>The worker writes the token to a file and exports <code>AWS_WEB_IDENTITY_TOKEN_FILE</code> + <code>AWS_ROLE_ARN</code>: the AWS providers consume it natively, <strong>zero specific code in the users' Terraform code</strong>.</li>
 <li>Consequences: plan and apply can assume different roles (plan = ReadOnly + s3 modules, apply = write rights), a PR plan physically cannot modify the infrastructure, and credential rotation disappears from the model.</li>
@@ -1957,10 +1984,10 @@ Goal: a self-hostable Terraform orchestration platform with multi-environment st
 <ul>
 <li>[ ] <code>Stack</code> model (template: repo, project_root, tool, version)</li>
 <li>[ ] <code>Environment</code> model (instance: <strong>tier dev/staging/prod</strong>, branch, autodeploy, protected, 4-eyes, managed_state, labels, position)</li>
-<li>[ ] <strong>Per-tier apply permissions</strong> (see SPECS §2.4): <code>users.max_apply_tier</code> + <code>users.can_destroy</code>; <code>can_apply(user, env)</code> helper called in the <code>unconfirmed → confirmed</code> transition; <code>protected</code> refocused on its own effects (forced confirmation + 4-eyes), with access control moving to the tier; admin Users page (role, tier, destroy) + audit of changes</li>
+<li>[ ] <strong>Per-tier apply permissions</strong> (see SPECS §2.4): <code>users.allowed_tiers</code> (a set over a configurable tier catalog — originally a linear <code>max_apply_tier</code>) + <code>users.can_destroy</code>; <code>can_apply(user, env)</code> helper called in the <code>unconfirmed → confirmed</code> transition; <code>protected</code> refocused on its own effects (forced confirmation + 4-eyes), with access control moving to the tier; admin Users page (role, tiers, destroy) + audit of changes</li>
 <li>[ ] <strong>Variable sets</strong> (see SPECS §3.4):</li>
 <li>named sets of variables (terraform + environment), at the space level</li>
-<li>attachable to stacks (→ all their envs) or to specific environments</li>
+<li>attachable to stacks (→ all their envs), to specific environments or to a tier — always within the set's own space (<em>status: enforced at attach and at resolution</em>)</li>
 <li><code>auto_attach: true</code> = attached to all stacks in the space (e.g. <code>common-aws</code>)</li>
 <li>attachment priority to order the sets relative to each other</li>
 <li>final resolution: <strong>variable sets (by priority) &lt; stack &lt; environment</strong></li>
@@ -1984,26 +2011,26 @@ Goal: a self-hostable Terraform orchestration platform with multi-environment st
 <h4 id="2b-worker-api-pull-protocol">2b. Worker API (pull protocol)<a class="headerlink" href="#2b-worker-api-pull-protocol" title="Permanent link">&para;</a></h4>
 <ul>
 <li>[ ] Register/heartbeat/claim (<code>SKIP LOCKED</code>), events, chunked logs, artifacts</li>
-<li>[ ] Dead worker detection → <code>worker_lost</code></li>
+<li>[ ] Dead worker detection → <code>worker_lost</code> — <em>status: only runs whose job is executing on the lost worker; an apply or a mutating command only after the apply window (SPECS §3.7)</em></li>
 </ul>
 <h4 id="2c-the-worker-agent">2c. The worker agent<a class="headerlink" href="#2c-the-worker-agent" title="Permanent link">&para;</a></h4>
 <ul>
-<li>[ ] Loop claim → clone → tool setup → <strong>hooks</strong> → init → plan → upload → confirmation → <strong>hooks</strong> → apply → report</li>
-<li>[ ] Ephemeral workspace, Docker runner, secret masking in the logs</li>
+<li>[ ] Loop claim → clone → tool setup → <strong>hooks</strong> → init → plan → upload → confirmation → <strong>hooks</strong> → apply → report — <em>status: the run is pinned to the commit its plan checked out, and the apply clones that commit and applies the uploaded saved plan, never a fresh plan (SPECS §7.3)</em></li>
+<li>[ ] Ephemeral workspace, Docker runner, secret masking in the logs — <em>status: workspace and masking done; the Docker runner is not: the agent runs every command as a local subprocess whatever <code>STACKD_RUNNER</code> says, and does not enforce <code>tool_version</code> (SPECS §7.4)</em></li>
 </ul>
 <h4 id="2d-hooks-checks-custom-flows-see-specs-8">2d. Hooks &amp; checks (custom flows, see SPECS §8)<a class="headerlink" href="#2d-hooks-checks-custom-flows-see-specs-8" title="Permanent link">&para;</a></h4>
 <ul>
 <li>[ ] <strong>YAML</strong> declaration in two places, merged: <code>.stackd.yml</code> file in the repo (versioned with the code) + hooks defined at the stack/environment level in the UI (governance imposed by the platform, not bypassable by a PR)</li>
 <li>[ ] Anchor points: <code>before_init</code>, <code>after_init</code>, <code>before_plan</code>, <code>after_plan</code>, <code>before_apply</code>, <code>after_apply</code></li>
 <li>[ ] Each hook = a command executed in the workspace, with read access to <code>plan.json</code> (for post-plan checks: tfsec, checkov, infracost, in-house scripts)</li>
-<li>[ ] Failure modes: <code>fail</code> (run → failed), <code>warn</code> (continue, visible warning, manual confirmation forced even if autodeploy)</li>
+<li>[ ] Failure modes: <code>fail</code> (run → failed), <code>warn</code> (continue, visible warning, manual confirmation forced even if autodeploy) — <em>status: done at every stage, plan and apply jobs; each hook under a 10 min timeout; every check result kept on the run with its stage; repo hooks run without secrets (SPECS §8.3). The <code>*_apply</code> repo-hook ban on prod and the per-env secret opt-in are pending a decision</em></li>
 <li>[ ] Hook logs integrated into the viewer (dedicated sections)</li>
 </ul>
 <h4 id="2e-terraform-job-logs">2e. Terraform job logs<a class="headerlink" href="#2e-terraform-job-logs" title="Permanent link">&para;</a></h4>
 <ul>
 <li>[ ] Live: multiplexed WebSocket, line-by-line tracking per phase</li>
 <li>[ ] Viewer: virtualized, ANSI, search, shareable anchors, follow-tail</li>
-<li>[ ] Two-tier storage (hot DB 7 d → S3 gz 1 year), download, configurable retention</li>
+<li>[ ] Two-tier storage (hot DB 7 d → S3 gz 1 year), download, configurable retention — <em>status: hot tier only; no archiving or download yet (SPECS §5.2)</em></li>
 </ul>
 <h4 id="2f-runs-front">2f. Runs front<a class="headerlink" href="#2f-runs-front" title="Permanent link">&para;</a></h4>
 <ul>
@@ -2017,7 +2044,8 @@ Goal: a self-hostable Terraform orchestration platform with multi-environment st
 <ul>
 <li>[ ] Complete HTTP backend protocol (GET/POST/LOCK/UNLOCK/423), S3 SSE-KMS storage</li>
 <li>[ ] Application versioning linked to runs, Postgres locking visible in UI, audited force-unlock</li>
-<li>[ ] Per-run scoped tokens (RO for proposed), automatic <code>-backend-config</code> injection</li>
+<li>[ ] Per-job scoped tokens (<code>ro</code>/<code>plan</code>/<code>rw</code>), backend settings injected automatically — <em>status: done, as <code>TF_HTTP_*</code> environment variables for tofu only (not <code>-backend-config</code>, which tofu persists), SPECS §11.2</em></li>
+<li>[ ] Saved plans in S3: the reviewed <code>plan.tfplan</code>, encrypted by the API, kept until the run ends — <em>status: done (SPECS §7.3, §11.3); <code>plan.json</code>/<code>outputs.json</code> artifacts are accepted but not archived yet</em></li>
 <li>[ ] "Bring your own S3 backend" mode</li>
 <li>[ ] Front: State tab per env (versions, lock, admin download)</li>
 </ul>
@@ -2039,7 +2067,7 @@ Goal: a self-hostable Terraform orchestration platform with multi-environment st
 <li>used when the upstream has <strong>never produced</strong> the output (bootstrapping a new cascade) or on <strong>proposed runs</strong> if the upstream is not applied</li>
 <li>a run that has consumed at least one mock is marked <code>used_mocks: true</code>: visible badge, <strong>apply forbidden</strong> (validation plan-only) unless explicit opt-in per env</li>
 <li>solves the chicken-and-egg problem: write <code>app/dev</code> and plan its config before <code>network/dev</code> has run</li>
-<li>[ ] Propagation scheduler: topological cascade, policies, multi-parents, stop on failure</li>
+<li>[ ] Propagation scheduler: topological cascade, policies, multi-parents, stop on failure — <em>status: cascade and policies done; multi-parent gating and stop-on-failure are not (SPECS §9.2)</em></li>
 <li>[ ] Run groups + graph view; the cascade never bypasses the protections</li>
 </ul>
 <p><strong>Deliverable: plan <code>app/dev</code> with <code>vpc_id = "vpc-mock00000"</code> before the first apply of <code>network/dev</code>, then a real cascade.</strong></p>
@@ -2047,9 +2075,9 @@ Goal: a self-hostable Terraform orchestration platform with multi-environment st
 <h3 id="phase-5-git-webhooks-proposed-runs-2-weeks">Phase 5 — Git webhooks + proposed runs (2 weeks)<a class="headerlink" href="#phase-5-git-webhooks-proposed-runs-2-weeks" title="Permanent link">&para;</a></h3>
 <ul>
 <li>[ ] GitHub/GitLab webhook: HMAC, branch → environments mapping, filtering by <code>project_root</code></li>
-<li>[ ] <strong>Git staleness</strong>: tracking of <code>head_sha</code> per env (webhook + ls-remote polling 15 min + manual refresh), <code>↑N</code> chip on lagging envs, "stale plan" banner + re-plan on stale unconfirmed runs — see SPECS §9.6 / DESIGN §5.1-5.2</li>
-<li>[ ] Push → tracked runs; PR → <strong>proposed runs</strong> plan-only (RO state, secrets not injected by default, mocks allowed)</li>
-<li>[ ] (Optional) PR comment: plan summary + check results (warn/fail hooks)</li>
+<li>[ ] <strong>Git staleness</strong>: tracking of <code>head_sha</code> per env (webhook + ls-remote polling 15 min + manual refresh), <code>↑N</code> chip on lagging envs, "stale plan" banner + re-plan on stale unconfirmed runs — see SPECS §9.6 / DESIGN §5.1-5.2 — <em>status: done: <code>stale</code> computed on every env the API returns, background ls-remote polling, audited manual refresh, branch-deletion and re-pointed-branch handling; the <code>↑N</code> chip and the stale-plan banner are not in the UI yet</em></li>
+<li>[ ] Push → tracked runs; PR → <strong>proposed runs</strong> plan-only (RO state, secrets not injected by default, mocks allowed) — <em>status: done (SPECS §13): a proposed run gets no secret, keeping the read-only plan role; the per-env opt-in is not implemented</em></li>
+<li>[ ] (Optional) PR comment: plan summary + check results (warn/fail hooks) — <em>status: shipped for GitHub (SPECS §18): a commit status and one comment per run, edited in place</em></li>
 </ul>
 <p><strong>Deliverable: <code>git push</code> → automatic plans + checks visible in the PR.</strong></p>
 <hr />
@@ -2066,13 +2094,13 @@ Goal: a self-hostable Terraform orchestration platform with multi-environment st
 <hr />
 <h3 id="phase-7-production-ready-ongoing">Phase 7 — Production-ready (ongoing)<a class="headerlink" href="#phase-7-production-ready-ongoing" title="Permanent link">&para;</a></h3>
 <ul>
-<li>[ ] RBAC per space, Google group mapping — extends per-tier permissions (§2.4) toward per-space/team scopes, and enables the "sensitive but not prod" env that the linear tier does not cover</li>
+<li>[ ] RBAC per space, Google group mapping — extends per-tier permissions (§2.4) toward per-space/team scopes — <em>status: per-space memberships shipped (SPECS §2.4 Phase F) and tiers are now a non-linear set; Google group mapping and per-stack grants remain</em></li>
 <li>[ ] <strong>Environment matrix</strong> (track, not specified): declare <code>{eu-west-1, us-east-1} × {dev, prod}</code> on a stack and generate/synchronize the corresponding environments — multi-region is done by naming convention + variable sets in the MVP</li>
 <li>[ ] HTTP run tasks (blocking external webhooks), advanced policies (OPA) if there is a real need</li>
 <li>[ ] OIDC to GCP/Azure (the <code>CloudIntegration</code> interface is already generic)</li>
-<li>[ ] Scheduled drift detection</li>
+<li>[ ] Scheduled drift detection — <em>status: shipped (SPECS §19)</em></li>
 <li>[ ] Audit export, automated retention/purge</li>
-<li>[ ] Platform observability (Prometheus, OTel, Datadog dashboard)</li>
+<li>[ ] Platform observability (Prometheus, OTel, Datadog dashboard) — <em>status: <code>/metrics</code> and optional OTLP tracing shipped (SPECS §20); no dashboard yet</em></li>
 <li>[ ] Helm chart / Terraform deployment module (dogfooding)</li>
 <li>[ ] <strong>Go rewrite of the worker</strong> (single binary, easier distribution) — the MVP Python agent remains the functional reference; the Go port does not change the protocol (§7)</li>
 </ul>
@@ -2137,12 +2165,12 @@ Goal: a self-hostable Terraform orchestration platform with multi-environment st
 <tr>
 <td>Execution security (providers/provisioners = arbitrary code)</td>
 <td>High</td>
-<td>Self-hosted workers, Docker per run, no multi-tenant. Platform hooks (non-bypassable) are the governance safeguard</td>
+<td>Self-hosted workers, Docker per run (not implemented yet, SPECS §7.4), no multi-tenant. Platform hooks (non-bypassable) are the governance safeguard</td>
 </tr>
 <tr>
 <td>Repo hooks (<code>.stackd.yml</code>) modifiable by PR</td>
 <td>Medium</td>
-<td>The <strong>platform</strong> hooks (stack/env) always run and are not bypassable; critical security checks go there, not in the repo</td>
+<td>The <strong>platform</strong> hooks (stack/env) always run and are not bypassable; critical security checks go there, not in the repo. Repo hooks run without secrets: an allowlisted env, a masked <code>plan.json</code>, no tfvars, saved plan or token on disk (SPECS §8.3)</td>
 </tr>
 <tr>
 <td>OIDC issuer: compromise of the signing key = access to all roles</td>

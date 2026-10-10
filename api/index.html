@@ -11,7 +11,7 @@
       
       
       
-        <link rel="prev" href="../CONCEPTS/">
+        <link rel="prev" href="../ARCHITECTURE/">
       
       
         <link rel="next" href="../SPECS/">
@@ -762,6 +762,33 @@
       
   
   
+  
+  
+    <li class="md-nav__item">
+      <a href="../ARCHITECTURE/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Architecture
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
     
   
   
@@ -896,10 +923,10 @@
       
         
         
-        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5" >
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_6" >
         
           
-          <label class="md-nav__link" for="__nav_5" id="__nav_5_label" tabindex="">
+          <label class="md-nav__link" for="__nav_6" id="__nav_6_label" tabindex="">
             
   
   
@@ -917,8 +944,8 @@
             <span class="md-nav__icon md-icon"></span>
           </label>
         
-        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_5_label" aria-expanded="false">
-          <label class="md-nav__title" for="__nav_5">
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_6_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_6">
             <span class="md-nav__icon md-icon"></span>
             
   
@@ -1168,11 +1195,15 @@
 <h1 id="api">API<a class="headerlink" href="#api" title="Permanent link">&para;</a></h1>
 <p>Stackd exposes two REST surfaces under versioned prefixes:</p>
 <ul>
-<li><strong><code>/api/v1</code></strong> — the human/automation API (auth, stacks, environments, variables, runs, hooks,
-  dependencies, notifications, audit, state management, workers, health, logs).</li>
-<li><strong><code>/worker/v1</code></strong> — the worker (agent) API: register, heartbeat, claim, events, logs, artifacts.
-  Workers authenticate with a pool/worker token; humans never call this.</li>
+<li><strong><code>/api/v1</code></strong> — the human/automation API (auth, spaces, stacks, environments, variables, runs,
+  hooks, dependencies, notifications, audit, state management, workers, health, logs).</li>
+<li><strong><code>/worker/v1</code></strong> — the worker (agent) API: register, heartbeat, claim, events, logs, artifacts
+  (including the saved plan the apply job downloads). Workers authenticate with a pool/worker
+  token; humans never call this.</li>
 </ul>
+<p>Outside these prefixes: the Terraform HTTP state backend (<code>/state/v1/{env_id}</code>, used by tofu with
+a per-job state token), the OIDC issuer (<code>/.well-known/openid-configuration</code>, <code>/oidc/jwks</code>), and
+two unauthenticated probes, <code>/healthz</code> and <code>/metrics</code> (Prometheus).</p>
 <p>Errors follow <strong>RFC 9457</strong> (<code>application/problem+json</code>).</p>
 <h2 id="authentication">Authentication<a class="headerlink" href="#authentication" title="Permanent link">&para;</a></h2>
 <p>Human endpoints take a Bearer <strong>access token</strong> (a 15-minute JWT). In dev, get one via dev login:</p>
@@ -1185,12 +1216,12 @@ on <code>/refresh</code> and <code>/logout</code> use a CSRF double-submit token
 <h2 id="interactive-reference">Interactive reference<a class="headerlink" href="#interactive-reference" title="Permanent link">&para;</a></h2>
 <p>The API is FastAPI, so the full, always-current schema is served by the running instance:</p>
 <ul>
-<li><strong>Swagger UI</strong> — <code>/docs</code></li>
-<li><strong>ReDoc</strong> — <code>/redoc</code></li>
+<li><strong>Swagger UI</strong> — <code>/docs</code> (disabled when <code>STACKD_ENV=production</code>)</li>
 <li><strong>OpenAPI JSON</strong> — <code>/openapi.json</code></li>
 </ul>
 <h2 id="the-main-surface">The main surface<a class="headerlink" href="#the-main-surface" title="Permanent link">&para;</a></h2>
-<p>A curated map (the <a href="../SPECS/">Specification</a> §12 is the exhaustive list):</p>
+<p>A curated map, paths relative to <code>/api/v1</code> unless noted (the <a href="../SPECS/">Specification</a> §12 is the
+exhaustive list):</p>
 <table>
 <thead>
 <tr>
@@ -1201,23 +1232,31 @@ on <code>/refresh</code> and <code>/logout</code> use a CSRF double-submit token
 <tbody>
 <tr>
 <td>Auth</td>
-<td><code>POST /auth/dev/login</code>, <code>POST /auth/refresh</code>, <code>POST /auth/logout</code>, <code>GET /auth/me</code></td>
+<td><code>POST /auth/dev/login</code> (dev only), <code>POST /auth/refresh</code>, <code>POST /auth/logout</code>, <code>GET /auth/me</code></td>
+</tr>
+<tr>
+<td>Spaces</td>
+<td><code>GET/POST /spaces</code>, <code>GET/PUT /spaces/{id}/members</code>, <code>DELETE /spaces/{id}/members/{user_id}</code>, secret sources under <code>/spaces/{id}/secret-sources</code></td>
 </tr>
 <tr>
 <td>Stacks</td>
-<td><code>GET/POST /stacks</code>, <code>POST /stacks/{id}/check-repo</code></td>
+<td><code>GET/POST /stacks</code>, <code>GET/PATCH/DELETE /stacks/{id}</code> (409 while a run is active), <code>POST /stacks/{id}/check-repo</code></td>
 </tr>
 <tr>
 <td>Environments</td>
-<td><code>POST /stacks/{id}/environments</code>, <code>GET /environments/{id}/resolved-variables</code>, <code>POST /environments/{id}/refresh-head</code></td>
+<td><code>POST /stacks/{id}/environments</code>, <code>GET /environments/{id}/resolved-variables</code>, <code>POST /environments/{id}/refresh-head</code>, <code>POST /environments/{id}/discover-inputs</code></td>
 </tr>
 <tr>
 <td>Variables &amp; sets</td>
-<td>variables CRUD (stack/env/set), variable sets + attachments</td>
+<td>variables CRUD (stack/env/set), variable sets + attachments (tier/stack/env of the set's space)</td>
 </tr>
 <tr>
 <td>Runs</td>
-<td><code>POST /environments/{id}/runs</code>, <code>GET /runs/{id}</code>, <code>POST /runs/{id}/confirm</code>/<code>discard</code>/<code>cancel</code>, <code>GET /runs/{id}/logs</code>/<code>plan</code>/<code>checks</code></td>
+<td><code>POST /environments/{id}/runs</code>, <code>/commands</code>, <code>/promote</code>; <code>GET /runs/{id}</code>, <code>POST /runs/{id}/confirm</code>/<code>discard</code>/<code>cancel</code>, <code>GET /runs/{id}/logs</code>/<code>plan</code>/<code>checks</code>, <code>POST /runs/{id}/vcs/resync</code></td>
+</tr>
+<tr>
+<td>Comments</td>
+<td><code>GET/POST /runs/{id}/comments</code>, <code>PATCH/DELETE /runs/{id}/comments/{cid}</code></td>
 </tr>
 <tr>
 <td>Hooks</td>
@@ -1237,11 +1276,15 @@ on <code>/refresh</code> and <code>/logout</code> use a CSRF double-submit token
 </tr>
 <tr>
 <td>Notifications</td>
-<td><code>GET/POST/PATCH/DELETE /stacks/{id}/notifications</code> and <code>/environments/{id}/notifications</code></td>
+<td>targets: <code>GET/POST/PATCH/DELETE /stacks/{id}/notifications</code> and <code>/environments/{id}/notifications</code>, plus <code>…/{tid}/test</code>; your in-app feed: <code>GET /notifications</code>, <code>POST /notifications/read</code></td>
+</tr>
+<tr>
+<td>Users &amp; tiers</td>
+<td><code>GET /users</code> (admin), <code>PATCH /users/{id}</code> (admin), <code>GET /users/mentionable</code>, <code>GET/POST /tiers</code>, <code>PATCH/DELETE /tiers/{id}</code></td>
 </tr>
 <tr>
 <td>Audit</td>
-<td><code>GET /audit</code> (filters), <code>GET /audit/export</code> (CSV, admin)</td>
+<td><code>GET /audit</code> (filters), <code>GET /audit/export</code> (CSV) — both admin-only</td>
 </tr>
 <tr>
 <td>Webhooks</td>
@@ -1252,12 +1295,16 @@ on <code>/refresh</code> and <code>/logout</code> use a CSRF double-submit token
 <td><code>GET /.well-known/openid-configuration</code>, <code>GET /oidc/jwks</code></td>
 </tr>
 <tr>
+<td>Workers</td>
+<td><code>GET/POST /worker-pools</code>, <code>DELETE /worker-pools/{id}</code> (admin), <code>GET /workers</code>, <code>GET /queue</code>, worker diagnostics</td>
+</tr>
+<tr>
 <td>Observability</td>
-<td><code>GET /health</code>, <code>GET /logs</code> (admin), <code>GET /queue</code>, worker diagnostics</td>
+<td><code>GET /health</code>, <code>GET /logs</code> (admin); outside <code>/api/v1</code>: <code>GET /healthz</code>, <code>GET /metrics</code></td>
 </tr>
 <tr>
 <td>WebSocket</td>
-<td><code>GET /api/v1/ws</code> — live run/environment updates</td>
+<td><code>GET /api/v1/ws</code> — live run/environment updates and your own notification feed</td>
 </tr>
 </tbody>
 </table>

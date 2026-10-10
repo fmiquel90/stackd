@@ -930,6 +930,33 @@
   
   
     <li class="md-nav__item">
+      <a href="../../ARCHITECTURE/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Architecture
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../../api/" class="md-nav__link">
         
   
@@ -970,10 +997,10 @@
       
         
         
-        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5" >
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_6" >
         
           
-          <label class="md-nav__link" for="__nav_5" id="__nav_5_label" tabindex="">
+          <label class="md-nav__link" for="__nav_6" id="__nav_6_label" tabindex="">
             
   
   
@@ -991,8 +1018,8 @@
             <span class="md-nav__icon md-icon"></span>
           </label>
         
-        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_5_label" aria-expanded="false">
-          <label class="md-nav__title" for="__nav_5">
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_6_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_6">
             <span class="md-nav__icon md-icon"></span>
             
   
@@ -1356,7 +1383,7 @@ how to leave and get everything back.</p>
 <h2 id="what-lives-only-in-stackd-but-is-exportable">What lives only in Stackd (but is exportable)<a class="headerlink" href="#what-lives-only-in-stackd-but-is-exportable" title="Permanent link">&para;</a></h2>
 <ul>
 <li><strong>Orchestration config</strong> — stacks, environments, tiers, dependencies, variable sets. Exportable
-  via the API (<code>GET /stacks</code>, <code>/environments/{id}</code>, <code>/dependencies/graph</code>,
+  via the API (<code>GET /stacks</code>, <code>/environments/{id}</code>, <code>/graph</code>,
   <code>/environments/{id}/resolved-variables</code>). Re-creatable; it isn't infrastructure.</li>
 <li><strong>History</strong> — runs, logs, audit. The audit trail exports to CSV (<code>GET /api/v1/audit/export</code>).</li>
 <li><strong>Sensitive variable values</strong> — write-only by design (AES-GCM, never returned in clear). Keep
@@ -1372,16 +1399,18 @@ ever leave.</p>
 <h2 id="the-exit-procedure-rollback">The exit procedure (rollback)<a class="headerlink" href="#the-exit-procedure-rollback" title="Permanent link">&para;</a></h2>
 <p>This is the exact reverse of <a href="../importing-existing-state/">importing an existing stack</a>.</p>
 <h3 id="1-pull-managed-state-back-out">1. Pull managed state back out<a class="headerlink" href="#1-pull-managed-state-back-out" title="Permanent link">&para;</a></h3>
-<p>Only for environments with <code>managed_state: true</code>. Mint a session (it returns a scoped <code>rw</code> token +
-the HTTP backend config), then migrate to your own backend with a standard command:</p>
+<p>Only for environments with <code>managed_state: true</code>. Mint a session (admin; it returns a scoped <code>rw</code>
+token + the HTTP backend config, valid 30 minutes). In a local checkout, add a
+<code>terraform { backend "http" {} }</code> block, export the session's settings as <code>TF_HTTP_*</code> variables
+(exactly as in <a href="../importing-existing-state/">importing, step 3</a>) and run <code>tofu init</code>. Then:</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="c1"># get a scoped token + backend address</span>
 <a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>curl<span class="w"> </span>-s<span class="w"> </span>-X<span class="w"> </span>POST<span class="w"> </span>localhost:8000/api/v1/environments/<span class="nv">$ENV_ID</span>/state/import-session<span class="w"> </span>-H<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$AUTH</span><span class="s2">&quot;</span>
 <a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>
 <a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a><span class="c1"># option A — pull the raw tfstate (it&#39;s standard) and push it anywhere</span>
 <a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a>tofu<span class="w"> </span>state<span class="w"> </span>pull<span class="w"> </span>&gt;<span class="w"> </span>terraform.tfstate
 <a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a>
-<a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a><span class="c1"># option B — migrate the backend in place: switch the repo&#39;s backend block from</span>
-<a id="__codelineno-0-8" name="__codelineno-0-8" href="#__codelineno-0-8"></a><span class="c1"># `http` to `s3` (or local), then:</span>
+<a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a><span class="c1"># option B — migrate in place: replace the `http` backend block with your own</span>
+<a id="__codelineno-0-8" name="__codelineno-0-8" href="#__codelineno-0-8"></a><span class="c1"># (`s3`, local…), then:</span>
 <a id="__codelineno-0-9" name="__codelineno-0-9" href="#__codelineno-0-9"></a>tofu<span class="w"> </span>init<span class="w"> </span>-migrate-state
 </code></pre></div>
 <h3 id="2-repoint-terraform-ci-at-the-repos-directly">2. Repoint terraform / CI at the repos directly<a class="headerlink" href="#2-repoint-terraform-ci-at-the-repos-directly" title="Permanent link">&para;</a></h3>

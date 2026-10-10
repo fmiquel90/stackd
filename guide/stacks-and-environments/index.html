@@ -507,6 +507,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#deleting-a-stack-or-an-environment" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Deleting a stack or an environment
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#see-also" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -903,6 +914,33 @@
   
   
     <li class="md-nav__item">
+      <a href="../../ARCHITECTURE/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Architecture
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../../api/" class="md-nav__link">
         
   
@@ -943,10 +981,10 @@
       
         
         
-        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5" >
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_6" >
         
           
-          <label class="md-nav__link" for="__nav_5" id="__nav_5_label" tabindex="">
+          <label class="md-nav__link" for="__nav_6" id="__nav_6_label" tabindex="">
             
   
   
@@ -964,8 +1002,8 @@
             <span class="md-nav__icon md-icon"></span>
           </label>
         
-        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_5_label" aria-expanded="false">
-          <label class="md-nav__title" for="__nav_5">
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_6_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_6">
             <span class="md-nav__icon md-icon"></span>
             
   
@@ -1227,6 +1265,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#deleting-a-stack-or-an-environment" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Deleting a stack or an environment
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#see-also" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -1320,10 +1369,10 @@
 <ul>
 <li><strong><code>tier</code></strong> (a configurable catalog, e.g. <code>dev</code>/<code>staging</code>/<code>prod</code>/<code>qa</code>) — carries apply/destroy permissions: <code>can_apply</code> requires <code>env.tier ∈ user.allowed_tiers</code>. See <a href="../runs-and-approvals/">Runs &amp; approvals</a>.</li>
 <li><strong><code>branch</code></strong> — the branch this environment tracks for staleness and webhook-driven runs.</li>
-<li><strong><code>protected</code></strong> — forces confirmation and 4-eyes; it is <strong>not</strong> the access control (that is <code>tier</code>).</li>
-<li><strong><code>require_second_pair_of_eyes</code></strong> — the triggerer cannot confirm (already implied for <code>tier=prod</code>; useful on staging).</li>
-<li><strong><code>managed_state</code></strong> — when true, Terraform talks to Stackd's HTTP backend (state bytes in S3). Set <code>false</code> to keep your own <code>backend "s3"</code>. See <a href="../../CONCEPTS/">Concepts §7</a>.</li>
-<li><strong><code>allow_mock_apply</code></strong> — allow applying a run that consumed mock outputs (default <code>false</code>). See <a href="../variables/">Variables</a>.</li>
+<li><strong><code>protected</code></strong> — forces confirmation (never autodeploys) and four-eyes; it is <strong>not</strong> the access control (that is <code>tier</code>).</li>
+<li><strong><code>require_second_pair_of_eyes</code></strong> — four-eyes alone: the person who triggered a run cannot confirm it, and the environment may still autodeploy (already implied on a tier flagged <code>requires_four_eyes</code>, like the seeded <code>prod</code>, and on a <code>protected</code> environment; useful on staging).</li>
+<li><strong><code>managed_state</code></strong> — when true, Terraform talks to Stackd's HTTP backend (state bytes in S3) and the repo must declare <strong>no</strong> <code>backend</code> block: the worker adds <code>backend "http" {}</code> itself. Set <code>false</code> to keep your own <code>backend "s3"</code>. See <a href="../../CONCEPTS/#8-managed-state-s3-behind-an-http-backend">Concepts §8</a>.</li>
+<li><strong><code>allow_mock_apply</code></strong> — allow applying a run that consumed mock outputs (default <code>false</code>). See <a href="../dependencies-and-mocks/">Dependencies &amp; mocks</a>.</li>
 <li><strong><code>labels</code></strong> — JSON tags used to target a worker pool.</li>
 </ul>
 <div class="admonition warning">
@@ -1331,11 +1380,26 @@
 <p>Workspaces share code, backend and credentials and only suffix the state key — easy to target the wrong one. A Stackd environment is <strong>physically isolated</strong>: its own state, variables, protections and worker pool.</p>
 </div>
 <h3 id="refreshing-the-tracked-head">Refreshing the tracked head<a class="headerlink" href="#refreshing-the-tracked-head" title="Permanent link">&para;</a></h3>
-<p>Staleness compares the last applied commit to the branch head. <code>head_sha</code> updates via push webhook or 15-min polling; force it manually:</p>
+<p>Staleness compares the commit of the last finished tracked run (every run is pinned to the commit it planned) to the branch head. <code>head_sha</code> updates via the push webhook or the 15-min <code>git ls-remote</code> polling; force it manually (audited <code>environment.head_refreshed</code>):</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a>curl<span class="w"> </span>-s<span class="w"> </span>-X<span class="w"> </span>POST<span class="w"> </span>localhost:8000/api/v1/environments/<span class="nv">$ENV</span>/refresh-head<span class="w"> </span><span class="se">\</span>
 <a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a><span class="w">  </span>-H<span class="w"> </span><span class="s2">&quot;Authorization: Bearer </span><span class="nv">$TOKEN</span><span class="s2">&quot;</span>
 </code></pre></div>
-<p><code>GET /api/v1/environments/{id}</code> then exposes <code>head_sha</code>, <code>commits_ahead</code>, <code>affects_project_root</code> and <code>stale</code>. See <a href="../../SPECS/">SPECS §9.6</a>.</p>
+<p><code>GET /api/v1/environments/{id}</code> then exposes <code>head_sha</code>, <code>commits_ahead</code>, <code>affects_project_root</code> and <code>stale</code>. An environment with nothing applied yet is never <code>stale</code>. Changing an environment's <code>branch</code> clears its recorded head until the next poll, and a push that deletes the branch clears it too. See <a href="../../SPECS/">SPECS §9.6</a>.</p>
+<h2 id="deleting-a-stack-or-an-environment">Deleting a stack or an environment<a class="headerlink" href="#deleting-a-stack-or-an-environment" title="Permanent link">&para;</a></h2>
+<p><code>DELETE /api/v1/stacks/{id}</code> and <code>DELETE /api/v1/environments/{id}</code> are <strong>refused with <code>409 Active
+run</code></strong> while one of the environments involved has a run in an active state (<code>preparing</code> through
+<code>applying</code>, or a command <code>running</code>); the problem body names the <code>run_id</code>. Cancel or discard it, or
+let it finish, then retry. Queued runs are deleted with their environment.</p>
+<p>The deletion also removes, in the same transaction and each audited with the reason
+(<code>stack_deleted</code> or <code>environment_deleted</code>), everything that points at the stack or its
+environments:</p>
+<ul>
+<li>variable-set attachments (<code>variable_set.detached</code>) — the set itself stays;</li>
+<li>platform hooks (<code>hook.deleted</code>);</li>
+<li>notification targets (<code>notification_target.deleted</code>).</li>
+</ul>
+<p>An attach racing the deletion either fails with <code>404</code> or is removed with the rest: no orphan is
+left behind.</p>
 <h2 id="see-also">See also<a class="headerlink" href="#see-also" title="Permanent link">&para;</a></h2>
 <ul>
 <li><a href="../variables/">Variables</a> — variable sets, resolution and sensitive values</li>

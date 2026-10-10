@@ -524,6 +524,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#what-gets-applied-is-what-was-reviewed" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        What gets applied is what was reviewed
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#who-can-approve-can_apply" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -535,10 +546,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#four-eyes-on-prod" class="md-nav__link">
+  <a href="#four-eyes" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Four-eyes on prod
+        Four-eyes
       
     </span>
   </a>
@@ -924,6 +935,33 @@
   
   
     <li class="md-nav__item">
+      <a href="../../ARCHITECTURE/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Architecture
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../../api/" class="md-nav__link">
         
   
@@ -964,10 +1002,10 @@
       
         
         
-        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5" >
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_6" >
         
           
-          <label class="md-nav__link" for="__nav_5" id="__nav_5_label" tabindex="">
+          <label class="md-nav__link" for="__nav_6" id="__nav_6_label" tabindex="">
             
   
   
@@ -985,8 +1023,8 @@
             <span class="md-nav__icon md-icon"></span>
           </label>
         
-        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_5_label" aria-expanded="false">
-          <label class="md-nav__title" for="__nav_5">
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_6_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_6">
             <span class="md-nav__icon md-icon"></span>
             
   
@@ -1181,6 +1219,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#what-gets-applied-is-what-was-reviewed" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        What gets applied is what was reviewed
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#who-can-approve-can_apply" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -1192,10 +1241,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#four-eyes-on-prod" class="md-nav__link">
+  <a href="#four-eyes" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Four-eyes on prod
+        Four-eyes
       
     </span>
   </a>
@@ -1305,16 +1354,39 @@
 <h2 id="the-lifecycle">The lifecycle<a class="headerlink" href="#the-lifecycle" title="Permanent link">&para;</a></h2>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>queued → preparing → planning → [checking] → unconfirmed → confirmed → applying → finished
 </code></pre></div>
-<p>A worker claims a <code>queued</code> run, clones the repo at the pinned commit, runs hooks + <code>plan</code>, and
-reports back. With a non-empty diff the run stops at <strong><code>unconfirmed</code></strong> and waits for a human. After
-<strong>confirm</strong>, a worker claims the apply and drives it to <strong><code>finished</code></strong>. An empty diff goes straight
-to <code>finished</code>; a failure to <code>failed</code>; a human can <code>discard</code> or <code>cancel</code>.</p>
+<p>A worker claims a <code>queued</code> run and executes its <strong>plan job</strong>: it clones the repo, runs hooks +
+<code>plan</code>, and reports back. With a non-empty diff the run stops at <strong><code>unconfirmed</code></strong> and waits for a
+human. After <strong>confirm</strong>, a worker (not necessarily the same one) claims the <strong>apply job</strong> and
+drives the run to <strong><code>finished</code></strong>. An empty diff goes straight to <code>finished</code>; a
+failure to <code>failed</code>. A human can <code>discard</code> an <code>unconfirmed</code> run, or <code>cancel</code> a <code>queued</code> or
+<code>unconfirmed</code> one (stopping a run a worker is executing is not supported yet).</p>
 <div class="admonition note">
 <p class="admonition-title">Note</p>
 <p>State only ever changes through one function (<code>transition()</code>), which records a <code>run_event</code> and
 — for human/terminal actions — an <code>audit_event</code> in the <strong>same transaction</strong>. Nothing changes a
 run's state out of band.</p>
 </div>
+<h2 id="what-gets-applied-is-what-was-reviewed">What gets applied is what was reviewed<a class="headerlink" href="#what-gets-applied-is-what-was-reviewed" title="Permanent link">&para;</a></h2>
+<p>Two guarantees tie the apply to the plan a human approved:</p>
+<ul>
+<li><strong>The run is pinned to a commit.</strong> A run triggered without a commit (a click, a cascade) plans
+  the head of the environment's branch, and the plan job reports the exact commit it checked out:
+  the run is pinned to it. A run triggered on a branch or tag name is pinned to the commit that name
+  resolved to; a run triggered on a full SHA must check out exactly that commit, or it fails
+  (<code>commit_mismatch</code>). The apply clones exactly the pinned commit, so its hooks and <code>output -json</code>
+  run on the reviewed code too, and <a href="../stacks-and-environments/#refreshing-the-tracked-head">staleness</a>
+  knows what was applied.</li>
+<li><strong>The apply runs the saved plan.</strong> For a tracked or destroy run with changes, the plan job uploads
+  its <code>plan.tfplan</code> before any <code>after_plan</code> hook runs. The API encrypts it and keeps it in S3 while
+  the run can still be applied. The apply job downloads it and runs <code>tofu apply plan.tfplan</code> — it
+  never re-plans. If the saved plan is missing or unreadable, the run fails before the
+  <code>before_apply</code> hooks (<code>saved plan unavailable, not applied</code>). If the state or an input changed
+  since the plan, tofu refuses the stale plan and the run fails with tofu's reason. In both cases,
+  <strong>trigger a new plan</strong>. The saved plan is deleted as soon as the run ends, whatever the outcome.</li>
+</ul>
+<p>A plan file holds the run's variable values, sensitive ones included: it is encrypted with the
+API's key on top of the bucket's encryption, written <code>0600</code> on the apply worker, and removed right
+after the apply (the <code>after_apply</code> hooks never see it).</p>
 <h2 id="who-can-approve-can_apply">Who can approve — <code>can_apply</code><a class="headerlink" href="#who-can-approve-can_apply" title="Permanent link">&para;</a></h2>
 <p>Confirming an apply requires <strong>both</strong>:</p>
 <ol>
@@ -1325,6 +1397,8 @@ run's state out of band.</p>
 </ol>
 <p>A <code>destroy</code> run additionally requires the <code>can_destroy</code> permission. A tier flagged
 <code>requires_four_eyes</code> (e.g. <code>prod</code>) also forces the triggerer ≠ the confirmer.</p>
+<p>These are your <strong>effective</strong> permissions in the environment's space: a space membership can set a
+different role, tier set or destroy right than your instance defaults.</p>
 <table>
 <thead>
 <tr>
@@ -1342,29 +1416,39 @@ run's state out of band.</p>
 <td>❌</td>
 </tr>
 <tr>
-<td>approver capped staging</td>
+<td>approver with <code>{dev, staging}</code></td>
 <td>✅</td>
 <td>✅</td>
 <td>❌ (tier)</td>
 </tr>
 <tr>
-<td>approver/admin, prod ceiling (<code>alice</code>)</td>
+<td>approver/admin with <code>prod</code> in their set (<code>alice</code>, <code>admin</code>)</td>
 <td>✅</td>
 <td>✅</td>
 <td>✅</td>
 </tr>
 </tbody>
 </table>
-<h2 id="four-eyes-on-prod">Four-eyes on prod<a class="headerlink" href="#four-eyes-on-prod" title="Permanent link">&para;</a></h2>
-<p>On a <code>prod</code> environment (or any env with <code>require_second_pair_of_eyes</code>), the person who <strong>triggered</strong>
-the run cannot be the one who <strong>confirms</strong> it — a second approver is required.</p>
+<h2 id="four-eyes">Four-eyes<a class="headerlink" href="#four-eyes" title="Permanent link">&para;</a></h2>
+<p>On an environment whose tier is flagged <code>requires_four_eyes</code> (the seeded <code>prod</code>), a <code>protected</code>
+environment, or any env with <code>require_second_pair_of_eyes</code>, the person who <strong>triggered</strong> the run
+cannot be the one who <strong>confirms</strong> it — another authorized approver must. It only applies to runs
+a human triggered: a webhook or cascade run has no triggerer to oppose, so any authorized approver
+can confirm it.</p>
 <h2 id="friction-proportional-to-risk">Friction proportional to risk<a class="headerlink" href="#friction-proportional-to-risk" title="Permanent link">&para;</a></h2>
-<p>An authorized non-prod apply is one click. Confirming on <strong><code>tier=prod</code></strong> or any <strong><code>destroy</code></strong> run
-opens a confirmation popover: type the <strong>environment name</strong> + review a <code>+a ~c −d</code> plan summary. This
+<p>An authorized apply on an ordinary tier is one click. Confirming on a tier flagged
+<code>requires_four_eyes</code> or any <strong><code>destroy</code></strong> run opens a confirmation popover: type the <strong>environment name</strong> + review a <code>+a ~c −d</code> plan summary. This
 is a misclick safeguard only — it never bypasses <code>can_apply</code> (still evaluated server-side).</p>
 <h2 id="autodeploy-checks">Autodeploy &amp; checks<a class="headerlink" href="#autodeploy-checks" title="Permanent link">&para;</a></h2>
 <p>An environment with <code>autodeploy</code> auto-confirms when the plan is clean — <strong>but a <code>warn</code> check forces
-<code>unconfirmed</code></strong> so a human still sees it. A <code>protected</code> environment can never autodeploy.</p>
+<code>unconfirmed</code></strong> so a human still sees it. A <code>protected</code> environment can never autodeploy, and
+requires four-eyes.</p>
+<p>Every <a href="../hooks/">hook</a> result is kept on the run with the stage it ran at, from the plan job and
+then the apply job: <code>check_results.results</code> lists them all (<code>ok</code>, <code>warn</code>, <code>fail</code>) — what the run
+page shows, with each one's stage — and <code>check_results.checks</code> only the ones that warned or
+failed. A <code>fail</code>
+check fails the run at its stage; a failing <code>before_apply</code> check means nothing is applied. See
+<a href="../hooks/#check-results">Hooks — check results</a>.</p>
 <h2 id="mock-block">Mock block<a class="headerlink" href="#mock-block" title="Permanent link">&para;</a></h2>
 <p>A run that consumed a mock upstream output (<code>used_mocks=true</code>) <strong>cannot be applied</strong> unless the env
 sets <code>allow_mock_apply=true</code> — see <a href="../dependencies-and-mocks/">Dependencies &amp; mocks</a>.</p>
@@ -1378,12 +1462,28 @@ sets <code>allow_mock_apply=true</code> — see <a href="../dependencies-and-moc
 was tested</em> — not whatever HEAD happens to be. The apply is gated as usual (tier + four-eyes) at
 confirm. This is the same-stack counterpart to the cross-stack <a href="../dependencies-and-mocks/">cascade</a>.</p>
 <h2 id="proposed-runs-from-a-pr">Proposed runs (from a PR)<a class="headerlink" href="#proposed-runs-from-a-pr" title="Permanent link">&para;</a></h2>
-<p>A pull request triggers a <strong>proposed</strong> run: plan-only, read-only state, no secrets — a safe preview
-that is never applied. See <a href="../../SPECS/">the Git integration in SPECS</a>.</p>
+<p>A pull request triggers a <strong>proposed</strong> run: plan-only, with a read-only state token — a preview
+that is never applied and saves no plan file. See <a href="../../SPECS/">the Git integration in SPECS</a>.</p>
+<p>A pull request's code runs inside tofu (<code>data "external"</code>, provisioners), and nobody has reviewed
+it yet: a proposed run gets <strong>none of the environment's secrets</strong>. No sensitive variable, of
+either kind, and no <a href="../external-secrets/">external secret</a> (not even fetched) reaches its job.
+What a plan needs stays: the cloud credentials of the <strong>plan role</strong>, read-only by design (see
+<a href="../cloud-credentials/">Cloud credentials</a>), the read-only state token and the repo token to clone.</p>
+<div class="admonition warning">
+<p class="admonition-title">What a proposed run still reaches</p>
+<p>A plan that needs a secret gets no value for it: tofu uses the variable's default, or fails
+with <code>No value for required variable</code>. Plan with credentials that need no static secret (the
+OIDC plan role) for pull requests to plan. The pull request's code can still read the state
+(secrets a resource keeps there included) and use the plan role: keep that role read-only and
+away from secret stores. A per-environment opt-in giving proposed runs the secrets is specified
+but not implemented. A drift check is a proposed run too, of the last applied commit: it keeps
+the secrets.</p>
+</div>
 <h2 id="triggering-over-the-api">Triggering over the API<a class="headerlink" href="#triggering-over-the-api" title="Permanent link">&para;</a></h2>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>curl<span class="w"> </span>-s<span class="w"> </span>-X<span class="w"> </span>POST<span class="w"> </span>localhost:8000/api/v1/environments/<span class="nv">$ENV_ID</span>/runs<span class="w"> </span>-H<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$AUTH</span><span class="s2">&quot;</span><span class="w"> </span>-d<span class="w"> </span><span class="s1">&#39;{}&#39;</span><span class="w">   </span><span class="c1"># trigger plan</span>
-<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a>curl<span class="w"> </span>-s<span class="w"> </span>-X<span class="w"> </span>POST<span class="w"> </span>localhost:8000/api/v1/runs/<span class="nv">$RUN_ID</span>/confirm<span class="w"> </span>-H<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$AUTH</span><span class="s2">&quot;</span><span class="w">                 </span><span class="c1"># approve → apply</span>
-<a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a>curl<span class="w"> </span>-s<span class="w"> </span>-X<span class="w"> </span>POST<span class="w"> </span>localhost:8000/api/v1/runs/<span class="nv">$RUN_ID</span>/discard<span class="w"> </span>-H<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$AUTH</span><span class="s2">&quot;</span><span class="w">                 </span><span class="c1"># discard</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>curl<span class="w"> </span>-s<span class="w"> </span>-X<span class="w"> </span>POST<span class="w"> </span>localhost:8000/api/v1/environments/<span class="nv">$ENV_ID</span>/runs<span class="w"> </span>-H<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$AUTH</span><span class="s2">&quot;</span><span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="w">  </span>-H<span class="w"> </span><span class="s1">&#39;content-type: application/json&#39;</span><span class="w"> </span>-d<span class="w"> </span><span class="s1">&#39;{}&#39;</span><span class="w">                                         </span><span class="c1"># trigger plan</span>
+<a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a>curl<span class="w"> </span>-s<span class="w"> </span>-X<span class="w"> </span>POST<span class="w"> </span>localhost:8000/api/v1/runs/<span class="nv">$RUN_ID</span>/confirm<span class="w"> </span>-H<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$AUTH</span><span class="s2">&quot;</span><span class="w">                 </span><span class="c1"># approve → apply</span>
+<a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a>curl<span class="w"> </span>-s<span class="w"> </span>-X<span class="w"> </span>POST<span class="w"> </span>localhost:8000/api/v1/runs/<span class="nv">$RUN_ID</span>/discard<span class="w"> </span>-H<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$AUTH</span><span class="s2">&quot;</span><span class="w">                 </span><span class="c1"># discard</span>
 </code></pre></div>
 <h2 id="see-also">See also<a class="headerlink" href="#see-also" title="Permanent link">&para;</a></h2>
 <ul>

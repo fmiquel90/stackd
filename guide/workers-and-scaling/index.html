@@ -753,6 +753,17 @@
   
 </li>
         
+          <li class="md-nav__item">
+  <a href="#time-budgets" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Time budgets
+      
+    </span>
+  </a>
+  
+</li>
+        
       </ul>
     </nav>
   
@@ -777,6 +788,34 @@
       
     </span>
   </a>
+  
+    <nav class="md-nav" aria-label="Run a worker">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#worker-settings" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Worker settings
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#runners" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Runners
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
   
 </li>
       
@@ -919,6 +958,33 @@
   
   
     <li class="md-nav__item">
+      <a href="../../ARCHITECTURE/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Architecture
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../../api/" class="md-nav__link">
         
   
@@ -959,10 +1025,10 @@
       
         
         
-        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5" >
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_6" >
         
           
-          <label class="md-nav__link" for="__nav_5" id="__nav_5_label" tabindex="">
+          <label class="md-nav__link" for="__nav_6" id="__nav_6_label" tabindex="">
             
   
   
@@ -980,8 +1046,8 @@
             <span class="md-nav__icon md-icon"></span>
           </label>
         
-        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_5_label" aria-expanded="false">
-          <label class="md-nav__title" for="__nav_5">
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_6_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_6">
             <span class="md-nav__icon md-icon"></span>
             
   
@@ -1209,6 +1275,17 @@
   
 </li>
         
+          <li class="md-nav__item">
+  <a href="#time-budgets" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Time budgets
+      
+    </span>
+  </a>
+  
+</li>
+        
       </ul>
     </nav>
   
@@ -1233,6 +1310,34 @@
       
     </span>
   </a>
+  
+    <nav class="md-nav" aria-label="Run a worker">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#worker-settings" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Worker settings
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#runners" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Runners
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
   
 </li>
       
@@ -1298,7 +1403,7 @@
 <li><strong>Register</strong> to a pool with the pool token → it gets a <code>worker_id</code> and a per-worker token. The token expires (default 24h); the worker re-registers automatically on a <code>401</code> to refresh it.</li>
 <li><strong>Heartbeat</strong> every ~20s. The heartbeat response is the only <em>downward</em> channel (e.g. diagnostics, and later <code>cancel_job</code>).</li>
 <li><strong>Claim</strong> a job via long-poll (<code>POST /worker/v1/jobs/claim?wait=25</code>), returning <code>204</code> when there is nothing to do.</li>
-<li><strong>Run</strong> the job: clone the repo, set up the tool (checksum-verified), run hooks + <code>init</code>/<code>plan</code>/<code>apply</code>, stream logs, report results and upload artifacts.</li>
+<li><strong>Run</strong> the job: clone the repo, run hooks + <code>init</code>/<code>plan</code>/<code>apply</code> (or the command), stream logs, report results and upload artifacts — including the saved plan the apply will use.</li>
 <li>Clean up the workspace and repeat.</li>
 </ol>
 <pre class="mermaid"><code>sequenceDiagram
@@ -1312,33 +1417,123 @@
     end
     W-&gt;&gt;A: POST /worker/v1/jobs/claim?wait=25
     A--&gt;&gt;W: 200 { job } | 204 nothing
-    Note over W: clone → tool → hooks → plan/apply → report</code></pre>
+    Note over W: clone → hooks → init → plan/apply → report</code></pre>
 <p>The <strong>queue is Postgres</strong>, not a broker. A claim is an atomic <code>SELECT … FOR UPDATE … SKIP LOCKED</code> that picks the next eligible run. There is no Redis, no RabbitMQ, nothing to operate beyond the database.</p>
 <h3 id="one-active-run-per-environment">One active run per environment<a class="headerlink" href="#one-active-run-per-environment" title="Permanent link">&para;</a></h3>
 <p><code>SKIP LOCKED</code> alone does not serialise two workers claiming two <em>distinct</em> queued runs of the <strong>same</strong> environment. The hard guarantee is the partial unique index <code>one_active_run_per_env</code>: the second claim violates it (SQLSTATE <code>23505</code>), is caught, and is treated as "nothing to claim" — that worker simply re-polls. The claim also locks the environment row (<code>FOR UPDATE OF environment</code>) so losers skip it and pick other work instead of wasting effort.</p>
 <p>The practical consequence: <strong>the unit of parallelism is the environment.</strong> Two environments of the same stack run in parallel; two runs on the same environment never do.</p>
 <h3 id="apply-affinity">Apply affinity<a class="headerlink" href="#apply-affinity" title="Permanent link">&para;</a></h3>
-<p>After a plan, the originating worker is <strong>preferred</strong> for the matching apply for ~60s — it still has the workspace, so the apply reuses it. Past that delay (a dead or saturated worker), any compatible worker takes the run and does an <strong>automatic re-plan</strong> before applying.</p>
+<p>After a plan is confirmed, the originating worker is <strong>preferred</strong> for the apply for ~60s (<code>STACKD_APPLY_AFFINITY_SECONDS</code>). Past that delay (a dead or saturated worker), any compatible worker takes it. No workspace is reused either way: the apply worker clones the run's <strong>pinned commit</strong>, downloads the <strong>saved plan</strong> from the API and runs <code>tofu apply plan.tfplan</code>. It never re-plans: without a usable saved plan the run fails, and you trigger a new plan. See <a href="../runs-and-approvals/#what-gets-applied-is-what-was-reviewed">Runs &amp; approvals</a>.</p>
 <h3 id="worker-loss">Worker loss<a class="headerlink" href="#worker-loss" title="Permanent link">&para;</a></h3>
-<p>A worker silent for &gt; 60s is marked <code>offline</code>. An active run on a worker offline for &gt; 120s is transitioned to <code>failed (worker_lost)</code> by the scheduler's periodic detection task. No human action required.</p>
-<p>An <strong><code>applying</code> run is the exception</strong>: it is reclaimed only after the apply budget plus a grace period (<code>stackd_apply_timeout_seconds</code> + <code>stackd_apply_lost_grace_seconds</code>, default 15 min + 5 min). This keeps a healthy long apply from being failed mid-flight, and — since the worker hard-kills its own <code>apply</code> at the budget and its cloud/state tokens are scoped to budget + grace — guarantees a reclaimed env can't be applied by two workers at once.</p>
+<p>A worker silent for &gt; 60s is marked <code>offline</code>. The scheduler (every 10 s) then fails the runs whose job is <strong>executing</strong> on that worker — <code>preparing</code>, <code>planning</code>, <code>checking</code>, <code>running</code> (a command) or <code>applying</code> — as <code>failed (worker_lost)</code>, once the worker has been silent for &gt; 120s. No human action required.</p>
+<p>Runs that are <strong>not executing</strong> are never reclaimed: an <code>unconfirmed</code> run waits for a human and a <code>confirmed</code> one for the apply claim, and neither depends on the plan worker. Losing the worker that planned a run doesn't fail it; another worker applies the saved plan.</p>
+<p>A job holding <strong>apply credentials</strong> — an <code>applying</code> run, or a <strong>mutating command</strong> run (<code>import</code>, <code>state rm</code>/<code>mv</code>, <code>taint</code>, <code>untaint</code>, <code>refresh</code>) — is the exception: it is reclaimed only after the <strong>apply window</strong>, the apply budget plus a grace period (<code>stackd_apply_timeout_seconds</code> + <code>stackd_apply_lost_grace_seconds</code>, default 15 min + 5 min). The worker hard-kills its own apply or mutating command at the budget, and that job's state token and apply OIDC token expire at the end of the window. So a healthy long apply is never failed mid-flight, and by the time the environment is handed to another run, the lost worker can no longer write its state. As a second safeguard, the state backend refuses a write or a lock from any token whose run has already ended.</p>
+<h3 id="time-budgets">Time budgets<a class="headerlink" href="#time-budgets" title="Permanent link">&para;</a></h3>
+<p>Each job's subprocesses run in their own process group: whatever a hook or a tofu command leaves running there is killed once it exits, and a watchdog kills the whole group past its budget. A plan, an apply or a command killed this way fails the run with an "exceeded the …s time budget" error:</p>
+<table>
+<thead>
+<tr>
+<th>What</th>
+<th>Budget</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>apply</code> of the saved plan</td>
+<td>the apply budget, <code>apply_timeout_seconds</code> in the claim (<code>STACKD_APPLY_TIMEOUT_SECONDS</code> on the API, default 900 s)</td>
+</tr>
+<tr>
+<td>a command run's subcommand</td>
+<td>the apply budget when the claim's <code>cred_phase</code> is <code>apply</code> (a mutating command); the default cap when it is <code>plan</code> (a read-only command). A missing or unknown <code>cred_phase</code> (an older API) gets the apply budget: it fails closed</td>
+</tr>
+<tr>
+<td>each hook</td>
+<td>the hook timeout, <code>STACKD_HOOK_TIMEOUT_SECONDS</code> on the worker (default 600 s). A hook past it fails by its own <code>on_failure</code> (<a href="../hooks/#failures-warnings-and-timeouts">Hooks</a>)</td>
+</tr>
+<tr>
+<td>anything else (<code>init</code>, <code>plan</code>, <code>show</code>, <code>output</code>)</td>
+<td>the agent's default cap, 2 h</td>
+</tr>
+</tbody>
+</table>
+<p>The worker never decides on its own whether a command is mutating: it reads <code>cred_phase</code> from the claim. A plan fails on any exit code but 0 (no changes) and 2 (changes) — a killed plan never passes for "no changes".</p>
 <h2 id="create-a-pool">Create a pool<a class="headerlink" href="#create-a-pool" title="Permanent link">&para;</a></h2>
-<p>Workers register to a <strong>pool</strong>, scoped to a space. The pool token is shown once at creation and stored <strong>hashed</strong> — rotate it if leaked.</p>
+<p>Workers register to a <strong>pool</strong>, scoped to a space (<code>space_id</code> in the request, the <code>default</code> space otherwise). The pool token is shown once at creation and stored <strong>hashed</strong>. There is no rotate endpoint: if a token leaks, delete the pool and create a new one.</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="nv">AUTH</span><span class="o">=</span><span class="s2">&quot;Authorization: Bearer </span><span class="nv">$TOKEN</span><span class="s2">&quot;</span>
 <a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="nv">POOL_TOKEN</span><span class="o">=</span><span class="k">$(</span>curl<span class="w"> </span>-s<span class="w"> </span>-X<span class="w"> </span>POST<span class="w"> </span>localhost:8000/api/v1/worker-pools<span class="w"> </span><span class="se">\</span>
 <a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a><span class="w">  </span>-H<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$AUTH</span><span class="s2">&quot;</span><span class="w"> </span>-H<span class="w"> </span><span class="s2">&quot;Content-Type: application/json&quot;</span><span class="w"> </span><span class="se">\</span>
 <a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a><span class="w">  </span>-d<span class="w"> </span><span class="s1">&#39;{&quot;name&quot;: &quot;default&quot;}&#39;</span><span class="w"> </span><span class="p">|</span><span class="w"> </span>jq<span class="w"> </span>-r<span class="w"> </span>.token<span class="k">)</span>
 </code></pre></div>
 <h2 id="run-a-worker">Run a worker<a class="headerlink" href="#run-a-worker" title="Permanent link">&para;</a></h2>
-<p>A worker needs only the API URL and the pool token:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="nv">STACKD_API_URL</span><span class="o">=</span>http://localhost:8000<span class="w"> </span><span class="se">\</span>
-<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="nv">STACKD_POOL_TOKEN</span><span class="o">=</span><span class="nv">$POOL_TOKEN</span><span class="w"> </span><span class="se">\</span>
-<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a><span class="w">  </span>python<span class="w"> </span>-m<span class="w"> </span>agent.main
+<p>A worker needs only the API URL and the pool token (or <code>STACKD_POOL_TOKEN_FILE</code>, a file it re-reads until the token appears):</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="nb">cd</span><span class="w"> </span>worker
+<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="nv">STACKD_API_URL</span><span class="o">=</span>http://localhost:8000<span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a><span class="nv">STACKD_POOL_TOKEN</span><span class="o">=</span><span class="nv">$POOL_TOKEN</span><span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a><span class="w">  </span>uv<span class="w"> </span>run<span class="w"> </span>python<span class="w"> </span>-m<span class="w"> </span>agent.main
 </code></pre></div>
-<p>In dev the runner executes commands locally. In prod the <strong>container runner</strong> runs each terraform and hook command inside <code>stackd/runner:&lt;tool&gt;-&lt;version&gt;</code> (bundling tfsec, checkov, infracost, jq).</p>
+<h3 id="worker-settings">Worker settings<a class="headerlink" href="#worker-settings" title="Permanent link">&para;</a></h3>
+<table>
+<thead>
+<tr>
+<th>Variable</th>
+<th>Default</th>
+<th>What it does</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>STACKD_API_URL</code></td>
+<td><code>http://api:8000</code></td>
+<td>where the worker reaches the API</td>
+</tr>
+<tr>
+<td><code>STACKD_POOL_TOKEN</code> / <code>STACKD_POOL_TOKEN_FILE</code></td>
+<td>—</td>
+<td>the pool token, or a file holding it</td>
+</tr>
+<tr>
+<td><code>STACKD_WORKER_NAME</code></td>
+<td>the host name</td>
+<td>the worker's name in the UI</td>
+</tr>
+<tr>
+<td><code>STACKD_MAX_CONCURRENT_JOBS</code></td>
+<td><code>1</code></td>
+<td>jobs run at once, always on different environments</td>
+</tr>
+<tr>
+<td><code>STACKD_HOOK_TIMEOUT_SECONDS</code></td>
+<td><code>600</code></td>
+<td>each hook's time budget</td>
+</tr>
+<tr>
+<td><code>STACKD_LEAK_TRIPWIRE</code></td>
+<td><code>warn</code></td>
+<td><code>fail</code> fails a plan whose non-sensitive output shows a secret</td>
+</tr>
+<tr>
+<td><code>STACKD_WORKSPACE_ROOT</code></td>
+<td><code>/tmp/stackd-ws</code></td>
+<td>where each job's workspace is created, then removed</td>
+</tr>
+<tr>
+<td><code>STACKD_HEARTBEAT_INTERVAL</code>, <code>STACKD_POLL_WAIT</code></td>
+<td><code>20</code>, <code>25</code> (s)</td>
+<td>heartbeat period, claim long-poll</td>
+</tr>
+</tbody>
+</table>
+<p>These <code>STACKD_*</code> settings are the agent's own: <strong>they never reach tofu or a hook</strong>, so repo code
+can't read the pool token from its environment.</p>
 <div class="admonition warning">
-<p class="admonition-title">Fargate runner caveat</p>
-<p>The container runner needs to launch containers, i.e. Docker-in-Docker. <strong>AWS Fargate does not allow this.</strong> On Fargate, run the worker with the <strong>local</strong> runner, or use an ECS launch type / host that provides a Docker daemon.</p>
+<p class="admonition-title">Keep platform secrets out of the worker's environment</p>
+<p>The worker needs no database, S3 or signing credential: it reaches states and saved plans through the API. tofu and platform hooks inherit the worker's environment — minus the <code>STACKD_*</code> namespace — and repo code runs inside tofu (<code>data "external"</code>, provisioners). So never give the worker <code>DATABASE_URL</code>, <code>S3_*</code> keys or <code>GOOGLE_CLIENT_SECRET</code>, nor <code>STACKD_ENCRYPTION_KEY</code> or <code>STACKD_JWT_SECRET</code>. The dev compose file blanks them for the worker. Repo hooks get only an allowlist (<code>PATH</code>, <code>HOME</code>, locale, proxy and CA settings), see <a href="../hooks/#what-hooks-can-see">Hooks</a>.</p>
+</div>
+<h3 id="runners">Runners<a class="headerlink" href="#runners" title="Permanent link">&para;</a></h3>
+<p>Every job runs in its own workspace, removed when the job ends. Today the agent runs each tofu and hook command as a <strong>local subprocess</strong>, as its own OS user — whatever <code>STACKD_RUNNER</code> says. A <strong>container runner</strong> (<code>STACKD_RUNNER=docker</code>: each job in its own container from a runner image, see <code>deploy/images/</code>) is specified but <strong>not implemented yet</strong>. Until it exists, a job is isolated neither from the agent's own process nor from the other jobs of its worker: keep <code>STACKD_MAX_CONCURRENT_JOBS=1</code> on workers that run code you don't fully trust.</p>
+<div class="admonition warning">
+<p class="admonition-title">Fargate caveat, for the container runner</p>
+<p>A container runner needs to launch containers, i.e. Docker-in-Docker. <strong>AWS Fargate does not allow this.</strong> On Fargate, the worker runs commands locally, as it does today.</p>
 </div>
 <h2 id="dedicate-a-pool-with-labels">Dedicate a pool with labels<a class="headerlink" href="#dedicate-a-pool-with-labels" title="Permanent link">&para;</a></h2>
 <p>Labels route work to pools. A run is eligible for a worker only when <code>env.labels &lt;@ worker.labels</code> (the environment's labels are a subset of the worker's). To dedicate a pool to production, label both the prod environments and a prod-only worker pool with <code>tier: prod</code>, and give general workers no such label — they will never pick up prod runs.</p>
@@ -1349,7 +1544,7 @@
 </code></pre></div>
 <p>This is the recommended isolation for sensitive environments: combine it with prod-scoped <a href="../cloud-credentials/">cloud credentials</a> for a hardened apply path.</p>
 <h2 id="scale">Scale<a class="headerlink" href="#scale" title="Permanent link">&para;</a></h2>
-<p><strong>Scaling = run more workers.</strong> They are stateless, so just increase the replica count — e.g. an ECS service <code>desiredCount</code>, a Deployment <code>replicas</code>, or more <code>python -m agent.main</code> processes. Nothing to coordinate; they all long-poll the same queue.</p>
+<p><strong>Scaling = run more workers.</strong> They are stateless, so just increase the replica count — e.g. an ECS service <code>desiredCount</code>, a Deployment <code>replicas</code>, or more agent processes. Nothing to coordinate; they all long-poll the same queue.</p>
 <p>Because the environment is the unit of parallelism, <strong>throughput ≈ min(workers, environments with queued work)</strong>. Adding workers beyond the number of environments that currently have queued runs buys nothing; they will idle on <code>204</code>.</p>
 <p>There is <strong>no built-in autoscaler</strong>, but the signals you need are exposed:</p>
 <ul>

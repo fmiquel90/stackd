@@ -891,6 +891,33 @@
   
   
     <li class="md-nav__item">
+      <a href="../../ARCHITECTURE/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Architecture
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../../api/" class="md-nav__link">
         
   
@@ -931,10 +958,10 @@
       
         
         
-        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5" >
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_6" >
         
           
-          <label class="md-nav__link" for="__nav_5" id="__nav_5_label" tabindex="">
+          <label class="md-nav__link" for="__nav_6" id="__nav_6_label" tabindex="">
             
   
   
@@ -952,8 +979,8 @@
             <span class="md-nav__icon md-icon"></span>
           </label>
         
-        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_5_label" aria-expanded="false">
-          <label class="md-nav__title" for="__nav_5">
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_6_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_6">
             <span class="md-nav__icon md-icon"></span>
             
   
@@ -1243,10 +1270,15 @@ scoped to the run, and AWS exchanges that token for an IAM role via
 </code></pre></div>
 <div class="admonition note">
 <p class="admonition-title">Plan and apply assume different roles</p>
-<p>A <code>plan</code> run and an <code>apply</code> run get tokens with different <code>phase</code> segments and
+<p>A <code>plan</code> job and an <code>apply</code> job get tokens with different <code>phase</code> segments and
 therefore assume <strong>different IAM roles</strong>: <code>plan</code> is read-only, <code>apply</code> is write.
-A PR plan physically cannot modify infrastructure.</p>
+A PR plan physically cannot modify infrastructure. A <a href="../commands/">command run</a> gets
+the <code>apply</code> role for a mutating command (<code>import</code>, <code>state rm</code>…) and the <code>plan</code> role
+for a read-only one.</p>
 </div>
+<p>The token expires after <code>session_duration</code>, capped per phase: 30 min for <code>plan</code>, and the
+apply window (the apply budget + grace, 20 min by default) for <code>apply</code> — so apply
+credentials never outlive the job they were minted for.</p>
 <h2 id="how-the-issuer-works">How the issuer works<a class="headerlink" href="#how-the-issuer-works" title="Permanent link">&para;</a></h2>
 <p>Stackd exposes a standard OIDC discovery surface, RS256-signed:</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>GET /.well-known/openid-configuration   → issuer, jwks_uri, alg RS256
@@ -1306,22 +1338,25 @@ different role or even a different AWS account). The resource is CRUD over:</p>
 way to catch a missing identity provider, a too-narrow <code>sub</code> condition, or an
 unreachable issuer.</p>
 <h2 id="what-the-agent-injects">What the agent injects<a class="headerlink" href="#what-the-agent-injects" title="Permanent link">&para;</a></h2>
-<p>When a <code>cloud_integration</code> is set, the worker writes the signed token to a file and
-exports, <strong>to the terraform process only</strong>:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a>AWS_WEB_IDENTITY_TOKEN_FILE = &lt;path to the token file&gt;
+<p>When a <code>cloud_integration</code> is set, the worker exports, <strong>to tofu and to platform hooks only</strong>:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a>AWS_WEB_IDENTITY_TOKEN_FILE = &lt;path to the token file, outside the checkout&gt;
 <a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a>AWS_ROLE_ARN                = &lt;plan_role_arn | apply_role_arn for this phase&gt;
 <a id="__codelineno-6-3" name="__codelineno-6-3" href="#__codelineno-6-3"></a>AWS_ROLE_SESSION_NAME       = stackd-&lt;run_id&gt;
+<a id="__codelineno-6-4" name="__codelineno-6-4" href="#__codelineno-6-4"></a>AWS_REGION                  = &lt;region, when the integration sets one&gt;
 </code></pre></div>
+<p>The token file is written right before each tofu command or platform hook and deleted right
+after: it is never on disk while a repo hook runs.</p>
 <p>The AWS SDK inside the providers performs the AssumeRoleWithWebIdentity natively. The
 session name ties every CloudTrail entry back to the run — and thus to the human who
 confirmed the apply.</p>
 <p>These variables are <strong>never</strong> exported to repo hooks (a <code>.stackd.yml</code> pushed via PR must
-not be able to assume the apply role and exfiltrate). Platform hooks can opt in. See
-<a href="../hooks/">Hooks</a>.</p>
+not be able to assume the apply role and exfiltrate). Platform hooks always get them. See
+<a href="../hooks/#what-hooks-can-see">Hooks</a>.</p>
 <h2 id="fallback-and-coexistence">Fallback and coexistence<a class="headerlink" href="#fallback-and-coexistence" title="Permanent link">&para;</a></h2>
-<p>With no <code>cloud_integration</code>, Stackd falls back to classic static variables (the
-<code>aws-credentials</code> variable set). If both an integration <strong>and</strong> static <code>AWS_*</code> variables
-are resolved, the OIDC credentials win and a configuration warning is shown.</p>
+<p>With no <code>cloud_integration</code>, Stackd falls back to classic static variables (for example an
+<code>aws-credentials</code> variable set). Don't resolve both on one environment: Stackd does not warn
+about it yet, and a static <code>AWS_ACCESS_KEY_ID</code> stays in tofu's environment, where the AWS SDK
+normally uses it before the OIDC token.</p>
 <h2 id="see-also">See also<a class="headerlink" href="#see-also" title="Permanent link">&para;</a></h2>
 <ul>
 <li><a href="../runs-and-approvals/">Runs &amp; approvals</a></li>

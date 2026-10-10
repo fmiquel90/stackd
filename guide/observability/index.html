@@ -815,6 +815,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#inspecting-object-storage-dev" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Inspecting object storage (dev)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#watching-a-run-live" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -886,6 +897,33 @@
   
   
     <li class="md-nav__item">
+      <a href="../../ARCHITECTURE/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Architecture
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../../api/" class="md-nav__link">
         
   
@@ -926,10 +964,10 @@
       
         
         
-        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5" >
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_6" >
         
           
-          <label class="md-nav__link" for="__nav_5" id="__nav_5_label" tabindex="">
+          <label class="md-nav__link" for="__nav_6" id="__nav_6_label" tabindex="">
             
   
   
@@ -947,8 +985,8 @@
             <span class="md-nav__icon md-icon"></span>
           </label>
         
-        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_5_label" aria-expanded="false">
-          <label class="md-nav__title" for="__nav_5">
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_6_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_6">
             <span class="md-nav__icon md-icon"></span>
             
   
@@ -1182,6 +1220,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#inspecting-object-storage-dev" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Inspecting object storage (dev)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#watching-a-run-live" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -1230,24 +1279,39 @@ a structured, filterable buffer; worker diagnostics let you debug a remote agent
 without opening a shell. This page is task-oriented — pick the section that
 matches what you're trying to find out.</p>
 <h2 id="health-at-a-glance">Health at a glance<a class="headerlink" href="#health-at-a-glance" title="Permanent link">&para;</a></h2>
-<p><code>GET /api/v1/health</code> returns one snapshot: a DB connectivity check, workers
-(online / total with each one's last heartbeat), runs (active / queued), and a
-short list of recent warnings and errors. The front <strong>Workers &amp; health</strong> page
-renders this snapshot alongside a live logs panel, and a green/red status dot
-sits in the topbar so you see degradation without leaving your current screen.</p>
+<p><code>GET /api/v1/health</code> (any signed-in user) returns one snapshot: a DB
+connectivity check, workers (online / total, and each worker's pool, labels,
+status and last heartbeat), runs (active / queued), and how many warnings and
+errors the log buffer holds. The front <strong>Workers &amp; health</strong> page renders this
+snapshot alongside a live logs panel, and a green/red status dot sits in the
+topbar so you see degradation without leaving your current screen.</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>curl<span class="w"> </span>-s<span class="w"> </span>localhost:8000/api/v1/health<span class="w"> </span>-H<span class="w"> </span><span class="s2">&quot;Authorization: Bearer </span><span class="nv">$TOKEN</span><span class="s2">&quot;</span>
 </code></pre></div>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="p">{</span>
-<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="w">  </span><span class="nt">&quot;db&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;ok&quot;</span><span class="p">,</span>
-<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a><span class="w">  </span><span class="nt">&quot;workers&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="nt">&quot;online&quot;</span><span class="p">:</span><span class="w"> </span><span class="mi">2</span><span class="p">,</span><span class="w"> </span><span class="nt">&quot;total&quot;</span><span class="p">:</span><span class="w"> </span><span class="mi">3</span><span class="p">,</span><span class="w"> </span><span class="nt">&quot;last_heartbeat_at&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;2026-06-14T09:31:02Z&quot;</span><span class="w"> </span><span class="p">},</span>
-<a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a><span class="w">  </span><span class="nt">&quot;runs&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="nt">&quot;active&quot;</span><span class="p">:</span><span class="w"> </span><span class="mi">1</span><span class="p">,</span><span class="w"> </span><span class="nt">&quot;queued&quot;</span><span class="p">:</span><span class="w"> </span><span class="mi">4</span><span class="w"> </span><span class="p">},</span>
-<a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a><span class="w">  </span><span class="nt">&quot;recent&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">[</span>
-<a id="__codelineno-1-6" name="__codelineno-1-6" href="#__codelineno-1-6"></a><span class="w">    </span><span class="p">{</span><span class="w"> </span><span class="nt">&quot;level&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;WARNING&quot;</span><span class="p">,</span><span class="w"> </span><span class="nt">&quot;event&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;http.request&quot;</span><span class="p">,</span><span class="w"> </span><span class="nt">&quot;request_id&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;01J…&quot;</span><span class="p">,</span><span class="w"> </span><span class="nt">&quot;msg&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;404 GET /api/v1/runs/unknown&quot;</span><span class="w"> </span><span class="p">}</span>
-<a id="__codelineno-1-7" name="__codelineno-1-7" href="#__codelineno-1-7"></a><span class="w">  </span><span class="p">]</span>
-<a id="__codelineno-1-8" name="__codelineno-1-8" href="#__codelineno-1-8"></a><span class="p">}</span>
+<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="w">  </span><span class="nt">&quot;status&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;ok&quot;</span><span class="p">,</span>
+<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a><span class="w">  </span><span class="nt">&quot;env&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;development&quot;</span><span class="p">,</span>
+<a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a><span class="w">  </span><span class="nt">&quot;version&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;0.1.0&quot;</span><span class="p">,</span>
+<a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a><span class="w">  </span><span class="nt">&quot;checks&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="nt">&quot;database&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;ok&quot;</span><span class="w"> </span><span class="p">},</span>
+<a id="__codelineno-1-6" name="__codelineno-1-6" href="#__codelineno-1-6"></a><span class="w">  </span><span class="nt">&quot;workers&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">{</span>
+<a id="__codelineno-1-7" name="__codelineno-1-7" href="#__codelineno-1-7"></a><span class="w">    </span><span class="nt">&quot;total&quot;</span><span class="p">:</span><span class="w"> </span><span class="mi">1</span><span class="p">,</span>
+<a id="__codelineno-1-8" name="__codelineno-1-8" href="#__codelineno-1-8"></a><span class="w">    </span><span class="nt">&quot;online&quot;</span><span class="p">:</span><span class="w"> </span><span class="mi">1</span><span class="p">,</span>
+<a id="__codelineno-1-9" name="__codelineno-1-9" href="#__codelineno-1-9"></a><span class="w">    </span><span class="nt">&quot;items&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">[</span>
+<a id="__codelineno-1-10" name="__codelineno-1-10" href="#__codelineno-1-10"></a><span class="w">      </span><span class="p">{</span><span class="w"> </span><span class="nt">&quot;name&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;worker-1&quot;</span><span class="p">,</span><span class="w"> </span><span class="nt">&quot;pool&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;local&quot;</span><span class="p">,</span><span class="w"> </span><span class="nt">&quot;labels&quot;</span><span class="p">:</span><span class="w"> </span><span class="kc">null</span><span class="p">,</span><span class="w"> </span><span class="nt">&quot;status&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;idle&quot;</span><span class="p">,</span><span class="w"> </span><span class="nt">&quot;online&quot;</span><span class="p">:</span><span class="w"> </span><span class="kc">true</span><span class="p">,</span>
+<a id="__codelineno-1-11" name="__codelineno-1-11" href="#__codelineno-1-11"></a><span class="w">        </span><span class="nt">&quot;last_heartbeat_at&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;2026-10-10T09:31:02+00:00&quot;</span><span class="p">,</span><span class="w"> </span><span class="nt">&quot;seconds_since_heartbeat&quot;</span><span class="p">:</span><span class="w"> </span><span class="mf">3.2</span><span class="w"> </span><span class="p">}</span>
+<a id="__codelineno-1-12" name="__codelineno-1-12" href="#__codelineno-1-12"></a><span class="w">    </span><span class="p">]</span>
+<a id="__codelineno-1-13" name="__codelineno-1-13" href="#__codelineno-1-13"></a><span class="w">  </span><span class="p">},</span>
+<a id="__codelineno-1-14" name="__codelineno-1-14" href="#__codelineno-1-14"></a><span class="w">  </span><span class="nt">&quot;runs&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="nt">&quot;active&quot;</span><span class="p">:</span><span class="w"> </span><span class="mi">1</span><span class="p">,</span><span class="w"> </span><span class="nt">&quot;queued&quot;</span><span class="p">:</span><span class="w"> </span><span class="mi">4</span><span class="w"> </span><span class="p">},</span>
+<a id="__codelineno-1-15" name="__codelineno-1-15" href="#__codelineno-1-15"></a><span class="w">  </span><span class="nt">&quot;log_buffer&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="nt">&quot;size&quot;</span><span class="p">:</span><span class="w"> </span><span class="mi">812</span><span class="p">,</span><span class="w"> </span><span class="nt">&quot;recent_warn_error&quot;</span><span class="p">:</span><span class="w"> </span><span class="mi">3</span><span class="w"> </span><span class="p">}</span>
+<a id="__codelineno-1-16" name="__codelineno-1-16" href="#__codelineno-1-16"></a><span class="p">}</span>
 </code></pre></div>
-<p>A worker whose heartbeat is older than 60 s shows as offline; see
-<a href="../workers-and-scaling/">Workers &amp; scaling</a> for the worker-lost lifecycle.</p>
+<p><code>status</code> turns <code>degraded</code> when the database check fails. A worker whose heartbeat
+is older than 60 s shows as offline; see
+<a href="../workers-and-scaling/#worker-loss">Workers &amp; scaling</a> for the worker-lost
+lifecycle (only runs <em>executing</em> on a lost worker are failed).</p>
+<p>Two unauthenticated endpoints sit outside <code>/api/v1</code> for probes and scrapers:
+<code>GET /healthz</code> (liveness) and <code>GET /metrics</code> (Prometheus: runs by state, queue
+depth, workers online, claim latency, run duration, webhook results — counts
+only, never secrets). Restrict <code>/metrics</code> at the network layer.</p>
 <h2 id="querying-logs">Querying logs<a class="headerlink" href="#querying-logs" title="Permanent link">&para;</a></h2>
 <p><code>GET /api/v1/logs</code> (admin only) serves the structured JSON ring buffer. Filter
 by <code>level</code>, <code>event</code>, <code>worker_id</code>, <code>run_id</code>, <code>request_id</code>, or free-text <code>q</code>.
@@ -1285,6 +1349,14 @@ the result comes back via <code>POST /worker/v1/commands/{id}/result</code>.</p>
 Secrets are never logged anywhere: <code>sensitive</code> variables are masked by the
 agent and never appear in logs, health output, or a diagnostics bundle.</p>
 </div>
+<h2 id="inspecting-object-storage-dev">Inspecting object storage (dev)<a class="headerlink" href="#inspecting-object-storage-dev" title="Permanent link">&para;</a></h2>
+<p>Managed states and saved plans live in S3 (Garage in dev), reached only by the
+API. <code>task s3-ls</code> lists the dev bucket with the API's own S3 settings:
+<code>states/&lt;environment_id&gt;/…</code> for state versions, <code>artifacts/&lt;run_id&gt;/plan.tfplan</code>
+for the saved plan of a run that can still be applied (encrypted, deleted when
+the run ends). If a plan with changes fails while uploading its plan file, the
+API cannot reach the bucket: run <code>task s3</code>, then <code>task dev</code>. See
+<a href="../../DEV/#2-docker-compose-stack">Dev environment §2</a>.</p>
 <h2 id="watching-a-run-live">Watching a run live<a class="headerlink" href="#watching-a-run-live" title="Permanent link">&para;</a></h2>
 <p>You don't need to poll for an active run. The run page and the dependency graph
 subscribe over WebSocket: state transitions, new log lines, and graph status

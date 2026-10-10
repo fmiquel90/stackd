@@ -765,6 +765,33 @@
   
   
     <li class="md-nav__item">
+      <a href="../ARCHITECTURE/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Architecture
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../api/" class="md-nav__link">
         
   
@@ -807,10 +834,10 @@
       
         
         
-        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5" checked>
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_6" checked>
         
           
-          <label class="md-nav__link" for="__nav_5" id="__nav_5_label" tabindex="">
+          <label class="md-nav__link" for="__nav_6" id="__nav_6_label" tabindex="">
             
   
   
@@ -828,8 +855,8 @@
             <span class="md-nav__icon md-icon"></span>
           </label>
         
-        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_5_label" aria-expanded="true">
-          <label class="md-nav__title" for="__nav_5">
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_6_label" aria-expanded="true">
+          <label class="md-nav__title" for="__nav_6">
             <span class="md-nav__icon md-icon"></span>
             
   
@@ -1306,7 +1333,7 @@
 <tr>
 <td>AWS cloud</td>
 <td>Real STS/providers</td>
-<td><strong>Cloud-less providers</strong> (<code>local_file</code>, <code>random</code>, <code>null</code>) + optional LocalStack (§6)</td>
+<td><strong>Cloud-less fixtures</strong> (built-in <code>terraform_data</code>, no provider) + optional LocalStack (§6)</td>
 </tr>
 </tbody>
 </table>
@@ -1316,7 +1343,7 @@
 <div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="c1"># deploy/docker-compose.dev.yml</span>
 <a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="nt">services</span><span class="p">:</span>
 <a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a><span class="w">  </span><span class="nt">postgres</span><span class="p">:</span><span class="w">        </span><span class="c1"># 18, port 5432, named volume</span>
-<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a><span class="w">  </span><span class="nt">garage</span><span class="p">:</span><span class="w">          </span><span class="c1"># local S3 (Garage), S3 API on :3900, admin CLI `garage` ; stackd bucket auto-created at seed</span>
+<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a><span class="w">  </span><span class="nt">garage</span><span class="p">:</span><span class="w">          </span><span class="c1"># local S3 (Garage), S3 API on :3900, admin CLI `garage` ; layout, key and stackd bucket provisioned by `task dev`</span>
 <a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a><span class="w">  </span><span class="nt">api</span><span class="p">:</span><span class="w">             </span><span class="c1"># uv run uvicorn --reload, mounts ./api, port 8000</span>
 <a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a><span class="w">  </span><span class="nt">front</span><span class="p">:</span><span class="w">           </span><span class="c1"># vite dev server, mounts ./front, port 5173, proxy /api → api</span>
 <a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a><span class="w">  </span><span class="nt">worker</span><span class="p">:</span><span class="w">          </span><span class="c1"># agent in --reload mode (watchfiles), runner=local (§5)</span>
@@ -1324,14 +1351,16 @@
 <a id="__codelineno-0-9" name="__codelineno-0-9" href="#__codelineno-0-9"></a><span class="w">  </span><span class="nt">gitea</span><span class="p">:</span><span class="w">           </span><span class="c1"># profile &quot;git&quot;  : real webhooks locally (§4)</span>
 <a id="__codelineno-0-10" name="__codelineno-0-10" href="#__codelineno-0-10"></a><span class="w">  </span><span class="nt">localstack</span><span class="p">:</span><span class="w">      </span><span class="c1"># profile &quot;aws&quot;  : simulated S3/RDS/IAM (§6)</span>
 </code></pre></div>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>task<span class="w"> </span>dev<span class="w">            </span><span class="c1"># compose up (base services) + migrations + seed</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>task<span class="w"> </span>dev<span class="w">            </span><span class="c1"># S3 bootstrap + compose up (base services) + migrations + seed</span>
 <a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a>task<span class="w"> </span>dev-git<span class="w">        </span><span class="c1"># + Gitea (webhook testing)</span>
 <a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a>task<span class="w"> </span>dev-aws<span class="w">        </span><span class="c1"># + LocalStack</span>
 <a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a>task<span class="w"> </span>seed<span class="w">           </span><span class="c1"># (re)creates the demo data, idempotent</span>
-<a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a>task<span class="w"> </span>reset<span class="w">          </span><span class="c1"># down -v + dev : start from scratch</span>
-<a id="__codelineno-1-6" name="__codelineno-1-6" href="#__codelineno-1-6"></a>task<span class="w"> </span>logs<span class="w">           </span><span class="c1"># aggregated colored logs (api, worker)</span>
-<a id="__codelineno-1-7" name="__codelineno-1-7" href="#__codelineno-1-7"></a>task<span class="w"> </span><span class="nb">test</span><span class="w">           </span><span class="c1"># pytest + vitest</span>
-<a id="__codelineno-1-8" name="__codelineno-1-8" href="#__codelineno-1-8"></a>task<span class="w"> </span>e2e<span class="w">            </span><span class="c1"># complete automated scenario (§7)</span>
+<a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a>task<span class="w"> </span>s3<span class="w">             </span><span class="c1"># provision the dev S3 (Garage layout, key into .env, bucket), idempotent; part of dev</span>
+<a id="__codelineno-1-6" name="__codelineno-1-6" href="#__codelineno-1-6"></a>task<span class="w"> </span>s3-ls<span class="w">          </span><span class="c1"># list the dev bucket (managed states, saved plans)</span>
+<a id="__codelineno-1-7" name="__codelineno-1-7" href="#__codelineno-1-7"></a>task<span class="w"> </span>reset<span class="w">          </span><span class="c1"># down -v, drop .dev/pool.token, then dev : start from scratch</span>
+<a id="__codelineno-1-8" name="__codelineno-1-8" href="#__codelineno-1-8"></a>task<span class="w"> </span>logs<span class="w">           </span><span class="c1"># aggregated colored logs (api, worker)</span>
+<a id="__codelineno-1-9" name="__codelineno-1-9" href="#__codelineno-1-9"></a>task<span class="w"> </span><span class="nb">test</span><span class="w">           </span><span class="c1"># pytest + vitest</span>
+<a id="__codelineno-1-10" name="__codelineno-1-10" href="#__codelineno-1-10"></a>task<span class="w"> </span>e2e<span class="w">            </span><span class="c1"># complete automated scenario (§7)</span>
 </code></pre></div>
 <p>Orchestration via <strong><a href="https://taskfile.dev">Task</a></strong> (<code>Taskfile.yml</code> at the root) rather than Make: readable YAML syntax, cross-platform (single Go binary, no dependency on GNU Make), native <code>deps</code>/<code>status</code> for idempotence, namespaces per module, and self-documented <code>task --list</code>. Excerpt:</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="c1"># Taskfile.yml</span>
@@ -1342,116 +1371,140 @@
 <a id="__codelineno-2-6" name="__codelineno-2-6" href="#__codelineno-2-6"></a>
 <a id="__codelineno-2-7" name="__codelineno-2-7" href="#__codelineno-2-7"></a><span class="nt">tasks</span><span class="p">:</span>
 <a id="__codelineno-2-8" name="__codelineno-2-8" href="#__codelineno-2-8"></a><span class="w">  </span><span class="nt">dev</span><span class="p">:</span>
-<a id="__codelineno-2-9" name="__codelineno-2-9" href="#__codelineno-2-9"></a><span class="w">    </span><span class="nt">desc</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Complete local stack (compose + migrations + seed)</span>
+<a id="__codelineno-2-9" name="__codelineno-2-9" href="#__codelineno-2-9"></a><span class="w">    </span><span class="nt">desc</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Complete local stack (compose + S3 bootstrap + migrations + seed)</span>
 <a id="__codelineno-2-10" name="__codelineno-2-10" href="#__codelineno-2-10"></a><span class="w">    </span><span class="nt">deps</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">env</span><span class="p p-Indicator">]</span>
 <a id="__codelineno-2-11" name="__codelineno-2-11" href="#__codelineno-2-11"></a><span class="w">    </span><span class="nt">cmds</span><span class="p">:</span>
-<a id="__codelineno-2-12" name="__codelineno-2-12" href="#__codelineno-2-12"></a><span class="w">      </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="s">&quot;{{.COMPOSE}}</span><span class="nv"> </span><span class="s">up</span><span class="nv"> </span><span class="s">-d</span><span class="nv"> </span><span class="s">--wait&quot;</span>
-<a id="__codelineno-2-13" name="__codelineno-2-13" href="#__codelineno-2-13"></a><span class="w">      </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">task</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">migrate</span>
-<a id="__codelineno-2-14" name="__codelineno-2-14" href="#__codelineno-2-14"></a><span class="w">      </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">task</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">seed</span>
-<a id="__codelineno-2-15" name="__codelineno-2-15" href="#__codelineno-2-15"></a>
-<a id="__codelineno-2-16" name="__codelineno-2-16" href="#__codelineno-2-16"></a><span class="w">  </span><span class="nt">env</span><span class="p">:</span>
-<a id="__codelineno-2-17" name="__codelineno-2-17" href="#__codelineno-2-17"></a><span class="w">    </span><span class="nt">desc</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Generates .env and dev keys on first launch</span>
-<a id="__codelineno-2-18" name="__codelineno-2-18" href="#__codelineno-2-18"></a><span class="w">    </span><span class="nt">cmds</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">./scripts/bootstrap-env.sh</span><span class="p p-Indicator">]</span>
-<a id="__codelineno-2-19" name="__codelineno-2-19" href="#__codelineno-2-19"></a><span class="w">    </span><span class="nt">status</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">test -f .env</span><span class="p p-Indicator">]</span><span class="w">          </span><span class="c1"># idempotent: does nothing if .env exists</span>
-<a id="__codelineno-2-20" name="__codelineno-2-20" href="#__codelineno-2-20"></a>
-<a id="__codelineno-2-21" name="__codelineno-2-21" href="#__codelineno-2-21"></a><span class="w">  </span><span class="nt">seed</span><span class="p">:</span>
-<a id="__codelineno-2-22" name="__codelineno-2-22" href="#__codelineno-2-22"></a><span class="w">    </span><span class="nt">desc</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Demo data (idempotent)</span>
-<a id="__codelineno-2-23" name="__codelineno-2-23" href="#__codelineno-2-23"></a><span class="w">    </span><span class="nt">cmds</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="s">&quot;{{.COMPOSE}}</span><span class="nv"> </span><span class="s">exec</span><span class="nv"> </span><span class="s">api</span><span class="nv"> </span><span class="s">uv</span><span class="nv"> </span><span class="s">run</span><span class="nv"> </span><span class="s">python</span><span class="nv"> </span><span class="s">-m</span><span class="nv"> </span><span class="s">app.seed&quot;</span><span class="p p-Indicator">]</span>
-<a id="__codelineno-2-24" name="__codelineno-2-24" href="#__codelineno-2-24"></a>
-<a id="__codelineno-2-25" name="__codelineno-2-25" href="#__codelineno-2-25"></a><span class="w">  </span><span class="nt">push-change</span><span class="p">:</span>
-<a id="__codelineno-2-26" name="__codelineno-2-26" href="#__codelineno-2-26"></a><span class="w">    </span><span class="nt">desc</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Simulates a merge into demo-network (staleness test)</span>
-<a id="__codelineno-2-27" name="__codelineno-2-27" href="#__codelineno-2-27"></a><span class="w">    </span><span class="nt">dir</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">.dev/repos/demo-network</span>
-<a id="__codelineno-2-28" name="__codelineno-2-28" href="#__codelineno-2-28"></a><span class="w">    </span><span class="nt">cmds</span><span class="p">:</span>
-<a id="__codelineno-2-29" name="__codelineno-2-29" href="#__codelineno-2-29"></a><span class="w">      </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">date &gt;&gt; CHANGELOG.txt</span>
-<a id="__codelineno-2-30" name="__codelineno-2-30" href="#__codelineno-2-30"></a><span class="w">      </span><span class="c1"># Quote the whole command — the &quot;: &quot; in the message is a YAML mapping token otherwise.</span>
-<a id="__codelineno-2-31" name="__codelineno-2-31" href="#__codelineno-2-31"></a><span class="w">      </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="s">&#39;git</span><span class="nv"> </span><span class="s">add</span><span class="nv"> </span><span class="s">-A</span><span class="nv"> </span><span class="s">&amp;&amp;</span><span class="nv"> </span><span class="s">git</span><span class="nv"> </span><span class="s">commit</span><span class="nv"> </span><span class="s">-m</span><span class="nv"> </span><span class="s">&quot;feat:</span><span class="nv"> </span><span class="s">simulated</span><span class="nv"> </span><span class="s">merge&quot;&#39;</span>
-<a id="__codelineno-2-32" name="__codelineno-2-32" href="#__codelineno-2-32"></a>
-<a id="__codelineno-2-33" name="__codelineno-2-33" href="#__codelineno-2-33"></a><span class="w">  </span><span class="nt">e2e</span><span class="p">:</span>
-<a id="__codelineno-2-34" name="__codelineno-2-34" href="#__codelineno-2-34"></a><span class="w">    </span><span class="nt">desc</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Complete §7 scenario (non-regression)</span>
-<a id="__codelineno-2-35" name="__codelineno-2-35" href="#__codelineno-2-35"></a><span class="w">    </span><span class="nt">deps</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">dev</span><span class="p p-Indicator">]</span>
-<a id="__codelineno-2-36" name="__codelineno-2-36" href="#__codelineno-2-36"></a><span class="w">    </span><span class="nt">cmds</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">pytest tests/e2e -v</span><span class="p p-Indicator">]</span>
+<a id="__codelineno-2-12" name="__codelineno-2-12" href="#__codelineno-2-12"></a><span class="w">      </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">task</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">s3</span><span class="w">                    </span><span class="c1"># before `up`: compose reads the S3 key from .env at creation</span>
+<a id="__codelineno-2-13" name="__codelineno-2-13" href="#__codelineno-2-13"></a><span class="w">      </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="s">&quot;{{.COMPOSE}}</span><span class="nv"> </span><span class="s">up</span><span class="nv"> </span><span class="s">-d</span><span class="nv"> </span><span class="s">--wait&quot;</span>
+<a id="__codelineno-2-14" name="__codelineno-2-14" href="#__codelineno-2-14"></a><span class="w">      </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">task</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">migrate</span>
+<a id="__codelineno-2-15" name="__codelineno-2-15" href="#__codelineno-2-15"></a><span class="w">      </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">task</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">seed-fixtures</span>
+<a id="__codelineno-2-16" name="__codelineno-2-16" href="#__codelineno-2-16"></a><span class="w">      </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">task</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">seed</span>
+<a id="__codelineno-2-17" name="__codelineno-2-17" href="#__codelineno-2-17"></a>
+<a id="__codelineno-2-18" name="__codelineno-2-18" href="#__codelineno-2-18"></a><span class="w">  </span><span class="nt">s3</span><span class="p">:</span>
+<a id="__codelineno-2-19" name="__codelineno-2-19" href="#__codelineno-2-19"></a><span class="w">    </span><span class="nt">desc</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Provision the dev S3 (Garage layout, access key into .env, bucket; idempotent)</span>
+<a id="__codelineno-2-20" name="__codelineno-2-20" href="#__codelineno-2-20"></a><span class="w">    </span><span class="nt">cmds</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">bash scripts/bootstrap-s3.sh</span><span class="p p-Indicator">]</span>
+<a id="__codelineno-2-21" name="__codelineno-2-21" href="#__codelineno-2-21"></a>
+<a id="__codelineno-2-22" name="__codelineno-2-22" href="#__codelineno-2-22"></a><span class="w">  </span><span class="nt">env</span><span class="p">:</span>
+<a id="__codelineno-2-23" name="__codelineno-2-23" href="#__codelineno-2-23"></a><span class="w">    </span><span class="nt">desc</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Generates .env and dev keys on first launch</span>
+<a id="__codelineno-2-24" name="__codelineno-2-24" href="#__codelineno-2-24"></a><span class="w">    </span><span class="nt">cmds</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">bash scripts/bootstrap-env.sh</span><span class="p p-Indicator">]</span>
+<a id="__codelineno-2-25" name="__codelineno-2-25" href="#__codelineno-2-25"></a><span class="w">    </span><span class="nt">status</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">test -f .env</span><span class="p p-Indicator">]</span><span class="w">          </span><span class="c1"># idempotent: does nothing if .env exists</span>
+<a id="__codelineno-2-26" name="__codelineno-2-26" href="#__codelineno-2-26"></a>
+<a id="__codelineno-2-27" name="__codelineno-2-27" href="#__codelineno-2-27"></a><span class="w">  </span><span class="nt">seed</span><span class="p">:</span>
+<a id="__codelineno-2-28" name="__codelineno-2-28" href="#__codelineno-2-28"></a><span class="w">    </span><span class="nt">desc</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Demo data (idempotent)</span>
+<a id="__codelineno-2-29" name="__codelineno-2-29" href="#__codelineno-2-29"></a><span class="w">    </span><span class="nt">cmds</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="s">&quot;{{.COMPOSE}}</span><span class="nv"> </span><span class="s">exec</span><span class="nv"> </span><span class="s">-T</span><span class="nv"> </span><span class="s">api</span><span class="nv"> </span><span class="s">uv</span><span class="nv"> </span><span class="s">run</span><span class="nv"> </span><span class="s">python</span><span class="nv"> </span><span class="s">-m</span><span class="nv"> </span><span class="s">app.seed&quot;</span><span class="p p-Indicator">]</span>
+<a id="__codelineno-2-30" name="__codelineno-2-30" href="#__codelineno-2-30"></a>
+<a id="__codelineno-2-31" name="__codelineno-2-31" href="#__codelineno-2-31"></a><span class="w">  </span><span class="nt">reset</span><span class="p">:</span>
+<a id="__codelineno-2-32" name="__codelineno-2-32" href="#__codelineno-2-32"></a><span class="w">    </span><span class="nt">desc</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Tear everything down and start fresh</span>
+<a id="__codelineno-2-33" name="__codelineno-2-33" href="#__codelineno-2-33"></a><span class="w">    </span><span class="nt">cmds</span><span class="p">:</span>
+<a id="__codelineno-2-34" name="__codelineno-2-34" href="#__codelineno-2-34"></a><span class="w">      </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="s">&quot;{{.COMPOSE}}</span><span class="nv"> </span><span class="s">down</span><span class="nv"> </span><span class="s">-v&quot;</span>
+<a id="__codelineno-2-35" name="__codelineno-2-35" href="#__codelineno-2-35"></a><span class="w">      </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">rm -f .dev/pool.token</span><span class="w">       </span><span class="c1"># belongs to the wiped DB: the worker waits for the new seed&#39;s</span>
+<a id="__codelineno-2-36" name="__codelineno-2-36" href="#__codelineno-2-36"></a><span class="w">      </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">task</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">dev</span>
+<a id="__codelineno-2-37" name="__codelineno-2-37" href="#__codelineno-2-37"></a>
+<a id="__codelineno-2-38" name="__codelineno-2-38" href="#__codelineno-2-38"></a><span class="w">  </span><span class="nt">push-change</span><span class="p">:</span>
+<a id="__codelineno-2-39" name="__codelineno-2-39" href="#__codelineno-2-39"></a><span class="w">    </span><span class="nt">desc</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Simulates a merge into demo-network (staleness test)</span>
+<a id="__codelineno-2-40" name="__codelineno-2-40" href="#__codelineno-2-40"></a><span class="w">    </span><span class="nt">dir</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">.dev/repos/demo-network</span>
+<a id="__codelineno-2-41" name="__codelineno-2-41" href="#__codelineno-2-41"></a><span class="w">    </span><span class="nt">cmds</span><span class="p">:</span>
+<a id="__codelineno-2-42" name="__codelineno-2-42" href="#__codelineno-2-42"></a><span class="w">      </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">date &gt;&gt; CHANGELOG.txt</span>
+<a id="__codelineno-2-43" name="__codelineno-2-43" href="#__codelineno-2-43"></a><span class="w">      </span><span class="c1"># Quote the whole command — the &quot;: &quot; in the message is a YAML mapping token otherwise.</span>
+<a id="__codelineno-2-44" name="__codelineno-2-44" href="#__codelineno-2-44"></a><span class="w">      </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="s">&#39;git</span><span class="nv"> </span><span class="s">add</span><span class="nv"> </span><span class="s">-A</span><span class="nv"> </span><span class="s">&amp;&amp;</span><span class="nv"> </span><span class="s">git</span><span class="nv"> </span><span class="s">commit</span><span class="nv"> </span><span class="s">-m</span><span class="nv"> </span><span class="s">&quot;feat:</span><span class="nv"> </span><span class="s">simulated</span><span class="nv"> </span><span class="s">merge&quot;&#39;</span>
+<a id="__codelineno-2-45" name="__codelineno-2-45" href="#__codelineno-2-45"></a>
+<a id="__codelineno-2-46" name="__codelineno-2-46" href="#__codelineno-2-46"></a><span class="w">  </span><span class="nt">e2e</span><span class="p">:</span>
+<a id="__codelineno-2-47" name="__codelineno-2-47" href="#__codelineno-2-47"></a><span class="w">    </span><span class="nt">desc</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Complete §7 scenario (non-regression)</span>
+<a id="__codelineno-2-48" name="__codelineno-2-48" href="#__codelineno-2-48"></a><span class="w">    </span><span class="nt">deps</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">dev</span><span class="p p-Indicator">]</span>
+<a id="__codelineno-2-49" name="__codelineno-2-49" href="#__codelineno-2-49"></a><span class="w">    </span><span class="nt">cmds</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="s">&quot;{{.COMPOSE}}</span><span class="nv"> </span><span class="s">exec</span><span class="nv"> </span><span class="s">-T</span><span class="nv"> </span><span class="s">api</span><span class="nv"> </span><span class="s">uv</span><span class="nv"> </span><span class="s">run</span><span class="nv"> </span><span class="s">pytest</span><span class="nv"> </span><span class="s">e2e</span><span class="nv"> </span><span class="s">-v&quot;</span><span class="p p-Indicator">]</span>
 </code></pre></div>
-<p><code>.env.example</code> → <code>.env</code> copied automatically by <code>task dev</code>: dev keys (encryption key, JWT secret, OIDC keypair) <strong>generated on first launch</strong> and stored in <code>.dev/</code> (gitignored). No secret value committed, no manual entry.</p>
+<p><code>.env.example</code> → <code>.env</code> copied automatically by <code>task dev</code> (<code>task env</code>, <code>scripts/bootstrap-env.sh</code>, only when <code>.env</code> is missing): dev keys (encryption key, JWT secret, OIDC keypair) <strong>generated on first launch</strong> and stored in <code>.dev/</code> (gitignored), the first two injected into <code>.env</code>. No secret value committed, no manual entry.</p>
+<p><strong>Dev S3 (Garage)</strong>: the API keeps managed states and every tracked/destroy run's saved plan (encrypted; deleted when the run ends) in S3, so a plan with changes needs a provisioned Garage. <code>task s3</code> (<code>scripts/bootstrap-s3.sh</code>, run by every <code>dev*</code> task) brings <code>garage</code> up and, checking before each step:</p>
+<ol>
+<li>assigns the single-node layout (zone <code>dc1</code>) and applies it;</li>
+<li>writes a generated access key into <code>.env</code> (<code>S3_ACCESS_KEY</code> / <code>S3_SECRET_KEY</code>) <strong>only when both are empty</strong>, then imports it into Garage if Garage lacks it;</li>
+<li>creates the <code>S3_BUCKET</code> bucket (<code>stackd</code>) and grants the key read/write/owner on it.</li>
+</ol>
+<p>A re-run changes nothing. Compose reads <code>.env</code> when it creates a container, which is why <code>task dev</code> runs the bootstrap before <code>up</code>; a stack started before the key existed is recreated by that <code>up</code>, since its <code>.env</code> values changed. Garage binds IPv4 (<code>0.0.0.0</code>, <code>deploy/garage.toml</code>), so it also starts on hosts whose kernel has IPv6 disabled. The CI e2e workflow runs the same script.</p>
+<p><strong>Only the <code>api</code> holds platform secrets.</strong> The S3 key, <code>DATABASE_URL</code>, <code>STACKD_ENCRYPTION_KEY</code>, <code>STACKD_JWT_SECRET</code> and <code>GOOGLE_CLIENT_SECRET</code> come from the shared <code>.env</code>, and compose blanks all of them in the <code>worker</code>'s environment: the worker reaches plans and states through the API (SPECS §11.1) and needs none of them, and tofu and platform hooks inherit the worker's environment (minus its own <code>STACKD_*</code> settings) — repo code runs inside tofu. Repo hooks only get an allowlist of it (SPECS §8.3).</p>
+<p><strong><code>task reset</code></strong> runs <code>down -v</code> (Postgres <strong>and</strong> Garage volumes), deletes <code>.dev/pool.token</code>, then <code>task dev</code>. <code>.env</code> and <code>.dev/</code> keys are kept, so the S3 bootstrap imports the same key into the fresh Garage. The pool token belongs to the wiped database: without it the worker waits (re-reading the file) for the new seed's token instead of registering with a stale one before the migrations have run.</p>
 <hr />
 <h2 id="3-auth-in-dev-the-dev-login">3. Auth in dev: the dev login<a class="headerlink" href="#3-auth-in-dev-the-dev-login" title="Permanent link">&para;</a></h2>
 <p>Running the real Google flow locally is possible (OAuth client with redirect <code>http://localhost:8000</code>) but cumbersome for quick testing. Dev mode therefore adds an <strong>explicitly gated</strong> bypass:</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a>STACKD_DEV_AUTH=true        # rejected if STACKD_ENV=production (assert at startup)
 </code></pre></div>
 <ul>
-<li>The login page displays, below the Google button, a "Dev login" panel with <strong>three personas</strong> covering the permissions in §2.4: <code>admin@dev.local</code> (admin, prod tier, destroy), <code>alice@dev.local</code> (approver, prod tier), <code>bob@dev.local</code> (writer, staging tier — <strong>cannot confirm prod</strong>). One click = session.</li>
-<li>Three personas with distinct tiers: essential for testing the "apply everywhere except prod" case (bob confirms dev/staging, rejected on prod), prod 4-eyes (bob triggers, alice confirms) and audit ("who applied what" only makes sense with several people).</li>
+<li>The login page displays, below the Google button, a "Dev login" panel with <strong>three personas</strong> covering the permissions in SPECS §2.4: <code>admin@dev.local</code> (admin, tiers dev/staging/prod, destroy), <code>alice@dev.local</code> (approver, tiers dev/staging/prod), <code>bob@dev.local</code> (writer, tiers dev/staging — a writer <strong>cannot confirm any apply</strong>). One click = session.</li>
+<li>Three personas: essential for testing the role gate (bob triggers, but is refused at confirm everywhere), prod 4-eyes (bob triggers, alice confirms) and audit ("who applied what" only makes sense with several people). No persona is an approver <em>without</em> prod, so the "apply everywhere except prod" tier gate needs a space membership (<code>PUT /api/v1/spaces/{id}/members</code>) giving an approver <code>{dev, staging}</code>.</li>
 <li>Sessions, roles and audit events are strictly the same as with Google — only the <code>google_sub</code> is synthetic (<code>dev:admin</code>).</li>
 <li>The real Google flow remains testable in dev by setting <code>GOOGLE_CLIENT_ID/SECRET</code> (the two coexist).</li>
 </ul>
 <p>Safeguard: the prod build of the API image <strong>removes the dev_auth module</strong> (not just the flag) — a configuration oversight cannot expose the bypass.</p>
 <hr />
 <h2 id="4-git-fixture-repos">4. Git fixture repos<a class="headerlink" href="#4-git-fixture-repos" title="Permanent link">&para;</a></h2>
-<p><code>task seed</code> creates in <code>.dev/repos/</code> two <strong>local and committable</strong> Git repositories:</p>
+<p><code>task seed-fixtures</code> (<code>scripts/seed-fixtures.sh</code>, run on the host by every <code>dev*</code> task, idempotent) creates in <code>.dev/repos/</code> two <strong>local and committable</strong> Git repositories (branch <code>main</code>). They use only the built-in <code>terraform_data</code> resource: no provider to download, <code>tofu plan/apply</code> runs fully offline.</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a>.dev/repos/demo-network/      # upstream stack
-<a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a>  main.tf                     #   random_pet + local_file, outputs: network_name, cidr
-<a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a>  outputs.tf
-<a id="__codelineno-4-4" name="__codelineno-4-4" href="#__codelineno-4-4"></a>  .stackd.yml                 #   example after_plan hook (jq on plan.json, warn mode)
-<a id="__codelineno-4-5" name="__codelineno-4-5" href="#__codelineno-4-5"></a>.dev/repos/demo-app/          # downstream stack
-<a id="__codelineno-4-6" name="__codelineno-4-6" href="#__codelineno-4-6"></a>  main.tf                     #   local_file that consumes TF_VAR_network_name
-<a id="__codelineno-4-7" name="__codelineno-4-7" href="#__codelineno-4-7"></a>  variables.tf
+<a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a>  main.tf                     #   variable org, terraform_data &quot;network&quot;, output network_name
+<a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a>.dev/repos/demo-app/          # downstream stack
+<a id="__codelineno-4-4" name="__codelineno-4-4" href="#__codelineno-4-4"></a>  main.tf                     #   variables org + network_name, terraform_data &quot;app&quot;, output app_target
 </code></pre></div>
 <ul>
-<li>The seed stacks point to them with <code>repo_url: file:///repos/demo-network</code> (the volume is mounted in the API and the worker). <code>repo_auth_kind: none</code>.</li>
-<li><strong>Simulate "a PR is merged"</strong> without GitHub: <code>task push-change</code> commits a change in demo-network → staleness polling (reduced to <strong>15 s</strong> in dev via <code>STACKD_HEAD_POLL_INTERVAL</code>) makes the <code>↑1</code> chip appear. Perfect for testing the "apply at 9am, merge at 9:15am" scenario.</li>
-<li><strong>Real webhooks</strong>: <code>task dev-git</code> launches Gitea, <code>task seed-gitea</code> pushes the fixtures to it and configures the webhook to the API. Otherwise, <code>task webhook</code> sends an HMAC-signed push payload via curl — enough to develop the handler.</li>
+<li>The seed stacks point to them with <code>repo_url: file:///stackd-dev/repos/demo-network</code> (<code>.dev/</code> is mounted at <code>/stackd-dev</code> in the API and the worker; <code>STACKD_SEED_REPO_BASE</code> overrides the base). <code>repo_auth_kind: none</code>. The fixtures carry no <code>.stackd.yml</code>.</li>
+<li><strong>Simulate "a PR is merged"</strong> without GitHub: <code>task push-change</code> commits a change in demo-network → staleness polling (reduced to <strong>15 s</strong> in dev via <code>STACKD_HEAD_POLL_INTERVAL</code>) turns <code>stale</code> to <code>true</code> (<code>GET /api/v1/environments/{id}</code>) on an env that already has a finished tracked run. The <code>↑1</code> chip of DESIGN §5.1 is not in the UI yet. Perfect for testing the "apply at 9am, merge at 9:15am" scenario.</li>
+<li><strong>Real webhooks</strong>: <code>task dev-git</code> launches Gitea (profile <code>git</code>, port 3000). Pushing the fixtures to it and configuring its webhook to the API are manual for now (no <code>seed-gitea</code> or <code>webhook</code> task yet).</li>
 </ul>
 <hr />
 <h2 id="5-worker-in-dev">5. Worker in dev<a class="headerlink" href="#5-worker-in-dev" title="Permanent link">&para;</a></h2>
 <ul>
-<li>Launched by compose with <code>STACKD_RUNNER=local</code>: terraform commands run directly inside the worker container (image including OpenTofu + jq + git). <strong>No Docker-in-Docker</strong> — the complexity of the <code>docker</code> runner is tested separately (<code>task test-runner-docker</code>, requires the socket).</li>
+<li>Launched by compose with <code>STACKD_RUNNER=local</code>: terraform commands run directly inside the worker container (image including OpenTofu + jq + git). <strong>No Docker-in-Docker</strong> — the <code>docker</code> runner is not implemented in the agent yet (SPECS §7.4), so there is nothing to exercise in dev.</li>
 <li>Tool binaries: <strong>OpenTofu and Terraform</strong> pre-installed in the dev image (no download on first run). A stack's <code>tool</code> picks which one runs — no separate "terraform worker", any dev worker handles both.</li>
 <li>Agent hot reload (watchfiles): modifying <code>worker/</code> cleanly restarts the poll loop (the current job finishes).</li>
-<li>Multi-workers to test concurrency and affinity: <code>docker compose up --scale worker=3</code>.</li>
+<li>Multi-workers to test concurrency and affinity: <code>docker compose -f deploy/docker-compose.dev.yml up -d --scale worker=3</code>, or <code>STACKD_MAX_CONCURRENT_JOBS</code> for several jobs per worker.</li>
+<li>The worker reads its pool token from <code>.dev/pool.token</code> (<code>STACKD_POOL_TOKEN_FILE</code>), written by the seed: it waits for the file and re-reads it on a failed registration.</li>
 </ul>
 <hr />
 <h2 id="6-terraform-without-aws-and-with-if-needed">6. Terraform without AWS (and with, if needed)<a class="headerlink" href="#6-terraform-without-aws-and-with-if-needed" title="Permanent link">&para;</a></h2>
-<p><strong>By default</strong>: the fixtures use only <code>random</code>, <code>null</code>, <code>local_file</code> and <code>time</code> — an apply creates files in the workspace, zero credentials, zero cost, execution in seconds. Enough to test <strong>the entire platform</strong> (the platform orchestrates terraform, it does not depend on what terraform creates).</p>
-<p><strong><code>aws</code> profile (LocalStack)</strong>: to test AWS-realistic stacks (S3, SQS, IAM...), <code>task dev-aws</code> + the seeded <code>localstack</code> variable set (endpoint overrides). Known limitations: LocalStack does not cover everything and <strong>does not validate workload OIDC</strong> (STS AssumeRoleWithWebIdentity is superficial there).</p>
+<p><strong>By default</strong>: the fixtures use only the built-in <code>terraform_data</code> resource — zero providers, zero credentials, zero cost, execution in seconds. Enough to test <strong>the entire platform</strong> (the platform orchestrates terraform, it does not depend on what terraform creates).</p>
+<p><strong><code>aws</code> profile (LocalStack)</strong>: to test AWS-realistic stacks (S3, SQS, IAM...), <code>task dev-aws</code> brings up LocalStack on <code>:4566</code>; the seed creates no LocalStack variable set, so add the provider endpoint overrides yourself (e.g. in a variable set). Known limitations: LocalStack does not cover everything and <strong>does not validate workload OIDC</strong> (STS AssumeRoleWithWebIdentity is superficial there).</p>
 <p><strong>Your own AWS profiles (real <code>plan</code> against real AWS)</strong>: to run a real <code>terraform plan</code> against your AWS account using your <strong>named profiles</strong> — without setting up the OIDC/STS integration — bring the stack up with:</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a>task dev-aws-creds      # = docker compose -f docker-compose.dev.yml -f docker-compose.dev.aws.yml up
 </code></pre></div>
-<p>Use it <strong>instead of <code>task dev</code></strong> whenever you want AWS creds in the worker — a plain <code>task dev</code> (or any <code>docker compose up</code> without the overlay) recreates the worker <strong>without</strong> the mount. It mounts <code>~/.aws</code> <strong>read-only</strong> into the worker. The provider's <code>profile = "..."</code> then resolves from your <code>~/.aws/{config,credentials}</code> (the worker runs terraform with the container env; <code>_cloud_env</code> only injects OIDC vars for environments that have a cloud-integration, so a plain dev env falls back to these creds). For SSO profiles, run <code>aws sso login</code> first (the cached token under <code>~/.aws</code> is mounted too); for a default profile, add <code>AWS_PROFILE=&lt;name&gt;</code> to <code>.env</code>. <strong>Dev-only, never in prod or CI</strong>; this tests your Terraform, not the platform's OIDC exchange.</p>
-<p><strong>Workload OIDC in dev</strong>: the issuer runs (JWKS on <code>localhost:8000/oidc/jwks</code>, tokens signed per claim) — we test the <strong>generation and claims</strong> of the tokens (unit tests + <code>task show-token</code> which decodes the JWT of a run). The real STS exchange is tested against a real AWS sandbox account, not locally: documented as out of scope for dev mode.</p>
+<p>Use it <strong>instead of <code>task dev</code></strong> whenever you want AWS creds in the worker — a plain <code>task dev</code> (or any <code>docker compose up</code> without the overlay) recreates the worker <strong>without</strong> the mount. It mounts <code>~/.aws</code> <strong>read-only</strong> into the worker. The provider's <code>profile = "..."</code> then resolves from your <code>~/.aws/{config,credentials}</code> (the worker runs terraform with the container env, minus its own <code>STACKD_*</code> settings; <code>_cloud_env</code> only injects OIDC vars for environments that have a cloud-integration, so a plain dev env falls back to these creds). For SSO profiles, run <code>aws sso login</code> first (the cached token under <code>~/.aws</code> is mounted too); for a default profile, add <code>AWS_PROFILE=&lt;name&gt;</code> to <code>.env</code>. <strong>Dev-only, never in prod or CI</strong>; this tests your Terraform, not the platform's OIDC exchange.</p>
+<p><strong>Workload OIDC in dev</strong>: the issuer runs (JWKS on <code>localhost:8000/oidc/jwks</code>, tokens signed per claim) — we test the <strong>generation and claims</strong> of the tokens (unit tests, <code>api/tests/test_oidc.py</code>). The real STS exchange is tested against a real AWS sandbox account, not locally: documented as out of scope for dev mode.</p>
 <hr />
 <h2 id="7-seed-and-demo-scenario">7. Seed and demo scenario<a class="headerlink" href="#7-seed-and-demo-scenario" title="Permanent link">&para;</a></h2>
 <p><code>task seed</code> creates (idempotent):</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a>space &quot;demo&quot;
-<a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a>├── variable set common        (TF_VAR_org=demo, auto_attach)
-<a id="__codelineno-6-3" name="__codelineno-6-3" href="#__codelineno-6-3"></a>├── variable set region-local  (TF_VAR_region=local-1)
-<a id="__codelineno-6-4" name="__codelineno-6-4" href="#__codelineno-6-4"></a>├── stack demo-network  → envs: dev (tier dev), prod (tier prod, protected, 4-eyes)
-<a id="__codelineno-6-5" name="__codelineno-6-5" href="#__codelineno-6-5"></a>├── stack demo-app      → envs: dev (tier dev), prod (tier prod, protected)
-<a id="__codelineno-6-6" name="__codelineno-6-6" href="#__codelineno-6-6"></a>├── dependencies : network/dev → app/dev, network/prod → app/prod
-<a id="__codelineno-6-7" name="__codelineno-6-7" href="#__codelineno-6-7"></a>│     output_references: network_name → TF_VAR_network_name
-<a id="__codelineno-6-8" name="__codelineno-6-8" href="#__codelineno-6-8"></a>│                        (mock: &quot;mock-network&quot;)
-<a id="__codelineno-6-9" name="__codelineno-6-9" href="#__codelineno-6-9"></a>└── worker pool &quot;local&quot; (token written to .dev/, consumed by the compose worker)
+<div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a>tiers: dev, staging, prod (prod requires four-eyes)      ← catalog, global
+<a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a>space &quot;default&quot;                                          ← bootstrap space, empty
+<a id="__codelineno-6-3" name="__codelineno-6-3" href="#__codelineno-6-3"></a>space &quot;demo&quot;
+<a id="__codelineno-6-4" name="__codelineno-6-4" href="#__codelineno-6-4"></a>├── variable set common        (TF_VAR_org=demo, auto_attach)
+<a id="__codelineno-6-5" name="__codelineno-6-5" href="#__codelineno-6-5"></a>├── variable set region-local  (TF_VAR_region=local-1, attached to both stacks)
+<a id="__codelineno-6-6" name="__codelineno-6-6" href="#__codelineno-6-6"></a>├── stack demo-network  → envs: dev (tier dev), prod (tier prod, protected, 4-eyes)
+<a id="__codelineno-6-7" name="__codelineno-6-7" href="#__codelineno-6-7"></a>├── stack demo-app      → envs: dev (tier dev), prod (tier prod, protected, 4-eyes)
+<a id="__codelineno-6-8" name="__codelineno-6-8" href="#__codelineno-6-8"></a>│     every env: branch main, managed_state off (local state, not kept between runs)
+<a id="__codelineno-6-9" name="__codelineno-6-9" href="#__codelineno-6-9"></a>├── dependencies : network/dev → app/dev, network/prod → app/prod
+<a id="__codelineno-6-10" name="__codelineno-6-10" href="#__codelineno-6-10"></a>│     output_references: network_name → TF_VAR_network_name
+<a id="__codelineno-6-11" name="__codelineno-6-11" href="#__codelineno-6-11"></a>│                        (mock: &quot;mock-network&quot;)
+<a id="__codelineno-6-12" name="__codelineno-6-12" href="#__codelineno-6-12"></a>└── worker pool &quot;local&quot; (token written to .dev/pool.token, consumed by the compose worker)
 </code></pre></div>
-<p><code>task e2e</code> replays the complete journey via API (and serves as a non-regression test):</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a> 1. login bob → trigger network/dev            → plan → unconfirmed
-<a id="__codelineno-7-2" name="__codelineno-7-2" href="#__codelineno-7-2"></a> 2. bob confirms (tier dev, ok)                 → apply → finished
-<a id="__codelineno-7-3" name="__codelineno-7-3" href="#__codelineno-7-3"></a> 3. automatic cascade                           → app/dev plan (real input injected)
-<a id="__codelineno-7-4" name="__codelineno-7-4" href="#__codelineno-7-4"></a> 4. trigger app/prod BEFORE network/prod        → plan with MOCK (purple badge)
-<a id="__codelineno-7-5" name="__codelineno-7-5" href="#__codelineno-7-5"></a> 5. attempt to confirm the mocked run           → expected rejection (allow_mock_apply=false)
-<a id="__codelineno-7-6" name="__codelineno-7-6" href="#__codelineno-7-6"></a> 6. trigger network/prod (bob) → bob attempts to confirm → rejection (tier staging &lt; prod)
-<a id="__codelineno-7-7" name="__codelineno-7-7" href="#__codelineno-7-7"></a> 7. alice confirms network/prod (tier prod, 4-eyes ok) → cascade app/prod
-<a id="__codelineno-7-8" name="__codelineno-7-8" href="#__codelineno-7-8"></a> 8. task push-change                            → chip ↑1 within 15 s
-<a id="__codelineno-7-9" name="__codelineno-7-9" href="#__codelineno-7-9"></a> 9. verification of audit events                → triggered/confirmed/applied
-<a id="__codelineno-7-10" name="__codelineno-7-10" href="#__codelineno-7-10"></a>                                                   with the right actors and tiers
+<p><code>task e2e</code> replays the complete journey via the API (<code>api/e2e/test_scenario.py</code>, the non-regression test):</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a> 1. bob (writer) triggers network/dev                  → plan → unconfirmed
+<a id="__codelineno-7-2" name="__codelineno-7-2" href="#__codelineno-7-2"></a> 2. bob&#39;s confirm is refused (403: writer, not approver); alice confirms → apply → finished
+<a id="__codelineno-7-3" name="__codelineno-7-3" href="#__codelineno-7-3"></a> 3. automatic cascade                                  → app/dev plans with the REAL input (no mock)
+<a id="__codelineno-7-4" name="__codelineno-7-4" href="#__codelineno-7-4"></a> 4. bob triggers app/prod BEFORE network/prod          → plan with the MOCK (used_mocks=true)
+<a id="__codelineno-7-5" name="__codelineno-7-5" href="#__codelineno-7-5"></a> 5. alice&#39;s confirm of the mocked run                  → 409 (allow_mock_apply=false); alice discards it
+<a id="__codelineno-7-6" name="__codelineno-7-6" href="#__codelineno-7-6"></a> 6. bob triggers network/prod, then confirms           → 403 (a role refusal: bob is a writer)
+<a id="__codelineno-7-7" name="__codelineno-7-7" href="#__codelineno-7-7"></a> 7. alice confirms network/prod (tier prod in her set, 4-eyes ok: alice ≠ bob) → apply → finished
+<a id="__codelineno-7-8" name="__codelineno-7-8" href="#__codelineno-7-8"></a> 8. automatic cascade                                  → app/prod re-plans with the REAL input
+<a id="__codelineno-7-9" name="__codelineno-7-9" href="#__codelineno-7-9"></a> 9. audit                                              → run.confirmed lists alice@dev.local
 </code></pre></div>
-<p>If the 9 steps pass, the core of the product works. It is also the demo script to run through in front of someone.</p>
+<p>If the 9 steps pass, the core of the product works. It is also the demo script to run through in front of someone. Two checks stay <strong>manual</strong> (not in the automated scenario): staleness (<code>task push-change</code>, then <code>stale: true</code> within 15 s on an env that has a finished run) and the tier gate (an approver without <code>prod</code> in their set, see §3).</p>
+<p>Every tracked plan goes through S3 (saved encrypted after the plan, downloaded by the apply, deleted when the run ends), so the scenario needs the provisioned Garage (§2). <code>task e2e</code> depends on <code>task dev</code>, which provisions it. CI (<code>.github/workflows/e2e.yml</code>) runs the same <code>scripts/bootstrap-s3.sh</code> before it brings up <code>postgres garage api worker</code>.</p>
+<p><code>task e2e</code> never runs on the seeded <code>demo-*</code> stacks themselves. It first builds a <strong>throwaway copy</strong> of the demo graph through the public API, as admin, in the <code>demo</code> space: <code>e2e-&lt;MMDDhhmmss&gt;-&lt;tag&gt;-network</code> and <code>e2e-&lt;MMDDhhmmss&gt;-&lt;tag&gt;-app</code>, with the same repos, branches, project roots, tiers, settings, variable-set attachments and dependency + mock. Permissions are per space, so bob and alice keep exactly the rights the steps rely on. Every run therefore starts from never-applied environments (step 4 always sees the mock): the scenario is <strong>re-runnable on a used database without <code>task reset</code></strong>, and the seeded graph stays as a demo left it. At the end it ends what is still active through the API (cancels queued runs, discards unconfirmed plans) and deletes the copy. If the scenario failed or a run is still in flight, it keeps the copy for inspection, named in a warning; its unique name never blocks the next run.</p>
 <hr />
 <h2 id="8-dev-comfort">8. Dev comfort<a class="headerlink" href="#8-dev-comfort" title="Permanent link">&para;</a></h2>
 <ul>
 <li><strong>API</strong>: OpenAPI/Swagger on <code>/docs</code> (disabled in prod), <strong>structured JSON logs by default</strong> (<code>STACKD_LOG_FORMAT=pretty</code> for local reading; <code>STACKD_LOG_LEVEL=DEBUG</code> to also capture reads/polls/heartbeats), errors with traceback. Buffer browsable via <code>/api/v1/logs</code> + <strong>Workers &amp; health</strong> page.</li>
 <li><strong>Shortened timings</strong> in dev: heartbeat 5 s, offline 15 s, staleness poll 15 s, apply affinity 10 s — asynchronous behaviors are tested without waiting.</li>
-<li><strong>Front</strong>: MSW (Mock Service Worker) optional to develop the UI without a backend (<code>pnpm dev:mock</code>) — the handlers replay runs/logs fixtures, including a "running" run that streams. Useful for iterating on the viewer and the rail without triggering real runs.</li>
-<li><strong>Storybook/Ladle</strong>: <code>pnpm storybook</code> — the identity components (PhaseRail, StateBadge, LogViewer with ANSI fixture) are developed in isolation.</li>
-<li><strong>DB</strong>: <code>task psql</code> (shell), <code>task db-reset</code> (drop + migrations + seed). The local S3 storage (Garage) is inspected via the <code>aws s3 --endpoint-url http://localhost:3900</code> CLI or <code>task s3-ls</code>; no web console (Garage is administered via CLI).</li>
-<li><strong>Realistic log data</strong>: the demo-network fixture includes a 10 s <code>time_sleep</code> resource — runs last long enough to see streaming, follow-tail and cancellation.</li>
+<li><strong>Front</strong>: the UI runs against the real dev API (Vite proxies <code>/api</code> and the WebSocket to <code>:8000</code>); there is no mock-backend mode (no MSW <code>dev:mock</code> script yet).</li>
+<li><strong>Ladle</strong>: <code>cd front &amp;&amp; pnpm ladle</code> — the identity components with stories (<code>PhaseRail</code>, <code>StateBadge</code>, <code>ProvenanceBadge</code>) are developed in isolation.</li>
+<li><strong>DB</strong>: <code>task psql</code> (shell); <code>task reset</code> to start from an empty database (there is no separate <code>db-reset</code> task). The local S3 storage (Garage) is inspected via <code>task s3-ls</code> (lists the bucket with the API's own settings), or the <code>aws s3 --endpoint-url http://localhost:3900 --region garage</code> CLI with the key from <code>.env</code>; no web console (Garage is administered via its CLI: <code>docker compose -f deploy/docker-compose.dev.yml exec garage /garage status</code>).</li>
+<li><strong>Log data</strong>: the fixtures plan and apply in seconds; to watch streaming and follow-tail on a longer run, add a slow resource (e.g. a <code>time_sleep</code>) to a fixture repo and commit it.</li>
 </ul>
 <hr />
 <h2 id="9-what-dev-mode-does-not-cover-assumed">9. What dev mode does not cover (assumed)<a class="headerlink" href="#9-what-dev-mode-does-not-cover-assumed" title="Permanent link">&para;</a></h2>
@@ -1469,7 +1522,7 @@
 </tr>
 <tr>
 <td>Docker runner (per-container isolation)</td>
-<td><code>task test-runner-docker</code> (socket required) or CI</td>
+<td>not implemented yet (SPECS §7.4)</td>
 </tr>
 <tr>
 <td>Real GitHub/GitLab webhooks</td>
@@ -1477,11 +1530,11 @@
 </tr>
 <tr>
 <td>Load (N workers × M runs)</td>
-<td>k6 scenario in CI, not locally</td>
+<td>not covered yet (no load scenario)</td>
 </tr>
 <tr>
 <td>Light theme / mobile responsive</td>
-<td>Storybook + manual review</td>
+<td>Ladle stories + manual review</td>
 </tr>
 </tbody>
 </table>

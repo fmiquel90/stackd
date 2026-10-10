@@ -479,10 +479,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#resolution-order-5-layers" class="md-nav__link">
+  <a href="#resolution-order-6-layers" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Resolution order (5 layers)
+        Resolution order (6 layers)
       
     </span>
   </a>
@@ -508,6 +508,23 @@
       
     </span>
   </a>
+  
+    <nav class="md-nav" aria-label="Variable sets">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#attachments-stay-inside-the-sets-space" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Attachments stay inside the set's space
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
   
 </li>
       
@@ -902,6 +919,33 @@
   
   
     <li class="md-nav__item">
+      <a href="../../ARCHITECTURE/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Architecture
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../../api/" class="md-nav__link">
         
   
@@ -942,10 +986,10 @@
       
         
         
-        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5" >
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_6" >
         
           
-          <label class="md-nav__link" for="__nav_5" id="__nav_5_label" tabindex="">
+          <label class="md-nav__link" for="__nav_6" id="__nav_6_label" tabindex="">
             
   
   
@@ -963,8 +1007,8 @@
             <span class="md-nav__icon md-icon"></span>
           </label>
         
-        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_5_label" aria-expanded="false">
-          <label class="md-nav__title" for="__nav_5">
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_6_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_6">
             <span class="md-nav__icon md-icon"></span>
             
   
@@ -1170,10 +1214,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#resolution-order-5-layers" class="md-nav__link">
+  <a href="#resolution-order-6-layers" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Resolution order (5 layers)
+        Resolution order (6 layers)
       
     </span>
   </a>
@@ -1199,6 +1243,23 @@
       
     </span>
   </a>
+  
+    <nav class="md-nav" aria-label="Variable sets">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#attachments-stay-inside-the-sets-space" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Attachments stay inside the set's space
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
   
 </li>
       
@@ -1269,11 +1330,11 @@
 <tbody>
 <tr>
 <td><code>terraform</code></td>
-<td>exposed as <code>TF_VAR_&lt;name&gt;</code> (and written to a tfvars file)</td>
+<td>written to an auto-loaded tfvars file, present only while a tofu command runs (listed as <code>TF_VAR_&lt;name&gt;</code>); hooks only see it inside <code>plan.json</code></td>
 </tr>
 <tr>
 <td><code>environment</code></td>
-<td>exposed as a plain process environment variable for the run</td>
+<td>exposed as a plain process environment variable for the run: to tofu and hooks — to repo hooks only when it is not sensitive</td>
 </tr>
 </tbody>
 </table>
@@ -1281,15 +1342,16 @@
 <ul>
 <li><strong>Stack variable</strong> — common to all environments of a stack (<code>environment_id</code> is null).</li>
 <li><strong>Environment variable</strong> — scoped to a single environment.</li>
-<li><strong>Variable set</strong> — a named, reusable bundle (e.g. <code>common-aws</code>, <code>datadog</code>, <code>region-eu</code>) you attach to many stacks or envs. Set members are never scoped to an env directly; the <em>attachment</em> carries the targeting.</li>
+<li><strong>Variable set</strong> — a named, reusable bundle (e.g. <code>common-aws</code>, <code>datadog</code>, <code>region-eu</code>) that belongs to one space and that you attach to tiers, stacks or envs of that space. Set members are never scoped to an env directly; the <em>attachment</em> carries the targeting.</li>
 </ul>
-<h2 id="resolution-order-5-layers">Resolution order (5 layers)<a class="headerlink" href="#resolution-order-5-layers" title="Permanent link">&para;</a></h2>
+<h2 id="resolution-order-6-layers">Resolution order (6 layers)<a class="headerlink" href="#resolution-order-6-layers" title="Permanent link">&para;</a></h2>
 <p>At claim time the value of each variable is resolved from weakest to strongest. The strongest layer that defines a given <code>(name, kind)</code> wins.</p>
 <pre class="mermaid"><code>flowchart LR
-  A["1· sets auto_attach"] --&gt; B["2· sets attached to stack"]
-  B --&gt; C["3· sets attached to env"]
-  C --&gt; D["4· stack variables"]
-  D --&gt; E["5· environment variables&lt;br/&gt;(always wins)"]</code></pre>
+  A["1· sets by rule&lt;br/&gt;(auto_attach, selector)"] --&gt; T["2· sets attached to tier"]
+  T --&gt; B["3· sets attached to stack"]
+  B --&gt; C["4· sets attached to env"]
+  C --&gt; D["5· stack variables"]
+  D --&gt; E["6· environment variables&lt;br/&gt;(always wins)"]</code></pre>
 <table>
 <thead>
 <tr>
@@ -1301,32 +1363,37 @@
 <tbody>
 <tr>
 <td>1</td>
-<td>variable sets with <code>auto_attach</code></td>
-<td>increasing <code>priority</code></td>
+<td>variable sets that apply by rule: <code>auto_attach</code>, or a <code>selector</code> matching the env's labels</td>
+<td>set name</td>
 </tr>
 <tr>
 <td>2</td>
-<td>variable sets attached to the stack</td>
+<td>variable sets attached to the env's <strong>tier</strong></td>
 <td>increasing <code>priority</code></td>
 </tr>
 <tr>
 <td>3</td>
-<td>variable sets attached to the env</td>
+<td>variable sets attached to the stack</td>
 <td>increasing <code>priority</code></td>
 </tr>
 <tr>
 <td>4</td>
+<td>variable sets attached to the env</td>
+<td>increasing <code>priority</code></td>
+</tr>
+<tr>
+<td>5</td>
 <td>stack variables</td>
 <td>—</td>
 </tr>
 <tr>
-<td>5</td>
+<td>6</td>
 <td>environment variables</td>
 <td>— (always wins)</td>
 </tr>
 </tbody>
 </table>
-<p>Within a layer, sets are ordered by their attachment <code>priority</code>. Two more sources are merged in at claim time but sit outside this order: upstream outputs (<code>dependency:</code>) and mocks (<code>mock</code>) — see <a href="../../CONCEPTS/">Concepts</a> and <a href="../../SPECS/">SPECS</a> §9.</p>
+<p>Only sets of the environment's own space take part. A <code>selector</code> (<code>{"label": "value", …}</code>) matches an env whose effective labels (stack labels + env labels, env wins) contain every pair. Two more sources are merged in at claim time but sit outside this order: upstream outputs (<code>dependency:</code>) and mocks (<code>mock</code>) — see <a href="../../CONCEPTS/">Concepts</a> and <a href="../../SPECS/">SPECS</a> §9.</p>
 <h2 id="inspecting-resolved-values">Inspecting resolved values<a class="headerlink" href="#inspecting-resolved-values" title="Permanent link">&para;</a></h2>
 <p><code>GET /environments/{id}/resolved-variables</code> returns the fully resolved set, each entry tagged with its <code>injected_name</code> and <code>provenance</code>:</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>curl<span class="w"> </span>-s<span class="w"> </span>localhost:8000/api/v1/environments/<span class="nv">$ENV</span>/resolved-variables<span class="w"> </span><span class="se">\</span>
@@ -1339,7 +1406,7 @@
 </code></pre></div>
 <p>The provenance snapshot is frozen onto the run (<code>variable_provenance</code>) for audit, and the UI uses it to show "inherited from <code>common-aws</code>", "overridden here" or <code>MOCK</code>.</p>
 <h2 id="variable-sets">Variable sets<a class="headerlink" href="#variable-sets" title="Permanent link">&para;</a></h2>
-<p>Create a set, add members, then attach it. <code>auto_attach: true</code> attaches it to every stack in the space; otherwise attach explicitly with a <code>priority</code>.</p>
+<p>Create a set, add members, then attach it. <code>auto_attach: true</code> attaches it to every stack in the space; otherwise attach explicitly to a <code>tier</code>, <code>stack</code> or <code>environment</code>, with a <code>priority</code>. A set is created in the <code>default</code> space unless you pass <code>space_id</code>.</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="nv">SET</span><span class="o">=</span><span class="k">$(</span>curl<span class="w"> </span>-s<span class="w"> </span>-X<span class="w"> </span>POST<span class="w"> </span>localhost:8000/api/v1/variable-sets<span class="w"> </span><span class="se">\</span>
 <a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="w">  </span>-H<span class="w"> </span><span class="s2">&quot;Authorization: Bearer </span><span class="nv">$TOKEN</span><span class="s2">&quot;</span><span class="w"> </span>-H<span class="w"> </span><span class="s1">&#39;content-type: application/json&#39;</span><span class="w"> </span><span class="se">\</span>
 <a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a><span class="w">  </span>-d<span class="w"> </span><span class="s1">&#39;{&quot;name&quot;:&quot;common-aws&quot;,&quot;auto_attach&quot;:true}&#39;</span><span class="w"> </span><span class="p">|</span><span class="w"> </span>jq<span class="w"> </span>-r<span class="w"> </span>.id<span class="k">)</span>
@@ -1348,9 +1415,21 @@
 <a id="__codelineno-2-6" name="__codelineno-2-6" href="#__codelineno-2-6"></a><span class="w">  </span>-H<span class="w"> </span><span class="s2">&quot;Authorization: Bearer </span><span class="nv">$TOKEN</span><span class="s2">&quot;</span><span class="w"> </span>-H<span class="w"> </span><span class="s1">&#39;content-type: application/json&#39;</span><span class="w"> </span><span class="se">\</span>
 <a id="__codelineno-2-7" name="__codelineno-2-7" href="#__codelineno-2-7"></a><span class="w">  </span>-d<span class="w"> </span><span class="s1">&#39;{&quot;target_kind&quot;:&quot;environment&quot;,&quot;target_id&quot;:&quot;&#39;</span><span class="s2">&quot;</span><span class="nv">$ENV</span><span class="s2">&quot;</span><span class="s1">&#39;&quot;,&quot;priority&quot;:10}&#39;</span>
 </code></pre></div>
+<h3 id="attachments-stay-inside-the-sets-space">Attachments stay inside the set's space<a class="headerlink" href="#attachments-stay-inside-the-sets-space" title="Permanent link">&para;</a></h3>
+<p>A variable set only ever reaches its own space:</p>
+<ul>
+<li>A <strong>stack</strong> or <strong>environment</strong> attachment requires the target to live in the set's space, and you
+  need <code>writer</code> on it. Otherwise the attach is refused: <code>400 Cross-space attachment</code> (or <code>403</code> when
+  you can't write the target).</li>
+<li>A <strong>tier</strong> attachment (<code>target_id</code> = the tier's id from <code>GET /api/v1/tiers</code>) applies to that
+  tier's environments <strong>inside the set's space only</strong>. Tiers are a global catalog; attaching
+  <code>prod-credentials</code> to the <code>prod</code> tier never injects it into another space's prod environments.</li>
+<li>At resolution, an attachment from a set of another space is ignored, even one created before
+  this rule existed.</li>
+</ul>
 <div class="admonition note">
 <p class="admonition-title">Note</p>
-<p>Detach a set before deleting it. Deleting an attached set returns <strong>409</strong> with the list of attachments — explicit detachment is required.</p>
+<p>Detach a set before deleting it. Deleting an attached set returns <strong>409</strong> with the list of attachments — explicit detachment is required. Deleting a stack or an environment removes the attachments that target it for you (audited <code>variable_set.detached</code> with the reason).</p>
 </div>
 <h2 id="sensitive-values">Sensitive values<a class="headerlink" href="#sensitive-values" title="Permanent link">&para;</a></h2>
 <p>Mark a variable <code>sensitive: true</code> to make it write-only:</p>

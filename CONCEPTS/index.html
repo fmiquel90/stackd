@@ -14,7 +14,7 @@
         <link rel="prev" href="../guide/observability/">
       
       
-        <link rel="next" href="../api/">
+        <link rel="next" href="../ARCHITECTURE/">
       
       
         
@@ -798,6 +798,45 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
+  <a href="#key-concepts-at-a-glance" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Key concepts at a glance
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Key concepts at a glance">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#the-life-of-a-change" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The life of a change
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#following-the-examples" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Following the examples
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#0-the-one-sentence-mental-model" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -1016,6 +1055,33 @@
   
   
     <li class="md-nav__item">
+      <a href="../ARCHITECTURE/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Architecture
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../api/" class="md-nav__link">
         
   
@@ -1056,10 +1122,10 @@
       
         
         
-        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5" >
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_6" >
         
           
-          <label class="md-nav__link" for="__nav_5" id="__nav_5_label" tabindex="">
+          <label class="md-nav__link" for="__nav_6" id="__nav_6_label" tabindex="">
             
   
   
@@ -1077,8 +1143,8 @@
             <span class="md-nav__icon md-icon"></span>
           </label>
         
-        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_5_label" aria-expanded="false">
-          <label class="md-nav__title" for="__nav_5">
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_6_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_6">
             <span class="md-nav__icon md-icon"></span>
             
   
@@ -1260,6 +1326,45 @@
       Table of contents
     </label>
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#key-concepts-at-a-glance" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Key concepts at a glance
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Key concepts at a glance">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#the-life-of-a-change" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The life of a change
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#following-the-examples" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Following the examples
+      
+    </span>
+  </a>
+  
+</li>
       
         <li class="md-nav__item">
   <a href="#0-the-one-sentence-mental-model" class="md-nav__link">
@@ -1491,11 +1596,141 @@
 concrete, copy-pasteable examples. For the exhaustive field-by-field truth, see <strong>SPECS.md</strong> —
 this document never contradicts it, it illustrates it.</p>
 </blockquote>
+<h2 id="key-concepts-at-a-glance">Key concepts at a glance<a class="headerlink" href="#key-concepts-at-a-glance" title="Permanent link">&para;</a></h2>
+<p>Read this first if you are new to Stackd: each line is expanded, with examples, in the numbered
+section given in the last column.</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>Space                  a team or project boundary: who can see and do what
+<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>└── Stack              the code: a Git repo + a folder (the template)
+<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>    ├── Environment    dev      ┐ real deployments of that code, each with its own
+<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a>    ├── Environment    staging  ├ state, variables and rules
+<a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a>    └── Environment    prod     ┘
+<a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a>        └── Run        one change to one environment: plan → review → apply
+<a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a>            ├── Job    plan job: a worker plans the change and runs the checks
+<a id="__codelineno-0-8" name="__codelineno-0-8" href="#__codelineno-0-8"></a>            └── Job    apply job: a worker applies the reviewed plan
+</code></pre></div>
+<table>
+<thead>
+<tr>
+<th>Concept</th>
+<th>What it is</th>
+<th>Why it matters</th>
+<th>§</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>Space</strong></td>
+<td>A boundary for a team or project, holding its stacks, variable sets and worker pools.</td>
+<td>Members get a role and a set of tiers <em>per space</em>; nothing crosses from one space to another.</td>
+<td>1</td>
+</tr>
+<tr>
+<td><strong>Stack</strong></td>
+<td>The code: a Git repository, a folder in it, and the tool (OpenTofu or Terraform).</td>
+<td>Written once, deployed many times. A stack never runs on its own.</td>
+<td>2</td>
+</tr>
+<tr>
+<td><strong>Environment</strong></td>
+<td>One real deployment of a stack (<code>dev</code>, <code>prod</code>…): its branch, state, variables and protections.</td>
+<td>Environments are fully isolated from each other — the opposite of Terraform workspaces.</td>
+<td>2</td>
+</tr>
+<tr>
+<td><strong>Variables &amp; variable sets</strong></td>
+<td>The code's inputs, set on the environment, the stack, or in sets shared across stacks.</td>
+<td>The most specific value wins and the UI shows where each value came from. Secrets are write-only.</td>
+<td>3</td>
+</tr>
+<tr>
+<td><strong>Run</strong></td>
+<td>One change to one environment: plan, wait for review, apply exactly the reviewed plan.</td>
+<td>It is the unit of change, of review and of audit. One active run per environment at a time.</td>
+<td>4</td>
+</tr>
+<tr>
+<td><strong>Job</strong></td>
+<td>One piece of a run that a worker executes: the <em>plan job</em>, then — once confirmed — the <em>apply job</em>. A command run has a single <em>command job</em>.</td>
+<td>The two jobs of a run can land on different workers: the apply job starts from a fresh clone and the saved plan.</td>
+<td>4</td>
+</tr>
+<tr>
+<td><strong>Tier</strong></td>
+<td>A label on an environment (<code>dev</code>, <code>prod</code>, or your own).</td>
+<td>Decides who may approve it, and whether someone other than the person who started the run must confirm.</td>
+<td>5</td>
+</tr>
+<tr>
+<td><strong>Role</strong></td>
+<td><em>reader</em> (looks), <em>writer</em> (starts runs, edits configuration), <em>approver</em> (also confirms applies on their tiers), <em>admin</em> (also manages workers, users and settings).</td>
+<td>Approving needs both the role <strong>and</strong> the environment's tier in your allowed tiers.</td>
+<td>5</td>
+</tr>
+<tr>
+<td><strong>Hook</strong></td>
+<td>A command run at a fixed step of a job: a security scan, a cost check, a policy.</td>
+<td>Platform hooks are enforced and trusted; hooks from the repo run without secrets. Each result is kept on the run as a <em>check</em>.</td>
+<td>6</td>
+</tr>
+<tr>
+<td><strong>Worker</strong></td>
+<td>The agent that runs OpenTofu on your infrastructure.</td>
+<td>It pulls its jobs (no inbound port), keeps nothing between jobs and can be replaced at any time.</td>
+<td>7</td>
+</tr>
+<tr>
+<td><strong>Managed state</strong></td>
+<td>The <code>tfstate</code>, stored by Stackd in S3 behind its own HTTP backend.</td>
+<td>Each job gets a short-lived token scoped to what it may do: read (a pull request's plan), lock (a plan), or write (an apply).</td>
+<td>8</td>
+</tr>
+<tr>
+<td><strong>Dependency &amp; mock</strong></td>
+<td>One environment's outputs feeding another's inputs (network → app).</td>
+<td>An upstream change re-plans its dependents. A mock lets a new chain plan before its upstream exists, but blocks the apply by default.</td>
+<td>9</td>
+</tr>
+<tr>
+<td><strong>Cloud credentials (OIDC)</strong></td>
+<td>Short-lived cloud credentials minted for each job.</td>
+<td>No static cloud keys to store or rotate; the plan job assumes the plan role (read-only), the apply job the apply role.</td>
+<td>10</td>
+</tr>
+<tr>
+<td><strong>Staleness</strong></td>
+<td>"This environment is behind its branch."</td>
+<td>Tells you a merged change hasn't been applied yet; it never triggers anything by itself.</td>
+<td>11</td>
+</tr>
+<tr>
+<td><strong>Audit</strong></td>
+<td>An append-only record of every action, written with the action itself.</td>
+<td>Answers "who changed prod, and why?"</td>
+<td>12</td>
+</tr>
+</tbody>
+</table>
+<h3 id="the-life-of-a-change">The life of a change<a class="headerlink" href="#the-life-of-a-change" title="Permanent link">&para;</a></h3>
+<ol>
+<li><strong>Someone pushes, opens a pull request, or clicks <em>Plan</em>.</strong> Stackd creates a run for the
+   environment(s) tracking that branch. A pull request only ever gets a read-only plan.</li>
+<li><strong>A worker runs the plan job</strong>: it checks out the exact commit and plans with credentials
+   minted for this job only. Hooks check the plan.</li>
+<li><strong>The run waits for a human</strong> (unless the environment autodeploys a clean plan). An approver
+   allowed on that tier reads the diff, the checks and every input with its origin, then confirms
+   or discards. If the tier or the environment requires four-eyes, that approver can't be the
+   person who started the run.</li>
+<li><strong>A worker runs the apply job</strong>: it applies the saved plan — exactly what was reviewed, on the
+   same commit.</li>
+<li><strong>If the outputs changed, dependent environments re-plan</strong> under their own approval rules.
+   Everything above is in the audit log.</li>
+</ol>
+<h2 id="following-the-examples">Following the examples<a class="headerlink" href="#following-the-examples" title="Permanent link">&para;</a></h2>
 <p>All examples assume the local dev stack is up (<code>task dev</code>) with the API on <code>http://localhost:8000</code>
 and dev login enabled. Authenticate once:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="nv">TOKEN</span><span class="o">=</span><span class="k">$(</span>curl<span class="w"> </span>-s<span class="w"> </span>-X<span class="w"> </span>POST<span class="w"> </span>localhost:8000/api/v1/auth/dev/login<span class="w"> </span><span class="se">\</span>
-<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="w">  </span>-H<span class="w"> </span><span class="s1">&#39;content-type: application/json&#39;</span><span class="w"> </span>-d<span class="w"> </span><span class="s1">&#39;{&quot;persona&quot;:&quot;admin&quot;}&#39;</span><span class="w"> </span><span class="p">|</span><span class="w"> </span>jq<span class="w"> </span>-r<span class="w"> </span>.access_token<span class="k">)</span>
-<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a><span class="nv">AUTH</span><span class="o">=</span><span class="s2">&quot;Authorization: Bearer </span><span class="nv">$TOKEN</span><span class="s2">&quot;</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="nv">TOKEN</span><span class="o">=</span><span class="k">$(</span>curl<span class="w"> </span>-s<span class="w"> </span>-X<span class="w"> </span>POST<span class="w"> </span>localhost:8000/api/v1/auth/dev/login<span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="w">  </span>-H<span class="w"> </span><span class="s1">&#39;content-type: application/json&#39;</span><span class="w"> </span>-d<span class="w"> </span><span class="s1">&#39;{&quot;persona&quot;:&quot;admin&quot;}&#39;</span><span class="w"> </span><span class="p">|</span><span class="w"> </span>jq<span class="w"> </span>-r<span class="w"> </span>.access_token<span class="k">)</span>
+<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a><span class="nv">AUTH</span><span class="o">=</span><span class="s2">&quot;Authorization: Bearer </span><span class="nv">$TOKEN</span><span class="s2">&quot;</span>
 </code></pre></div>
 <hr />
 <h2 id="0-the-one-sentence-mental-model">0. The one-sentence mental model<a class="headerlink" href="#0-the-one-sentence-mental-model" title="Permanent link">&para;</a></h2>
@@ -1508,13 +1743,15 @@ auditable event.</p>
 <hr />
 <h2 id="1-space-the-container">1. Space — the container<a class="headerlink" href="#1-space-the-container" title="Permanent link">&para;</a></h2>
 <p>A <strong>space</strong> is the top of the hierarchy: <code>space / stack / environment / run</code>. It owns stacks,
-variable sets and worker pools. At MVP there is exactly one space, <code>default</code> (RBAC per space is a
-later phase). You rarely think about it; it's the namespace everything hangs off.</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>default                      ← space
-<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a>└── core-network             ← stack   (a repo + a folder)
-<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a>    ├── dev                  ← environment (an instance with its own state)
-<a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a>    ├── staging
-<a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a>    └── prod
+variable sets, worker pools and secret sources. The bootstrap creates <code>default</code> (the dev seed adds
+<code>demo</code>), and an instance admin can create more. A space is also a <strong>permission boundary</strong>: each
+member has a membership in it (role, allowed tiers, destroy right), you only see and touch the
+spaces you belong to (an instance admin reaches all), and configuration never crosses spaces (§3).</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>default                      ← space
+<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a>└── core-network             ← stack   (a repo + a folder)
+<a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a>    ├── dev                  ← environment (an instance with its own state)
+<a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a>    ├── staging
+<a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a>    └── prod
 </code></pre></div>
 <hr />
 <h2 id="2-stack-vs-environment-template-vs-instance">2. Stack vs Environment — template vs instance<a class="headerlink" href="#2-stack-vs-environment-template-vs-instance" title="Permanent link">&para;</a></h2>
@@ -1554,30 +1791,37 @@ later phase). You rarely think about it; it's the namespace everything hangs off
 state key — easy to target the wrong one. A Stackd environment is <strong>physically isolated</strong>: its own
 state, variables, protections and worker pool.</p>
 <p><strong>Example — one stack, three environments:</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="c1"># Stack = the template</span>
-<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="nv">STACK</span><span class="o">=</span><span class="k">$(</span>curl<span class="w"> </span>-s<span class="w"> </span>-X<span class="w"> </span>POST<span class="w"> </span>localhost:8000/api/v1/stacks<span class="w"> </span>-H<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$AUTH</span><span class="s2">&quot;</span><span class="w"> </span>-H<span class="w"> </span><span class="s1">&#39;content-type: application/json&#39;</span><span class="w"> </span><span class="se">\</span>
-<a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a><span class="w">  </span>-d<span class="w"> </span><span class="s1">&#39;{&quot;name&quot;:&quot;core-network&quot;,&quot;repo_url&quot;:&quot;https://github.com/acme/infra&quot;,</span>
-<a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a><span class="s1">       &quot;project_root&quot;:&quot;network&quot;,&quot;tool&quot;:&quot;opentofu&quot;,&quot;tool_version&quot;:&quot;1.12.0&quot;}&#39;</span><span class="w"> </span><span class="p">|</span><span class="w"> </span>jq<span class="w"> </span>-r<span class="w"> </span>.id<span class="k">)</span>
-<a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a>
-<a id="__codelineno-2-6" name="__codelineno-2-6" href="#__codelineno-2-6"></a><span class="c1"># Environments = instances of that template</span>
-<a id="__codelineno-2-7" name="__codelineno-2-7" href="#__codelineno-2-7"></a>curl<span class="w"> </span>-s<span class="w"> </span>-X<span class="w"> </span>POST<span class="w"> </span>localhost:8000/api/v1/stacks/<span class="nv">$STACK</span>/environments<span class="w"> </span>-H<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$AUTH</span><span class="s2">&quot;</span><span class="w"> </span>-H<span class="w"> </span><span class="s1">&#39;content-type: application/json&#39;</span><span class="w"> </span><span class="se">\</span>
-<a id="__codelineno-2-8" name="__codelineno-2-8" href="#__codelineno-2-8"></a><span class="w">  </span>-d<span class="w"> </span><span class="s1">&#39;{&quot;name&quot;:&quot;dev&quot;,&quot;tier&quot;:&quot;dev&quot;,&quot;branch&quot;:&quot;main&quot;}&#39;</span>
-<a id="__codelineno-2-9" name="__codelineno-2-9" href="#__codelineno-2-9"></a>curl<span class="w"> </span>-s<span class="w"> </span>-X<span class="w"> </span>POST<span class="w"> </span>localhost:8000/api/v1/stacks/<span class="nv">$STACK</span>/environments<span class="w"> </span>-H<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$AUTH</span><span class="s2">&quot;</span><span class="w"> </span>-H<span class="w"> </span><span class="s1">&#39;content-type: application/json&#39;</span><span class="w"> </span><span class="se">\</span>
-<a id="__codelineno-2-10" name="__codelineno-2-10" href="#__codelineno-2-10"></a><span class="w">  </span>-d<span class="w"> </span><span class="s1">&#39;{&quot;name&quot;:&quot;prod&quot;,&quot;tier&quot;:&quot;prod&quot;,&quot;branch&quot;:&quot;main&quot;,&quot;protected&quot;:true,&quot;require_second_pair_of_eyes&quot;:true}&#39;</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="c1"># Stack = the template</span>
+<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a><span class="nv">STACK</span><span class="o">=</span><span class="k">$(</span>curl<span class="w"> </span>-s<span class="w"> </span>-X<span class="w"> </span>POST<span class="w"> </span>localhost:8000/api/v1/stacks<span class="w"> </span>-H<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$AUTH</span><span class="s2">&quot;</span><span class="w"> </span>-H<span class="w"> </span><span class="s1">&#39;content-type: application/json&#39;</span><span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a><span class="w">  </span>-d<span class="w"> </span><span class="s1">&#39;{&quot;name&quot;:&quot;core-network&quot;,&quot;repo_url&quot;:&quot;https://github.com/acme/infra&quot;,</span>
+<a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a><span class="s1">       &quot;project_root&quot;:&quot;network&quot;,&quot;tool&quot;:&quot;opentofu&quot;,&quot;tool_version&quot;:&quot;1.12.0&quot;}&#39;</span><span class="w"> </span><span class="p">|</span><span class="w"> </span>jq<span class="w"> </span>-r<span class="w"> </span>.id<span class="k">)</span>
+<a id="__codelineno-3-5" name="__codelineno-3-5" href="#__codelineno-3-5"></a>
+<a id="__codelineno-3-6" name="__codelineno-3-6" href="#__codelineno-3-6"></a><span class="c1"># Environments = instances of that template</span>
+<a id="__codelineno-3-7" name="__codelineno-3-7" href="#__codelineno-3-7"></a>curl<span class="w"> </span>-s<span class="w"> </span>-X<span class="w"> </span>POST<span class="w"> </span>localhost:8000/api/v1/stacks/<span class="nv">$STACK</span>/environments<span class="w"> </span>-H<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$AUTH</span><span class="s2">&quot;</span><span class="w"> </span>-H<span class="w"> </span><span class="s1">&#39;content-type: application/json&#39;</span><span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-3-8" name="__codelineno-3-8" href="#__codelineno-3-8"></a><span class="w">  </span>-d<span class="w"> </span><span class="s1">&#39;{&quot;name&quot;:&quot;dev&quot;,&quot;tier&quot;:&quot;dev&quot;,&quot;branch&quot;:&quot;main&quot;}&#39;</span>
+<a id="__codelineno-3-9" name="__codelineno-3-9" href="#__codelineno-3-9"></a>curl<span class="w"> </span>-s<span class="w"> </span>-X<span class="w"> </span>POST<span class="w"> </span>localhost:8000/api/v1/stacks/<span class="nv">$STACK</span>/environments<span class="w"> </span>-H<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$AUTH</span><span class="s2">&quot;</span><span class="w"> </span>-H<span class="w"> </span><span class="s1">&#39;content-type: application/json&#39;</span><span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-3-10" name="__codelineno-3-10" href="#__codelineno-3-10"></a><span class="w">  </span>-d<span class="w"> </span><span class="s1">&#39;{&quot;name&quot;:&quot;prod&quot;,&quot;tier&quot;:&quot;prod&quot;,&quot;branch&quot;:&quot;main&quot;,&quot;protected&quot;:true,&quot;require_second_pair_of_eyes&quot;:true}&#39;</span>
 </code></pre></div>
 <p><code>dev</code> and <code>prod</code> run the <em>same code</em> but have different state, variables, tier and protections.</p>
 <hr />
 <h2 id="3-variables-variable-sets-configuration-in-layers">3. Variables &amp; variable sets — configuration in layers<a class="headerlink" href="#3-variables-variable-sets-configuration-in-layers" title="Permanent link">&para;</a></h2>
 <p>Configuration is composed from <strong>layers</strong>. The same variable name can be defined at several layers;
 the strongest layer wins. From weakest to strongest:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a>1. variable sets, auto_attach        (shared defaults for the whole space)
-<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a>2. variable sets attached to a stack (by priority)
-<a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a>3. variable sets attached to an env  (by priority)
-<a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a>4. stack variables                   (common to all envs of the stack)
-<a id="__codelineno-3-5" name="__codelineno-3-5" href="#__codelineno-3-5"></a>5. environment variables             ← always wins
+<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a>1. variable sets applying by rule          (auto_attach, or a label selector matching
+<a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a>                                            the environment)
+<a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a>2. variable sets attached to a tier        (by priority)
+<a id="__codelineno-4-4" name="__codelineno-4-4" href="#__codelineno-4-4"></a>3. variable sets attached to a stack       (by priority)
+<a id="__codelineno-4-5" name="__codelineno-4-5" href="#__codelineno-4-5"></a>4. variable sets attached to an environment (by priority)
+<a id="__codelineno-4-6" name="__codelineno-4-6" href="#__codelineno-4-6"></a>5. stack variables                         (common to all environments of the stack)
+<a id="__codelineno-4-7" name="__codelineno-4-7" href="#__codelineno-4-7"></a>6. environment variables                   ← always wins
 </code></pre></div>
 <p>A <strong>variable set</strong> is a named, reusable bundle (e.g. <code>common-aws</code>, <code>datadog</code>, <code>region-eu</code>) you
-attach to many stacks/envs. <code>auto_attach: true</code> means "attach to every stack in the space".</p>
+attach to many stacks and environments. <code>auto_attach: true</code> means "attach to every stack in the
+space"; a <code>selector</code> (<code>{label: value}</code>) attaches it to every environment whose labels match.</p>
+<p><strong>A set stays in its space.</strong> You can only attach it to a stack or environment of the set's own
+space (<code>400 Cross-space attachment</code> otherwise), and a <strong>tier</strong> attachment reaches that tier's
+environments <strong>in the set's space only</strong> — tiers are a global catalog, the set is not. Deleting a
+stack or an environment removes the attachments that target it.</p>
 <p><strong>Worked example.</strong> Suppose:</p>
 <table>
 <thead>
@@ -1592,7 +1836,7 @@ attach to many stacks/envs. <code>auto_attach: true</code> means "attach to ever
 <td><code>region = eu-west-1</code>, <code>tags = {team:core}</code></td>
 </tr>
 <tr>
-<td>set <code>region-us</code> (attached to env <code>prod-us</code>)</td>
+<td>set <code>region-us</code> (attached to environment <code>prod-us</code>)</td>
 <td><code>region = us-east-1</code></td>
 </tr>
 <tr>
@@ -1600,7 +1844,7 @@ attach to many stacks/envs. <code>auto_attach: true</code> means "attach to ever
 <td><code>cidr = 10.0.0.0/16</code></td>
 </tr>
 <tr>
-<td>env variable on <code>prod-us</code></td>
+<td>environment variable on <code>prod-us</code></td>
 <td><code>cidr = 10.9.0.0/16</code></td>
 </tr>
 </tbody>
@@ -1618,7 +1862,7 @@ attach to many stacks/envs. <code>auto_attach: true</code> means "attach to ever
 <tr>
 <td><code>region</code></td>
 <td><code>us-east-1</code></td>
-<td><code>set:region-us</code> (env-attached set beats auto_attach)</td>
+<td><code>set:region-us</code> (a set attached to the environment beats auto_attach)</td>
 </tr>
 <tr>
 <td><code>tags</code></td>
@@ -1628,54 +1872,66 @@ attach to many stacks/envs. <code>auto_attach: true</code> means "attach to ever
 <tr>
 <td><code>cidr</code></td>
 <td><code>10.9.0.0/16</code></td>
-<td><code>env</code> (env override beats the stack variable)</td>
+<td><code>env</code> (the environment's override beats the stack variable)</td>
 </tr>
 </tbody>
 </table>
 <p>See it for real:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a>curl<span class="w"> </span>-s<span class="w"> </span>localhost:8000/api/v1/environments/<span class="nv">$ENV</span>/resolved-variables<span class="w"> </span>-H<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$AUTH</span><span class="s2">&quot;</span><span class="w"> </span><span class="p">|</span><span class="w"> </span>jq
-<a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a><span class="c1"># [{ &quot;name&quot;:&quot;region&quot;,&quot;injected_name&quot;:&quot;TF_VAR_region&quot;,&quot;value&quot;:&quot;us-east-1&quot;,&quot;provenance&quot;:&quot;set:region-us&quot; }, ...]</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a>curl<span class="w"> </span>-s<span class="w"> </span>localhost:8000/api/v1/environments/<span class="nv">$ENV</span>/resolved-variables<span class="w"> </span>-H<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$AUTH</span><span class="s2">&quot;</span><span class="w"> </span><span class="p">|</span><span class="w"> </span>jq
+<a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a><span class="c1"># [{ &quot;name&quot;:&quot;region&quot;,&quot;injected_name&quot;:&quot;TF_VAR_region&quot;,&quot;value&quot;:&quot;us-east-1&quot;,&quot;provenance&quot;:&quot;set:region-us&quot; }, ...]</span>
 </code></pre></div>
 <p>Every resolved variable carries its <strong>provenance</strong> so the UI can show "inherited from <code>common-aws</code>"
 or "overridden here". The provenance is also frozen onto the run (<code>variable_provenance</code>) for audit.</p>
 <h3 id="variable-kinds">Variable kinds<a class="headerlink" href="#variable-kinds" title="Permanent link">&para;</a></h3>
 <ul>
-<li><code>terraform</code> → injected as <code>TF_VAR_&lt;name&gt;</code> / written to a tfvars file.</li>
-<li><code>environment</code> → injected as a process env var for the run.</li>
+<li><code>terraform</code> → written to an auto-loaded tfvars file that exists only while tofu runs (listed as
+  <code>TF_VAR_&lt;name&gt;</code>).</li>
+<li><code>environment</code> → injected as a process environment variable for the run.</li>
 </ul>
 <h3 id="sensitive-variables-are-write-only">Sensitive variables are write-only<a class="headerlink" href="#sensitive-variables-are-write-only" title="Permanent link">&para;</a></h3>
 <p>Mark a variable <code>sensitive: true</code> and it is <strong>AES-256-GCM encrypted at rest</strong> and <strong>never returned
 in clear</strong> — the API masks it as <code>•••</code>, decrypting only to build the worker payload, and the agent
 masks the literal value in logs.</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a>curl<span class="w"> </span>-s<span class="w"> </span>-X<span class="w"> </span>POST<span class="w"> </span>localhost:8000/api/v1/stacks/<span class="nv">$STACK</span>/variables<span class="w"> </span>-H<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$AUTH</span><span class="s2">&quot;</span><span class="w"> </span>-H<span class="w"> </span><span class="s1">&#39;content-type: application/json&#39;</span><span class="w"> </span><span class="se">\</span>
-<a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a><span class="w">  </span>-d<span class="w"> </span><span class="s1">&#39;{&quot;kind&quot;:&quot;environment&quot;,&quot;name&quot;:&quot;DD_API_KEY&quot;,&quot;value&quot;:&quot;super-secret&quot;,&quot;sensitive&quot;:true}&#39;</span>
-<a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a><span class="c1"># GET later → &quot;value&quot;:&quot;•••&quot;   (the plaintext is never readable again through the API)</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a>curl<span class="w"> </span>-s<span class="w"> </span>-X<span class="w"> </span>POST<span class="w"> </span>localhost:8000/api/v1/stacks/<span class="nv">$STACK</span>/variables<span class="w"> </span>-H<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$AUTH</span><span class="s2">&quot;</span><span class="w"> </span>-H<span class="w"> </span><span class="s1">&#39;content-type: application/json&#39;</span><span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a><span class="w">  </span>-d<span class="w"> </span><span class="s1">&#39;{&quot;kind&quot;:&quot;environment&quot;,&quot;name&quot;:&quot;DD_API_KEY&quot;,&quot;value&quot;:&quot;super-secret&quot;,&quot;sensitive&quot;:true}&#39;</span>
+<a id="__codelineno-6-3" name="__codelineno-6-3" href="#__codelineno-6-3"></a><span class="c1"># GET later → &quot;value&quot;:&quot;•••&quot;   (the plaintext is never readable again through the API)</span>
 </code></pre></div>
 <hr />
 <h2 id="4-runs-the-state-machine">4. Runs &amp; the state machine<a class="headerlink" href="#4-runs-the-state-machine" title="Permanent link">&para;</a></h2>
-<p>A <strong>run</strong> is one execution against one environment. Its life is an explicit state machine — and
+<p>A <strong>run</strong> is one change to one environment, from plan to apply. Its life is an explicit state machine — and
 <strong>the only way the state ever changes is the <code>transition()</code> function</strong>, which writes a <code>run_event</code>,
 an <code>audit_event</code> (for human/terminal actions) and a live WebSocket signal, all in one DB transaction.</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a>queued → preparing → planning → [checking] → unconfirmed → confirmed → applying → finished
-<a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a>                                                  │ discard → discarded
-<a id="__codelineno-6-3" name="__codelineno-6-3" href="#__codelineno-6-3"></a>   (terminal: finished · failed · discarded · canceled)
+<div class="highlight"><pre><span></span><code><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a>queued → preparing → planning → [checking] → unconfirmed → confirmed → applying → finished
+<a id="__codelineno-7-2" name="__codelineno-7-2" href="#__codelineno-7-2"></a>                                                  │ discard → discarded
+<a id="__codelineno-7-3" name="__codelineno-7-3" href="#__codelineno-7-3"></a>   (terminal: finished · failed · discarded · canceled)
 </code></pre></div>
 <ul>
 <li><code>checking</code> only appears if there are <code>after_plan</code> hooks.</li>
 <li><code>unconfirmed</code> = <strong>waiting for a human</strong> (the amber state — see DESIGN).</li>
 <li>If the plan has no changes, the run jumps straight to <code>finished</code>.</li>
 </ul>
+<p><strong>Run and job.</strong> A run is the <em>change</em>; a <strong>job</strong> is what a worker executes for it. A run that goes
+all the way has two jobs: the <strong>plan job</strong> (<code>preparing</code> → <code>planning</code> → <code>checking</code>: clone, hooks,
+<code>init</code>, <code>plan</code>, checks) and, once confirmed, the <strong>apply job</strong> (<code>applying</code>: fresh clone, apply the
+saved plan, outputs). They can run on different workers. A <a href="../guide/commands/">command run</a> (<code>import</code>, <code>state rm</code>…) has one <strong>command job</strong>;
+a pull request's run has only a plan job. Hooks, credentials and state tokens are per job.</p>
 <p><strong>Example — a manual plan that needs confirmation:</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a><span class="c1"># 1. trigger → run is created &#39;queued&#39;</span>
-<a id="__codelineno-7-2" name="__codelineno-7-2" href="#__codelineno-7-2"></a><span class="nv">RUN</span><span class="o">=</span><span class="k">$(</span>curl<span class="w"> </span>-s<span class="w"> </span>-X<span class="w"> </span>POST<span class="w"> </span>localhost:8000/api/v1/environments/<span class="nv">$ENV</span>/runs<span class="w"> </span>-H<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$AUTH</span><span class="s2">&quot;</span><span class="w"> </span>-d<span class="w"> </span><span class="s1">&#39;{}&#39;</span><span class="w"> </span><span class="p">|</span><span class="w"> </span>jq<span class="w"> </span>-r<span class="w"> </span>.id<span class="k">)</span>
-<a id="__codelineno-7-3" name="__codelineno-7-3" href="#__codelineno-7-3"></a>
-<a id="__codelineno-7-4" name="__codelineno-7-4" href="#__codelineno-7-4"></a><span class="c1"># 2. a worker claims it → preparing → planning, then reports a non-empty plan → &#39;unconfirmed&#39;</span>
-<a id="__codelineno-7-5" name="__codelineno-7-5" href="#__codelineno-7-5"></a><span class="c1"># 3. a human confirms (subject to permissions, §5)</span>
-<a id="__codelineno-7-6" name="__codelineno-7-6" href="#__codelineno-7-6"></a>curl<span class="w"> </span>-s<span class="w"> </span>-X<span class="w"> </span>POST<span class="w"> </span>localhost:8000/api/v1/runs/<span class="nv">$RUN</span>/confirm<span class="w"> </span>-H<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$AUTH</span><span class="s2">&quot;</span>
-<a id="__codelineno-7-7" name="__codelineno-7-7" href="#__codelineno-7-7"></a><span class="c1"># → confirmed → a worker claims the apply → applying → finished</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a><span class="c1"># 1. trigger → run is created &#39;queued&#39;</span>
+<a id="__codelineno-8-2" name="__codelineno-8-2" href="#__codelineno-8-2"></a><span class="nv">RUN</span><span class="o">=</span><span class="k">$(</span>curl<span class="w"> </span>-s<span class="w"> </span>-X<span class="w"> </span>POST<span class="w"> </span>localhost:8000/api/v1/environments/<span class="nv">$ENV</span>/runs<span class="w"> </span>-H<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$AUTH</span><span class="s2">&quot;</span><span class="w"> </span>-d<span class="w"> </span><span class="s1">&#39;{}&#39;</span><span class="w"> </span><span class="p">|</span><span class="w"> </span>jq<span class="w"> </span>-r<span class="w"> </span>.id<span class="k">)</span>
+<a id="__codelineno-8-3" name="__codelineno-8-3" href="#__codelineno-8-3"></a>
+<a id="__codelineno-8-4" name="__codelineno-8-4" href="#__codelineno-8-4"></a><span class="c1"># 2. a worker claims it → preparing → planning, then reports a non-empty plan → &#39;unconfirmed&#39;</span>
+<a id="__codelineno-8-5" name="__codelineno-8-5" href="#__codelineno-8-5"></a><span class="c1"># 3. a human confirms (subject to permissions, §5)</span>
+<a id="__codelineno-8-6" name="__codelineno-8-6" href="#__codelineno-8-6"></a>curl<span class="w"> </span>-s<span class="w"> </span>-X<span class="w"> </span>POST<span class="w"> </span>localhost:8000/api/v1/runs/<span class="nv">$RUN</span>/confirm<span class="w"> </span>-H<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$AUTH</span><span class="s2">&quot;</span>
+<a id="__codelineno-8-7" name="__codelineno-8-7" href="#__codelineno-8-7"></a><span class="c1"># → confirmed → a worker claims the apply → applying → finished</span>
 </code></pre></div>
+<p><strong>What gets applied is exactly what was reviewed.</strong> The plan job saves its <code>plan.tfplan</code>; the API
+encrypts it and keeps it in S3 until the run ends. The run is pinned to the commit the plan checked
+out, and the apply job clones that commit and runs <code>tofu apply plan.tfplan</code> — it never re-plans. If
+the saved plan is missing, or the state moved since the plan (tofu refuses a stale plan), the run
+fails: trigger a new plan.</p>
 <p><strong>Concurrency invariant:</strong> at most <strong>one active run per environment</strong> (enforced by a partial unique
-index). Two environments of the same stack can run in parallel; two runs on the <em>same</em> env cannot.</p>
+index). Two environments of the same stack can run in parallel; two runs on the <em>same</em> environment
+cannot.</p>
 <hr />
 <h2 id="5-tiers-roles-permissions-who-can-apply-what">5. Tiers, roles &amp; permissions — who can apply what<a class="headerlink" href="#5-tiers-roles-permissions-who-can-apply-what" title="Permanent link">&para;</a></h2>
 <p>Two orthogonal axes:</p>
@@ -1697,7 +1953,7 @@ membership — tiers are not ordered, so a grant can be non-contiguous like <cod
 <tr>
 <th>User</th>
 <th>role</th>
-<th>ceiling</th>
+<th>allowed tiers</th>
 <th>dev</th>
 <th>staging</th>
 <th>prod</th>
@@ -1707,7 +1963,7 @@ membership — tiers are not ordered, so a grant can be non-contiguous like <cod
 <tr>
 <td>Bob</td>
 <td>writer</td>
-<td>staging</td>
+<td><code>{dev, staging}</code></td>
 <td>❌ (not approver)</td>
 <td>❌</td>
 <td>❌</td>
@@ -1715,32 +1971,43 @@ membership — tiers are not ordered, so a grant can be non-contiguous like <cod
 <tr>
 <td>Carol</td>
 <td>approver</td>
-<td>staging</td>
+<td><code>{dev, staging}</code></td>
 <td>✅</td>
 <td>✅</td>
-<td>❌ (tier prod required)</td>
+<td>❌ (prod not in her set)</td>
 </tr>
 <tr>
 <td>Alice</td>
 <td>approver</td>
-<td>prod</td>
+<td><code>{dev, staging, prod}</code></td>
 <td>✅</td>
 <td>✅</td>
 <td>✅</td>
 </tr>
+<tr>
+<td>Dan</td>
+<td>approver</td>
+<td><code>{dev, prod}</code></td>
+<td>✅</td>
+<td>❌</td>
+<td>✅</td>
+</tr>
 </tbody>
 </table>
+<p>These are the <strong>effective</strong> permissions in the environment's space: a space membership can give
+someone a different role, tier set or destroy right there than their instance defaults.</p>
 <p>Extra rules:</p>
 <ul>
 <li><strong>Destroy</strong> (<code>type=destroy</code>) additionally requires <code>can_destroy=true</code> — a separate, explicit right.</li>
-<li><strong>4-eyes</strong>: on <code>tier=prod</code> (or when <code>require_second_pair_of_eyes</code> is set), the <strong>triggerer cannot
-  confirm their own run</strong>. It only bites human-triggered runs — a webhook/cascade run has no human
-  to oppose.</li>
+<li><strong>Four-eyes</strong>: on a tier flagged <code>requires_four_eyes</code> (the seeded <code>prod</code>), on a <code>protected</code>
+  environment, or when the environment sets <code>require_second_pair_of_eyes</code>, <strong>someone other than
+  the person who triggered the run must confirm it</strong>. It only bites human-triggered runs — a
+  webhook or cascade run has no human to oppose.</li>
 <li><strong>Mock block</strong>: a run that consumed mock outputs cannot be applied unless <code>allow_mock_apply=true</code>
   (see §9).</li>
 </ul>
-<p>When a confirm is refused, the API returns the reason in clear, e.g. <code>403 "tier prod required —
-your ceiling is staging"</code>, which the UI shows on the disabled Confirm button.</p>
+<p>When a confirm is refused, the API returns the reason in clear, e.g. <code>403 "tier prod not in your
+allowed tiers (dev, staging)"</code>, which the UI shows on the disabled Confirm button.</p>
 <p><strong>Double lock with the cloud:</strong> for prod, the restriction also lives in the AWS trust policy (§10),
 so bypassing the API still can't assume the prod apply role.</p>
 <hr />
@@ -1759,7 +2026,7 @@ so bypassing the API still can't assume the prod apply role.</p>
 <tbody>
 <tr>
 <td><strong>Platform</strong></td>
-<td>UI/API (per stack or env)</td>
+<td>UI/API (per stack or environment)</td>
 <td>writer+ (audited)</td>
 <td>governance — <strong>not bypassable by a PR</strong></td>
 </tr>
@@ -1771,71 +2038,101 @@ so bypassing the API still can't assume the prod apply role.</p>
 </tr>
 </tbody>
 </table>
-<p>Order per stage: <strong>platform (stack) → platform (env) → repo</strong>. Security-critical checks belong on
-the platform side.</p>
+<p>Order per stage: <strong>platform (stack) → platform (environment) → repo</strong>. Security-critical checks
+belong on the platform side. The plan job runs the <code>*_init</code>, <code>*_plan</code> stages; the apply job the
+<code>*_apply</code> ones.</p>
 <p><strong><code>.stackd.yml</code> example:</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a><span class="nt">version</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">1</span>
-<a id="__codelineno-8-2" name="__codelineno-8-2" href="#__codelineno-8-2"></a><span class="nt">hooks</span><span class="p">:</span>
-<a id="__codelineno-8-3" name="__codelineno-8-3" href="#__codelineno-8-3"></a><span class="w">  </span><span class="nt">after_plan</span><span class="p">:</span>
-<a id="__codelineno-8-4" name="__codelineno-8-4" href="#__codelineno-8-4"></a><span class="w">    </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">infracost</span>
-<a id="__codelineno-8-5" name="__codelineno-8-5" href="#__codelineno-8-5"></a><span class="w">      </span><span class="nt">command</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">infracost breakdown --path plan.json --format table</span>
-<a id="__codelineno-8-6" name="__codelineno-8-6" href="#__codelineno-8-6"></a><span class="w">      </span><span class="nt">on_failure</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">warn</span><span class="w">          </span><span class="c1"># run continues but MUST be confirmed by a human</span>
-<a id="__codelineno-8-7" name="__codelineno-8-7" href="#__codelineno-8-7"></a><span class="w">    </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">no-prod-deletes</span>
-<a id="__codelineno-8-8" name="__codelineno-8-8" href="#__codelineno-8-8"></a><span class="w">      </span><span class="nt">command</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">jq -e &#39;[.resource_changes[]|select(.change.actions|index(&quot;delete&quot;))]|length==0&#39; plan.json</span>
-<a id="__codelineno-8-9" name="__codelineno-8-9" href="#__codelineno-8-9"></a><span class="w">      </span><span class="nt">on_failure</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">fail</span><span class="w">          </span><span class="c1"># run → failed</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a><span class="nt">version</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">1</span>
+<a id="__codelineno-9-2" name="__codelineno-9-2" href="#__codelineno-9-2"></a><span class="nt">hooks</span><span class="p">:</span>
+<a id="__codelineno-9-3" name="__codelineno-9-3" href="#__codelineno-9-3"></a><span class="w">  </span><span class="nt">after_plan</span><span class="p">:</span>
+<a id="__codelineno-9-4" name="__codelineno-9-4" href="#__codelineno-9-4"></a><span class="w">    </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">infracost</span>
+<a id="__codelineno-9-5" name="__codelineno-9-5" href="#__codelineno-9-5"></a><span class="w">      </span><span class="nt">command</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">infracost breakdown --path plan.json --format table</span>
+<a id="__codelineno-9-6" name="__codelineno-9-6" href="#__codelineno-9-6"></a><span class="w">      </span><span class="nt">on_failure</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">warn</span><span class="w">          </span><span class="c1"># run continues but MUST be confirmed by a human</span>
+<a id="__codelineno-9-7" name="__codelineno-9-7" href="#__codelineno-9-7"></a><span class="w">    </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">no-prod-deletes</span>
+<a id="__codelineno-9-8" name="__codelineno-9-8" href="#__codelineno-9-8"></a><span class="w">      </span><span class="nt">command</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">jq -e &#39;[.resource_changes[]|select(.change.actions|index(&quot;delete&quot;))]|length==0&#39; plan.json</span>
+<a id="__codelineno-9-9" name="__codelineno-9-9" href="#__codelineno-9-9"></a><span class="w">      </span><span class="nt">on_failure</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">fail</span><span class="w">          </span><span class="c1"># run → failed</span>
 </code></pre></div>
 <ul>
-<li><code>on_failure: fail</code> → the run fails (<code>run.check_failed</code>).</li>
+<li><code>on_failure: fail</code> → the job stops at that stage and the run fails (<code>run.check_failed</code>), at every
+  stage. A failing <code>before_apply</code> hook means nothing is applied. A failing <code>after_apply</code> hook fails
+  the run after the infrastructure changed: its outputs are still recorded, but nothing cascades.</li>
 <li><code>on_failure: warn</code> → the run continues but is <strong>forced through <code>unconfirmed</code></strong> even if autodeploy
-  was on — a human must own the warning.</li>
+  was on — a human must own the warning. (At an apply stage the run is already confirmed: the
+  warning is only recorded.)</li>
+<li>Each hook has 10 minutes (<code>STACKD_HOOK_TIMEOUT_SECONDS</code> on the worker); past it, it is killed and
+  fails by its <code>on_failure</code>. If tofu can't produce the plan JSON, the plan job fails rather than
+  check an empty plan.</li>
 </ul>
-<p>Repo hooks never receive <code>sensitive_env</code> or cloud credentials by default, and repo hooks at
-<code>*_apply</code> stages are ignored on <code>tier=prod</code> (they'd run with the prod write role).</p>
+<p><strong>Checks.</strong> Every hook result is a <em>check</em>, kept on the run with the stage it ran at
+(<code>check_results.results</code>: <code>ok</code>, <code>warn</code>, <code>fail</code>; <code>check_results.checks</code>: only warn/fail).</p>
+<p><strong>Repo hooks get nothing secret</strong>: of the worker's environment only an allowlist (<code>PATH</code>, <code>HOME</code>,
+locale, proxies…), the run's non-sensitive environment variables, no cloud credentials, and a
+<code>plan.json</code> with every sensitive value masked. While a repo hook runs, neither the saved plan, the
+run's tfvars, the cloud token file nor the repo token is on disk. Platform hooks are trusted: they
+get the run's secrets, the cloud credentials and the raw <code>plan.json</code>. Neither tofu nor any hook sees
+the agent's own <code>STACKD_*</code> settings. See <a href="../guide/hooks/#what-hooks-can-see">Hooks</a>.</p>
 <hr />
 <h2 id="7-workers-the-pull-model">7. Workers — the pull model<a class="headerlink" href="#7-workers-the-pull-model" title="Permanent link">&para;</a></h2>
 <p>Workers are <strong>self-hosted, stateless and disposable</strong>. They <strong>pull</strong> work; the API never connects
 out to them.</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a>register (pool token) → heartbeat (every ~20s) → claim (long-poll)
-<a id="__codelineno-9-2" name="__codelineno-9-2" href="#__codelineno-9-2"></a>   → clone → setup tool → hooks → init → plan/apply → stream logs → report → repeat
+<div class="highlight"><pre><span></span><code><a id="__codelineno-10-1" name="__codelineno-10-1" href="#__codelineno-10-1"></a>register (pool token) → heartbeat (every ~20s) → claim (long-poll)
+<a id="__codelineno-10-2" name="__codelineno-10-2" href="#__codelineno-10-2"></a>   → clone → hooks → init → plan/apply → stream logs → report → repeat
 </code></pre></div>
 <ul>
 <li><strong>Claim</strong> is concurrency-safe: <code>SELECT … FOR UPDATE OF environment SKIP LOCKED</code> serialises per
-  env, and the <code>one_active_run_per_env</code> unique index is the hard guarantee (a losing racer gets a
+  environment, and the <code>one_active_run_per_env</code> unique index is the hard guarantee (a losing racer gets a
   <code>23505</code> and simply re-polls).</li>
 <li><strong>Labels</strong> target work to pools (e.g. a dedicated <code>prod</code> pool).</li>
-<li><strong>Apply affinity</strong>: the worker that produced a plan is preferred for the apply for ~60s (it still
-  has the workspace); otherwise any compatible worker re-plans then applies.</li>
-<li>A worker silent &gt; 60s → <code>offline</code>; an active run on a dead worker → <code>failed (worker_lost)</code> (an <code>applying</code> run only after the apply budget + grace, so a long apply isn't failed mid-flight).</li>
+<li><strong>Apply affinity</strong>: the worker that produced a plan is preferred for the apply for ~60s; past
+  that, any compatible worker takes it. Either way the apply worker starts from a fresh clone of
+  the pinned commit and applies the saved plan it downloads from the API (§4) — no workspace is
+  reused, nothing is re-planned.</li>
+<li><strong>Per-job credentials</strong>: each job gets its own state token, scoped to what it does — <code>ro</code> for a
+  PR plan or a read-only command, <code>plan</code> for a plan job (it may lock, never write), <code>rw</code> for an
+  apply job or a mutating command (§8) — and its own cloud credentials: the plan role for a plan
+  job, the apply role for an apply job (§10).</li>
+<li><strong>Worker loss</strong>: a worker silent &gt; 60s → <code>offline</code>. A run whose job is <em>executing</em> on it
+  (<code>preparing</code>, <code>planning</code>, <code>checking</code>, <code>running</code>, <code>applying</code>) → <code>failed (worker_lost)</code> after 120s.
+  A job holding apply credentials (an <code>applying</code> run, a mutating command) is only reclaimed after
+  the apply budget + grace (15 + 5 min by default), so a long apply isn't failed mid-flight and its
+  tokens have expired before another worker takes the environment. <code>unconfirmed</code> and <code>confirmed</code> runs are
+  never reclaimed: they wait on a human or on the apply claim, not on the plan worker.</li>
 <li><strong>Command channel.</strong> The heartbeat response is also the <em>downward</em> channel (still no inbound to
   the worker). Today it carries <strong>diagnostics</strong>: an admin clicks a button, a <code>pending</code> command is
   queued, the worker picks it up on its next heartbeat, runs a <strong>read-only</strong> bundle (versions, disk,
-  env var <em>names</em> — never values, recent agent logs) and posts it back. Same mechanism will carry
-  <code>cancel_job</code> later. Delivery latency is bounded by the claim long-poll (~25 s).</li>
+  environment variable <em>names</em> — never values, recent agent logs) and posts it back. Same mechanism will carry
+  <code>cancel_job</code> later. Delivery latency is bounded by the heartbeat interval (~20 s).</li>
 </ul>
 <p><strong>Run an agent:</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-10-1" name="__codelineno-10-1" href="#__codelineno-10-1"></a><span class="nv">POOL</span><span class="o">=</span><span class="k">$(</span>curl<span class="w"> </span>-s<span class="w"> </span>-X<span class="w"> </span>POST<span class="w"> </span>localhost:8000/api/v1/worker-pools<span class="w"> </span>-H<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$AUTH</span><span class="s2">&quot;</span><span class="w"> </span>-d<span class="w"> </span><span class="s1">&#39;{&quot;name&quot;:&quot;local&quot;}&#39;</span><span class="w"> </span><span class="p">|</span><span class="w"> </span>jq<span class="w"> </span>-r<span class="w"> </span>.token<span class="k">)</span>
-<a id="__codelineno-10-2" name="__codelineno-10-2" href="#__codelineno-10-2"></a><span class="nv">STACKD_POOL_TOKEN</span><span class="o">=</span><span class="nv">$POOL</span><span class="w"> </span><span class="nv">STACKD_API_URL</span><span class="o">=</span>http://localhost:8000<span class="w"> </span>python<span class="w"> </span>-m<span class="w"> </span>agent.main
+<div class="highlight"><pre><span></span><code><a id="__codelineno-11-1" name="__codelineno-11-1" href="#__codelineno-11-1"></a><span class="nv">POOL</span><span class="o">=</span><span class="k">$(</span>curl<span class="w"> </span>-s<span class="w"> </span>-X<span class="w"> </span>POST<span class="w"> </span>localhost:8000/api/v1/worker-pools<span class="w"> </span>-H<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$AUTH</span><span class="s2">&quot;</span><span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-11-2" name="__codelineno-11-2" href="#__codelineno-11-2"></a><span class="w">  </span>-H<span class="w"> </span><span class="s1">&#39;content-type: application/json&#39;</span><span class="w"> </span>-d<span class="w"> </span><span class="s1">&#39;{&quot;name&quot;:&quot;local&quot;}&#39;</span><span class="w"> </span><span class="p">|</span><span class="w"> </span>jq<span class="w"> </span>-r<span class="w"> </span>.token<span class="k">)</span>
+<a id="__codelineno-11-3" name="__codelineno-11-3" href="#__codelineno-11-3"></a><span class="nb">cd</span><span class="w"> </span>worker<span class="w"> </span><span class="o">&amp;&amp;</span><span class="w"> </span><span class="nv">STACKD_POOL_TOKEN</span><span class="o">=</span><span class="nv">$POOL</span><span class="w"> </span><span class="nv">STACKD_API_URL</span><span class="o">=</span>http://localhost:8000<span class="w"> </span>uv<span class="w"> </span>run<span class="w"> </span>python<span class="w"> </span>-m<span class="w"> </span>agent.main
 </code></pre></div>
 <hr />
 <h2 id="8-managed-state-s3-behind-an-http-backend">8. Managed state — S3 behind an HTTP backend<a class="headerlink" href="#8-managed-state-s3-behind-an-http-backend" title="Permanent link">&para;</a></h2>
 <p>The tfstate bytes live in <strong>S3</strong>, but Terraform talks to <strong>Stackd's HTTP backend</strong>, not S3 directly.</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-11-1" name="__codelineno-11-1" href="#__codelineno-11-1"></a>terraform ──backend &quot;http&quot;──▶ Stackd API ──(SSE-KMS)──▶ S3
-<a id="__codelineno-11-2" name="__codelineno-11-2" href="#__codelineno-11-2"></a>                                  └─▶ Postgres: versions, locks, audit
+<div class="highlight"><pre><span></span><code><a id="__codelineno-12-1" name="__codelineno-12-1" href="#__codelineno-12-1"></a>terraform ──backend &quot;http&quot;──▶ Stackd API ──(SSE-KMS)──▶ S3
+<a id="__codelineno-12-2" name="__codelineno-12-2" href="#__codelineno-12-2"></a>                                  └─▶ Postgres: versions, locks, audit
 </code></pre></div>
-<p>Why: per-run <strong>scoped tokens</strong> (read-only for PR plans), <strong>locking visible in the UI</strong> with audited
-force-unlock, refusal of a regressive serial, and every write tied to the run that produced it. The
-worker receives the backend config in its claim payload and injects it via <code>-backend-config</code> — <strong>zero
-changes to the user's Terraform code</strong>. Set <code>managed_state: false</code> to keep your own <code>backend "s3"</code>.</p>
+<p>Why: per-job <strong>scoped tokens</strong>, <strong>locking visible in the UI</strong> with audited force-unlock, refusal
+of a regressive serial, and every write tied to the run that produced it. The token's scope follows
+the job: <code>ro</code> (PR plans, read-only commands: read only), <code>plan</code> (a plan may lock, never write),
+<code>rw</code> (an apply or a mutating command). Once its run has ended, a token can no longer write or lock.</p>
+<p>The worker adds a bare <code>backend "http" {}</code> block and hands the address and the token to tofu
+<strong>only</strong>, as <code>TF_HTTP_*</code> environment variables — never <code>-backend-config</code>, which tofu would persist
+in <code>.terraform/</code> (readable by repo hooks) and in the saved plan. <strong>Zero changes to the user's
+Terraform code</strong>: the repo declares no backend. Set <code>managed_state: false</code> to keep your own
+<code>backend "s3"</code>.</p>
 <hr />
 <h2 id="9-dependencies-outputs-mocks-the-differentiator">9. Dependencies, outputs &amp; mocks — the differentiator<a class="headerlink" href="#9-dependencies-outputs-mocks-the-differentiator" title="Permanent link">&para;</a></h2>
 <p>Environments can depend on each other and pass <strong>outputs</strong> as inputs. Example: <code>app/dev</code> needs the
 <code>network_name</code> produced by <code>network/dev</code>.</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-12-1" name="__codelineno-12-1" href="#__codelineno-12-1"></a><span class="c1"># app/dev depends on network/dev: map upstream output → downstream input, with a mock for bootstrap</span>
-<a id="__codelineno-12-2" name="__codelineno-12-2" href="#__codelineno-12-2"></a>curl<span class="w"> </span>-s<span class="w"> </span>-X<span class="w"> </span>POST<span class="w"> </span>localhost:8000/api/v1/environments/<span class="nv">$APP_DEV</span>/dependencies<span class="w"> </span>-H<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$AUTH</span><span class="s2">&quot;</span><span class="w"> </span>-H<span class="w"> </span><span class="s1">&#39;content-type: application/json&#39;</span><span class="w"> </span>-d<span class="w"> </span><span class="s1">&#39;{</span>
-<a id="__codelineno-12-3" name="__codelineno-12-3" href="#__codelineno-12-3"></a><span class="s1">  &quot;upstream_env_id&quot;:&quot;&#39;</span><span class="nv">$NET_DEV</span><span class="s1">&#39;&quot;,</span>
-<a id="__codelineno-12-4" name="__codelineno-12-4" href="#__codelineno-12-4"></a><span class="s1">  &quot;trigger_policy&quot;:&quot;on_output_change&quot;,</span>
-<a id="__codelineno-12-5" name="__codelineno-12-5" href="#__codelineno-12-5"></a><span class="s1">  &quot;references&quot;:[{&quot;output_name&quot;:&quot;network_name&quot;,&quot;input_name&quot;:&quot;network_name&quot;,&quot;mock_value&quot;:&quot;mock-network&quot;}]</span>
-<a id="__codelineno-12-6" name="__codelineno-12-6" href="#__codelineno-12-6"></a><span class="s1">}&#39;</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-13-1" name="__codelineno-13-1" href="#__codelineno-13-1"></a><span class="c1"># app/dev depends on network/dev: map upstream output → downstream input, with a mock for bootstrap</span>
+<a id="__codelineno-13-2" name="__codelineno-13-2" href="#__codelineno-13-2"></a>curl<span class="w"> </span>-s<span class="w"> </span>-X<span class="w"> </span>POST<span class="w"> </span>localhost:8000/api/v1/environments/<span class="nv">$APP_DEV</span>/dependencies<span class="w"> </span>-H<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$AUTH</span><span class="s2">&quot;</span><span class="w"> </span>-H<span class="w"> </span><span class="s1">&#39;content-type: application/json&#39;</span><span class="w"> </span>-d<span class="w"> </span><span class="s1">&#39;{</span>
+<a id="__codelineno-13-3" name="__codelineno-13-3" href="#__codelineno-13-3"></a><span class="s1">  &quot;upstream_env_id&quot;:&quot;&#39;</span><span class="nv">$NET_DEV</span><span class="s1">&#39;&quot;,</span>
+<a id="__codelineno-13-4" name="__codelineno-13-4" href="#__codelineno-13-4"></a><span class="s1">  &quot;trigger_policy&quot;:&quot;on_output_change&quot;,</span>
+<a id="__codelineno-13-5" name="__codelineno-13-5" href="#__codelineno-13-5"></a><span class="s1">  &quot;references&quot;:[{&quot;output_name&quot;:&quot;network_name&quot;,&quot;input_name&quot;:&quot;network_name&quot;,&quot;mock_value&quot;:&quot;mock-network&quot;}]</span>
+<a id="__codelineno-13-6" name="__codelineno-13-6" href="#__codelineno-13-6"></a><span class="s1">}&#39;</span>
 </code></pre></div>
 <p><strong>Resolution rule at claim time: real value &gt; mock &gt; explicit error.</strong></p>
 <table>
@@ -1871,7 +2168,7 @@ validation, not for real changes. The UI shows a violet <code>MOCKED</code> badg
 <p><strong>Cascade.</strong> When <code>network/dev</code> finishes an apply, Stackd captures its outputs and triggers the
 downstream <code>app/dev</code> run automatically (<code>triggered_by=dependency</code>), passing the now-real value. The
 cascade <strong>never bypasses protections</strong> — a protected downstream still stops at <code>unconfirmed</code>.</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-13-1" name="__codelineno-13-1" href="#__codelineno-13-1"></a>network/dev  ──apply finished──▶  capture outputs  ──cascade──▶  app/dev run (real network_name)
+<div class="highlight"><pre><span></span><code><a id="__codelineno-14-1" name="__codelineno-14-1" href="#__codelineno-14-1"></a>network/dev  ──apply finished──▶  capture outputs  ──cascade──▶  app/dev run (real network_name)
 </code></pre></div>
 <hr />
 <h2 id="10-oidc-workload-credentials-zero-static-cloud-secrets">10. OIDC workload credentials — zero static cloud secrets<a class="headerlink" href="#10-oidc-workload-credentials-zero-static-cloud-secrets" title="Permanent link">&para;</a></h2>
@@ -1879,38 +2176,45 @@ cascade <strong>never bypasses protections</strong> — a protected downstream s
 to the run and phase; AWS exchanges it for a role via <code>AssumeRoleWithWebIdentity</code>. No static AWS
 keys anywhere.</p>
 <p>Token subject (the basis of trust policies):</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-14-1" name="__codelineno-14-1" href="#__codelineno-14-1"></a>sub = run:&lt;tier&gt;:&lt;stack&gt;:&lt;phase&gt;      e.g.  run:prod:core-network:apply
+<div class="highlight"><pre><span></span><code><a id="__codelineno-15-1" name="__codelineno-15-1" href="#__codelineno-15-1"></a>sub = run:&lt;tier&gt;:&lt;stack&gt;:&lt;phase&gt;      e.g.  run:prod:core-network:apply
 </code></pre></div>
 <p><strong>Plan and apply assume different roles</strong> — a PR plan physically cannot modify infra:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-15-1" name="__codelineno-15-1" href="#__codelineno-15-1"></a><span class="c1"># Trust policy of the prod APPLY role — refuses everything else</span>
-<a id="__codelineno-15-2" name="__codelineno-15-2" href="#__codelineno-15-2"></a><span class="nb">condition</span><span class="w"> </span><span class="p">{</span>
-<a id="__codelineno-15-3" name="__codelineno-15-3" href="#__codelineno-15-3"></a><span class="w">  </span><span class="na">test</span><span class="w">     </span><span class="o">=</span><span class="w"> </span><span class="s2">&quot;StringLike&quot;</span>
-<a id="__codelineno-15-4" name="__codelineno-15-4" href="#__codelineno-15-4"></a><span class="w">  </span><span class="na">variable</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">&quot;stackd.example.com:sub&quot;</span>
-<a id="__codelineno-15-5" name="__codelineno-15-5" href="#__codelineno-15-5"></a><span class="w">  </span><span class="na">values</span><span class="w">   </span><span class="o">=</span><span class="w"> </span><span class="p">[</span><span class="s2">&quot;run:prod:*:apply&quot;</span><span class="p">]</span><span class="c1">   # any stack, but tier=prod AND phase=apply</span>
-<a id="__codelineno-15-6" name="__codelineno-15-6" href="#__codelineno-15-6"></a><span class="p">}</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-16-1" name="__codelineno-16-1" href="#__codelineno-16-1"></a><span class="c1"># Trust policy of the prod APPLY role — refuses everything else</span>
+<a id="__codelineno-16-2" name="__codelineno-16-2" href="#__codelineno-16-2"></a><span class="nb">condition</span><span class="w"> </span><span class="p">{</span>
+<a id="__codelineno-16-3" name="__codelineno-16-3" href="#__codelineno-16-3"></a><span class="w">  </span><span class="na">test</span><span class="w">     </span><span class="o">=</span><span class="w"> </span><span class="s2">&quot;StringLike&quot;</span>
+<a id="__codelineno-16-4" name="__codelineno-16-4" href="#__codelineno-16-4"></a><span class="w">  </span><span class="na">variable</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">&quot;stackd.example.com:sub&quot;</span>
+<a id="__codelineno-16-5" name="__codelineno-16-5" href="#__codelineno-16-5"></a><span class="w">  </span><span class="na">values</span><span class="w">   </span><span class="o">=</span><span class="w"> </span><span class="p">[</span><span class="s2">&quot;run:prod:*:apply&quot;</span><span class="p">]</span><span class="c1">   # any stack, but tier=prod AND phase=apply</span>
+<a id="__codelineno-16-6" name="__codelineno-16-6" href="#__codelineno-16-6"></a><span class="p">}</span>
 </code></pre></div>
 <p>The wildcard is allowed <strong>only on the stack segment</strong> — <code>tier</code> and <code>phase</code> are always fixed; that's
-the double lock with §5. The worker writes the token to a file and exports
-<code>AWS_WEB_IDENTITY_TOKEN_FILE</code> / <code>AWS_ROLE_ARN</code> for terraform only (never for repo hooks). The
+the double lock with §5. The worker exports <code>AWS_WEB_IDENTITY_TOKEN_FILE</code> / <code>AWS_ROLE_ARN</code> to tofu
+and platform hooks only — never to repo hooks — and the token file exists only while one of them
+runs. The
 <code>AWS_ROLE_SESSION_NAME = stackd-&lt;run_id&gt;</code> ties every CloudTrail action back to the run — and thus to
 the human who confirmed it.</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-16-1" name="__codelineno-16-1" href="#__codelineno-16-1"></a>curl<span class="w"> </span>-s<span class="w"> </span>-X<span class="w"> </span>PUT<span class="w"> </span>localhost:8000/api/v1/environments/<span class="nv">$PROD</span>/cloud-integration<span class="w"> </span>-H<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$AUTH</span><span class="s2">&quot;</span><span class="w"> </span>-d<span class="w"> </span><span class="s1">&#39;{</span>
-<a id="__codelineno-16-2" name="__codelineno-16-2" href="#__codelineno-16-2"></a><span class="s1">  &quot;plan_role_arn&quot;:&quot;arn:aws:iam::123:role/stackd-prod-plan&quot;,</span>
-<a id="__codelineno-16-3" name="__codelineno-16-3" href="#__codelineno-16-3"></a><span class="s1">  &quot;apply_role_arn&quot;:&quot;arn:aws:iam::123:role/stackd-prod-apply&quot;,&quot;region&quot;:&quot;eu-west-1&quot;}&#39;</span>
-<a id="__codelineno-16-4" name="__codelineno-16-4" href="#__codelineno-16-4"></a>curl<span class="w"> </span>-s<span class="w"> </span>-X<span class="w"> </span>POST<span class="w"> </span>localhost:8000/api/v1/environments/<span class="nv">$PROD</span>/cloud-integration/test<span class="w"> </span>-H<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$AUTH</span><span class="s2">&quot;</span><span class="w">  </span><span class="c1"># verify AssumeRole</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-17-1" name="__codelineno-17-1" href="#__codelineno-17-1"></a>curl<span class="w"> </span>-s<span class="w"> </span>-X<span class="w"> </span>PUT<span class="w"> </span>localhost:8000/api/v1/environments/<span class="nv">$PROD</span>/cloud-integration<span class="w"> </span>-H<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$AUTH</span><span class="s2">&quot;</span><span class="w"> </span>-d<span class="w"> </span><span class="s1">&#39;{</span>
+<a id="__codelineno-17-2" name="__codelineno-17-2" href="#__codelineno-17-2"></a><span class="s1">  &quot;plan_role_arn&quot;:&quot;arn:aws:iam::123:role/stackd-prod-plan&quot;,</span>
+<a id="__codelineno-17-3" name="__codelineno-17-3" href="#__codelineno-17-3"></a><span class="s1">  &quot;apply_role_arn&quot;:&quot;arn:aws:iam::123:role/stackd-prod-apply&quot;,&quot;region&quot;:&quot;eu-west-1&quot;}&#39;</span>
+<a id="__codelineno-17-4" name="__codelineno-17-4" href="#__codelineno-17-4"></a>curl<span class="w"> </span>-s<span class="w"> </span>-X<span class="w"> </span>POST<span class="w"> </span>localhost:8000/api/v1/environments/<span class="nv">$PROD</span>/cloud-integration/test<span class="w"> </span>-H<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$AUTH</span><span class="s2">&quot;</span><span class="w">  </span><span class="c1"># verify AssumeRole</span>
 </code></pre></div>
 <hr />
 <h2 id="11-webhooks-git-staleness">11. Webhooks &amp; Git staleness<a class="headerlink" href="#11-webhooks-git-staleness" title="Permanent link">&para;</a></h2>
 <p>A Git webhook (HMAC-verified, secret per repo) maps a pushed branch to the environments tracking it,
 filtered by <code>project_root</code>:</p>
 <ul>
-<li><strong>push</strong> → a <code>tracked</code> run per matching env, and <code>head_sha</code> advances.</li>
-<li><strong>pull request</strong> → a <code>proposed</code> run: plan-only, read-only state, secrets off, mocks allowed.</li>
+<li><strong>push</strong> → a <code>tracked</code> run per matching environment, and <code>head_sha</code> advances.</li>
+<li><strong>pull request</strong> → a <code>proposed</code> run: plan-only, read-only state, mocks allowed, and <strong>no
+  secrets</strong>: the pull request's code runs inside tofu, so it gets none of the environment's
+  sensitive variables — only the read-only plan role — see
+  <a href="../guide/runs-and-approvals/#proposed-runs-from-a-pr">Runs &amp; approvals</a>.</li>
 </ul>
-<p><strong>Staleness</strong> answers "applied ≠ tip of branch": Stackd compares the last applied commit to the
-branch head (<code>head_sha</code>, refreshed by webhook, by <code>git ls-remote</code> polling, or manually). A stale env
-shows a <code>↑N</code> chip; a stale <code>unconfirmed</code> run shows a banner with <em>Re-plan</em>. Staleness is information,
-never an automatic trigger.</p>
+<p><strong>Staleness</strong> answers "applied ≠ tip of branch": Stackd compares the commit of the last finished
+tracked run (every run is pinned to the commit it planned) to the branch head (<code>head_sha</code>, refreshed
+by webhook, by <code>git ls-remote</code> polling every 15 min, or manually). The API exposes it on each
+environment (<code>stale</code>, <code>commits_ahead</code>); the <code>↑N</code> chip and the <em>Re-plan</em> banner on a stale
+<code>unconfirmed</code> run (DESIGN §5.1–5.2) are not in the UI yet. Changing an environment's branch resets
+its recorded head; a push deleting the branch clears it. Staleness is information, never an
+automatic trigger.</p>
 <hr />
 <h2 id="12-audit-vs-logs-two-different-journals">12. Audit vs logs — two different journals<a class="headerlink" href="#12-audit-vs-logs-two-different-journals" title="Permanent link">&para;</a></h2>
 <table>
@@ -1950,7 +2254,7 @@ never an automatic trigger.</p>
 </tbody>
 </table>
 <p>They never duplicate each other: a login is an <strong>audit</strong> event, not a debug log.</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-17-1" name="__codelineno-17-1" href="#__codelineno-17-1"></a>curl<span class="w"> </span>-s<span class="w"> </span><span class="s2">&quot;localhost:8000/api/v1/audit?action=run.applied&quot;</span><span class="w"> </span>-H<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$AUTH</span><span class="s2">&quot;</span><span class="w"> </span><span class="p">|</span><span class="w"> </span>jq<span class="w">   </span><span class="c1"># who applied what</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-18-1" name="__codelineno-18-1" href="#__codelineno-18-1"></a>curl<span class="w"> </span>-s<span class="w"> </span><span class="s2">&quot;localhost:8000/api/v1/audit?action=run.applied&quot;</span><span class="w"> </span>-H<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$AUTH</span><span class="s2">&quot;</span><span class="w"> </span><span class="p">|</span><span class="w"> </span>jq<span class="w">   </span><span class="c1"># who applied what</span>
 </code></pre></div>
 <hr />
 <h2 id="13-observability-health-logs-at-a-glance">13. Observability — health &amp; logs at a glance<a class="headerlink" href="#13-observability-health-logs-at-a-glance" title="Permanent link">&para;</a></h2>
@@ -2004,22 +2308,22 @@ actually <em>learns</em> a decision is waiting — without staring at the UI.</p
 </tbody>
 </table>
 <p>Two kinds: <code>slack</code> (posts <code>{"text": …}</code> to a Slack/Mattermost incoming webhook, with a deep link to
-the run) and <code>webhook</code> (a structured JSON envelope: state, run id, stack/env, tier, commit, url).</p>
+the run) and <code>webhook</code> (a structured JSON envelope: state, run id, stack/environment, tier, commit, url).</p>
 <p><strong>Example — Slack the approver whenever a prod apply is pending:</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-18-1" name="__codelineno-18-1" href="#__codelineno-18-1"></a>curl<span class="w"> </span>-s<span class="w"> </span>-X<span class="w"> </span>POST<span class="w"> </span>localhost:8000/api/v1/environments/<span class="nv">$ENV_ID</span>/notifications<span class="w"> </span>-H<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$AUTH</span><span class="s2">&quot;</span><span class="w"> </span><span class="se">\</span>
-<a id="__codelineno-18-2" name="__codelineno-18-2" href="#__codelineno-18-2"></a><span class="w">  </span>-H<span class="w"> </span><span class="s1">&#39;content-type: application/json&#39;</span><span class="w"> </span>-d<span class="w"> </span><span class="s1">&#39;{</span>
-<a id="__codelineno-18-3" name="__codelineno-18-3" href="#__codelineno-18-3"></a><span class="s1">    &quot;name&quot;: &quot;prod-approvals&quot;,</span>
-<a id="__codelineno-18-4" name="__codelineno-18-4" href="#__codelineno-18-4"></a><span class="s1">    &quot;kind&quot;: &quot;slack&quot;,</span>
-<a id="__codelineno-18-5" name="__codelineno-18-5" href="#__codelineno-18-5"></a><span class="s1">    &quot;url&quot;: &quot;https://hooks.slack.com/services/XXX/YYY/ZZZ&quot;,</span>
-<a id="__codelineno-18-6" name="__codelineno-18-6" href="#__codelineno-18-6"></a><span class="s1">    &quot;on_states&quot;: [&quot;unconfirmed&quot;, &quot;failed&quot;]</span>
-<a id="__codelineno-18-7" name="__codelineno-18-7" href="#__codelineno-18-7"></a><span class="s1">  }&#39;</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-19-1" name="__codelineno-19-1" href="#__codelineno-19-1"></a>curl<span class="w"> </span>-s<span class="w"> </span>-X<span class="w"> </span>POST<span class="w"> </span>localhost:8000/api/v1/environments/<span class="nv">$ENV_ID</span>/notifications<span class="w"> </span>-H<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$AUTH</span><span class="s2">&quot;</span><span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-19-2" name="__codelineno-19-2" href="#__codelineno-19-2"></a><span class="w">  </span>-H<span class="w"> </span><span class="s1">&#39;content-type: application/json&#39;</span><span class="w"> </span>-d<span class="w"> </span><span class="s1">&#39;{</span>
+<a id="__codelineno-19-3" name="__codelineno-19-3" href="#__codelineno-19-3"></a><span class="s1">    &quot;name&quot;: &quot;prod-approvals&quot;,</span>
+<a id="__codelineno-19-4" name="__codelineno-19-4" href="#__codelineno-19-4"></a><span class="s1">    &quot;kind&quot;: &quot;slack&quot;,</span>
+<a id="__codelineno-19-5" name="__codelineno-19-5" href="#__codelineno-19-5"></a><span class="s1">    &quot;url&quot;: &quot;https://hooks.slack.com/services/XXX/YYY/ZZZ&quot;,</span>
+<a id="__codelineno-19-6" name="__codelineno-19-6" href="#__codelineno-19-6"></a><span class="s1">    &quot;on_states&quot;: [&quot;unconfirmed&quot;, &quot;failed&quot;]</span>
+<a id="__codelineno-19-7" name="__codelineno-19-7" href="#__codelineno-19-7"></a><span class="s1">  }&#39;</span>
 </code></pre></div>
 <p><strong>How it works — a transactional outbox, not a side-effect.</strong> When <code>transition()</code> moves a run to a
 notify-worthy state, it inserts a row into <code>notification_outbox</code> <strong>in the same DB transaction</strong> as
 the state change (no HTTP in the request path). A background scheduler task drains the outbox under
 a <code>pg_try_advisory_lock</code> (one replica at a time) with <code>FOR UPDATE … SKIP LOCKED</code>, resolves the
-matching targets (env-level for the run's env + stack-level for its stack, filtered by <code>on_states</code>),
-and POSTs. Consequences worth knowing:</p>
+matching targets (those on the run's environment + those on its stack, filtered by <code>on_states</code>),
+and POSTs — with no DB transaction held during the HTTP call. Consequences worth knowing:</p>
 <ul>
 <li>a <strong>rolled-back</strong> transition never notifies (the outbox row rolls back with it);</li>
 <li>two API replicas never double-send (the lock + <code>SKIP LOCKED</code>);</li>
@@ -2027,6 +2331,12 @@ and POSTs. Consequences worth knowing:</p>
   the failure is logged — a flaky Slack never blocks or fails a run.</li>
 </ul>
 <p>Deep links use <code>STACKD_APP_URL</code> (the SPA base, e.g. <code>http://localhost:5173</code>).</p>
+<p><strong>SSRF guard.</strong> A target URL must be <code>https</code> and its host must resolve to public addresses only
+(no private, loopback, link-local or metadata IP), checked at create/update and again at every
+delivery. The POST connects to the IP that check vetted (Host, SNI and certificate stay on the
+hostname), never follows redirects, and <strong>ignores <code>HTTPS_PROXY</code> and other proxy variables by design</strong>: a proxy
+would resolve the name again. An API whose only egress is a proxy cannot deliver notifications.
+Targets are deleted with their stack or environment.</p>
 <hr />
 <h2 id="15-quick-reference">15. Quick reference<a class="headerlink" href="#15-quick-reference" title="Permanent link">&para;</a></h2>
 <table>
@@ -2039,7 +2349,7 @@ and POSTs. Consequences worth knowing:</p>
 <tbody>
 <tr>
 <td><strong>Space</strong></td>
-<td>top container; one <code>default</code> at MVP</td>
+<td>top container and permission boundary (<code>default</code>, plus any an admin creates)</td>
 </tr>
 <tr>
 <td><strong>Stack</strong></td>
@@ -2051,7 +2361,7 @@ and POSTs. Consequences worth knowing:</p>
 </tr>
 <tr>
 <td><strong>Variable set</strong></td>
-<td>reusable bundle of variables, attached to stacks/envs</td>
+<td>reusable bundle of variables, attached to tiers, stacks or environments of its own space</td>
 </tr>
 <tr>
 <td><strong>Provenance</strong></td>
@@ -2059,7 +2369,11 @@ and POSTs. Consequences worth knowing:</p>
 </tr>
 <tr>
 <td><strong>Run</strong></td>
-<td>one execution against one env, driven by the state machine</td>
+<td>one change to one environment, from plan to apply, driven by the state machine</td>
+</tr>
+<tr>
+<td><strong>Job</strong></td>
+<td>what a worker executes for a run: the plan job, the apply job, or a command job</td>
 </tr>
 <tr>
 <td><strong><code>transition()</code></strong></td>
@@ -2070,12 +2384,16 @@ and POSTs. Consequences worth knowing:</p>
 <td>configurable catalog; gates apply via the user's <code>allowed_tiers</code> set (not ordered)</td>
 </tr>
 <tr>
-<td><strong>4-eyes</strong></td>
-<td>triggerer ≠ confirmer on prod / when required</td>
+<td><strong>Four-eyes</strong></td>
+<td>the person who triggered a run can't confirm it, on a <code>requires_four_eyes</code> tier, a <code>protected</code> environment, or when the environment requires it</td>
 </tr>
 <tr>
 <td><strong>Hook</strong></td>
-<td>shell step at a lifecycle stage; platform (governance) or repo</td>
+<td>shell step at a lifecycle stage; platform (governance, trusted) or repo (no secrets)</td>
+</tr>
+<tr>
+<td><strong>Check</strong></td>
+<td>a hook's result (<code>ok</code>, <code>warn</code>, <code>fail</code>), kept on the run with its stage</td>
 </tr>
 <tr>
 <td><strong>Worker</strong></td>
@@ -2083,11 +2401,15 @@ and POSTs. Consequences worth knowing:</p>
 </tr>
 <tr>
 <td><strong>Managed state</strong></td>
-<td>tfstate in S3 via Stackd's HTTP backend</td>
+<td>tfstate in S3 via Stackd's HTTP backend, per-job scoped tokens</td>
+</tr>
+<tr>
+<td><strong>Saved plan</strong></td>
+<td>the reviewed <code>plan.tfplan</code>, kept encrypted until the run ends; the apply applies exactly it</td>
 </tr>
 <tr>
 <td><strong>Mock output</strong></td>
-<td>placeholder value to bootstrap a cascade; blocks apply</td>
+<td>placeholder value to bootstrap a cascade; blocks the apply unless the environment sets <code>allow_mock_apply</code></td>
 </tr>
 <tr>
 <td><strong>Cascade</strong></td>
@@ -2095,7 +2417,7 @@ and POSTs. Consequences worth knowing:</p>
 </tr>
 <tr>
 <td><strong>Workload token</strong></td>
-<td>per-run OIDC token, <code>sub=run:&lt;tier&gt;:&lt;stack&gt;:&lt;phase&gt;</code></td>
+<td>per-job OIDC token, <code>sub=run:&lt;tier&gt;:&lt;stack&gt;:&lt;phase&gt;</code></td>
 </tr>
 <tr>
 <td><strong>Audit</strong></td>
@@ -2103,11 +2425,11 @@ and POSTs. Consequences worth knowing:</p>
 </tr>
 <tr>
 <td><strong>Proposed run</strong></td>
-<td>plan-only run from a PR (RO state, no secrets)</td>
+<td>plan-only run from a PR (<code>ro</code> state token, plan role, no secrets)</td>
 </tr>
 <tr>
 <td><strong>Notification target</strong></td>
-<td>outbound Slack/webhook on a stack/env, firing on chosen run states</td>
+<td>outbound Slack/webhook on a stack or environment, firing on chosen run states</td>
 </tr>
 <tr>
 <td><strong>Outbox</strong></td>

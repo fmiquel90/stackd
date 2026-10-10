@@ -880,6 +880,33 @@
   
   
     <li class="md-nav__item">
+      <a href="../../ARCHITECTURE/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Architecture
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../../api/" class="md-nav__link">
         
   
@@ -920,10 +947,10 @@
       
         
         
-        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5" >
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_6" >
         
           
-          <label class="md-nav__link" for="__nav_5" id="__nav_5_label" tabindex="">
+          <label class="md-nav__link" for="__nav_6" id="__nav_6_label" tabindex="">
             
   
   
@@ -941,8 +968,8 @@
             <span class="md-nav__icon md-icon"></span>
           </label>
         
-        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_5_label" aria-expanded="false">
-          <label class="md-nav__title" for="__nav_5">
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_6_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_6">
             <span class="md-nav__icon md-icon"></span>
             
   
@@ -1235,9 +1262,14 @@ an optional <code>mock_value</code>.</p>
 <code>upstream &lt;&gt; downstream</code> — two environments <strong>of the same stack</strong> may depend on each
 other (primary/secondary region pattern). To wire same-named environments across two
 stacks in bulk, use the helper:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>curl<span class="w"> </span>-s<span class="w"> </span>-X<span class="w"> </span>POST<span class="w"> </span>localhost:8000/api/v1/stacks/<span class="nv">$STACK_ID</span>/dependencies/link-by-name<span class="w"> </span><span class="se">\</span>
-<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="w">  </span>-H<span class="w"> </span><span class="s2">&quot;Authorization: Bearer </span><span class="nv">$TOKEN</span><span class="s2">&quot;</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>curl<span class="w"> </span>-s<span class="w"> </span>-X<span class="w"> </span>POST<span class="w"> </span>localhost:8000/api/v1/stacks/<span class="nv">$APP_STACK_ID</span>/dependencies/link-by-name<span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="w">  </span>-H<span class="w"> </span><span class="s2">&quot;Authorization: Bearer </span><span class="nv">$TOKEN</span><span class="s2">&quot;</span><span class="w"> </span>-H<span class="w"> </span><span class="s1">&#39;content-type: application/json&#39;</span><span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a><span class="w">  </span>-d<span class="w"> </span><span class="s1">&#39;{&quot;upstream_stack_id&quot;: &quot;&#39;</span><span class="s2">&quot;</span><span class="nv">$NETWORK_STACK_ID</span><span class="s2">&quot;</span><span class="s1">&#39;&quot;, &quot;trigger_policy&quot;: &quot;on_output_change&quot;}&#39;</span>
 </code></pre></div>
+<p>It links each environment of the stack in the path to the same-named environment of
+<code>upstream_stack_id</code>, skipping pairs already linked and any edge that would close a
+cycle, and returns <code>{"created": N}</code> — running it twice is harmless. Add the
+<code>output_references</code> on each edge afterwards.</p>
 <h2 id="how-inputs-resolve">How inputs resolve<a class="headerlink" href="#how-inputs-resolve" title="Permanent link">&para;</a></h2>
 <p>Inputs are resolved fresh <strong>at claim time</strong> and snapshotted into <code>resolved_inputs</code>.
 The rule is <strong>real upstream output &gt; mock &gt; explicit error</strong>.</p>
@@ -1288,23 +1320,29 @@ walks the outgoing edges and triggers downstream runs (<code>type=tracked</code>
 </tr>
 </tbody>
 </table>
-<p>A downstream with multiple parents fires only when <strong>all</strong> its run-group parents have
-finished; a failed parent stops that branch (<code>run_group = partial_failure</code>).</p>
+<p>Each finished upstream apply triggers its downstream runs on its own: a downstream with two
+parents can run twice. Waiting for <strong>all</strong> parents of a run group, and stopping a branch when a
+parent fails, are specified but not implemented yet (SPECS §9.2). Only a finished apply cascades:
+a failed run, including one whose <code>after_apply</code> hook failed, triggers nothing.</p>
 <div class="admonition warning">
 <p class="admonition-title">Protections are never bypassed</p>
-<p>The cascade never auto-confirms. A <strong>protected</strong> downstream still stops at
-<code>unconfirmed</code> and waits for a human — see <a href="../runs-and-approvals/">Runs &amp; approvals</a>.</p>
+<p>A cascade run is routed like any other plan. It auto-confirms only on an <code>autodeploy</code>,
+unprotected environment, with no mock and no <code>warn</code> check; a <strong>protected</strong> downstream always
+stops at <code>unconfirmed</code> and waits for a human — see <a href="../runs-and-approvals/">Runs &amp; approvals</a>.</p>
 </div>
-<p>Launch a whole subgraph at once with <code>with_downstream=true</code>; the root starts and
-subsequent levels follow via cascade:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>curl<span class="w"> </span>-s<span class="w"> </span>-X<span class="w"> </span>POST<span class="w"> </span><span class="s2">&quot;localhost:8000/api/v1/environments/</span><span class="nv">$NETWORK_DEV</span><span class="s2">/runs?with_downstream=true&quot;</span><span class="w"> </span><span class="se">\</span>
-<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="w">  </span>-H<span class="w"> </span><span class="s2">&quot;Authorization: Bearer </span><span class="nv">$TOKEN</span><span class="s2">&quot;</span>
+<p>Launch a whole subgraph at once with <code>with_downstream: true</code> in the trigger body; the
+root starts and subsequent levels follow via cascade:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>curl<span class="w"> </span>-s<span class="w"> </span>-X<span class="w"> </span>POST<span class="w"> </span>localhost:8000/api/v1/environments/<span class="nv">$NETWORK_DEV</span>/runs<span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="w">  </span>-H<span class="w"> </span><span class="s2">&quot;Authorization: Bearer </span><span class="nv">$TOKEN</span><span class="s2">&quot;</span><span class="w"> </span>-H<span class="w"> </span><span class="s1">&#39;content-type: application/json&#39;</span><span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a><span class="w">  </span>-d<span class="w"> </span><span class="s1">&#39;{&quot;with_downstream&quot;: true}&#39;</span>
 </code></pre></div>
 <h2 id="inspect">Inspect<a class="headerlink" href="#inspect" title="Permanent link">&para;</a></h2>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a>curl<span class="w"> </span>-s<span class="w"> </span>localhost:8000/api/v1/environments/<span class="nv">$APP_DEV</span>/outputs<span class="w">   </span>-H<span class="w"> </span><span class="s2">&quot;Authorization: Bearer </span><span class="nv">$TOKEN</span><span class="s2">&quot;</span>
 <a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a>curl<span class="w"> </span>-s<span class="w"> </span>localhost:8000/api/v1/graph<span class="w">                            </span>-H<span class="w"> </span><span class="s2">&quot;Authorization: Bearer </span><span class="nv">$TOKEN</span><span class="s2">&quot;</span>
-<a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a>curl<span class="w"> </span>-s<span class="w"> </span>localhost:8000/api/v1/run-groups/<span class="nv">$GROUP_ID</span><span class="w">             </span>-H<span class="w"> </span><span class="s2">&quot;Authorization: Bearer </span><span class="nv">$TOKEN</span><span class="s2">&quot;</span>
 </code></pre></div>
+<p><code>/graph</code> only shows the environments and edges of the spaces you can see. There is no
+run-group endpoint yet: follow a cascade on the graph page, or through the downstream
+environments' runs (<code>triggered_by: "dependency"</code>).</p>
 <p>To remove an edge: <code>DELETE /api/v1/dependencies/{id}</code>.</p>
 <h2 id="see-also">See also<a class="headerlink" href="#see-also" title="Permanent link">&para;</a></h2>
 <ul>

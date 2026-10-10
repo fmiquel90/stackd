@@ -329,6 +329,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#the-model-in-one-paragraph" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The model in one paragraph
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#start-here" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -832,6 +843,33 @@
   
   
     <li class="md-nav__item">
+      <a href="ARCHITECTURE/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Architecture
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="api/" class="md-nav__link">
         
   
@@ -872,10 +910,10 @@
       
         
         
-        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5" >
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_6" >
         
           
-          <label class="md-nav__link" for="__nav_5" id="__nav_5_label" tabindex="">
+          <label class="md-nav__link" for="__nav_6" id="__nav_6_label" tabindex="">
             
   
   
@@ -893,8 +931,8 @@
             <span class="md-nav__icon md-icon"></span>
           </label>
         
-        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_5_label" aria-expanded="false">
-          <label class="md-nav__title" for="__nav_5">
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_6_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_6">
             <span class="md-nav__icon md-icon"></span>
             
   
@@ -1089,6 +1127,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#the-model-in-one-paragraph" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The model in one paragraph
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#start-here" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -1130,7 +1179,7 @@
 <p><strong>StackD is a self-hostable control plane for
 Terraform &amp; OpenTofu:</strong> every change becomes a reviewable <strong><code>plan → human approval → apply</code></strong> run,
 executed on disposable pull-based workers, with a full audit trail and short-lived cloud
-credentials minted per run.</p>
+credentials minted for each job. The apply runs exactly the plan that was approved.</p>
 <blockquote>
 <p>No static cloud secrets. No shared state. No one running <code>apply</code> from their laptop.</p>
 </blockquote>
@@ -1141,6 +1190,12 @@ answer. Managed SaaS solves it — but you hand over your state, credentials, an
 <p>Stackd is the <strong>self-hosted middle ground</strong>: the API is the single source of truth, workers are
 stateless and disposable, every state change is one auditable event, and cloud credentials expire
 with the run.</p>
+<h2 id="the-model-in-one-paragraph">The model in one paragraph<a class="headerlink" href="#the-model-in-one-paragraph" title="Permanent link">&para;</a></h2>
+<p>A <strong>space</strong> holds <strong>stacks</strong>: a stack is your code (a Git repo and a folder). Each stack is deployed
+as several <strong>environments</strong> (<code>dev</code>, <code>prod</code>…), each with its own state, variables and rules. Every
+change to an environment is a <strong>run</strong>: plan, human review, apply. A worker executes a run as
+<strong>jobs</strong> — a plan job, then an apply job once someone confirms. Each environment's <strong>tier</strong> decides
+who may confirm.</p>
 <h2 id="start-here">Start here<a class="headerlink" href="#start-here" title="Permanent link">&para;</a></h2>
 <ul>
 <li>🚀 <strong><a href="guide/getting-started/">Getting started</a></strong> — bring the stack up and drive your first run.</li>
@@ -1148,10 +1203,12 @@ with the run.</p>
 <li>🛡️ <strong><a href="guide/runs-and-approvals/">Runs &amp; approvals</a></strong> — tiers, four-eyes, the apply gate.</li>
 <li>🪝 <strong><a href="guide/hooks/">Hooks &amp; <code>.stackd.yml</code></a></strong> — platform and repo hooks.</li>
 <li>📥 <strong><a href="guide/importing-existing-state/">Importing an existing stack</a></strong> — adopt existing remote state.</li>
-<li>🔑 <strong><a href="guide/cloud-credentials/">Cloud credentials (OIDC)</a></strong> — per-run roles, no static keys.</li>
+<li>🔑 <strong><a href="guide/cloud-credentials/">Cloud credentials (OIDC)</a></strong> — per-job roles, no static keys.</li>
+<li>🏗️ <strong><a href="ARCHITECTURE/">Architecture</a></strong> — how it works inside, with diagrams.</li>
 </ul>
-<p>New to the model? The <strong><a href="CONCEPTS/">Concepts</a></strong> guide explains everything with worked examples.
-For the exhaustive technical truth, see the <strong><a href="SPECS/">Specification</a></strong>.</p>
+<p>New to the model? The <strong><a href="CONCEPTS/">Concepts</a></strong> guide starts with a one-page glossary, then
+explains everything with worked examples. For the exhaustive technical truth, see the
+<strong><a href="SPECS/">Specification</a></strong>.</p>
 
 
 

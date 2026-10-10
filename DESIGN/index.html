@@ -765,6 +765,33 @@
   
   
     <li class="md-nav__item">
+      <a href="../ARCHITECTURE/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Architecture
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../api/" class="md-nav__link">
         
   
@@ -807,10 +834,10 @@
       
         
         
-        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5" checked>
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_6" checked>
         
           
-          <label class="md-nav__link" for="__nav_5" id="__nav_5_label" tabindex="">
+          <label class="md-nav__link" for="__nav_6" id="__nav_6_label" tabindex="">
             
   
   
@@ -828,8 +855,8 @@
             <span class="md-nav__icon md-icon"></span>
           </label>
         
-        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_5_label" aria-expanded="true">
-          <label class="md-nav__title" for="__nav_5">
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_6_label" aria-expanded="true">
+          <label class="md-nav__title" for="__nav_6">
             <span class="md-nav__icon md-icon"></span>
             
   
@@ -1665,7 +1692,7 @@
 <li><strong>Flat and delimited by rules</strong>: separations via 1px borders and subtle background variations. No drop shadows, no glassmorphism. Low radius (4 px) — the tool is angular like a schematic.</li>
 </ul>
 <h3 id="22-signature-element-the-phase-rail">2.2 Signature element: the <strong>phase rail</strong><a class="headerlink" href="#22-signature-element-the-phase-rail" title="Permanent link">&para;</a></h3>
-<p>THE memorable thing about the interface: a <strong>vertical rail</strong> present on every run page, which materializes the state machine (queued → preparing → planning → checking → unconfirmed → applying → finished; <code>checking</code> only appears if checks exist, <code>confirmed</code> is transient and is displayed as the start of the applying segment). Each segment:</p>
+<p>THE memorable thing about the interface: a <strong>vertical rail</strong> present on every run page, which materializes the state machine (queued → preparing → planning → checking → unconfirmed → applying → finished; <code>checking</code> only appears if the plan ran <code>after_plan</code> hooks, <code>confirmed</code> is transient and is displayed as the start of the applying segment). Each segment:</p>
 <ul>
 <li>semantic color code (cf. §3.2), the active segment animated with a discreet pulse (the only ambient animation in the app);</li>
 <li>clickable: navigates directly to the log section for that phase;</li>
@@ -1855,12 +1882,12 @@
 <a id="__codelineno-1-9" name="__codelineno-1-9" href="#__codelineno-1-9"></a>└────────┴─┴─────────────────────────────────────────────┴─┘
 </code></pre></div>
 <ul>
-<li><strong>Sticky action bar</strong> at the top, not at the bottom: the decision is always visible, with the context (who triggered, env tier). Confirm button <strong>amber</strong>, disabled with the reason spelled out ("prod tier required — your cap is staging", "approver role required", "destroy permission required", "mocked run — apply disabled", "you triggered this prod run"). The triggerer and the confirmer are shown with their tier.</li>
-<li><strong>Friction proportional to risk.</strong> An authorized non-prod apply = one click. But confirming an apply on <strong><code>tier=prod</code></strong> or <strong>any <code>destroy</code> run</strong> requires an <strong>explicit confirmation</strong> in a popover anchored to the button: typing the <strong>name of the environment</strong> (GitHub pattern, consistent with deletions §5.7) + a <code>+a ~c −d</code> summary of the plan, destructions highlighted. Consistent with the principle: deleting a stack already requires typing its name — applying a destruction on prod cannot be less demanding than editing config. The popover bypasses no access rule (<code>can_apply</code> is still evaluated on the API side): it is a misclick safeguard, not a permission check.</li>
+<li><strong>Sticky action bar</strong> at the top, not at the bottom: the decision is always visible, with the context (who triggered, env tier). Confirm button <strong>amber</strong>, disabled with the reason spelled out ("tier prod not in your allowed tiers (dev, staging)", "approver role required", "destroy permission required", "mocked run — apply disabled", "you triggered this prod run"). The triggerer and the confirmer are shown with their tier.</li>
+<li><strong>Friction proportional to risk.</strong> An authorized apply on an ordinary tier = one click. But confirming an apply on a <strong>tier flagged <code>requires_four_eyes</code></strong> (the seeded <code>prod</code>) or <strong>any <code>destroy</code> run</strong> requires an <strong>explicit confirmation</strong> in a popover anchored to the button: typing the <strong>name of the environment</strong> (GitHub pattern, consistent with deletions §5.7) + a <code>+a ~c −d</code> summary of the plan, destructions highlighted. Consistent with the principle: deleting a stack already requires typing its name — applying a destruction on prod cannot be less demanding than editing config. The popover bypasses no access rule (<code>can_apply</code> is still evaluated on the API side): it is a misclick safeguard, not a permission check.</li>
 <li><strong>Staleness banner</strong>: if the tracked branch advances while a plan awaits confirmation, a banner above the content — "Plan computed on <code>abc1234</code> · the branch has advanced by 2 commits" — with a <em>Re-plan</em> action. Confirming remains possible (applying a precise commit is legitimate), but never unknowingly.</li>
 <li>Header: triggerer AND confirmer shown (Google avatars) — audit is in the interface, not hidden in a page.</li>
 <li><strong>Plan</strong> tab: <code>+3 ~1 −0</code> summary in giant mono, then a list of resources grouped by action (create/update/delete), each resource expandable into an attribute-by-attribute diff (added green / modified amber / deleted red, values in mono). <strong>Destructions are always expanded by default</strong> — a delete is never hidden.</li>
-<li><strong>Checks</strong> tab: one block per after_plan hook (name, status, duration, output), warn = amber with the note "manual confirmation required".</li>
+<li><strong>Checks</strong> tab: one block per hook check, from every stage of the plan and apply jobs (<code>check_results.results</code>, SPECS §8.3) — name, stage, status, duration, output; warn = amber with the note "manual confirmation required" (a warning at an apply stage comes after the confirmation and only informs). A run older than <code>results</code> shows its <code>checks</code> instead (warn/fail only), with the stage as <code>—</code>.</li>
 <li><strong>Inputs</strong> tab: resolved variables with their <strong>provenance as a mono badge</strong> (<code>set:common-aws</code>, <code>stack</code>, <code>env</code>, <code>dependency</code>, <code>MOCK</code> in magenta). Sensitive values: <code>•••</code> with no "reveal" button.</li>
 </ul>
 <h3 id="53-log-viewer-in-the-run-page">5.3 Log viewer (in the run page)<a class="headerlink" href="#53-log-viewer-in-the-run-page" title="Permanent link">&para;</a></h3>
@@ -1957,7 +1984,7 @@
 <ul>
 <li>Drop shadows, gradients, glassmorphism, decorative illustrations, emojis in the UI.</li>
 <li>State colors used for anything other than state; brand violet used to carry state meaning; amber used outside its meaning ("needs a human": decision, <code>unconfirmed</code>, warn/review signals) — e.g. for log severity or technical telemetry.</li>
-<li>An icon alone on a destructive action; confirmation without typing the name for deletions <strong>and for any <code>tier=prod</code> or <code>destroy</code> apply</strong> (§5.2).</li>
+<li>An icon alone on a destructive action; confirmation without typing the name for deletions <strong>and for any apply on a <code>requires_four_eyes</code> tier or any <code>destroy</code> apply</strong> (§5.2).</li>
 <li>Toasts for background events; unsolicited animations beyond the rail's pulse.</li>
 <li>Hiding or collapsing a resource destruction in a plan.</li>
 <li>Any system text (ID, SHA, value, duration) in the UI font: data is mono, always.</li>

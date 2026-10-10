@@ -803,6 +803,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#network-requirements-and-ssrf-protection" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Network requirements and SSRF protection
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#delivery-guarantees" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -902,6 +913,33 @@
   
   
     <li class="md-nav__item">
+      <a href="../../ARCHITECTURE/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Architecture
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../../api/" class="md-nav__link">
         
   
@@ -942,10 +980,10 @@
       
         
         
-        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5" >
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_6" >
         
           
-          <label class="md-nav__link" for="__nav_5" id="__nav_5_label" tabindex="">
+          <label class="md-nav__link" for="__nav_6" id="__nav_6_label" tabindex="">
             
   
   
@@ -963,8 +1001,8 @@
             <span class="md-nav__icon md-icon"></span>
           </label>
         
-        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_5_label" aria-expanded="false">
-          <label class="md-nav__title" for="__nav_5">
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_6_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_6">
             <span class="md-nav__icon md-icon"></span>
             
   
@@ -1214,6 +1252,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#network-requirements-and-ssrf-protection" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Network requirements and SSRF protection
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#delivery-guarantees" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -1285,7 +1334,7 @@
 </tr>
 </tbody>
 </table>
-<p>Default <code>on_states</code> is <code>["unconfirmed", "failed"]</code>. Two kinds exist: <code>slack</code> posts <code>{"text": …}</code> to a Slack/Mattermost incoming webhook (with a deep link to the run), and <code>webhook</code> posts a structured JSON envelope (state, run id, stack/env, tier, commit, url). Deep links use <code>STACKD_APP_URL</code>, the SPA base.</p>
+<p>Default <code>on_states</code> is <code>["unconfirmed", "failed"]</code>; those three states are the only accepted values. Two kinds exist: <code>slack</code> posts <code>{"text": …}</code> to a Slack/Mattermost incoming webhook (with a deep link to the run), and <code>webhook</code> posts a structured JSON envelope (state, run id, run type, stack/env, tier, commit, url). Deep links use <code>STACKD_APP_URL</code>, the SPA base.</p>
 <h2 id="setting-up-slack">Setting up Slack<a class="headerlink" href="#setting-up-slack" title="Permanent link">&para;</a></h2>
 <p>The <code>slack</code> kind posts to a <strong>Slack incoming webhook</strong> — a URL Slack gives you that drops a message into one channel. No bot token, no scopes.</p>
 <ol>
@@ -1303,7 +1352,7 @@
 <p>The <code>webhook</code> kind POSTs the JSON envelope (see <a href="#a-generic-webhook-target">below</a>) to any HTTPS endpoint you control (a CI bridge, a Lambda URL, an internal service).</p>
 <ul>
 <li><strong>Method/format</strong>: <code>POST</code>, <code>Content-Type: application/json</code>.</li>
-<li><strong>No signature</strong>: outbound notification webhooks are <strong>not</strong> HMAC-signed (unlike <em>inbound</em> GitHub webhooks, which use <code>stacks.webhook_secret</code>). Treat the URL itself as the secret — use an unguessable path or a token your receiver checks — and prefer an endpoint reachable only over TLS.</li>
+<li><strong>No signature</strong>: outbound notification webhooks are <strong>not</strong> HMAC-signed (unlike <em>inbound</em> GitHub webhooks, which use <code>stacks.webhook_secret</code>). Treat the URL itself as the secret — use an unguessable path or a token your receiver checks. The URL must be <code>https</code> on a public host (see <a href="#network-requirements-and-ssrf-protection">Network requirements</a>).</li>
 <li><strong>Idempotency</strong>: delivery is at-least-once (see <a href="#delivery-guarantees">Delivery guarantees</a>); key on <code>run_id</code> + <code>state</code> so a retry is a no-op.</li>
 </ul>
 <h2 id="ping-the-approver-when-a-prod-plan-is-waiting">Ping the approver when a prod plan is waiting<a class="headerlink" href="#ping-the-approver-when-a-prod-plan-is-waiting" title="Permanent link">&para;</a></h2>
@@ -1331,14 +1380,16 @@
 </code></pre></div>
 <p>The <code>webhook</code> kind POSTs a JSON envelope:</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="p">{</span>
-<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="w">  </span><span class="nt">&quot;state&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;finished&quot;</span><span class="p">,</span>
-<a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a><span class="w">  </span><span class="nt">&quot;run_id&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;0190e...c3&quot;</span><span class="p">,</span>
-<a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a><span class="w">  </span><span class="nt">&quot;stack&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;payments&quot;</span><span class="p">,</span>
-<a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a><span class="w">  </span><span class="nt">&quot;environment&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;payments-prod&quot;</span><span class="p">,</span>
-<a id="__codelineno-2-6" name="__codelineno-2-6" href="#__codelineno-2-6"></a><span class="w">  </span><span class="nt">&quot;tier&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;prod&quot;</span><span class="p">,</span>
-<a id="__codelineno-2-7" name="__codelineno-2-7" href="#__codelineno-2-7"></a><span class="w">  </span><span class="nt">&quot;commit&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;a1b2c3d&quot;</span><span class="p">,</span>
-<a id="__codelineno-2-8" name="__codelineno-2-8" href="#__codelineno-2-8"></a><span class="w">  </span><span class="nt">&quot;url&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;http://localhost:5173/runs/0190e...c3&quot;</span>
-<a id="__codelineno-2-9" name="__codelineno-2-9" href="#__codelineno-2-9"></a><span class="p">}</span>
+<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="w">  </span><span class="nt">&quot;event&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;run.state_changed&quot;</span><span class="p">,</span>
+<a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a><span class="w">  </span><span class="nt">&quot;state&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;finished&quot;</span><span class="p">,</span>
+<a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a><span class="w">  </span><span class="nt">&quot;run_id&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;0190e...c3&quot;</span><span class="p">,</span>
+<a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a><span class="w">  </span><span class="nt">&quot;run_type&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;tracked&quot;</span><span class="p">,</span>
+<a id="__codelineno-2-6" name="__codelineno-2-6" href="#__codelineno-2-6"></a><span class="w">  </span><span class="nt">&quot;stack&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;payments&quot;</span><span class="p">,</span>
+<a id="__codelineno-2-7" name="__codelineno-2-7" href="#__codelineno-2-7"></a><span class="w">  </span><span class="nt">&quot;environment&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;payments-prod&quot;</span><span class="p">,</span>
+<a id="__codelineno-2-8" name="__codelineno-2-8" href="#__codelineno-2-8"></a><span class="w">  </span><span class="nt">&quot;tier&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;prod&quot;</span><span class="p">,</span>
+<a id="__codelineno-2-9" name="__codelineno-2-9" href="#__codelineno-2-9"></a><span class="w">  </span><span class="nt">&quot;commit_sha&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;a1b2c3d4e5f6...&quot;</span><span class="p">,</span>
+<a id="__codelineno-2-10" name="__codelineno-2-10" href="#__codelineno-2-10"></a><span class="w">  </span><span class="nt">&quot;url&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;http://localhost:5173/runs/0190e...c3&quot;</span>
+<a id="__codelineno-2-11" name="__codelineno-2-11" href="#__codelineno-2-11"></a><span class="p">}</span>
 </code></pre></div>
 <h2 id="managing-targets">Managing targets<a class="headerlink" href="#managing-targets" title="Permanent link">&para;</a></h2>
 <p>Both scopes expose the same CRUD. List or create on the scope, then patch or delete by target id:</p>
@@ -1347,7 +1398,30 @@
 <a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a><span class="w">  </span>-H<span class="w"> </span><span class="s2">&quot;Authorization: Bearer </span><span class="nv">$TOKEN</span><span class="s2">&quot;</span><span class="w"> </span>-H<span class="w"> </span><span class="s1">&#39;content-type: application/json&#39;</span><span class="w"> </span>-d<span class="w"> </span><span class="s1">&#39;{&quot;enabled&quot;: false}&#39;</span>
 <a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a>curl<span class="w"> </span>-s<span class="w"> </span>-X<span class="w"> </span>DELETE<span class="w"> </span>localhost:8000/api/v1/stacks/<span class="nv">$STACK_ID</span>/notifications/<span class="nv">$TARGET_ID</span><span class="w"> </span>-H<span class="w"> </span><span class="s2">&quot;Authorization: Bearer </span><span class="nv">$TOKEN</span><span class="s2">&quot;</span>
 </code></pre></div>
-<p>For a run's env, both the env-level and the stack-level targets resolve and fire (filtered by <code>on_states</code>).</p>
+<p>For a run's env, both the env-level and the stack-level targets resolve and fire (filtered by <code>on_states</code>). Deleting a stack or an environment deletes its targets too (each audited <code>notification_target.deleted</code> with the reason).</p>
+<h2 id="network-requirements-and-ssrf-protection">Network requirements and SSRF protection<a class="headerlink" href="#network-requirements-and-ssrf-protection" title="Permanent link">&para;</a></h2>
+<p>Targets are URLs that users enter and the API POSTs to from inside your network, so Stackd guards
+against server-side request forgery:</p>
+<ul>
+<li>The URL must use <strong><code>https</code></strong>, and its host must resolve to <strong>public addresses only</strong>: a private,
+  loopback, link-local (including the <code>169.254.169.254</code> metadata endpoint), reserved or multicast
+  address is refused with a <code>422</code> at create/update, and checked again at every delivery.</li>
+<li>At delivery the API resolves the host <strong>once</strong>, vets every address, then connects to a vetted IP
+  directly. The <code>Host</code> header, TLS SNI and certificate verification still use the hostname. This
+  closes the DNS-rebinding window between the check and the connection.</li>
+<li>Redirects are <strong>not followed</strong>; the request times out after 5 s.</li>
+<li><strong>Proxy settings are ignored by design.</strong> Delivery never goes through <code>HTTPS_PROXY</code>, <code>HTTP_PROXY</code>
+  or any other environment proxy: a proxy would resolve the hostname again, which would defeat the
+  pinning.</li>
+</ul>
+<div class="admonition warning">
+<p class="admonition-title">Egress through a proxy only</p>
+<p>If the API's only route to the internet is an HTTP proxy, notifications cannot be delivered:
+the API needs direct outbound HTTPS (port 443) to the target hosts, for example through a NAT
+gateway or a firewall allow rule for <code>hooks.slack.com</code>. A relay on your private network does not
+help either, since private addresses are refused. Failed deliveries are retried, then logged
+(see below); the <strong>test</strong> button surfaces the error immediately.</p>
+</div>
 <h2 id="delivery-guarantees">Delivery guarantees<a class="headerlink" href="#delivery-guarantees" title="Permanent link">&para;</a></h2>
 <p>Notifications are not a fire-and-forget side effect. When a run transitions to a notify-worthy state, a row is inserted into the outbox <strong>in the same DB transaction</strong> as the state change — no HTTP in the request path. A background scheduler drains the outbox under an advisory lock (one replica at a time) and POSTs to the matching targets.</p>
 <div class="admonition note">

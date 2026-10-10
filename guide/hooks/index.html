@@ -591,6 +591,28 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#failures-warnings-and-timeouts" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Failures, warnings and timeouts
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#check-results" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Check results
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#what-hooks-can-see" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -869,6 +891,33 @@
   
   
     <li class="md-nav__item">
+      <a href="../../ARCHITECTURE/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Architecture
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../../api/" class="md-nav__link">
         
   
@@ -909,10 +958,10 @@
       
         
         
-        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5" >
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_6" >
         
           
-          <label class="md-nav__link" for="__nav_5" id="__nav_5_label" tabindex="">
+          <label class="md-nav__link" for="__nav_6" id="__nav_6_label" tabindex="">
             
   
   
@@ -930,8 +979,8 @@
             <span class="md-nav__icon md-icon"></span>
           </label>
         
-        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_5_label" aria-expanded="false">
-          <label class="md-nav__title" for="__nav_5">
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_6_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_6">
             <span class="md-nav__icon md-icon"></span>
             
   
@@ -1137,6 +1186,28 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#failures-warnings-and-timeouts" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Failures, warnings and timeouts
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#check-results" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Check results
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#what-hooks-can-see" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -1218,10 +1289,15 @@ non-bypassable) and <strong>repo hooks</strong> (defined in a <code>.stackd.yml<
 <td>imposed governance — <strong>not bypassable by a PR</strong></td>
 <td>project-specific logic (file generation, terragrunt, infracost…)</td>
 </tr>
+<tr>
+<td>Trusted with secrets</td>
+<td>yes</td>
+<td>no</td>
+</tr>
 </tbody>
 </table>
-<p><strong>Execution order at each stage:</strong> platform stack hooks → platform env hooks → repo hooks. Put your
-<strong>critical security checks on the platform side</strong>, not in the repo.</p>
+<p><strong>Execution order at each stage:</strong> platform stack hooks → platform environment hooks → repo hooks.
+Put your <strong>critical security checks on the platform side</strong>, not in the repo.</p>
 <h2 id="stackdyml"><code>.stackd.yml</code><a class="headerlink" href="#stackdyml" title="Permanent link">&para;</a></h2>
 <p>Place it at the root of the stack's <code>project_root</code> (so one repo can carry a different file per
 stack). Only the <code>hooks:</code> key is read.</p>
@@ -1238,42 +1314,111 @@ stack). Only the <code>hooks:</code> key is read.</p>
 <a id="__codelineno-0-11" name="__codelineno-0-11" href="#__codelineno-0-11"></a><span class="w">      </span><span class="nt">command</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">jq -e &#39;[.resource_changes[] | select(.change.actions | index(&quot;delete&quot;))] | length == 0&#39; plan.json</span>
 <a id="__codelineno-0-12" name="__codelineno-0-12" href="#__codelineno-0-12"></a><span class="w">      </span><span class="nt">on_failure</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">fail</span>
 </code></pre></div>
-<p><strong>Stages:</strong> <code>before_init</code>, <code>after_init</code>, <code>before_plan</code>, <code>after_plan</code>, <code>before_apply</code>, <code>after_apply</code>.
-Each hook is one shell command run in the workspace (<code>cwd = project_root</code>), with <code>name</code>, <code>command</code>,
-and <code>on_failure</code> (<code>fail</code> aborts the run; <code>warn</code> forces the run to <code>unconfirmed</code> so a human reviews).</p>
+<p>Each hook is one shell command run in the checkout (<code>cwd = project_root</code>), with <code>name</code>, <code>command</code>
+and <code>on_failure</code>.</p>
+<p><strong>Stages.</strong> The plan job runs <code>before_init</code>, <code>after_init</code>, <code>before_plan</code> and <code>after_plan</code>. The apply
+job, a fresh clone of the reviewed commit, runs <code>before_apply</code> and <code>after_apply</code>. A
+<a href="../commands/">command run</a> runs no hook. <code>plan.json</code> exists only at <code>after_plan</code>.</p>
+<h2 id="failures-warnings-and-timeouts">Failures, warnings and timeouts<a class="headerlink" href="#failures-warnings-and-timeouts" title="Permanent link">&para;</a></h2>
+<ul>
+<li><strong><code>on_failure: fail</code></strong> (the default): a failing hook stops the job at its stage, before the next
+  tofu step — at every stage, platform or repo. The run fails (audited <code>run.check_failed</code>). A
+  failing <code>before_apply</code> hook means <strong>nothing is applied</strong>.</li>
+<li><strong><code>on_failure: warn</code></strong>: the job goes on and the warning is recorded. At a plan stage it forces the
+  run to <code>unconfirmed</code>, even under autodeploy, so a human sees it (audited <code>run.check_warned</code>). At
+  an apply stage the run is already confirmed: the apply goes on.</li>
+<li><strong>A failing <code>after_apply</code> hook</strong> fails the run although the apply has already changed the
+  infrastructure. Stackd still records the new outputs and clears the environment's drift flag,
+  but nothing cascades from a failed run.</li>
+<li><strong>Timeout.</strong> Each hook gets 10 minutes (<code>STACKD_HOOK_TIMEOUT_SECONDS</code> on the worker). Past it the
+  hook and every process it started are killed, and it fails by its own <code>on_failure</code> (detail
+  <code>timed out after &lt;n&gt;s</code>).</li>
+<li><strong>No background process.</strong> When a hook's command exits, every process it left running in its
+  process group (<code>cmd &amp;</code>) is killed: nothing a hook starts outlives it. Run what a check needs in
+  the foreground.</li>
+<li><strong>No plan JSON, no checks.</strong> If tofu can't produce the plan's JSON document, the plan job fails
+  (<code>plan JSON unavailable, not checked</code>): an <code>after_plan</code> check never passes on an empty plan.</li>
+</ul>
 <div class="admonition tip">
 <p class="admonition-title">Tip</p>
 <p>A <code>warn</code> check on <code>after_plan</code> is how you surface policy/cost findings without blocking — the
 run still stops for a human even under autodeploy.</p>
 </div>
+<h2 id="check-results">Check results<a class="headerlink" href="#check-results" title="Permanent link">&para;</a></h2>
+<p>Every hook result is kept on the run, with the stage it ran at, across the plan and apply jobs:
+<code>check_results</code> in <code>GET /api/v1/runs/{id}</code> (or <code>GET /api/v1/runs/{id}/checks</code>).</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="nt">&quot;check_results&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">{</span>
+<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="w">  </span><span class="nt">&quot;results&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">[</span>
+<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a><span class="w">    </span><span class="p">{</span><span class="nt">&quot;name&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;fmt&quot;</span><span class="p">,</span><span class="w">       </span><span class="nt">&quot;status&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;ok&quot;</span><span class="p">,</span><span class="w">   </span><span class="nt">&quot;detail&quot;</span><span class="p">:</span><span class="w"> </span><span class="kc">null</span><span class="p">,</span><span class="w">     </span><span class="nt">&quot;stage&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;before_plan&quot;</span><span class="p">},</span>
+<a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a><span class="w">    </span><span class="p">{</span><span class="nt">&quot;name&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;infracost&quot;</span><span class="p">,</span><span class="w"> </span><span class="nt">&quot;status&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;warn&quot;</span><span class="p">,</span><span class="w"> </span><span class="nt">&quot;detail&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;exit 1&quot;</span><span class="p">,</span><span class="w"> </span><span class="nt">&quot;stage&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;after_plan&quot;</span><span class="p">}</span>
+<a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a><span class="w">  </span><span class="p">],</span>
+<a id="__codelineno-1-6" name="__codelineno-1-6" href="#__codelineno-1-6"></a><span class="w">  </span><span class="nt">&quot;checks&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">[</span>
+<a id="__codelineno-1-7" name="__codelineno-1-7" href="#__codelineno-1-7"></a><span class="w">    </span><span class="p">{</span><span class="nt">&quot;name&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;infracost&quot;</span><span class="p">,</span><span class="w"> </span><span class="nt">&quot;status&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;warn&quot;</span><span class="p">,</span><span class="w"> </span><span class="nt">&quot;detail&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;exit 1&quot;</span><span class="p">,</span><span class="w"> </span><span class="nt">&quot;stage&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;after_plan&quot;</span><span class="p">}</span>
+<a id="__codelineno-1-8" name="__codelineno-1-8" href="#__codelineno-1-8"></a><span class="w">  </span><span class="p">]</span>
+<a id="__codelineno-1-9" name="__codelineno-1-9" href="#__codelineno-1-9"></a><span class="p">}</span>
+</code></pre></div>
+<p><code>results</code> lists every check (<code>ok</code>, <code>warn</code>, <code>fail</code>), which the run page shows with each one's
+stage; <code>checks</code> only the ones that need attention. A job that fails on something other than a
+check (a tofu error, for example) still records the checks of the stages that ran, and a warning
+among them is audited.</p>
 <h2 id="what-hooks-can-see">What hooks can see<a class="headerlink" href="#what-hooks-can-see" title="Permanent link">&para;</a></h2>
-<p>The run's variables are injected as env vars for every hook. Two stages of guard protect repo hooks
-(which a PR author controls):</p>
-<ul>
-<li><strong>No secrets by default.</strong> <code>sensitive</code> variables (<code>sensitive_env</code>) are <em>not</em> passed to repo hooks
-  unless the environment opts in (same logic as proposed runs).</li>
-<li><strong>No cloud credentials by default.</strong> <code>AWS_WEB_IDENTITY_TOKEN_FILE</code> / <code>AWS_ROLE_ARN</code> go to
-  <strong>terraform only</strong>, never to repo hooks (opt-in per env). Platform hooks always have access.</li>
-<li><strong>Sensitive values are masked</strong> in hook stdout; hooks have a timeout and run in the run's
-  ephemeral container.</li>
-</ul>
+<p>A repo hook runs code that anyone who can open a pull request controls, so it gets <strong>nothing
+secret</strong>. A platform hook is trusted.</p>
+<table>
+<thead>
+<tr>
+<th></th>
+<th><strong>Platform hook</strong></th>
+<th><strong>Repo hook</strong></th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Process environment</td>
+<td>the worker's, minus the agent's own <code>STACKD_*</code> settings</td>
+<td>an allowlist of the worker's: <code>PATH</code>, <code>HOME</code>, locale, proxy and CA settings…</td>
+</tr>
+<tr>
+<td>Environment variables of the run</td>
+<td>all, sensitive ones included</td>
+<td>the non-sensitive ones</td>
+</tr>
+<tr>
+<td>Cloud credentials (OIDC)</td>
+<td>yes</td>
+<td>no</td>
+</tr>
+<tr>
+<td><code>plan.json</code> at <code>after_plan</code></td>
+<td>tofu's plan JSON as is</td>
+<td>a masked copy: every sensitive value is <code>***</code></td>
+</tr>
+</tbody>
+</table>
+<p>Terraform variables reach <strong>no</strong> hook directly: tofu reads them from variable files that exist
+only while a tofu command runs (their values do show in <code>plan.json</code>, sensitive ones masked in a repo
+hook's copy). Give a hook what it needs as an environment variable.</p>
+<p>While a repo hook runs, none of these is on disk: the saved plan, the run's variable files, the
+cloud token file, the repo token. Sensitive values are masked in every hook's output.</p>
 <div class="admonition warning">
-<p class="admonition-title">Warning</p>
-<p>On a <code>tier=prod</code> environment, <strong>repo hooks at the <code>*_apply</code> stages are forbidden</strong> (ignored with
-a visible warning) — only platform hooks run there, because those stages carry the prod write
-role. The <code>*_init</code> / <code>*_plan</code> repo stages stay allowed (plan role = read-only). This stops a
-<code>.stackd.yml</code> pushed via PR from assuming the prod apply role.</p>
+<p class="admonition-title">Not implemented yet</p>
+<p>The specification also describes ignoring repo hooks at the <code>*_apply</code> stages of <code>prod</code>
+environments, and a per-environment opt-in giving repo hooks secrets or cloud credentials.
+Neither exists: repo hooks run at every stage, and never get secrets. The <code>prod</code> rule is
+pending a decision, since tiers are a configurable catalog. Until the
+<a href="../workers-and-scaling/#runners">container runner</a> exists, hooks also run as the worker's own
+user, without isolation from other jobs on the same worker (<a href="../../SPECS/">SPECS §8.3</a>).</p>
 </div>
 <h2 id="managing-platform-hooks">Managing platform hooks<a class="headerlink" href="#managing-platform-hooks" title="Permanent link">&para;</a></h2>
 <p>Platform hooks are CRUD over the API, scoped to a stack or an environment:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>curl<span class="w"> </span>-s<span class="w"> </span>-X<span class="w"> </span>POST<span class="w"> </span>localhost:8000/api/v1/stacks/<span class="nv">$STACK_ID</span>/hooks<span class="w"> </span>-H<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$AUTH</span><span class="s2">&quot;</span><span class="w"> </span>-d<span class="w"> </span><span class="s1">&#39;{</span>
-<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="s1">  &quot;stage&quot;: &quot;after_plan&quot;, &quot;name&quot;: &quot;tfsec&quot;, &quot;command&quot;: &quot;tfsec .&quot;, &quot;on_failure&quot;: &quot;fail&quot;</span>
-<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a><span class="s1">}&#39;</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>curl<span class="w"> </span>-s<span class="w"> </span>-X<span class="w"> </span>POST<span class="w"> </span>localhost:8000/api/v1/stacks/<span class="nv">$STACK_ID</span>/hooks<span class="w"> </span>-H<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$AUTH</span><span class="s2">&quot;</span><span class="w"> </span>-d<span class="w"> </span><span class="s1">&#39;{</span>
+<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="s1">  &quot;stage&quot;: &quot;after_plan&quot;, &quot;name&quot;: &quot;tfsec&quot;, &quot;command&quot;: &quot;tfsec .&quot;, &quot;on_failure&quot;: &quot;fail&quot;</span>
+<a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a><span class="s1">}&#39;</span>
 </code></pre></div>
 <h2 id="see-also">See also<a class="headerlink" href="#see-also" title="Permanent link">&para;</a></h2>
 <ul>
 <li><a href="../runs-and-approvals/">Runs &amp; approvals</a> · <a href="../cloud-credentials/">Cloud credentials (OIDC)</a></li>
-<li><a href="../../CONCEPTS/">Concepts</a> · <a href="../../SPECS/">SPECS §8</a></li>
+<li><a href="../workers-and-scaling/">Workers &amp; scaling</a> · <a href="../../CONCEPTS/">Concepts</a> · <a href="../../SPECS/">SPECS §8</a></li>
 </ul>
 
 

@@ -858,6 +858,33 @@
   
   
     <li class="md-nav__item">
+      <a href="../../ARCHITECTURE/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Architecture
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../../api/" class="md-nav__link">
         
   
@@ -898,10 +925,10 @@
       
         
         
-        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5" >
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_6" >
         
           
-          <label class="md-nav__link" for="__nav_5" id="__nav_5_label" tabindex="">
+          <label class="md-nav__link" for="__nav_6" id="__nav_6_label" tabindex="">
             
   
   
@@ -919,8 +946,8 @@
             <span class="md-nav__icon md-icon"></span>
           </label>
         
-        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_5_label" aria-expanded="false">
-          <label class="md-nav__title" for="__nav_5">
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_6_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_6">
             <span class="md-nav__icon md-icon"></span>
             
   
@@ -1201,26 +1228,73 @@ commands only need <code>writer</code>.</p>
 land on the run page with live logs.</p>
 <p>Over the API:</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="c1"># import an existing bucket into state</span>
-<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>curl<span class="w"> </span>-s<span class="w"> </span>-X<span class="w"> </span>POST<span class="w"> </span>localhost:8000/api/v1/environments/<span class="nv">$ENV_ID</span>/commands<span class="w"> </span>-H<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$AUTH</span><span class="s2">&quot;</span><span class="w"> </span>-d<span class="w"> </span><span class="s1">&#39;{</span>
-<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a><span class="s1">  &quot;command&quot;: &quot;import&quot;,</span>
-<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a><span class="s1">  &quot;args&quot;: [&quot;aws_s3_bucket.logs&quot;, &quot;my-existing-bucket&quot;]</span>
-<a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a><span class="s1">}&#39;</span>
-<a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a>
-<a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a><span class="c1"># remove a resource from state</span>
-<a id="__codelineno-0-8" name="__codelineno-0-8" href="#__codelineno-0-8"></a>curl<span class="w"> </span>-s<span class="w"> </span>-X<span class="w"> </span>POST<span class="w"> </span>localhost:8000/api/v1/environments/<span class="nv">$ENV_ID</span>/commands<span class="w"> </span>-H<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$AUTH</span><span class="s2">&quot;</span><span class="w"> </span>-d<span class="w"> </span><span class="s1">&#39;{</span>
-<a id="__codelineno-0-9" name="__codelineno-0-9" href="#__codelineno-0-9"></a><span class="s1">  &quot;command&quot;: &quot;state rm&quot;, &quot;args&quot;: [&quot;aws_instance.old&quot;]</span>
-<a id="__codelineno-0-10" name="__codelineno-0-10" href="#__codelineno-0-10"></a><span class="s1">}&#39;</span>
+<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>curl<span class="w"> </span>-s<span class="w"> </span>-X<span class="w"> </span>POST<span class="w"> </span>localhost:8000/api/v1/environments/<span class="nv">$ENV_ID</span>/commands<span class="w"> </span>-H<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$AUTH</span><span class="s2">&quot;</span><span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a><span class="w">  </span>-H<span class="w"> </span><span class="s1">&#39;content-type: application/json&#39;</span><span class="w"> </span>-d<span class="w"> </span><span class="s1">&#39;{</span>
+<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a><span class="s1">  &quot;command&quot;: &quot;import&quot;,</span>
+<a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a><span class="s1">  &quot;args&quot;: [&quot;aws_s3_bucket.logs&quot;, &quot;my-existing-bucket&quot;]</span>
+<a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a><span class="s1">}&#39;</span>
+<a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a>
+<a id="__codelineno-0-8" name="__codelineno-0-8" href="#__codelineno-0-8"></a><span class="c1"># remove a resource from state</span>
+<a id="__codelineno-0-9" name="__codelineno-0-9" href="#__codelineno-0-9"></a>curl<span class="w"> </span>-s<span class="w"> </span>-X<span class="w"> </span>POST<span class="w"> </span>localhost:8000/api/v1/environments/<span class="nv">$ENV_ID</span>/commands<span class="w"> </span>-H<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$AUTH</span><span class="s2">&quot;</span><span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-0-10" name="__codelineno-0-10" href="#__codelineno-0-10"></a><span class="w">  </span>-H<span class="w"> </span><span class="s1">&#39;content-type: application/json&#39;</span><span class="w"> </span>-d<span class="w"> </span><span class="s1">&#39;{</span>
+<a id="__codelineno-0-11" name="__codelineno-0-11" href="#__codelineno-0-11"></a><span class="s1">  &quot;command&quot;: &quot;state rm&quot;, &quot;args&quot;: [&quot;aws_instance.old&quot;]</span>
+<a id="__codelineno-0-12" name="__codelineno-0-12" href="#__codelineno-0-12"></a><span class="s1">}&#39;</span>
 </code></pre></div>
 <p>The response is a normal run (<code>type: command</code>). It flows <code>queued → preparing → running →
 finished/failed</code>, holds the <strong>one-active-run-per-env</strong> lock (no command races a plan/apply), streams
 logs, and uses the managed state backend.</p>
 <h2 id="what-it-runs-with">What it runs with<a class="headerlink" href="#what-it-runs-with" title="Permanent link">&para;</a></h2>
 <ul>
-<li>The worker clones the repo at the pinned commit, <code>init</code>s with the env's backend, then runs the
-  subcommand — so config-aware commands like <code>import</code> work.</li>
-<li><strong>Credentials</strong>: a mutating command gets the env's <strong>apply</strong> OIDC role; a read-only command gets
-  the <strong>plan</strong> (read-only) role. See <a href="../cloud-credentials/">Cloud credentials</a>.</li>
-<li><strong>Audited</strong>: <code>run.command_triggered</code> on trigger and <code>run.command_executed</code> on success.</li>
+<li>The worker clones the repo at the request's <code>commit_sha</code> (a full SHA, a branch or a tag) or, by
+  default, the head of the environment's branch, <code>init</code>s with the env's backend, then runs the
+  subcommand — so config-aware commands like <code>import</code> work. No hooks run.</li>
+<li>
+<p><strong>Credentials follow the command.</strong> The claim tells the worker the job's credential phase
+  (<code>cred_phase</code>):</p>
+<table>
+<thead>
+<tr>
+<th></th>
+<th>Read-only command</th>
+<th>Mutating command</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>cred_phase</code></td>
+<td><code>plan</code></td>
+<td><code>apply</code></td>
+</tr>
+<tr>
+<td>OIDC role</td>
+<td>the <strong>plan</strong> (read-only) role</td>
+<td>the <strong>apply</strong> role</td>
+</tr>
+<tr>
+<td>State token</td>
+<td><strong><code>ro</code></strong>: reads state only, never locks (its backend has no lock address)</td>
+<td><strong><code>rw</code></strong>: may lock and write state</td>
+</tr>
+<tr>
+<td>Token lifetime</td>
+<td>6 h</td>
+<td>the apply window (apply budget + grace, 20 min by default)</td>
+</tr>
+<tr>
+<td>Time budget</td>
+<td>the agent's default cap (2 h)</td>
+<td>the <strong>apply budget</strong> (<code>STACKD_APPLY_TIMEOUT_SECONDS</code>, 15 min by default)</td>
+</tr>
+</tbody>
+</table>
+<p>A mutating command killed at its budget fails with an "exceeded the …s time budget" error. If
+its worker disappears, the run is only reclaimed (<code>worker_lost</code>) after the apply window, by
+which time its tokens have expired — two workers never write the env's state at once. See
+<a href="../workers-and-scaling/#worker-loss">Workers &amp; scaling</a> and
+<a href="../cloud-credentials/">Cloud credentials</a>.
+- <strong>Audited</strong>: <code>run.command_triggered</code> on trigger and <code>run.command_executed</code> on success; a failure
+  is <code>run.apply_failed</code>.</p>
+</li>
 </ul>
 <div class="admonition warning">
 <p class="admonition-title">Warning</p>

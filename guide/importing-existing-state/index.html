@@ -858,6 +858,33 @@
   
   
     <li class="md-nav__item">
+      <a href="../../ARCHITECTURE/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Architecture
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../../api/" class="md-nav__link">
         
   
@@ -898,10 +925,10 @@
       
         
         
-        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5" >
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_6" >
         
           
-          <label class="md-nav__link" for="__nav_5" id="__nav_5_label" tabindex="">
+          <label class="md-nav__link" for="__nav_6" id="__nav_6_label" tabindex="">
             
   
   
@@ -919,8 +946,8 @@
             <span class="md-nav__icon md-icon"></span>
           </label>
         
-        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_5_label" aria-expanded="false">
-          <label class="md-nav__title" for="__nav_5">
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_6_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_6">
             <span class="md-nav__icon md-icon"></span>
             
   
@@ -1188,7 +1215,7 @@ must have access to your state bucket (and lock table, if any). You keep your ow
 don't get Stackd's scoped state tokens / visible locking for this env.</p>
 </div>
 <h2 id="path-2-adopt-stackd-managed-state-managed_state-true">Path 2 — adopt Stackd-managed state (<code>managed_state: true</code>)<a class="headerlink" href="#path-2-adopt-stackd-managed-state-managed_state-true" title="Permanent link">&para;</a></h2>
-<p>Hand state to Stackd (state in S3 behind its HTTP backend, scoped per-run tokens, visible locking,
+<p>Hand state to Stackd (state in S3 behind its HTTP backend, per-job scoped tokens, visible locking,
 serial-regression guard). Migrate your current state <strong>once</strong> with a standard
 <code>tofu init -migrate-state</code> — Stackd hands you a scoped credential to do it.</p>
 <p><strong>1. Set the environment to managed state</strong> (<code>managed_state: true</code>).</p>
@@ -1210,25 +1237,40 @@ config:</p>
 <a id="__codelineno-2-12" name="__codelineno-2-12" href="#__codelineno-2-12"></a><span class="w">  </span><span class="nt">&quot;instructions&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">[</span><span class="w"> </span><span class="s2">&quot;...&quot;</span><span class="w"> </span><span class="p">]</span>
 <a id="__codelineno-2-13" name="__codelineno-2-13" href="#__codelineno-2-13"></a><span class="p">}</span>
 </code></pre></div></p>
-<p><strong>3. Migrate your state</strong> with the returned config. In your repo, switch the backend block to
-<code>terraform { backend "http" {} }</code>, then run once:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a>tofu<span class="w"> </span>init<span class="w"> </span>-migrate-state<span class="w"> </span><span class="se">\</span>
-<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a><span class="w">  </span>-backend-config<span class="o">=</span><span class="s2">&quot;address=</span><span class="nv">$ADDRESS</span><span class="s2">&quot;</span><span class="w"> </span><span class="se">\</span>
-<a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a><span class="w">  </span>-backend-config<span class="o">=</span><span class="s2">&quot;lock_address=</span><span class="nv">$ADDRESS</span><span class="s2">/lock&quot;</span><span class="w"> </span><span class="se">\</span>
-<a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a><span class="w">  </span>-backend-config<span class="o">=</span><span class="s2">&quot;unlock_address=</span><span class="nv">$ADDRESS</span><span class="s2">/lock&quot;</span><span class="w"> </span><span class="se">\</span>
-<a id="__codelineno-3-5" name="__codelineno-3-5" href="#__codelineno-3-5"></a><span class="w">  </span>-backend-config<span class="o">=</span><span class="s2">&quot;lock_method=LOCK&quot;</span><span class="w"> </span><span class="se">\</span>
-<a id="__codelineno-3-6" name="__codelineno-3-6" href="#__codelineno-3-6"></a><span class="w">  </span>-backend-config<span class="o">=</span><span class="s2">&quot;unlock_method=UNLOCK&quot;</span><span class="w"> </span><span class="se">\</span>
-<a id="__codelineno-3-7" name="__codelineno-3-7" href="#__codelineno-3-7"></a><span class="w">  </span>-backend-config<span class="o">=</span><span class="s2">&quot;username=env&quot;</span><span class="w"> </span><span class="se">\</span>
-<a id="__codelineno-3-8" name="__codelineno-3-8" href="#__codelineno-3-8"></a><span class="w">  </span>-backend-config<span class="o">=</span><span class="s2">&quot;password=</span><span class="nv">$TOKEN</span><span class="s2">&quot;</span>
+<p><strong>3. Migrate your state</strong> with the returned config. In a local checkout, switch the backend block
+to <code>terraform { backend "http" {} }</code>, then run once:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="nv">TF_HTTP_ADDRESS</span><span class="o">=</span><span class="s2">&quot;</span><span class="nv">$ADDRESS</span><span class="s2">&quot;</span><span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a><span class="nv">TF_HTTP_LOCK_ADDRESS</span><span class="o">=</span><span class="s2">&quot;</span><span class="nv">$ADDRESS</span><span class="s2">/lock&quot;</span><span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a><span class="nv">TF_HTTP_UNLOCK_ADDRESS</span><span class="o">=</span><span class="s2">&quot;</span><span class="nv">$ADDRESS</span><span class="s2">/lock&quot;</span><span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a><span class="nv">TF_HTTP_LOCK_METHOD</span><span class="o">=</span>LOCK<span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-3-5" name="__codelineno-3-5" href="#__codelineno-3-5"></a><span class="nv">TF_HTTP_UNLOCK_METHOD</span><span class="o">=</span>UNLOCK<span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-3-6" name="__codelineno-3-6" href="#__codelineno-3-6"></a><span class="nv">TF_HTTP_USERNAME</span><span class="o">=</span>env<span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-3-7" name="__codelineno-3-7" href="#__codelineno-3-7"></a><span class="nv">TF_HTTP_PASSWORD</span><span class="o">=</span><span class="s2">&quot;</span><span class="nv">$TOKEN</span><span class="s2">&quot;</span><span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-3-8" name="__codelineno-3-8" href="#__codelineno-3-8"></a>tofu<span class="w"> </span>init<span class="w"> </span>-migrate-state
 </code></pre></div>
+<p>The settings go through <code>TF_HTTP_*</code> environment variables rather than <code>-backend-config</code>: tofu writes
+<code>-backend-config</code> values, the token included, into <code>.terraform/</code>, while environment variables never
+touch disk. Stackd's own workers do the same.</p>
 <p>Terraform LOCKs, uploads your current state through Stackd's backend (stored as a <code>state_version</code>),
-then UNLOCKs. Future runs use the managed backend automatically.</p>
+then UNLOCKs.</p>
+<p><strong>4. Remove the backend block from the committed code.</strong> On a managed-state environment the worker
+adds its own <code>backend "http" {}</code> block and hands the address and its job token to tofu through
+<code>TF_HTTP_*</code> environment variables, so the repo must declare <strong>no</strong> backend: a second backend block
+makes <code>init</code> fail. Future runs then use the managed backend automatically.</p>
+<div class="admonition tip">
+<p class="admonition-title">Clean up the local checkout</p>
+<p>Delete the local <code>.terraform/</code> once the migration is done, and don't commit the temporary
+<code>backend "http" {}</code> block (step 4).</p>
+</div>
 <div class="admonition warning">
 <p class="admonition-title">Warning</p>
 <p>The import session is <strong>admin-only</strong>, the token expires in 30 minutes, and creating it is
 audited (<code>state.import_session_created</code>). The endpoint refuses an env where <code>managed_state</code> is
-off (409).</p>
+off (409). The returned addresses use <code>STACKD_PUBLIC_URL</code>, since you run <code>tofu</code> from your own
+machine.</p>
 </div>
+<p>In the local dev stack, the imported state lands in the Garage bucket that <code>task dev</code> provisions;
+<code>task s3-ls</code> lists it under <code>states/&lt;environment_id&gt;/</code>.</p>
 <h2 id="which-to-choose">Which to choose?<a class="headerlink" href="#which-to-choose" title="Permanent link">&para;</a></h2>
 <ul>
 <li><strong>Just want orchestration over your existing state?</strong> → Path 1 (<code>managed_state: false</code>). Instant.</li>

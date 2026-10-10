@@ -891,6 +891,33 @@
   
   
     <li class="md-nav__item">
+      <a href="../../ARCHITECTURE/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Architecture
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../../api/" class="md-nav__link">
         
   
@@ -931,10 +958,10 @@
       
         
         
-        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5" >
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_6" >
         
           
-          <label class="md-nav__link" for="__nav_5" id="__nav_5_label" tabindex="">
+          <label class="md-nav__link" for="__nav_6" id="__nav_6_label" tabindex="">
             
   
   
@@ -952,8 +979,8 @@
             <span class="md-nav__icon md-icon"></span>
           </label>
         
-        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_5_label" aria-expanded="false">
-          <label class="md-nav__title" for="__nav_5">
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_6_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_6">
             <span class="md-nav__icon md-icon"></span>
             
   
@@ -1240,10 +1267,16 @@ no Google account or AWS needed.</p>
 <p>Docker, <a href="https://taskfile.dev">Task</a>, <a href="https://docs.astral.sh/uv/"><code>uv</code></a>, and <code>pnpm</code> (via
 corepack).</p>
 <h2 id="launch-the-stack">Launch the stack<a class="headerlink" href="#launch-the-stack" title="Permanent link">&para;</a></h2>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>task<span class="w"> </span>dev<span class="w">      </span><span class="c1"># generates .env + dev keys, brings up the stack, migrates &amp; seeds</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>task<span class="w"> </span>dev<span class="w">      </span><span class="c1"># generates .env + dev keys, provisions the dev S3, brings up the stack, migrates &amp; seeds</span>
 </code></pre></div>
 <p>This starts Postgres, an API, a worker, the front, and object storage (Garage), applies the
 migrations, and seeds a demo. Open <strong><a href="http://localhost:5173">http://localhost:5173</a></strong>.</p>
+<p>Before the containers start, <code>task dev</code> provisions Garage (<code>scripts/bootstrap-s3.sh</code>, also
+<code>task s3</code>): it assigns the single-node layout, writes a generated access key into <code>.env</code>
+(<code>S3_ACCESS_KEY</code> / <code>S3_SECRET_KEY</code>, only when both are empty), and creates the <code>stackd</code> bucket.
+The API needs it from the first plan: every tracked plan with changes is saved there, encrypted,
+until its run ends. Every step checks before it acts, so re-running <code>task dev</code> is safe. See
+<a href="../../DEV/#2-docker-compose-stack">Dev environment §2</a>.</p>
 <h2 id="log-in">Log in<a class="headerlink" href="#log-in" title="Permanent link">&para;</a></h2>
 <p>In dev, authentication is a <strong>dev login</strong> with three personas of distinct tiers — no real IdP:</p>
 <table>
@@ -1251,24 +1284,28 @@ migrations, and seeds a demo. Open <strong><a href="http://localhost:5173">http:
 <tr>
 <th>Persona</th>
 <th>Role</th>
-<th>Apply ceiling</th>
+<th>Allowed tiers</th>
+<th>Destroy</th>
 </tr>
 </thead>
 <tbody>
 <tr>
 <td><code>admin</code></td>
 <td>admin</td>
-<td>prod</td>
+<td><code>dev</code>, <code>staging</code>, <code>prod</code></td>
+<td>✅</td>
 </tr>
 <tr>
 <td><code>alice</code></td>
 <td>approver</td>
-<td>prod</td>
+<td><code>dev</code>, <code>staging</code>, <code>prod</code></td>
+<td>❌</td>
 </tr>
 <tr>
 <td><code>bob</code></td>
 <td>writer</td>
-<td>staging</td>
+<td><code>dev</code>, <code>staging</code></td>
+<td>❌</td>
 </tr>
 </tbody>
 </table>
@@ -1278,13 +1315,16 @@ migrations, and seeds a demo. Open <strong><a href="http://localhost:5173">http:
 <code>approver</code> or <code>admin</code> role. See <a href="../runs-and-approvals/">Runs &amp; approvals</a>.</p>
 </div>
 <h2 id="your-first-run">Your first run<a class="headerlink" href="#your-first-run" title="Permanent link">&para;</a></h2>
-<p>The seed creates a <code>demo-network</code> and a <code>demo-app</code> stack. From the UI:</p>
+<p>The seed creates a <code>demo-network</code> and a <code>demo-app</code> stack in the <code>demo</code> space, each with a <code>dev</code>
+and a <code>prod</code> environment; <code>demo-app</code> consumes <code>demo-network</code>'s output. From the UI:</p>
 <ol>
-<li>Open a stack → an environment → <strong>Plan</strong>. A run is created and a worker picks it up.</li>
+<li>Open a stack → an environment → <strong>Plan</strong>. A run is created and a worker picks up its plan job.</li>
 <li>Watch the <strong>Run page</strong>: the phase rail, the plan diff, the checks, the resolved inputs with
    their provenance, and the live log.</li>
-<li>When it reaches <strong>unconfirmed</strong>, an approver clicks <strong>Confirm &amp; apply</strong> (prod additionally needs
-   a second person and a typed confirmation).</li>
+<li>When it reaches <strong>unconfirmed</strong>, an approver clicks <strong>Confirm &amp; apply</strong>. On <code>prod</code>, that
+   approver must be someone other than the person who triggered the run (four-eyes), and types the
+   environment's name to confirm. The apply runs exactly the plan you reviewed, on the
+   commit it was made on — see <a href="../runs-and-approvals/#what-gets-applied-is-what-was-reviewed">Runs &amp; approvals</a>.</li>
 </ol>
 <p>The same flow over the API:</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="c1"># Dev-login as alice and capture the access token</span>
@@ -1293,15 +1333,22 @@ migrations, and seeds a demo. Open <strong><a href="http://localhost:5173">http:
 <a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a><span class="nv">AUTH</span><span class="o">=</span><span class="s2">&quot;Authorization: Bearer </span><span class="nv">$TOKEN</span><span class="s2">&quot;</span>
 <a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a>
 <a id="__codelineno-1-6" name="__codelineno-1-6" href="#__codelineno-1-6"></a><span class="c1"># Trigger a plan on an environment, then confirm the resulting run</span>
-<a id="__codelineno-1-7" name="__codelineno-1-7" href="#__codelineno-1-7"></a>curl<span class="w"> </span>-s<span class="w"> </span>-X<span class="w"> </span>POST<span class="w"> </span>localhost:8000/api/v1/environments/<span class="nv">$ENV_ID</span>/runs<span class="w"> </span>-H<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$AUTH</span><span class="s2">&quot;</span><span class="w"> </span>-d<span class="w"> </span><span class="s1">&#39;{}&#39;</span>
-<a id="__codelineno-1-8" name="__codelineno-1-8" href="#__codelineno-1-8"></a>curl<span class="w"> </span>-s<span class="w"> </span>-X<span class="w"> </span>POST<span class="w"> </span>localhost:8000/api/v1/runs/<span class="nv">$RUN_ID</span>/confirm<span class="w"> </span>-H<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$AUTH</span><span class="s2">&quot;</span>
+<a id="__codelineno-1-7" name="__codelineno-1-7" href="#__codelineno-1-7"></a>curl<span class="w"> </span>-s<span class="w"> </span>-X<span class="w"> </span>POST<span class="w"> </span>localhost:8000/api/v1/environments/<span class="nv">$ENV_ID</span>/runs<span class="w"> </span>-H<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$AUTH</span><span class="s2">&quot;</span><span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-1-8" name="__codelineno-1-8" href="#__codelineno-1-8"></a><span class="w">  </span>-H<span class="w"> </span><span class="s1">&#39;content-type: application/json&#39;</span><span class="w"> </span>-d<span class="w"> </span><span class="s1">&#39;{}&#39;</span>
+<a id="__codelineno-1-9" name="__codelineno-1-9" href="#__codelineno-1-9"></a>curl<span class="w"> </span>-s<span class="w"> </span>-X<span class="w"> </span>POST<span class="w"> </span>localhost:8000/api/v1/runs/<span class="nv">$RUN_ID</span>/confirm<span class="w"> </span>-H<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$AUTH</span><span class="s2">&quot;</span>
 </code></pre></div>
 <h2 id="useful-tasks">Useful tasks<a class="headerlink" href="#useful-tasks" title="Permanent link">&para;</a></h2>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>task<span class="w"> </span><span class="nb">test</span><span class="w">     </span><span class="c1"># unit + integration (real Postgres via testcontainers)</span>
-<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a>task<span class="w"> </span>e2e<span class="w">      </span><span class="c1"># the full live scenario, a real worker running OpenTofu</span>
-<a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a>task<span class="w"> </span>reset<span class="w">    </span><span class="c1"># tear everything down and start fresh</span>
-<a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a>task<span class="w"> </span>psql<span class="w"> </span>·<span class="w"> </span>task<span class="w"> </span>logs<span class="w"> </span>·<span class="w"> </span>task<span class="w"> </span>lint<span class="w"> </span>·<span class="w"> </span>task<span class="w"> </span>docs
+<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>task<span class="w"> </span><span class="nb">test</span><span class="w">     </span><span class="c1"># API unit + integration (real Postgres via testcontainers) + front vitest</span>
+<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a>task<span class="w"> </span>e2e<span class="w">      </span><span class="c1"># the full live scenario, a real worker running OpenTofu (re-runnable)</span>
+<a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a>task<span class="w"> </span>reset<span class="w">    </span><span class="c1"># tear everything down (DB + Garage volumes) and start fresh; .env keeps its keys</span>
+<a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a>task<span class="w"> </span>s3-ls<span class="w">    </span><span class="c1"># list the dev bucket (saved plans, managed states)</span>
+<a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a>task<span class="w"> </span>psql<span class="w"> </span>·<span class="w"> </span>task<span class="w"> </span>logs<span class="w"> </span>·<span class="w"> </span>task<span class="w"> </span>lint<span class="w"> </span>·<span class="w"> </span>task<span class="w"> </span>docs
 </code></pre></div>
+<div class="admonition tip">
+<p class="admonition-title">A plan fails while saving the plan file</p>
+<p>The API could not reach the dev S3. Run <code>task s3</code> (idempotent), then <code>task dev</code> again so the
+<code>api</code> container is recreated with the key from <code>.env</code>.</p>
+</div>
 <h2 id="next-steps">Next steps<a class="headerlink" href="#next-steps" title="Permanent link">&para;</a></h2>
 <ul>
 <li><a href="../stacks-and-environments/">Stacks &amp; environments</a> — model your own repos.</li>

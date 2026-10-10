@@ -919,6 +919,33 @@
   
   
     <li class="md-nav__item">
+      <a href="../../ARCHITECTURE/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Architecture
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../../api/" class="md-nav__link">
         
   
@@ -959,10 +986,10 @@
       
         
         
-        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5" >
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_6" >
         
           
-          <label class="md-nav__link" for="__nav_5" id="__nav_5_label" tabindex="">
+          <label class="md-nav__link" for="__nav_6" id="__nav_6_label" tabindex="">
             
   
   
@@ -980,8 +1007,8 @@
             <span class="md-nav__icon md-icon"></span>
           </label>
         
-        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_5_label" aria-expanded="false">
-          <label class="md-nav__title" for="__nav_5">
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_6_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_6">
             <span class="md-nav__icon md-icon"></span>
             
   
@@ -1385,7 +1412,7 @@
 <p>Leave <code>allow_fallback_apply</code> off on production environments. A fallback is a break-glass affordance for an outage, not a normal path — keeping it off forces a deliberate, audited opt-in before a non-live secret ever reaches prod.</p>
 </div>
 <h2 id="audit">Audit<a class="headerlink" href="#audit" title="Permanent link">&para;</a></h2>
-<p>Source management and every fallback event are audited (<code>secret_source.created</code>, <code>secret_source.token_rotated</code>, <code>secret.fallback_used</code>, <code>secret.fallback_overridden</code>, <code>secret.unavailable</code>). The secret value itself is never written to the audit context. Successful live resolutions are not audited individually — the run's <code>variable_provenance</code> records <code>secret:&lt;source&gt;</code> per variable.</p>
+<p>Source management and every fallback event are audited (<code>secret_source.created</code>, <code>secret_source.token_rotated</code>, <code>secret.fallback_used</code>, <code>secret.fallback_overridden</code>). A run failed because a reference could not resolve is audited as <code>run.apply_failed</code> with <code>reason: secret</code>. The secret value itself is never written to the audit context. Successful live resolutions are not audited individually — the run's <code>variable_provenance</code> records <code>secret:&lt;source&gt;</code> per variable.</p>
 <h2 id="see-also">See also<a class="headerlink" href="#see-also" title="Permanent link">&para;</a></h2>
 <ul>
 <li><a href="../variables/">Variables &amp; secrets</a></li>

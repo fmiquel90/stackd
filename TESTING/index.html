@@ -763,6 +763,33 @@
   
   
     <li class="md-nav__item">
+      <a href="../ARCHITECTURE/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Architecture
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../api/" class="md-nav__link">
         
   
@@ -805,10 +832,10 @@
       
         
         
-        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5" checked>
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_6" checked>
         
           
-          <label class="md-nav__link" for="__nav_5" id="__nav_5_label" tabindex="">
+          <label class="md-nav__link" for="__nav_6" id="__nav_6_label" tabindex="">
             
   
   
@@ -826,8 +853,8 @@
             <span class="md-nav__icon md-icon"></span>
           </label>
         
-        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_5_label" aria-expanded="true">
-          <label class="md-nav__title" for="__nav_5">
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_6_label" aria-expanded="true">
+          <label class="md-nav__title" for="__nav_6">
             <span class="md-nav__icon md-icon"></span>
             
   
@@ -1116,22 +1143,22 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#4-test-map-what-each-test-asserts" class="md-nav__link">
+  <a href="#4-test-map-what-each-file-covers" class="md-nav__link">
     <span class="md-ellipsis">
       
-        4. Test map (what each test asserts)
+        4. Test map (what each file covers)
       
     </span>
   </a>
   
-    <nav class="md-nav" aria-label="4. Test map (what each test asserts)">
+    <nav class="md-nav" aria-label="4. Test map (what each file covers)">
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
-  <a href="#api-unit-integration-apitests-92-tests" class="md-nav__link">
+  <a href="#api-unit-integration-apitests" class="md-nav__link">
     <span class="md-ellipsis">
       
-        API — unit &amp; integration (api/tests/, 92 tests)
+        API — unit &amp; integration (api/tests/)
       
     </span>
   </a>
@@ -1150,10 +1177,10 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#worker-workertests-5-tests" class="md-nav__link">
+  <a href="#worker-workertests" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Worker (worker/tests/, 5 tests)
+        Worker (worker/tests/)
       
     </span>
   </a>
@@ -1341,22 +1368,22 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#4-test-map-what-each-test-asserts" class="md-nav__link">
+  <a href="#4-test-map-what-each-file-covers" class="md-nav__link">
     <span class="md-ellipsis">
       
-        4. Test map (what each test asserts)
+        4. Test map (what each file covers)
       
     </span>
   </a>
   
-    <nav class="md-nav" aria-label="4. Test map (what each test asserts)">
+    <nav class="md-nav" aria-label="4. Test map (what each file covers)">
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
-  <a href="#api-unit-integration-apitests-92-tests" class="md-nav__link">
+  <a href="#api-unit-integration-apitests" class="md-nav__link">
     <span class="md-ellipsis">
       
-        API — unit &amp; integration (api/tests/, 92 tests)
+        API — unit &amp; integration (api/tests/)
       
     </span>
   </a>
@@ -1375,10 +1402,10 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#worker-workertests-5-tests" class="md-nav__link">
+  <a href="#worker-workertests" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Worker (worker/tests/, 5 tests)
+        Worker (worker/tests/)
       
     </span>
   </a>
@@ -1446,7 +1473,7 @@
 <h1 id="testingmd-how-stackd-is-tested">TESTING.md — how Stackd is tested<a class="headerlink" href="#testingmd-how-stackd-is-tested" title="Permanent link">&para;</a></h1>
 <blockquote>
 <p>The test suite <strong>is</strong> the functional contract. This document explains the testing philosophy,
-how to run everything, and what every test asserts. It complements <code>DEV.md</code> (environment) and
+how to run everything, and what each test file covers. It complements <code>DEV.md</code> (environment) and
 <code>SPECS.md</code> (the behaviour being verified). If a test and this doc disagree, the test wins —
 update the doc.</p>
 </blockquote>
@@ -1459,7 +1486,7 @@ update the doc.</p>
   <code>one_active_run_per_env</code> partial unique index, <code>FOR UPDATE … SKIP LOCKED</code>, <code>LISTEN/NOTIFY</code>,
   <code>uuidv7()</code>, JSONB <code>&lt;@</code> containment, cascade FKs.</li>
 <li><strong>Real AWS surfaces are mocked with <a href="https://docs.getmoto.org/">moto</a></strong> (S3 for the state
-  backend, STS for <code>AssumeRoleWithWebIdentity</code>). Everything else is real.</li>
+  backend and the saved plans, STS for <code>AssumeRoleWithWebIdentity</code>). Everything else is real.</li>
 <li><strong>Three rings of confidence:</strong></li>
 <li><strong>Unit</strong> — pure logic with no I/O (e.g. <code>can_apply</code>, the masker, plan-summary parsing).</li>
 <li><strong>Integration</strong> — the API exercised over HTTP via an in-process ASGI client against the real
@@ -1472,9 +1499,9 @@ update the doc.</p>
 <hr />
 <h2 id="2-running-the-tests">2. Running the tests<a class="headerlink" href="#2-running-the-tests" title="Permanent link">&para;</a></h2>
 <p>All commands go through the <a href="https://github.com/fmiquel90/stackd/blob/main/Taskfile.yml">Taskfile</a>:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>task<span class="w"> </span><span class="nb">test</span><span class="w">     </span><span class="c1"># unit + integration (testcontainers) + front vitest</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>task<span class="w"> </span><span class="nb">test</span><span class="w">     </span><span class="c1"># API unit + integration (testcontainers) + front vitest</span>
 <a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>task<span class="w"> </span>e2e<span class="w">      </span><span class="c1"># live end-to-end scenario (brings up the stack, seeds, runs api/e2e)</span>
-<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>task<span class="w"> </span>lint<span class="w">     </span><span class="c1"># ruff check + ruff format --check</span>
+<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>task<span class="w"> </span>lint<span class="w">     </span><span class="c1"># ruff check + ruff format --check (api)</span>
 </code></pre></div>
 <p>Under the hood:</p>
 <table>
@@ -1488,23 +1515,25 @@ update the doc.</p>
 <tbody>
 <tr>
 <td><code>task test</code></td>
-<td><code>docker compose exec -T api uv run pytest</code> then <code>cd front &amp;&amp; pnpm test --run</code></td>
-<td>compose <code>api</code> up</td>
+<td><code>docker compose exec -T api uv run pytest</code> then <code>cd front &amp;&amp; pnpm test</code> (<code>vitest run</code>)</td>
+<td>compose <code>api</code> up, Docker for testcontainers</td>
 </tr>
 <tr>
 <td><code>task e2e</code></td>
 <td><code>docker compose exec -T api uv run pytest e2e -v</code> (deps: <code>dev</code>)</td>
-<td>full stack <strong>+ a live worker</strong></td>
+<td>full stack <strong>+ a live worker</strong> + the provisioned dev S3</td>
 </tr>
 </tbody>
 </table>
-<p>Run a subset directly inside the api container:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>docker<span class="w"> </span>compose<span class="w"> </span>-f<span class="w"> </span>deploy/docker-compose.dev.yml<span class="w"> </span><span class="nb">exec</span><span class="w"> </span>-T<span class="w"> </span>api<span class="w"> </span>uv<span class="w"> </span>run<span class="w"> </span>pytest<span class="w"> </span>tests/test_runs.py<span class="w"> </span>-v
-<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a>docker<span class="w"> </span>compose<span class="w"> </span>-f<span class="w"> </span>deploy/docker-compose.dev.yml<span class="w"> </span><span class="nb">exec</span><span class="w"> </span>-T<span class="w"> </span>api<span class="w"> </span>uv<span class="w"> </span>run<span class="w"> </span>pytest<span class="w"> </span>tests/test_notifications.py::test_dispatcher_delivers_to_matching_targets
+<p><code>task test</code> does <strong>not</strong> run the worker suite. Run it directly — it needs no DB and no stack:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="nb">cd</span><span class="w"> </span>worker<span class="w"> </span><span class="o">&amp;&amp;</span><span class="w"> </span>uv<span class="w"> </span>run<span class="w"> </span>pytest
 </code></pre></div>
-<p>Worker tests are standalone (no DB):</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="nb">cd</span><span class="w"> </span>worker<span class="w"> </span><span class="o">&amp;&amp;</span><span class="w"> </span>uv<span class="w"> </span>run<span class="w"> </span>pytest
+<p>Run an API subset inside the api container:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>docker<span class="w"> </span>compose<span class="w"> </span>-f<span class="w"> </span>deploy/docker-compose.dev.yml<span class="w"> </span><span class="nb">exec</span><span class="w"> </span>-T<span class="w"> </span>api<span class="w"> </span>uv<span class="w"> </span>run<span class="w"> </span>pytest<span class="w"> </span>tests/test_runs.py<span class="w"> </span>-v
+<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a>docker<span class="w"> </span>compose<span class="w"> </span>-f<span class="w"> </span>deploy/docker-compose.dev.yml<span class="w"> </span><span class="nb">exec</span><span class="w"> </span>-T<span class="w"> </span>api<span class="w"> </span>uv<span class="w"> </span>run<span class="w"> </span>pytest<span class="w"> </span>tests/test_notifications.py::test_dispatcher_delivers_to_matching_targets
 </code></pre></div>
+<p>CI (<code>.github/workflows/ci.yml</code>) runs ruff, pytest and mypy for the API, ruff and pytest for the
+worker, and typecheck + vitest + build for the front; <code>e2e.yml</code> runs the live scenario.</p>
 <h3 id="pytest-configuration-apipyprojecttoml">pytest configuration (<code>api/pyproject.toml</code>)<a class="headerlink" href="#pytest-configuration-apipyprojecttoml" title="Permanent link">&para;</a></h3>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="k">[tool.pytest.ini_options]</span>
 <a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a><span class="n">asyncio_mode</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">&quot;auto&quot;</span><span class="w">                          </span><span class="c1"># plain `async def test_*`, no decorator</span>
@@ -1536,7 +1565,7 @@ throwaway one). <code>task e2e</code> points pytest at <code>e2e</code> explicit
 <tr>
 <td><code>_seed</code></td>
 <td>session, autouse</td>
-<td>Calls <code>app.seed.seed()</code> to ensure the <code>default</code>/<code>demo</code> spaces exist before any test.</td>
+<td>Calls <code>app.seed.seed()</code> so the <code>default</code>/<code>demo</code> spaces and the tier catalog exist before any test.</td>
 </tr>
 <tr>
 <td><code>client</code></td>
@@ -1545,6 +1574,7 @@ throwaway one). <code>task e2e</code> points pytest at <code>e2e</code> explicit
 </tr>
 </tbody>
 </table>
+<p>Tests that need the scheduler's tasks (worker loss, head polling, drift) call them directly.</p>
 <h3 id="apitestsconftest_phase2py-runworker-helpers"><code>api/tests/conftest_phase2.py</code> — run/worker helpers<a class="headerlink" href="#apitestsconftest_phase2py-runworker-helpers" title="Permanent link">&para;</a></h3>
 <table>
 <thead>
@@ -1590,130 +1620,188 @@ throwaway one). <code>task e2e</code> points pytest at <code>e2e</code> explicit
 <td>Real <code>httpx.AsyncClient</code> over <strong>HTTP</strong> to <code>STACKD_E2E_BASE_URL</code> (default <code>http://localhost:8000</code>) — not ASGI. Talks to the running api container, which shares Postgres with the live worker.</td>
 </tr>
 <tr>
-<td><code>envs</code></td>
-<td>Resolves the seeded demo env ids by <code>&lt;stack&gt;/&lt;env&gt;</code> name <strong>straight from the DB</strong> (<code>SessionLocal</code>), because the demo stacks live in the <code>demo</code> space which the public API doesn't list. Asserts the demo graph was seeded.</td>
+<td><code>graph</code></td>
+<td>Builds a <strong>throwaway copy</strong> of the seeded demo graph through the public API, as admin, in the <code>demo</code> space (<code>e2e-&lt;MMDDhhmmss&gt;-&lt;tag&gt;-network</code> / <code>-app</code>: same repos, tiers, settings, variable-set attachments, dependency + mock). It reads the seed straight from the DB (the API hides mock values). Teardown ends what is still active, then deletes the copy if the scenario passed; otherwise it keeps it and names it in a warning. Every run starts from never-applied environments, so the scenario is re-runnable without <code>task reset</code> (DEV §7).</td>
 </tr>
 </tbody>
 </table>
 <h3 id="workertests-no-conftest"><code>worker/tests/</code> — no conftest<a class="headerlink" href="#workertests-no-conftest" title="Permanent link">&para;</a></h3>
-<p>Worker tests import agent modules directly (<code>agent.diagnostics</code>, <code>agent.masking</code>, <code>agent.main</code>);
-no DB, no network.</p>
+<p>Worker tests import agent modules directly (<code>agent.main</code>, <code>agent.workspace</code>, <code>agent.runner</code>,
+<code>agent.masking</code>, <code>agent.diagnostics</code>…) and fake the API client where a job is driven end to end.
+No DB and no external network: the clone tests run real <code>git</code> against local repositories (one
+dials a closed loopback port, <code>test_hook_secrets.py</code> serves one over a loopback HTTP server). Hooks
+run for real (<code>sh -c</code>); tofu is a stand-in script, except in the one test that runs the real
+OpenTofu when <code>tofu</code> is on the <code>PATH</code> (skipped otherwise).</p>
 <hr />
-<h2 id="4-test-map-what-each-test-asserts">4. Test map (what each test asserts)<a class="headerlink" href="#4-test-map-what-each-test-asserts" title="Permanent link">&para;</a></h2>
-<h3 id="api-unit-integration-apitests-92-tests">API — unit &amp; integration (<code>api/tests/</code>, 92 tests)<a class="headerlink" href="#api-unit-integration-apitests-92-tests" title="Permanent link">&para;</a></h3>
-<p><strong><code>test_auth.py</code> (5)</strong> — auth flow &amp; session security
-- <code>test_dev_login_personas</code> — persona login returns the user (role/tier) + a usable access token.
-- <code>test_refresh_requires_csrf</code> — <code>/refresh</code> rejects a request missing the <code>X-CSRF-Token</code> (double-submit).
-- <code>test_refresh_rotation_and_reuse_detection</code> — each refresh rotates the token; replaying an old one → 401 and the whole family is revoked.
-- <code>test_onboarding_flag_persists</code> — <code>POST /auth/me/onboarded</code> persists <code>onboarded=true</code>.
-- <code>test_unauthenticated_me</code> — <code>GET /auth/me</code> unauthenticated → 401 problem+json.</p>
-<p><strong><code>test_audit.py</code> (2)</strong> — the who-did-what journal
-- <code>test_audit_filter_and_export</code> — mutations land in <code>/audit</code>; filtering by action works; CSV export has the right columns.
-- <code>test_audit_export_admin_only</code> — a non-admin gets 403 on export.</p>
-<p><strong><code>test_permissions.py</code> (6)</strong> — <code>can_apply</code> logic (pure, no HTTP)
-- <code>test_approver_can_apply_allowed_tier</code> — approver whose <code>allowed_tiers</code> contains the env tier may apply.
-- <code>test_writer_cannot_confirm</code> — a writer is refused (apply needs approver+); the reason mentions the role.
-- <code>test_membership_not_linear</code> — a non-contiguous set <code>{dev, prod}</code> applies dev/prod, refused on staging.
-- <code>test_no_tiers_cannot_apply</code> — empty <code>allowed_tiers</code> → denied.
-- <code>test_custom_tier</code> — a custom tier (<code>qa</code>) in the set is honored.
-- <code>test_destroy_requires_can_destroy</code> — destroy needs <code>can_destroy</code> on top of <code>can_apply</code>.</p>
-<p><strong><code>test_runs.py</code> (7)</strong> — the run lifecycle &amp; its gates
-- <code>test_full_run_lifecycle</code> — trigger → claim → plan events → unconfirmed → confirm → apply → finished.
-- <code>test_one_active_run_per_env_under_concurrency</code> — two workers claim the same env → exactly one wins, the loser is netted by <code>23505</code>.
-- <code>test_confirm_blocked_by_tier</code> — confirming a tier not in one's <code>allowed_tiers</code> → 403.
-- <code>test_four_eyes_on_prod</code> — the triggerer can't confirm their own prod run; a second person can.
-- <code>test_autodeploy_and_warn_forces_unconfirmed</code> — autodeploy auto-confirms, but a <code>warn</code> check forces <code>unconfirmed</code>.
-- <code>test_confirm_rejected_when_not_unconfirmed</code> — confirming a non-<code>unconfirmed</code> run → 409.
-- <code>test_mock_block</code> — a run with <code>used_mocks=true</code> can't be confirmed (reason mentions the mock).</p>
-<p><strong><code>test_commands.py</code> (4)</strong> — ad-hoc command runs (§4.3)
-- <code>test_command_allowlist_rejected</code> — a non-allowlisted command (e.g. <code>apply</code>) → 400.
-- <code>test_readonly_command_allowed_for_writer</code> — a writer may run a read-only command (<code>output</code>) → 201, <code>type=command</code>.
-- <code>test_mutating_command_requires_can_apply</code> — a writer is refused <code>state rm</code> (403); an admin is allowed.
-- <code>test_command_run_lifecycle</code> — claim carries <code>phase=command</code> + the subcommand; <code>running → finished</code>; audited (<code>run.command_triggered</code>/<code>run.command_executed</code>).</p>
-<p><strong><code>test_promote.py</code> (3)</strong> — environment promotion (§9.7)
-- <code>test_promote_carries_the_applied_commit</code> — promote dev→staging creates a tracked run pinned to dev's last applied commit; audited <code>run.promoted</code>.
-- <code>test_promote_requires_an_applied_source</code> — promoting from an env with nothing applied → 409.
-- <code>test_promote_rejects_cross_stack</code> — promoting between different stacks → 400.</p>
-<p><strong><code>test_dependencies.py</code> (5)</strong> — cross-env outputs, mocks, cascade
-- <code>test_mock_used_and_blocks_apply</code> — no real upstream output → the mock is injected, <code>used_mocks=true</code>, apply blocked.
-- <code>test_real_value_beats_mock</code> — a real output overrides the mock.
-- <code>test_missing_upstream_without_mock_fails_run</code> — no output and no mock → the run fails (<code>missing_upstream_output</code>).
-- <code>test_anti_cycle</code> — creating a dependency cycle → 422.
-- <code>test_cascade_triggers_downstream</code> — an upstream apply cascades a downstream run carrying the real output.</p>
-<p><strong><code>test_hooks.py</code> (2)</strong> — platform hooks
-- <code>test_platform_hook_crud_and_appears_in_claim</code> — a created hook shows up in the claim payload tagged platform; PATCH/DELETE work.
-- <code>test_hooks_require_writer</code> — writer may manage hooks (reader is gated by the permission model).</p>
-<p><strong><code>test_state_backend.py</code> (7)</strong> — Terraform HTTP state backend + import (moto S3)
-- <code>test_state_lock_post_get_unlock</code> — LOCK→409-on-second→POST→serial-regression-409→GET→UNLOCK.
-- <code>test_readonly_token_cannot_write</code> — a <code>ro</code> state token (proposed runs) can't POST state → 403.
-- <code>test_state_token_scoped_to_env</code> — a token scoped to env X can't touch env Y → 403.
-- <code>test_readonly_token_cannot_unlock</code> — a <code>ro</code> token is refused on UNLOCK → 403 (it never locks).
-- <code>test_import_session_adopts_existing_state</code> — an admin import session mints a backend config; the LOCK/POST/UNLOCK migration stores a <code>state_version</code> with no originating run (§11.4).
-- <code>test_import_session_requires_admin</code> — a non-admin can't mint an import session → 403.
-- <code>test_import_session_requires_managed_state</code> — importing into a <code>managed_state=false</code> env → 409.</p>
-<p><strong><code>test_oidc.py</code> (4)</strong> — workload credentials (§10)
-- <code>test_issuer_metadata_and_jwks</code> — discovery doc + JWKS endpoints serve RSA keys.
-- <code>test_claim_payload_signs_plan_token</code> — a plan claim carries a signed token with <code>sub=run:&lt;tier&gt;:&lt;stack&gt;:plan</code>, verifiable against JWKS.
-- <code>test_apply_uses_apply_role</code> — apply uses the apply role ARN, not the plan one.
-- <code>test_assume_role_against_moto</code> — the cloud-integration test endpoint assumes a role under moto STS.</p>
-<p><strong><code>test_webhooks.py</code> (3)</strong> — GitHub ingestion (§5)
-- <code>test_push_updates_head_and_triggers</code> — a valid-HMAC push advances <code>head_sha</code> and triggers a tracked run.
-- <code>test_invalid_signature_rejected</code> — a bad signature → 401.
-- <code>test_pull_request_creates_proposed_run</code> — a PR opens a proposed (plan-only) run at the PR head sha.</p>
-<p><strong><code>test_users.py</code> (2)</strong> — user administration
-- <code>test_non_admin_cannot_list_users</code> — listing users is admin-only.
-- <code>test_admin_updates_tier_is_audited</code> — changing tier/destroy emits the matching audit actions.</p>
-<p><strong><code>test_variables_api.py</code> (4)</strong> — 5-layer resolution &amp; secrets
-- <code>test_five_layer_resolution_and_provenance</code> — env &gt; env-attached set &gt; stack &gt; auto-attach set, each with the right provenance and <code>TF_VAR_</code> injection name.
-- <code>test_sensitive_variable_is_write_only</code> — sensitive values are masked everywhere in API responses.
-- <code>test_attached_set_delete_requires_detach</code> — deleting an attached set → 409 until detached.
-- <code>test_protected_env_forces_no_autodeploy</code> — <code>protected=true</code> forces <code>autodeploy=false</code>.</p>
-<p><strong><code>test_secret_sources.py</code> (7)</strong> — external secret references &amp; fallback (§15)
-- <code>test_reference_resolved_live_is_masked</code> — a referenced variable resolves to the live provider value, lands in <code>tfvars</code>, is added to <code>mask_values</code>, provenance <code>secret:&lt;source&gt;</code>.
-- <code>test_static_fallback_used_and_blocks_apply</code> — provider down → the static fallback value is used, <code>used_secret_fallback=true</code>; confirm is blocked until <code>allow_fallback_apply</code> is turned on.
-- <code>test_error_mode_fails_the_run</code> — provider down with <code>mode=error</code> → the claim returns 204 and the run is <code>failed</code> (fail-closed).
-- <code>test_break_glass_override</code> — a <code>break_glass</code> reference uses the operator's inline <code>secret_overrides</code> value when the provider is down; provenance <code>secret_override:&lt;source&gt;</code>.
-- <code>test_override_requires_apply_permission</code> — a writer (no apply right) supplying <code>secret_overrides</code> → 403.
-- <code>test_source_crud_hides_bootstrap_and_gates_writes</code> — a writer can't create a source (admin-only); the bootstrap credential is never serialized.
-- <code>test_source_in_use_cannot_be_deleted</code> — deleting a source a variable still references → 409 (FK RESTRICT).</p>
-<p><strong><code>test_tiers.py</code> (4)</strong> — configurable tier catalog (§2.4)
-- <code>test_tier_name_charset_rejected</code> — names with <code>:</code>/whitespace/uppercase → 422 (OIDC <code>sub</code> safety).
-- <code>test_update_user_rejects_unknown_tier</code> — <code>allowed_tiers</code> validated against the catalog → 422.
-- <code>test_delete_tier_strips_user_grants</code> — deleting a tier removes its name from every user's set (no resurrection).
-- <code>test_delete_tier_in_use_blocked</code> — deleting a tier an env references → 409.</p>
-<p><strong><code>test_inbox.py</code> (4)</strong> — in-app notification center (§17)
-- <code>test_approval_request_fans_out_to_approvers</code> — a run reaching <code>unconfirmed</code> notifies eligible approvers (not the triggerer).
-- <code>test_terminal_notifies_the_triggerer</code> — a finished run notifies its human triggerer.
-- <code>test_comment_reply_and_mention_notify</code> — a reply notifies the root author; an <code>@mention</code> notifies the mentioned user.
-- <code>test_feed_is_per_user_and_mark_read</code> — the feed is per-user; the triggerer isn't approval-notified for their own run; mark-read clears unread.</p>
-<p><strong><code>test_comments.py</code> (6)</strong> — plan-review comments (§16)
-- <code>test_comment_thread_and_anchor</code> — general + anchored (<code>plan_line</code>) comment + a reply; listed together.
-- <code>test_anchor_validation</code> — a <code>plan_line</code> anchor missing <code>phase</code>/<code>seq</code> → 422.
-- <code>test_no_nested_replies</code> — replying to a reply → 422 (threads stay one level deep).
-- <code>test_resolve_and_edit_permissions</code> — non-author can't edit the body; an approver may resolve; author edits own.
-- <code>test_delete_only_author_or_admin</code> — an approver ≠ author is refused (403); an admin can delete.
-- <code>test_delete_thread_with_replies_guarded</code> — a non-admin can't delete a root carrying others' replies (409); an admin can.</p>
-<p><strong><code>test_notifications.py</code> (4)</strong> — outbound notifications
-- <code>test_notification_target_crud</code> — create/list/patch/delete a target (default <code>on_states=[unconfirmed, failed]</code>); each mutation audited.
-- <code>test_rejects_unsupported_state</code> — an <code>on_states</code> value that never fires → 422.
-- <code>test_outbox_enqueued_on_transition</code> — a run reaching <code>unconfirmed</code> enqueues exactly one outbox row.
-- <code>test_dispatcher_delivers_to_matching_targets</code> — only targets whose <code>on_states</code> match are delivered; the row is marked sent (second drain is a no-op).</p>
-<p><strong><code>test_observability.py</code> (3)</strong> — health &amp; logs
-- <code>test_request_id_header</code> — every response carries <code>x-request-id</code>.
-- <code>test_health</code> — <code>/health</code> reports db + worker + run counts.
-- <code>test_logs_admin_only_and_structured</code> — <code>/logs</code> is admin-only and returns structured records.</p>
-<p><strong><code>test_worker_diagnostics.py</code> (2)</strong> — the downward command channel
-- <code>test_diagnostics_command_roundtrip</code> — an admin queues diagnostics; the worker picks it up on heartbeat, posts a read-only bundle (tools, disk, env var <em>names</em>), the admin reads the result.
-- <code>test_diagnostics_admin_only</code> — non-admins can't request diagnostics.</p>
-<p><strong><code>test_scheduler.py</code> (1)</strong> — background reconciliation
-- <code>test_worker_lost_fails_active_run</code> — a run on a worker whose heartbeat lapsed is transitioned to <code>failed (worker_lost)</code>.</p>
-<p><strong><code>test_ws_notify.py</code> (1)</strong> — the live-update bridge
-- <code>test_transition_emits_listen_notify</code> — each <code>transition()</code> emits a <code>LISTEN/NOTIFY</code> signal on the run channel with the new state.</p>
-<p><strong><code>test_seed.py</code> (1)</strong> — demo data
-- <code>test_seed_demo_is_idempotent</code> — <code>seed_demo()</code> run twice yields exactly the DEV §7 graph (2 stacks, 4 envs, 2 deps, the protected/4-eyes prod env, the <code>local</code> pool) with no duplicates; cleans up after itself so <code>/graph</code> stays unpolluted for other tests.</p>
+<h2 id="4-test-map-what-each-file-covers">4. Test map (what each file covers)<a class="headerlink" href="#4-test-map-what-each-file-covers" title="Permanent link">&para;</a></h2>
+<p>One line per file. The test names are descriptive: <code>uv run pytest --collect-only -q</code> lists them
+all. Counts in parentheses include parametrized cases and drift as tests are added — see §5.</p>
+<h3 id="api-unit-integration-apitests">API — unit &amp; integration (<code>api/tests/</code>)<a class="headerlink" href="#api-unit-integration-apitests" title="Permanent link">&para;</a></h3>
+<table>
+<thead>
+<tr>
+<th>File</th>
+<th>Covers</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>test_auth.py</code> (5)</td>
+<td>Dev-login personas; <code>/refresh</code> CSRF double-submit; refresh rotation and reuse detection (the family is revoked); onboarding flag; unauthenticated <code>/me</code> → 401 problem+json.</td>
+</tr>
+<tr>
+<td><code>test_permissions.py</code> (9)</td>
+<td><code>can_apply</code> (pure): approver + tier set, writer refused, non-contiguous sets, empty set, custom tier, <code>can_destroy</code>; a space membership overrides the instance tiers, role and destroy right.</td>
+</tr>
+<tr>
+<td><code>test_spaces.py</code> (8)</td>
+<td>Per-space RBAC: non-members blocked on env-scoped reads, <code>/graph</code> and space listing scoped to memberships, grant then revoke, create = instance admin, members listing = space admin, create in an unknown space → 404.</td>
+</tr>
+<tr>
+<td><code>test_tiers.py</code> (4)</td>
+<td>Tier catalog: name charset (OIDC <code>sub</code> safety), <code>allowed_tiers</code> validated, deleting a tier strips grants, a tier in use can't be deleted.</td>
+</tr>
+<tr>
+<td><code>test_users.py</code> (3)</td>
+<td>User listing is admin-only; the <code>@mention</code> directory is readable by anyone; tier/destroy changes are audited.</td>
+</tr>
+<tr>
+<td><code>test_audit.py</code> (2)</td>
+<td>Mutations land in <code>/audit</code>, filter by action, CSV export columns; export is admin-only.</td>
+</tr>
+<tr>
+<td><code>test_runs.py</code> (10)</td>
+<td>Run lifecycle; one active run per env under concurrency (<code>23505</code>); tier gate; four-eyes on a <code>requires_four_eyes</code> tier and on a <code>protected</code> env; autodeploy and <code>warn</code> forcing <code>unconfirmed</code>; confirm only from <code>unconfirmed</code>; mock block; repo token masked in the claim; the claim carries <code>cred_phase</code>.</td>
+</tr>
+<tr>
+<td><code>test_commit_pin.py</code> (6)</td>
+<td>An unpinned run is pinned to the commit its plan checked out and the apply gets it; staleness then works for a manual run; a pinned SHA must match (<code>commit_mismatch</code> fails the run); a ref is re-pinned to its SHA; a malformed SHA → 400.</td>
+</tr>
+<tr>
+<td><code>test_saved_plan.py</code> (10)</td>
+<td>The plan is stored encrypted and served only to the run's apply job; it can't be replaced after the plan phase; a blob moved to another run's key doesn't decrypt; no saved plan → nothing served; proposed runs save none; destroy runs plan with <code>-destroy</code>; 64 MiB cap; deleted once the run is terminal, kept if that transition rolls back.</td>
+</tr>
+<tr>
+<td><code>test_commands.py</code> (8)</td>
+<td>Command runs: allowlist, read-only for writers, mutating needs <code>can_apply</code>, lifecycle + audit; mutating → <code>rw</code> token with the apply-window TTL, read-only → <code>ro</code> token with the 6 h TTL.</td>
+</tr>
+<tr>
+<td><code>test_promote.py</code> (5)</td>
+<td>Promotion pins the source's applied commit (audited); needs an applied source; refuses cross-stack; distinct 404 for a missing source vs target; the source stays space-gated.</td>
+</tr>
+<tr>
+<td><code>test_deletion.py</code> (7)</td>
+<td>Stack/env deletion refused (409) while a run is active, allowed once it is terminal; attachments, hooks and notification targets removed with their target (audited); an attach racing a deletion leaves no orphan (variable set, hook, notification target).</td>
+</tr>
+<tr>
+<td><code>test_variables_api.py</code> (12)</td>
+<td>Layered resolution and provenance; sensitive values write-only; attached set can't be deleted; selectors on stack/env labels; tier attachments; cross-space attach refused; a tier attachment stays in the set's space; input discovery; backend config file round trip; <code>protected</code> forces no autodeploy.</td>
+</tr>
+<tr>
+<td><code>test_tfvars.py</code> (4)</td>
+<td><code>hcl</code> variables routed to the generated <code>.auto.tfvars</code>, everything else to JSON.</td>
+</tr>
+<tr>
+<td><code>test_secret_sources.py</code> (8)</td>
+<td>External secret references: live value masked, static fallback + apply gate, <code>error</code> mode fails closed, break-glass override (needs apply right), source CRUD hides the bootstrap secret, in-use source can't be deleted, a fallback appearing at the apply claim is gated.</td>
+</tr>
+<tr>
+<td><code>test_proposed_secrets.py</code> (3)</td>
+<td>A proposed run's claim carries no secret — no sensitive variable of either kind, no external reference (not fetched), nothing in <code>mask_values</code> or the provenance — and keeps the plan role and the repo token; a tracked run and a drift run still get every secret.</td>
+</tr>
+<tr>
+<td><code>test_dependencies.py</code> (10)</td>
+<td>Mocks (used, block apply, real value wins, missing → fail), anti-cycle, cascade; <code>link-by-name</code> idempotent, skips hand-made and racing edges and in-request cycles; <code>/graph</code> hides edges outside the caller's spaces.</td>
+</tr>
+<tr>
+<td><code>test_hooks.py</code> (2)</td>
+<td>Platform hook CRUD, tagged <code>platform</code> in the claim; writer gate.</td>
+</tr>
+<tr>
+<td><code>test_check_results.py</code> (6)</td>
+<td>Every check result is kept with its stage in <code>check_results.results</code>, the warn/fail ones in <code>checks</code>: a plan failing on a check records it with the ones before; an apply's checks add to the plan's; a job failing on no check records the checks it ran and audits a warning among them, in a plan and in an apply job; a job that ran no check leaves them alone; a run recorded before <code>results</code> existed keeps its checks.</td>
+</tr>
+<tr>
+<td><code>test_apply_stage_hooks.py</code> (6)</td>
+<td><code>before_apply</code>/<code>after_apply</code> checks are recorded and audited (<code>run.check_warned</code>); an apply without checks keeps the plan's; a failing <code>after_apply</code> hook records the outputs, clears the drift and cascades nothing; a failed apply records no outputs and leaves the drift.</td>
+</tr>
+<tr>
+<td><code>test_state_backend.py</code> (13)</td>
+<td>HTTP state backend (moto S3): LOCK/POST/GET/UNLOCK and serial regression; <code>ro</code> tokens can't write or unlock, <code>plan</code> tokens lock but can't write, proposed runs never lock; env scoping; TTL follows the credential phase; a terminal run's token can't write; UNLOCK and a locked POST need the holder's lock ID; import session (adopt, admin-only, managed state only).</td>
+</tr>
+<tr>
+<td><code>test_oidc.py</code> (4)</td>
+<td>Issuer metadata + JWKS; the plan token's <code>sub</code>; apply uses the apply role; AssumeRole against moto STS.</td>
+</tr>
+<tr>
+<td><code>test_scheduler.py</code> (4)</td>
+<td>The advisory lock survives a task's commit (dedicated connection); worker loss fails an executing run, waits the apply window for a mutating command, spares <code>unconfirmed</code>/<code>confirmed</code> runs.</td>
+</tr>
+<tr>
+<td><code>test_staleness.py</code> (11)</td>
+<td><code>stale</code> on the env API; head polling once per (repo, branch, credentials), surviving a failing repo, respecting the interval, bounded concurrency, never blocking the other scheduler tasks; refresh-head holds no transaction across git and is audited; a branch change resets the head.</td>
+</tr>
+<tr>
+<td><code>test_webhooks.py</code> (5)</td>
+<td>Push updates the head and triggers; bad signature → 401; PR → proposed run; a branch-deletion push clears the head and triggers nothing; an env re-pointed meanwhile is skipped.</td>
+</tr>
+<tr>
+<td><code>test_vcs.py</code> (6)</td>
+<td>GitHub post-back: owner/repo parsing, PR metadata persisted, PR close cancels proposed runs, status + one comment per run, a bad secret fails only its row, resync.</td>
+</tr>
+<tr>
+<td><code>test_drift.py</code> (6)</td>
+<td>Drift runs enqueued only for envs with an applied commit; status flips and approvers (by space membership) are notified once; an apply clears drift; user runs are claimed first.</td>
+</tr>
+<tr>
+<td><code>test_repo_safety.py</code> (65)</td>
+<td>Repo introspection: discovery reads only regular <code>.tf</code> files inside the clone (symlinks never escape), <code>project_root</code> containment, clone budget, cleanup off the event loop; the repo token percent-encoded in clone URLs and masked in every git error (both forms); git killed and reaped on timeout.</td>
+</tr>
+<tr>
+<td><code>test_notifications.py</code> (10)</td>
+<td>Target CRUD + audit, test delivery, unsupported states, outbox enqueue and dispatch; SSRF: delivery pinned to the vetted IP (DNS rebinding), private IPs refused at create and at delivery, no redirects, body validation does no DNS.</td>
+</tr>
+<tr>
+<td><code>test_inbox.py</code> (6)</td>
+<td>In-app notifications: approval requests to eligible approvers by space membership, terminal notifies the triggerer, replies and mentions, per-user feed, mark read, delete and clear.</td>
+</tr>
+<tr>
+<td><code>test_comments.py</code> (6)</td>
+<td>Plan-review threads: anchors, one level of replies, edit/resolve/delete permissions.</td>
+</tr>
+<tr>
+<td><code>test_metrics_ratelimit.py</code> (8)</td>
+<td>Token buckets (burst, per IP) in a bounded LRU (cap, eviction, concurrent new keys); <code>/metrics</code> exposition; <code>/health</code> needs auth, <code>/metrics</code> doesn't; discovery clone size budget.</td>
+</tr>
+<tr>
+<td><code>test_observability.py</code> (3)</td>
+<td><code>X-Request-ID</code>; <code>/health</code>; <code>/logs</code> admin-only and structured.</td>
+</tr>
+<tr>
+<td><code>test_worker_diagnostics.py</code> (2)</td>
+<td>Diagnostics round trip over the heartbeat; admin-only.</td>
+</tr>
+<tr>
+<td><code>test_worker_heartbeat.py</code> (2)</td>
+<td><code>in_flight</code> drives busy/idle; a bodyless heartbeat keeps the worker online.</td>
+</tr>
+<tr>
+<td><code>test_worker_register.py</code> (1)</td>
+<td>Re-registering under the same name reuses the worker row.</td>
+</tr>
+<tr>
+<td><code>test_ws_notify.py</code> (1)</td>
+<td>Each <code>transition()</code> emits a <code>LISTEN/NOTIFY</code> signal on the run channel.</td>
+</tr>
+<tr>
+<td><code>test_seed.py</code> (1)</td>
+<td>The demo seed is idempotent and yields exactly the DEV §7 graph.</td>
+</tr>
+</tbody>
+</table>
 <h3 id="api-end-to-end-apie2e-1-scenario">API — end-to-end (<code>api/e2e/</code>, 1 scenario)<a class="headerlink" href="#api-end-to-end-apie2e-1-scenario" title="Permanent link">&para;</a></h3>
-<p><strong><code>test_scenario.py::test_full_scenario</code></strong> — the DEV §7 narrative against the live stack + real
-worker running OpenTofu (≈2 min). It drives, in order:</p>
+<p><strong><code>test_scenario.py::test_full_scenario</code></strong> — the DEV §7 narrative against the live stack and a real
+worker running OpenTofu, on the <code>graph</code> copy (≈2 min). It drives, in order:</p>
 <ol>
 <li><code>bob</code> (writer) triggers <code>network/dev</code> → plan → <code>unconfirmed</code>.</li>
 <li><code>bob</code> is refused at confirm (apply needs approver+); <code>alice</code> confirms → apply → <code>finished</code>.</li>
@@ -1725,59 +1813,98 @@ worker running OpenTofu (≈2 min). It drives, in order:</p>
 <li>the cascade re-runs <code>app/prod</code>, now with the <strong>real</strong> output (<code>used_mocks=false</code>).</li>
 <li>the audit lists <code>run.confirmed</code> with <code>alice@dev.local</code> as the actor.</li>
 </ol>
-<blockquote>
-<p><strong>Note (spec drift):</strong> DEV §7 narrates <em>bob</em> confirming and a <em>tier</em> refusal. The implemented
-permission model (CLAUDE §4 #4) gates confirm on role ∈ {approver, admin}, so a writer is refused
-for <strong>role</strong>, and no seeded persona is an approver-with-sub-prod-tier. The e2e is faithful to the
-implementation. Reconcile DEV.md, or add a 4th persona, to demo the tier gate.</p>
-</blockquote>
-<h3 id="worker-workertests-5-tests">Worker (<code>worker/tests/</code>, 5 tests)<a class="headerlink" href="#worker-workertests-5-tests" title="Permanent link">&para;</a></h3>
-<p><strong><code>test_diagnostics.py</code> (1)</strong>
-- <code>test_diagnostics_exposes_env_names_not_values</code> — the bundle lists env var <strong>names</strong> but never their values.</p>
-<p><strong><code>test_masking.py</code> (6)</strong> — masking + the <code>-json</code> event parsing
-- <code>test_masker_replaces_all_secrets</code> — every known secret in a string is replaced.
-- <code>test_masker_longest_first</code> — overlapping secrets are masked longest-first (no partial leaks).
-- <code>test_merge_hooks_platform_before_repo</code> — platform hooks are merged ahead of repo hooks (non-bypassable).
-- <code>test_summary_from_change_summary_event</code> — the plan summary comes from tofu's <code>change_summary</code> event.
-- <code>test_summary_defaults_when_no_change_summary</code> — no <code>change_summary</code> → zero counts.
-- <code>test_first_error_picks_the_diagnostic_summary</code> — the run error is the first <code>diagnostic</code> summary.</p>
-<h3 id="front-front">Front (<code>front/</code>)<a class="headerlink" href="#front-front" title="Permanent link">&para;</a></h3>
-<p><code>pnpm test --run</code> (vitest) is wired but there are currently no component test files. The
-identity components are instead pinned by <strong>Ladle stories</strong> (the DESIGN §8 visual contract):
-<code>pnpm ladle</code> / <code>pnpm ladle:build</code> — <code>StateBadge</code>, <code>PhaseRail</code>, <code>ProvenanceBadge</code>.</p>
-<hr />
-<h2 id="5-counts">5. Counts<a class="headerlink" href="#5-counts" title="Permanent link">&para;</a></h2>
+<p>Every apply goes through the saved plan in S3, so the scenario needs the provisioned dev Garage.
+The tier gate (an approver without <code>prod</code>) and staleness stay manual checks (DEV §3, §7).</p>
+<h3 id="worker-workertests">Worker (<code>worker/tests/</code>)<a class="headerlink" href="#worker-workertests" title="Permanent link">&para;</a></h3>
 <table>
 <thead>
 <tr>
-<th>Location</th>
-<th>Files</th>
-<th>Tests</th>
+<th>File</th>
+<th>Covers</th>
 </tr>
 </thead>
 <tbody>
 <tr>
-<td><code>api/tests</code></td>
-<td>23</td>
-<td>92</td>
+<td><code>test_saved_plan.py</code> (10)</td>
+<td>The plan job uploads the plan it showed, before the <code>after_plan</code> hooks; destroy runs plan with <code>-destroy</code>; the apply job applies exactly the saved plan, fails closed without a usable one, reports a stale plan clearly; the plan file is never written through a checked-out symlink; the API's refusal reaches the job error.</td>
 </tr>
 <tr>
-<td><code>api/e2e</code></td>
-<td>1</td>
-<td>1 (multi-step scenario)</td>
+<td><code>test_commit_pin.py</code> (7)</td>
+<td>An unpinned clone takes the env branch head; a pinned SHA off the default tip and a pinned ref are checked out exactly; an unknown commit fails at fetch; the plan reports its commit; an apply without a pinned commit fails closed.</td>
 </tr>
 <tr>
-<td><code>worker/tests</code></td>
-<td>2</td>
-<td>7</td>
+<td><code>test_backend_env.py</code> (12)</td>
+<td>The managed backend reaches tofu only via <code>TF_HTTP_*</code> (never <code>-backend-config</code>), with no lock address for a read-only job; inherited <code>TF_HTTP_*</code> dropped; unmanaged unchanged; repo hooks never get it, in plan, apply and command jobs; tofu's environment carries none of the agent's <code>STACKD_*</code> settings, in all three jobs.</td>
 </tr>
 <tr>
-<td><strong>Total</strong></td>
-<td><strong>26</strong></td>
-<td><strong>100</strong></td>
+<td><code>test_hook_failures.py</code> (40)</td>
+<td>At every stage and from both sources: a <code>fail</code> hook fails the job at its stage, a <code>warn</code> one lets it finish and is reported; a failing <code>before_apply</code> hook stops the apply; a hook past <code>STACKD_HOOK_TIMEOUT_SECONDS</code> is killed and fails by its <code>on_failure</code>; a hook's background process is killed when the hook exits, whether it holds the hook's output or not; a job failing on no check (init, plan, plan JSON, apply, an uncaught error) reports the checks of the stages that ran; every check result is reported with its stage, in plan and apply jobs.</td>
+</tr>
+<tr>
+<td><code>test_hook_secrets.py</code> (8)</td>
+<td>What a repo hook can read: no saved plan, raw plan JSON, tfvars, OIDC token file or repo token in the workspace; a masked <code>plan.json</code> at <code>after_plan</code> (platform hooks get the raw one); symlinks a repo plants never receive a secret; the clone leaves no token under <code>.git/</code>; repo hooks get only the allowlisted worker env, platform hooks none of the agent's <code>STACKD_*</code> settings; command runs still read the tfvars; the real OpenTofu end to end.</td>
+</tr>
+<tr>
+<td><code>test_exit_codes.py</code> (17)</td>
+<td>A plan succeeds only on exit 0 or 2: an error, the watchdog's kill (124), a signal or any other code fails the job with the reason; an apply or command fails on any non-zero code; a plan without its JSON document (<code>show -json</code> failed or printed no JSON object) fails closed.</td>
+</tr>
+<tr>
+<td><code>test_command_run.py</code> (14)</td>
+<td>A command's time budget follows <code>cred_phase</code>: apply budget when mutating, default cap when read-only, apply budget when missing (fail closed); an over-budget command fails with a clear message.</td>
+</tr>
+<tr>
+<td><code>test_authed_url.py</code> (45)</td>
+<td>The repo token is percent-encoded into the clone URL (git dials the real host); other URLs unchanged; a failed clone masks both token forms.</td>
+</tr>
+<tr>
+<td><code>test_init_cmd.py</code> (6)</td>
+<td>The <code>init</code> command for managed state and for unmanaged partial backends (file, inline map, both).</td>
+</tr>
+<tr>
+<td><code>test_security.py</code> (6)</td>
+<td>Repo-hook env stripped of cloud credentials and sensitive values; the cleartext tripwire on plan and output JSON.</td>
+</tr>
+<tr>
+<td><code>test_masking.py</code> (8)</td>
+<td>Masking (all secrets, longest first); platform hooks before repo hooks; plan summary and first error from tofu's JSON events; the masked plan JSON hides every sensitive value and keeps the rest, and a non-JSON document is masked as text.</td>
+</tr>
+<tr>
+<td><code>test_workspace.py</code> (6)</td>
+<td><code>hcl</code> tfvars written verbatim; token injection into HTTPS clone URLs.</td>
+</tr>
+<tr>
+<td><code>test_concurrency.py</code> (3)</td>
+<td>The in-flight counter; <code>STACKD_MAX_CONCURRENT_JOBS</code> default and floor.</td>
+</tr>
+<tr>
+<td><code>test_runner_diag.py</code> (1)</td>
+<td>A tofu diagnostic is expanded to its detail and location.</td>
+</tr>
+<tr>
+<td><code>test_diagnostics.py</code> (1)</td>
+<td>The diagnostics bundle lists env var names, never values.</td>
 </tr>
 </tbody>
 </table>
+<h3 id="front-front">Front (<code>front/</code>)<a class="headerlink" href="#front-front" title="Permanent link">&para;</a></h3>
+<ul>
+<li><strong>vitest</strong> (<code>pnpm test</code>): <code>StateBadge.test.tsx</code> (label alongside color, mocked/fallback
+  modifiers), <code>ProvenanceBadge.test.ts</code> (provenance parsing) and <code>ProvenanceBadge.render.test.tsx</code>.</li>
+<li><strong>Playwright</strong> (<code>pnpm e2e</code>, <code>e2e/happy-path.spec.ts</code>): one smoke test — dev login reaches the
+  Stacks view — against a running dev stack (<code>PW_BASE_URL</code>, default <code>http://localhost:5173</code>). Not
+  run by CI yet.</li>
+<li><strong>Ladle stories</strong> (<code>pnpm ladle</code> / <code>pnpm ladle:build</code>) pin the identity components visually (the
+  DESIGN §8 contract): <code>StateBadge</code>, <code>PhaseRail</code>, <code>ProvenanceBadge</code>, plus <code>BrandMark</code> and the base
+  UI kit.</li>
+</ul>
+<hr />
+<h2 id="5-counts">5. Counts<a class="headerlink" href="#5-counts" title="Permanent link">&para;</a></h2>
+<p>Roughly <strong>282 API tests</strong> (38 files), <strong>184 worker tests</strong> (15 files), <strong>1 e2e scenario</strong> and
+<strong>9 front unit tests</strong>, parametrized cases included. The numbers move with every change; count them
+instead of trusting this page:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="nb">cd</span><span class="w"> </span>api<span class="w"> </span><span class="o">&amp;&amp;</span><span class="w"> </span>uv<span class="w"> </span>run<span class="w"> </span>pytest<span class="w"> </span>--collect-only<span class="w"> </span>-q<span class="w"> </span><span class="p">|</span><span class="w"> </span>tail<span class="w"> </span>-1<span class="w">      </span><span class="c1"># unit + integration</span>
+<a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a><span class="nb">cd</span><span class="w"> </span>worker<span class="w"> </span><span class="o">&amp;&amp;</span><span class="w"> </span>uv<span class="w"> </span>run<span class="w"> </span>pytest<span class="w"> </span>--collect-only<span class="w"> </span>-q<span class="w"> </span><span class="p">|</span><span class="w"> </span>tail<span class="w"> </span>-1
+</code></pre></div>
 <hr />
 <h2 id="6-adding-a-test">6. Adding a test<a class="headerlink" href="#6-adding-a-test" title="Permanent link">&para;</a></h2>
 <ul>
