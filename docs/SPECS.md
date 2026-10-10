@@ -672,7 +672,7 @@ POST /worker/v1/jobs/{id}/events
   { "event": "phase_started"|"phase_finished"|"job_failed",
     "phase": "...", "exit_code": 0,
     "result": { "has_changes": true, "summary": {...},
-                "checks": [{"name":"infracost","status":"warn","detail":"..."}] } }
+                "checks": [{"name":"infracost","status":"warn","detail":"...","stage":"after_plan"}] } }
   phase_started(planning) carries "result": {"commit_sha": "<full SHA checked out>"}
   job_failed(after_apply) carries "result": {"checks": [...], "outputs": {...}}   # §8.3: the
       # apply went through, an after_apply hook failed → outputs recorded (§9.1), drift
@@ -724,8 +724,9 @@ repo_env = {**allowlisted(worker_env), **job.env}        # repo hooks (§8.3)
 with_files = lambda tfvars=True: tofu_files(ws, job, tfvars)
 
 hooks = merge_hooks(job.hooks, ws.load_stackd_yml())   # platform first, §8
-# stage(name): run its hooks, each under the hook timeout (§8.3). A failing `fail` hook → report
-# job_failed(phase=name, checks) and stop, before the next tofu step; a `warn` one → into `checks`.
+# stage(name): run its hooks, each under the hook timeout (§8.3); every result (ok/warn/fail) goes
+# into `checks` with "stage": name. A failing `fail` hook → report job_failed(phase=name, checks) and
+# stop, before the next tofu step.
 
 if job.phase == "plan":
     write_backend_override(ws)               # `terraform { backend "http" {} }`, managed state only
