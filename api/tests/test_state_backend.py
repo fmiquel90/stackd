@@ -393,3 +393,45 @@ async def test_terminal_run_token_cannot_write_state(client: httpx.AsyncClient) 
         got = await client.get(f"/state/v1/{env_id}", headers=_basic(token))
         assert got.status_code == 200
         assert json.loads(got.content)["serial"] == 1
+
+
+async def test_unlock_requires_the_holders_lock_id(client: httpx.AsyncClient) -> None:
+    """A token-based UNLOCK releases the lock only with the holder's ID (tofu always sends the
+    lock info it LOCKed with): no ID or another ID gets 423 + the holder, like a LOCK conflict,
+    and leaves the lock in place. The admin force-unlock still breaks any lock."""
+    from app.statebackend.tokens import mint_state_token
+
+    admin = await login(client, "admin")
+    stack = await make_stack(client, admin, "state-unlock-id")
+    env_id = await make_env(client, admin, stack, "dev", "dev")
+    holder = mint_state_token(environment_id=uuid.UUID(env_id), scope="rw", ttl_seconds=3600)
+    other = mint_state_token(environment_id=uuid.UUID(env_id), scope="rw", ttl_seconds=3600)
+    url = f"/state/v1/{env_id}/lock"
+    held = json.dumps({"ID": "holder-lock", "Operation": "OperationTypeApply"})
+
+    async def _lock(token: str, body: str) -> httpx.Response:
+        return await client.request("LOCK", url, headers=_basic(token), content=body)
+
+    async def _unlock(token: str, body: str) -> httpx.Response:
+        return await client.request("UNLOCK", url, headers=_basic(token), content=body)
+
+    # A lock must carry an ID — an ID-less one could only ever be force-unlocked.
+    assert (await _lock(holder, json.dumps({"Operation": "OperationTypeApply"}))).status_code == 400
+    assert (await _lock(holder, held)).status_code == 200
+
+    for body in ("", "{}", json.dumps({"ID": ""}), json.dumps({"ID": "another-lock"})):
+        refused = await _unlock(other, body)
+        assert refused.status_code == 423, body
+        assert refused.json()["ID"] == "holder-lock"  # the holder, as on a LOCK conflict
+    conflict = await _lock(other, json.dumps({"ID": "other-lock"}))
+    assert conflict.status_code == 423  # still held by its holder
+    assert conflict.json()["ID"] == "holder-lock"
+
+    assert (await _unlock(holder, held)).status_code == 200
+    assert (await _unlock(holder, held)).status_code == 200  # nothing held: idempotent
+    assert (await _lock(other, json.dumps({"ID": "other-lock"}))).status_code == 200
+
+    # The admin force-unlock (§12) still breaks a lock it doesn't hold the ID of.
+    forced = await client.delete(f"/api/v1/environments/{env_id}/state/lock", headers=admin)
+    assert forced.status_code == 204
+    assert (await _lock(holder, held)).status_code == 200

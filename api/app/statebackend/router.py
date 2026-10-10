@@ -162,6 +162,20 @@ async def post_state(
     return Response(status_code=200)
 
 
+def _lock_id(info: object) -> str | None:
+    """The `ID` of a LOCK/UNLOCK body (tofu's lock info), or None if it carries none."""
+    lock_id = info.get("ID") if isinstance(info, dict) else None
+    return lock_id if isinstance(lock_id, str) and lock_id else None
+
+
+def _locked(holder: StateLock) -> Response:
+    """423 + the holder's lock info: the http backend's answer to a lock conflict (tofu prints the
+    body as the lock holder)."""
+    return Response(
+        content=json.dumps(holder.info or {}), status_code=423, media_type="application/json"
+    )
+
+
 @tf_router.api_route("/{env_id}/lock", methods=["LOCK"])
 async def lock_state(env_id: uuid.UUID, request: Request, session: DbSession) -> Response:
     claims = _token_claims(request)
@@ -169,13 +183,16 @@ async def lock_state(env_id: uuid.UUID, request: Request, session: DbSession) ->
     _require_lock_scope(claims)
     await _require_run_phase(session, claims)
     info = json.loads(await request.body() or b"{}")
+    lock_id = _lock_id(info)
+    if lock_id is None:
+        # Its holder releases a lock by presenting its ID (UNLOCK below): an ID-less lock could
+        # only be force-unlocked. tofu always sends one.
+        raise ProblemException(400, "Lock ID required", "The lock info carries no ID.")
 
     existing = await session.get(StateLock, env_id)
     if existing is not None:
-        return Response(
-            content=json.dumps(existing.info or {}), status_code=423, media_type="application/json"
-        )
-    session.add(StateLock(environment_id=env_id, lock_id=info.get("ID", ""), info=info))
+        return _locked(existing)
+    session.add(StateLock(environment_id=env_id, lock_id=lock_id, info=info))
     await session.commit()
     return Response(status_code=200)
 
@@ -189,8 +206,11 @@ async def unlock_state(env_id: uuid.UUID, request: Request, session: DbSession) 
     existing = await session.get(StateLock, env_id)
     if existing is None:
         return Response(status_code=200)
-    if info.get("ID") and existing.lock_id and info["ID"] != existing.lock_id:
-        raise ProblemException(423, "Locked", "Lock ID mismatch.")
+    # Only the holder releases its lock: tofu's UNLOCK body is the lock info it LOCKed with (and
+    # `tofu force-unlock <id>` sends that id), so a missing or different ID is another job's
+    # unlock — refused like a LOCK conflict. An admin breaks a lock with `force_unlock` below.
+    if _lock_id(info) != existing.lock_id:
+        return _locked(existing)
     await session.delete(existing)
     await session.commit()
     return Response(status_code=200)

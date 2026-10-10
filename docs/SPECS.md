@@ -928,10 +928,11 @@ S3 for the bytes, HTTP for the interface: per-job scoped tokens (§11.2) without
 | Method | Endpoint | Behavior |
 |---|---|---|
 | `GET` | `/state/v1/{env_id}` | any scope; 200 + latest state, 404 otherwise |
-| `POST` | `/state/v1/{env_id}?ID=<lock_id>` | **`rw` scope only**; verifies lock, refuses regressive serial (409), **403** once the token's run is no longer active, upload S3, `state_version` linked to the run, audit |
-| `LOCK` | `/state/v1/{env_id}/lock` | `plan` or `rw` scope; 200 or **423** + holder; **403** once the token's run is no longer active — and, for a `plan` token, once its run has left the plan phase |
-| `UNLOCK` | `/state/v1/{env_id}/lock` | `plan` or `rw` scope (a `ro` token never locks); verifies lock_id; still allowed after the run ended |
-| `DELETE` | `/state/v1/{env_id}` | admin, soft-delete, audited |
+| `POST` | `/state/v1/{env_id}?ID=<lock_id>` | **`rw` scope only**; an `ID` that is not the held lock's → **423**, refuses regressive serial (409), **403** once the token's run is no longer active, upload S3, `state_version` linked to the run (`NULL` for an import session) |
+| `LOCK` | `/state/v1/{env_id}/lock` | `plan` or `rw` scope; the body (tofu's lock info) must carry an `ID` (400 otherwise); 200 or **423** + holder; **403** once the token's run is no longer active — and, for a `plan` token, once its run has left the plan phase |
+| `UNLOCK` | `/state/v1/{env_id}/lock` | `plan` or `rw` scope (a `ro` token never locks); releases the lock only for its holder: the body's `ID` must be the held lock's — missing or different → **423** + holder, like a `LOCK` conflict (tofu always sends the lock info it locked with; `tofu force-unlock <id>` sends that id); 200 if nothing is held; still allowed after the run ended |
+
+These four are the whole Terraform-protocol surface: there is no state deletion route. Breaking a lock whose ID one does not hold is the human **force-unlock**, `DELETE /api/v1/environments/{env_id}/state/lock` (admin, audited `state.force_unlocked`, §12) — never a state token.
 
 Auth: Basic, password = JWT `{env_id, run_id, scope, typ: "state", iat, exp}`, minted at the claim (§7.2) for **one job**, not for the whole run. Its `scope` is fixed at mint time from the job, so a run's plan token and its apply token are different tokens with different rights:
 
