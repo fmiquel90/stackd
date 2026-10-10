@@ -43,15 +43,15 @@ function applyCodes(style: Style, codes: number[]): Style {
 }
 
 // Split on SGR sequences; drop any other escape sequence (cursor moves, etc.) and carriage returns.
-const SGR = /\x1b\[([0-9;]*)m/g;
-const OTHER_ESC = /\x1b\[[0-9;?]*[A-Za-z]|\r/g;
+const ESC = String.fromCharCode(27);
+const OTHER_ESC = new RegExp(`${ESC}\\[[0-9;?]*[A-Za-z]|\\r`, "g");
 
 export function AnsiText({ text }: { text: string }) {
   const segments: { text: string; style: Style }[] = [];
   let style: Style = {};
   let lastIndex = 0;
   let m: RegExpExecArray | null;
-  SGR.lastIndex = 0;
+  const SGR = new RegExp(`${ESC}\\[([0-9;]*)m`, "g");
   while ((m = SGR.exec(text)) !== null) {
     if (m.index > lastIndex) segments.push({ text: text.slice(lastIndex, m.index), style });
     const codes = m[1] ? m[1].split(";").map(Number) : [];

@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { ChevronDown, ChevronRight, RefreshCw } from "lucide-react";
@@ -160,18 +160,17 @@ function CreateEnvForm({ stackId, onDone }: { stackId: string; onDone: () => voi
     retry: false,
   });
   const branches = repo.data?.ok ? repo.data.branches : [];
-  // Default the tier to the first catalog entry once it loads.
-  useEffect(() => {
-    if (!form.tier && tierNames.length > 0) setForm((f) => ({ ...f, tier: tierNames[0] }));
-  }, [tierNames, form.tier]);
-  // Once branches load, point the default at a real one (main if present, else the first).
-  useEffect(() => {
-    if (branches.length > 0 && !branches.includes(form.branch)) {
-      setForm((f) => ({ ...f, branch: branches.includes("main") ? "main" : branches[0] }));
-    }
-  }, [branches, form.branch]);
+  // Defaults derived from the loaded catalog/branches: the first tier, and a real branch (main if
+  // present, else the first) once the repo answers.
+  const tier = form.tier || tierNames[0] || "";
+  const branch =
+    branches.length > 0 && !branches.includes(form.branch)
+      ? branches.includes("main")
+        ? "main"
+        : branches[0]
+      : form.branch;
   const create = useMutation({
-    mutationFn: () => stacks.createEnvironment(stackId, form),
+    mutationFn: () => stacks.createEnvironment(stackId, { ...form, tier, branch }),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["environments", stackId] });
       onDone();
@@ -190,7 +189,7 @@ function CreateEnvForm({ stackId, onDone }: { stackId: string; onDone: () => voi
           <TextInput value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} required />
         </Field>
         <Field label="Tier">
-          <Select value={form.tier} onChange={(e) => setForm({ ...form, tier: e.target.value })} required>
+          <Select value={tier} onChange={(e) => setForm({ ...form, tier: e.target.value })} required>
             {tierNames.map((name) => (
               <option key={name} value={name}>
                 {name}
@@ -200,7 +199,7 @@ function CreateEnvForm({ stackId, onDone }: { stackId: string; onDone: () => voi
         </Field>
         <Field label="Branch">
           {branches.length > 0 ? (
-            <Select value={form.branch} onChange={(e) => setForm({ ...form, branch: e.target.value })}>
+            <Select value={branch} onChange={(e) => setForm({ ...form, branch: e.target.value })}>
               {branches.map((b) => (
                 <option key={b} value={b}>
                   {b}
@@ -217,7 +216,7 @@ function CreateEnvForm({ stackId, onDone }: { stackId: string; onDone: () => voi
           onChange={(v) => setForm({ ...form, managed_state: v })}
           label="managed state"
         />
-        <Button type="submit" variant="accent" disabled={create.isPending || !form.tier}>
+        <Button type="submit" variant="accent" disabled={create.isPending || !tier}>
           Add environment
         </Button>
       </form>

@@ -1,8 +1,8 @@
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
 import { type StackPatch, stacks } from "@/api/resources";
-import type { RepoAuthKind, Tool } from "@/api/types";
+import type { RepoAuthKind, Stack, Tool } from "@/api/types";
 import { useIsAdmin } from "@/auth/session";
 import { Button, Card, Field, LabelsEditor, Select, TextInput } from "@/components/ui";
 
@@ -67,29 +67,28 @@ interface FormState {
 // Edit a stack's identity & source: repo URL/auth, project root, and the IaC tool + version. The
 // repo credential is write-only (only sent when a new value is typed).
 export function StackGeneralPanel({ stackId }: { stackId: string }) {
+  const { data: stack } = useQuery({ queryKey: ["stack", stackId], queryFn: () => stacks.get(stackId) });
+  if (!stack) return <span className="font-data text-[12px]">Loading…</span>;
+  // Keyed on the stack: the form initialises once and a background refetch never clobbers edits.
+  return <StackGeneralForm key={stack.id} stack={stack} />;
+}
+
+function StackGeneralForm({ stack }: { stack: Stack }) {
+  const stackId = stack.id;
   const qc = useQueryClient();
   const isAdmin = useIsAdmin();
-  const { data: stack } = useQuery({ queryKey: ["stack", stackId], queryFn: () => stacks.get(stackId) });
-  const [form, setForm] = useState<FormState | null>(null);
-
-  useEffect(() => {
-    // Initialize once from the loaded stack; don't clobber in-progress edits on a background refetch.
-    if (!stack || form !== null) return;
-    setForm({
-      name: stack.name,
-      description: stack.description ?? "",
-      repo_url: stack.repo_url,
-      project_root: stack.project_root,
-      tool: stack.tool,
-      tool_version: stack.tool_version,
-      repo_auth_kind: stack.repo_auth_kind,
-      repo_secret: "",
-      webhook_secret: "",
-      labels: Object.fromEntries(
-        Object.entries(stack.labels ?? {}).map(([k, v]) => [k, String(v)]),
-      ),
-    });
-  }, [stack]);
+  const [form, setForm] = useState<FormState>(() => ({
+    name: stack.name,
+    description: stack.description ?? "",
+    repo_url: stack.repo_url,
+    project_root: stack.project_root,
+    tool: stack.tool,
+    tool_version: stack.tool_version,
+    repo_auth_kind: stack.repo_auth_kind,
+    repo_secret: "",
+    webhook_secret: "",
+    labels: Object.fromEntries(Object.entries(stack.labels ?? {}).map(([k, v]) => [k, String(v)])),
+  }));
 
   const save = useMutation({
     mutationFn: (body: StackPatch) => stacks.update(stackId, body),
@@ -100,7 +99,6 @@ export function StackGeneralPanel({ stackId }: { stackId: string }) {
   });
   const check = useMutation({ mutationFn: () => stacks.checkRepo(stackId) });
 
-  if (!form || !stack) return <span className="font-data text-[12px]">Loading…</span>;
   const stackName = stack.name;
 
   const submit = () => {
@@ -119,7 +117,7 @@ export function StackGeneralPanel({ stackId }: { stackId: string }) {
     save.mutate(body);
   };
 
-  const set = (patch: Partial<FormState>) => setForm((f) => (f ? { ...f, ...patch } : f));
+  const set = (patch: Partial<FormState>) => setForm((f) => ({ ...f, ...patch }));
 
   return (
     <div className="flex flex-col gap-4">

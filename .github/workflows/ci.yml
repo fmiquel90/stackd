@@ -98,6 +98,12 @@ jobs:
           cache: pnpm
           cache-dependency-path: front/pnpm-lock.yaml
       - run: pnpm install --frozen-lockfile
+      - name: Lint (eslint)
+        run: pnpm run lint
+      - name: Format (prettier)
+        run: pnpm run format:check
+      - name: Invariants (no browser storage, no hard-coded colour)
+        run: pnpm run check:invariants
       - name: Typecheck (tsc)
         run: pnpm run typecheck
       - name: Unit tests (vitest)

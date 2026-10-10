@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { useMutation } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
 import { runs } from "@/api/resources";
@@ -13,11 +13,9 @@ export function PromotePanel({
   siblings: { id: string; name: string }[];
 }) {
   const navigate = useNavigate();
-  const [from, setFrom] = useState(siblings[0]?.id ?? "");
-  // If siblings arrive/refresh after mount, default the picker to the first one.
-  useEffect(() => {
-    if (!from && siblings.length > 0) setFrom(siblings[0].id);
-  }, [siblings, from]);
+  const [picked, setFrom] = useState("");
+  // Default to the first sibling until the user picks one (derived, so late-arriving siblings work).
+  const from = picked || siblings[0]?.id || "";
 
   const promote = useMutation({
     mutationFn: () => runs.promote(envId, from),
