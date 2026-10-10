@@ -18,21 +18,27 @@ _GIT_ENV = {
 
 
 def _authed_url(repo_url: str, auth_kind: RepoAuthKind, secret: str | None) -> str:
+    """Inject the repo token as HTTPS userinfo. Each userinfo component is percent-encoded: a raw
+    `@ : / ? # %` in the token would otherwise end the userinfo early, so git would contact the
+    wrong host or carry part of the token in the host or path. The host[:port] is kept verbatim
+    (any userinfo already in `repo_url` is replaced), so IPv6 brackets and the port survive."""
     if auth_kind == RepoAuthKind.token and secret and repo_url.startswith("http"):
         parts = urlsplit(repo_url)
-        netloc = f"x-access-token:{secret}@{parts.hostname}"
-        if parts.port:
-            netloc += f":{parts.port}"
+        userinfo = ":".join(quote(p, safe="") for p in ("x-access-token", secret))
+        netloc = f"{userinfo}@{parts.netloc.rpartition('@')[2]}"
         return urlunsplit((parts.scheme, netloc, parts.path, parts.query, parts.fragment))
     return repo_url
 
 
 def _redact(text: str, secret: str | None) -> str:
-    """Mask the repo token in anything git (or the subprocess layer) reports: the authed URL can
-    appear verbatim in git's errors, and the token is write-only (invariant 3). Every message this
-    module surfaces goes through here."""
+    """Mask the repo token in anything git (or the subprocess layer) reports: the authed URL (which
+    carries the percent-encoded form) can appear verbatim in git's errors, the raw form anywhere
+    else, and the token is write-only (invariant 3). Every message this module surfaces goes
+    through here. Longest form first: the raw token can be a substring of its encoded form (a
+    literal `%25` in it), and masking that first would leave the rest of the encoded token
+    behind."""
     if secret:
-        for form in (secret, quote(secret, safe="")):
+        for form in sorted({secret, quote(secret, safe="")}, key=len, reverse=True):
             text = text.replace(form, "•••")
     return text
 

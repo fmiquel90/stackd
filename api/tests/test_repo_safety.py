@@ -1,6 +1,6 @@
 """Repo-introspection safety: discovery only reads regular files inside the clone (in-clone
-symlinks included), the clone cleanup stays off the event loop, git is killed on timeout, and git
-output never carries the repo token (invariant 3)."""
+symlinks included), the clone cleanup stays off the event loop, git is killed on timeout, the repo
+token is percent-encoded into the URL, and git output never carries it in any form (invariant 3)."""
 
 from __future__ import annotations
 
@@ -8,11 +8,13 @@ import asyncio
 import os
 import shutil
 import signal
+import socket
 import subprocess
 import tempfile
 from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
+from urllib.parse import quote, unquote, urlsplit
 
 import httpx
 import pytest
@@ -251,6 +253,116 @@ async def test_clone_shallow_masks_token_and_cleans_up_off_loop(
     assert exc.value.detail is not None
     assert _TOKEN not in exc.value.detail and "•••" in exc.value.detail
     assert rmtree_calls == [(argv[-1], False)]  # the temp clone dir is removed, off the loop
+
+
+# --- the token is percent-encoded into the URL userinfo, and masked in both forms ---
+
+# Each character that ends or splits a raw userinfo, a token that would re-point git at another
+# host, and a literal `%25` (its raw form is a substring of its encoded form `%2525`).
+_SPECIAL_TOKENS = [
+    "tok@en",
+    "tok:en",
+    "tok/en",
+    "tok%en",
+    "tok#en",
+    "tok?en",
+    "tok%25",
+    "x@127.0.0.2:1/#?%",
+]
+_HTTPS_REPOS = [
+    "https://git.example.com/org/repo.git",
+    "https://git.example.com:8443/org/repo.git",
+    "https://[::1]:8443/org/repo.git",
+    "https://someone@git.example.com/org/repo.git",
+]
+
+
+@pytest.mark.parametrize("repo_url", _HTTPS_REPOS)
+@pytest.mark.parametrize("token", _SPECIAL_TOKENS)
+def test_authed_url_percent_encodes_token(repo_url: str, token: str) -> None:
+    orig = urlsplit(repo_url)
+    authed = urlsplit(git._authed_url(repo_url, RepoAuthKind.token, token))
+    # Same address git would dial without a token: nothing leaked out of the userinfo.
+    for part in ("scheme", "hostname", "port", "path", "query", "fragment"):
+        assert getattr(authed, part) == getattr(orig, part), part
+    assert authed.username == "x-access-token"
+    assert authed.password is not None and unquote(authed.password) == token
+
+
+@pytest.mark.parametrize(
+    ("repo_url", "auth_kind", "secret"),
+    [
+        ("file:///stackd-dev/repos/demo-app", RepoAuthKind.none, None),
+        ("file:///stackd-dev/repos/demo-app", RepoAuthKind.token, "tok@en"),  # not HTTP(S)
+        ("https://git.example.com/org/repo.git", RepoAuthKind.none, None),
+        ("https://git.example.com/org/repo.git", RepoAuthKind.none, "tok@en"),
+        ("https://git.example.com/org/repo.git", RepoAuthKind.token, None),
+    ],
+)
+def test_authed_url_leaves_other_urls_unchanged(
+    repo_url: str, auth_kind: RepoAuthKind, secret: str | None
+) -> None:
+    assert git._authed_url(repo_url, auth_kind, secret) == repo_url
+
+
+def _fake_git_echoing(monkeypatch: pytest.MonkeyPatch, urls: list[str]) -> None:
+    """git fails and echoes the token in both forms it holds: inside the authed URL it was given
+    (percent-encoded) and decoded from it (raw)."""
+
+    async def fake(*args: str, **_: Any) -> _FailingProc:
+        url = next(a for a in args if "://" in a)
+        urls.append(url)
+        raw = unquote(urlsplit(url).password or "")
+        return _FailingProc(f"fatal: unable to access '{url}/': 403 for {raw}".encode())
+
+    monkeypatch.setattr(git.asyncio, "create_subprocess_exec", fake)
+
+
+@pytest.mark.parametrize("op", ["check_repo", "clone_shallow"])
+@pytest.mark.parametrize("token", _SPECIAL_TOKENS)
+async def test_git_errors_mask_both_token_forms(
+    monkeypatch: pytest.MonkeyPatch, op: str, token: str
+) -> None:
+    urls: list[str] = []
+    _fake_git_echoing(monkeypatch, urls)
+    repo_url = "https://git.example.com/org/repo.git"
+
+    detail: str | None
+    if op == "check_repo":
+        ok, _, detail = await check_repo(repo_url, RepoAuthKind.token, token)
+        assert not ok
+    else:
+        with pytest.raises(ProblemException) as exc:
+            await clone_shallow(repo_url, RepoAuthKind.token, token, "main")
+        assert exc.value.status == 502
+        detail = exc.value.detail
+
+    [url] = urls
+    assert unquote(urlsplit(url).password or "") == token  # git really got the token
+    # Exact match: no form of the token survives, not even the tail of a partially masked one.
+    assert detail == (
+        "fatal: unable to access 'https://x-access-token:•••@git.example.com/org/repo.git/': "
+        "403 for •••"
+    )
+
+
+def _closed_port() -> int:
+    with socket.socket() as s:
+        s.bind(("127.0.0.1", 0))
+        return int(s.getsockname()[1])
+
+
+async def test_real_git_dials_the_repo_host_not_one_in_the_token() -> None:
+    """Real git, loopback only: with a raw token, git would dial 127.0.0.2:1 (from the token)."""
+    token, port = "x@127.0.0.2:1/#?%", _closed_port()
+
+    ok, _, detail = await check_repo(
+        f"https://127.0.0.1:{port}/org/repo.git", RepoAuthKind.token, token
+    )
+    assert not ok and detail is not None
+    assert f"127.0.0.1 port {port}" in detail, detail  # curl's connection-refused message
+    assert "127.0.0.2" not in detail
+    assert token not in detail and quote(token, safe="") not in detail
 
 
 # --- git is killed and reaped on timeout ---
