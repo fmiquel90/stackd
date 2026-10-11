@@ -59,7 +59,12 @@ export function TypeToConfirm({
       </div>
       {counts && <PlanCountsBig counts={counts} />}
       {(destroyed.length > 0 || replaced.length > 0) && (
-        <div className="max-h-48 overflow-auto rounded-base border border-st-failed bg-tint-failed px-2 py-1.5">
+        <div
+          tabIndex={0}
+          role="region"
+          aria-label="Resources destroyed or replaced"
+          className="max-h-48 overflow-auto rounded-base border border-st-failed bg-tint-failed px-2 py-1.5"
+        >
           {destroyed.length > 0 && (
             <>
               <div className="eyebrow text-st-failed">− Destroyed · {destroyed.length}</div>

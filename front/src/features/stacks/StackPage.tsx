@@ -145,7 +145,7 @@ export function StackPage({ stackId }: { stackId: string }) {
                         <Td>
                           <Link
                             to={`${base}/envs/${encodeURIComponent(e.name)}`}
-                            className="font-data text-[13px] underline underline-offset-2"
+                            className="cell-link font-data text-[13px]"
                           >
                             {e.name}
                           </Link>

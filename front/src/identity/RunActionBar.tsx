@@ -170,7 +170,12 @@ export function RunActionBar(props: RunActionBarProps) {
       confirmControl = (
         <Popover open={open} onOpenChange={setOpen}>
           <PopoverTrigger asChild>{confirmBtn}</PopoverTrigger>
-          <PopoverContent align="end">{friction}</PopoverContent>
+          <PopoverContent
+            align="end"
+            aria-label={`Confirm ${run.type === "destroy" ? "destroy" : "apply"} on ${env.name}`}
+          >
+            {friction}
+          </PopoverContent>
         </Popover>
       );
   }

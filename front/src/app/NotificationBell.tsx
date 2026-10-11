@@ -90,14 +90,18 @@ export function NotificationBell({ userId }: { userId: string }) {
           {unread > 0 && (
             <span
               aria-hidden
-              className="absolute -top-0.5 -right-0.5 inline-flex h-4 min-w-4 items-center justify-center rounded-badge border border-control bg-raised px-0.5 font-data text-[10px] text-primary"
+              className="absolute -top-0.5 -right-0.5 inline-flex h-4 min-w-4 items-center justify-center rounded-badge border border-control bg-raised px-0.5 font-data text-[11px] leading-none text-primary"
             >
               {unread > 9 ? "9+" : unread}
             </span>
           )}
         </button>
       </PopoverTrigger>
-      <PopoverContent align="end" className="flex w-[360px] max-w-[calc(100vw-32px)] flex-col gap-2 p-2">
+      <PopoverContent
+        align="end"
+        aria-label="Notifications"
+        className="flex w-[360px] max-w-[calc(100vw-32px)] flex-col gap-2 p-2"
+      >
         <div className="flex items-center justify-between gap-2 px-1">
           <h2 className="text-ui font-semibold">Notifications</h2>
           {items.some((n) => n.read && !fresh.has(n.id)) && (

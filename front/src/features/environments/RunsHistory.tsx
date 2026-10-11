@@ -84,7 +84,7 @@ export function RunsHistory({
               {filtered.slice(0, limit).map((r) => (
                 <tr key={r.id} className="hover:bg-raised">
                   <Td>
-                    <Link to={`/runs/${r.id}`} className="font-data text-[12px] underline underline-offset-2">
+                    <Link to={`/runs/${r.id}`} className="cell-link font-data text-[12px]">
                       {r.id.slice(0, 8)}
                     </Link>
                   </Td>

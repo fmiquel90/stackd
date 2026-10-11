@@ -79,7 +79,33 @@ body {
 
 /* Custom classes live in the components layer so Tailwind utilities (in the later utilities layer)
    can override them, e.g. `eyebrow normal-case`. */
+@layer base {
+  /* Tailwind v4 resets buttons to the arrow cursor: clickable things show the hand again. */
+  button:not(:disabled),
+  [role="button"]:not([aria-disabled="true"]),
+  [role="tab"],
+  [role="menuitem"],
+  [role="option"],
+  summary,
+  select:not(:disabled),
+  input[type="checkbox"]:not(:disabled),
+  input[type="radio"]:not(:disabled),
+  label:has(> input[type="checkbox"], > input[type="radio"]) {
+    cursor: pointer;
+  }
+}
+
 @layer components {
+  /* A link that stands alone in a table cell or list row: 24 px tall hit area (WCAG 2.5.8), so
+     links in adjacent rows never share their target zone. */
+  .cell-link {
+    display: inline-flex;
+    align-items: center;
+    min-height: 24px;
+    min-width: 24px;
+    text-decoration-line: underline;
+    text-underline-offset: 2px;
+  }
   /* "Data is mono" — tabular figures so columns don't dance while streaming (DESIGN §3.3, §7). */
   .font-data {
     font-family: var(--font-mono);

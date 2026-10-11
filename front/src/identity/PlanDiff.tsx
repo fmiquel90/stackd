@@ -127,10 +127,17 @@ function ResourceRow({
       </li>
     );
   }
+  // The action sits beside the <summary>, not inside it: a control nested in a disclosure toggle is
+  // unreachable as itself for assistive technology (WCAG 4.1.2).
   return (
-    <li className="py-0.5">
+    <li className="relative py-0.5">
       <details className="group">
-        <summary className="flex cursor-pointer list-none items-start justify-between gap-2 rounded-base px-1 py-1 hover:bg-raised">
+        <summary
+          className={cn(
+            "flex min-h-7 cursor-pointer list-none items-start gap-2 rounded-base px-1 py-1 hover:bg-raised",
+            !!action && "pr-10",
+          )}
+        >
           <span className="flex min-w-0 items-baseline gap-1">
             <ChevronRight
               size={14}
@@ -140,13 +147,13 @@ function ResourceRow({
             />
             {header}
           </span>
-          {action}
         </summary>
         <div className="mt-1 flex flex-col gap-1.5 pl-6">
           {r.notes.length > 0 && <div className="font-data text-[12px] text-muted">{r.notes.join(" ")}</div>}
           <Body lines={r.body} query={query} />
         </div>
       </details>
+      {action && <span className="absolute top-1 right-1">{action}</span>}
     </li>
   );
 }
@@ -251,7 +258,7 @@ export function PlanDiff({ lines, counts, query, onQueryChange, resourceAction, 
 
       {tagOnly.length > 0 && (
         <details className="rounded-base border border-line px-3 py-2">
-          <summary className="cursor-pointer eyebrow text-muted">
+          <summary className="min-h-6 cursor-pointer py-1 eyebrow text-muted">
             ~ Tag-only updates · {tagOnly.length} (collapsed, counted)
           </summary>
           <ul className="mt-2">
@@ -272,7 +279,7 @@ export function PlanDiff({ lines, counts, query, onQueryChange, resourceAction, 
 
       {plan.outputs.length > 0 && (
         <details className="rounded-base border border-line px-3 py-2">
-          <summary className="cursor-pointer eyebrow text-muted">Changes to outputs</summary>
+          <summary className="min-h-6 cursor-pointer py-1 eyebrow text-muted">Changes to outputs</summary>
           <div className="mt-2">
             <Body lines={plan.outputs.slice(1)} query={q} />
           </div>
@@ -283,7 +290,7 @@ export function PlanDiff({ lines, counts, query, onQueryChange, resourceAction, 
 
       {plan.preamble.some((l) => l.trim()) && (
         <details>
-          <summary className="cursor-pointer text-[12px] text-muted">
+          <summary className="min-h-6 cursor-pointer py-1 text-[12px] text-muted">
             Plan legend (as printed by the tool)
           </summary>
           <Body lines={plan.preamble.filter((l) => l.trim())} query="" />

@@ -21,8 +21,9 @@ const DISABLED =
   "disabled:cursor-not-allowed disabled:bg-raised disabled:text-muted disabled:border-dashed disabled:border-control disabled:hover:bg-raised";
 
 const SIZE: Record<ButtonSize, string> = {
-  sm: "h-7 px-2.5 text-[12px] gap-1.5",
-  md: "h-8 px-3 text-ui gap-2",
+  // Phones get taller targets (DESIGN §7): md matches the 44 px fields, sm stays compact for rows.
+  sm: "h-7 px-2.5 text-[12px] gap-1.5 max-md:h-8",
+  md: "h-8 px-3 text-ui gap-2 max-md:h-11",
   touch: "h-11 px-4 text-ui gap-2", // 44 px: the on-call mobile path (DESIGN §7)
 };
 

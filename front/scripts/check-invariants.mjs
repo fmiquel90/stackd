@@ -14,6 +14,9 @@ const CHECKS = [
     files: /\.(tsx?|css)$/,
     skip: (f) => f === TOKEN_FILE || /\.test\.tsx?$/.test(f),
   },
+  // `base` is a colour token here (the page ground), so `text-base` paints text in the background
+  // colour instead of setting 16 px: invisible text. Use an explicit size (`text-[16px]`).
+  { name: "text-base is a colour here", re: /(^|[\s"'`:])text-base(?![\w/-])/, files: /\.tsx?$/ },
 ];
 
 function walk(dir) {

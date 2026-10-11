@@ -239,7 +239,12 @@ function Diagnostics({ workerId }: { workerId: string }) {
         disk {disk.free_gb} GB free of {disk.total_gb} GB ({disk.used_pct}% used)
       </div>
       <div className="text-muted">{envNames.length} environment variables (names only)</div>
-      <div className="max-h-[240px] overflow-auto rounded-base bg-sunken p-2">
+      <div
+        tabIndex={0}
+        role="region"
+        aria-label="Diagnostics output"
+        className="max-h-[240px] overflow-auto rounded-base bg-sunken p-2"
+      >
         {logs.length ? (
           logs.map((l, i) => <div key={i}>{l}</div>)
         ) : (
@@ -387,7 +392,12 @@ function PlatformLogs({ workerId, onWorker }: { workerId: string; onWorker: (v: 
         </Field>
         <span className="pb-2 font-data text-[12px] text-muted">{data?.total ?? 0} matches</span>
       </div>
-      <div className="max-h-[460px] overflow-auto rounded-base border border-line bg-sunken p-2 font-data text-[12px] leading-[18px]">
+      <div
+        tabIndex={0}
+        role="region"
+        aria-label="Platform log entries"
+        className="max-h-[460px] overflow-auto rounded-base border border-line bg-sunken p-2 font-data text-[12px] leading-[18px]"
+      >
         {(data?.items ?? []).map((e, i) => (
           <div key={`${e.ts}-${i}`} className="whitespace-pre-wrap">
             <span className="text-muted">{e.ts.slice(11, 19)} </span>

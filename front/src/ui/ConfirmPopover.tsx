@@ -19,7 +19,7 @@ export function ConfirmPopover({
   return (
     <Popover>
       <PopoverTrigger asChild>{trigger}</PopoverTrigger>
-      <PopoverContent align="end" className="flex w-72 flex-col gap-2">
+      <PopoverContent align="end" aria-label={confirmLabel} className="flex w-72 flex-col gap-2">
         <p className="text-[12px]">{question}</p>
         <div className="flex justify-end gap-2">
           <PopoverClose asChild>

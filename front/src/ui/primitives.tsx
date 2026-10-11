@@ -18,8 +18,9 @@ import { isoLocal, relative } from "@/lib/time";
 
 /* ---------- Form controls ---------- */
 
+// On phones: 44 px tall (touch target) and 16 px text, below which iOS zooms into a focused field.
 const CONTROL =
-  "h-8 rounded-base border border-control bg-base px-2 font-data text-ui text-primary placeholder:text-muted disabled:cursor-not-allowed disabled:border-dashed disabled:text-muted";
+  "h-8 rounded-base border border-control bg-base px-2 font-data text-ui text-primary placeholder:text-muted disabled:cursor-not-allowed disabled:border-dashed disabled:text-muted max-md:h-11 max-md:text-[16px]";
 
 export const Input = forwardRef<HTMLInputElement, InputHTMLAttributes<HTMLInputElement>>(function Input(
   { className, ...rest },
@@ -37,7 +38,14 @@ export const NativeSelect = forwardRef<HTMLSelectElement, SelectHTMLAttributes<H
 /** Native checkbox; the selection colour is the focus violet (DESIGN §3.1: selection, not state). */
 export const Checkbox = forwardRef<HTMLInputElement, Omit<InputHTMLAttributes<HTMLInputElement>, "type">>(
   function Checkbox({ className, ...rest }, ref) {
-    return <input ref={ref} type="checkbox" className={cn("size-4 accent-ring", className)} {...rest} />;
+    return (
+      <input
+        ref={ref}
+        type="checkbox"
+        className={cn("size-4 accent-ring max-md:size-5", className)}
+        {...rest}
+      />
+    );
   },
 );
 

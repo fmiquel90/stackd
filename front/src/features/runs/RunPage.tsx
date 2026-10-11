@@ -421,6 +421,7 @@ export function RunPage() {
             </TabsList>
 
             <TabsContent value="plan" className="pt-3">
+              <h2 className="sr-only">Plan</h2>
               {resourceDraft && (
                 <div className="mb-3">
                   <Banner
@@ -483,6 +484,7 @@ export function RunPage() {
             </TabsContent>
 
             <TabsContent value="checks" className="pt-3">
+              <h2 className="sr-only">Checks</h2>
               {checks.length ? (
                 <CheckList checkResults={run.check_results} />
               ) : (
@@ -491,6 +493,7 @@ export function RunPage() {
             </TabsContent>
 
             <TabsContent value="logs" className="pt-3">
+              <h2 className="sr-only">Logs</h2>
               <LogViewer
                 chunks={d.logs}
                 live={!outcome}
@@ -557,6 +560,7 @@ export function RunPage() {
             </TabsContent>
 
             <TabsContent value="inputs" className="pt-3">
+              <h2 className="sr-only">Inputs</h2>
               {provenance.length ? (
                 <div className="max-w-[860px]">
                   <Table>
@@ -593,6 +597,7 @@ export function RunPage() {
             </TabsContent>
 
             <TabsContent value="discussion" className="pt-3">
+              <h2 className="sr-only">Discussion</h2>
               <Discussion runId={run.id} threads={d.threads} meId={me.id} />
             </TabsContent>
           </Tabs>

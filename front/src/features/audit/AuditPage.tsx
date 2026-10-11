@@ -343,7 +343,7 @@ function TargetCell({ e, lookup }: { e: AuditEvent; lookup: Lookup }) {
   return (
     <span className="font-data text-[12px]">
       {t.to ? (
-        <Link to={t.to} className="underline underline-offset-2">
+        <Link to={t.to} className="cell-link">
           {t.label}
         </Link>
       ) : (

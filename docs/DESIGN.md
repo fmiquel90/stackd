@@ -656,6 +656,10 @@ hooks, notifications, secret sources; URL `?tab=`).
 - **Overlays** are Radix primitives (focus trap in modal dialogs, `Esc`, focus return, `aria-*`).
 - **Tables and grids**: real `<table>` semantics for lists; the matrix is `role="grid"` with roving tabindex; sortable headers are buttons with `aria-sort`.
 - **Target size**: ≥ 24 × 24 px everywhere (WCAG 2.2 AA), **44 × 44 px** on the on-call mobile path (run page, attention zone, confirm/discard).
+  - Below 768 px, form fields and `md` buttons are 44 px tall and fields use 16 px text (below that, iOS zooms into a focused field); checkboxes grow to 20 px.
+  - A link standing alone in a table cell or list row uses `.cell-link` (24 px hit area), so adjacent rows never share a target.
+  - Log rows are 18 px with a mouse and 24 px on touch screens. **Known exception**: with a mouse, the line-number and comment targets stay 18 px tall to keep log density; they fail WCAG 2.5.8 there.
+  - Nothing is revealed on hover alone for touch: hover-only actions are always visible on coarse pointers.
 - **Tabular figures**: `tabular-nums` on any data aligned in a column.
 - **Async action buttons**: `Confirm`/`Discard`/`Cancel`/`Plan`/`Re-plan` go into a `loading` state (spinner + disabled, label kept) during the call — distinct from the permission-disabled state, which carries its reason.
 - **Empty states** = invitations to act, in the product's vocabulary, with the action when the user has the right. No decorative illustrations.

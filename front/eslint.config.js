@@ -53,6 +53,8 @@ export default tseslint.config(
       // Focus moved by autoFocus is fine when the field appears because the user just asked for it
       // (open a composer, open the confirm popover) — DESIGN §7 forbids only focus moved by events.
       "jsx-a11y/no-autofocus": "off",
+      // A scrollable region must take keyboard focus (WCAG 2.1.1, axe scrollable-region-focusable).
+      "jsx-a11y/no-noninteractive-tabindex": ["error", { roles: ["tabpanel", "region"], tags: [] }],
       // Our form primitives render a real <input>/<select>: a <label> wrapping them is associated.
       "jsx-a11y/label-has-associated-control": [
         "error",

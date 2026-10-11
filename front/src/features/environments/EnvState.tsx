@@ -67,7 +67,7 @@ export function EnvState({ env, isAdmin }: { env: Environment; isAdmin: boolean 
                 <Td className="font-data text-[12px] text-muted">{v.size_bytes} B</Td>
                 <Td className="font-data text-[12px]">
                   {v.created_by_run_id ? (
-                    <Link to={`/runs/${v.created_by_run_id}`} className="underline underline-offset-2">
+                    <Link to={`/runs/${v.created_by_run_id}`} className="cell-link">
                       run {v.created_by_run_id.slice(0, 8)}
                     </Link>
                   ) : (

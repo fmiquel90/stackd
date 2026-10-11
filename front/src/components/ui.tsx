@@ -83,7 +83,7 @@ export function DeleteButton({
           <span className="sr-only"> — {label}</span>
         </UiButton>
       </PopoverTrigger>
-      <PopoverContent align="end" className="flex w-72 flex-col gap-2">
+      <PopoverContent align="end" aria-label={label} className="flex w-72 flex-col gap-2">
         <p className="text-[12px]">{label}? This cannot be undone.</p>
         <div className="flex justify-end gap-2">
           <PopoverClose asChild>

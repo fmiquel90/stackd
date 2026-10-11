@@ -34,7 +34,7 @@ function EnvName({ row }: { row: QueueRow }) {
 function RunCell({ row }: { row: QueueRow }) {
   return (
     <span className="inline-flex items-baseline gap-2 md:flex md:flex-col md:gap-0">
-      <Link to={`/runs/${row.entry.run_id}`} className="font-data text-[12px] underline underline-offset-2">
+      <Link to={`/runs/${row.entry.run_id}`} className="cell-link font-data text-[12px]">
         {row.entry.run_id.slice(0, 8)}
       </Link>
       {row.run && <span className="font-data text-[11px] text-muted">{row.run.type}</span>}
@@ -118,7 +118,7 @@ export function QueuePage() {
         r.worker ? (
           <Link
             to={`/workers?worker=${encodeURIComponent(r.worker.name)}`}
-            className="font-data text-[12px] underline underline-offset-2"
+            className="cell-link font-data text-[12px]"
           >
             {r.worker.name}
           </Link>

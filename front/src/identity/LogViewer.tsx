@@ -159,7 +159,6 @@ export function LogViewer({
     <div
       role="region"
       aria-label="Run logs"
-      // eslint-disable-next-line jsx-a11y/no-noninteractive-tabindex
       tabIndex={0}
       onKeyDown={onKeyDown}
       className={cn(
@@ -377,7 +376,8 @@ function Line({
     <div id={`L-${line.id}`}>
       <div
         className={cn(
-          "group flex items-start font-data text-[12px] leading-[18px]",
+          // Dense 18 px rows for a mouse; 24 px on touch screens so line targets meet WCAG 2.5.8.
+          "group flex items-start font-data text-[12px] leading-[18px] pointer-coarse:leading-6 max-md:leading-6",
           targeted && "bg-raised outline outline-1 -outline-offset-1 outline-ring",
           hit && !targeted && "bg-raised",
           line.isError && "border-l-2 border-st-failed",
@@ -403,7 +403,7 @@ function Line({
           <AnsiText text={line.msg || " "} />
         </span>
         {action && (
-          <span className="shrink-0 pr-1 opacity-0 group-focus-within:opacity-100 group-hover:opacity-100">
+          <span className="shrink-0 pr-1 opacity-0 group-focus-within:opacity-100 group-hover:opacity-100 pointer-coarse:opacity-100">
             {action}
           </span>
         )}

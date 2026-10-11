@@ -292,7 +292,7 @@ function AdjacencyList({
                 <Td>
                   <button
                     type="button"
-                    className="font-data text-[12px] underline underline-offset-2"
+                    className="cell-link font-data text-[12px]"
                     onClick={() => onNode(i.edge.upstream)}
                   >
                     {name(i.edge.upstream)}
@@ -301,7 +301,7 @@ function AdjacencyList({
                 <Td>
                   <button
                     type="button"
-                    className="font-data text-[12px] underline underline-offset-2"
+                    className="cell-link font-data text-[12px]"
                     onClick={() => onNode(i.edge.downstream)}
                   >
                     {name(i.edge.downstream)}
