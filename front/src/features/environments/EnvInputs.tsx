@@ -126,9 +126,7 @@ export function EnvOutputs({ envId }: { envId: string }) {
               <Td className="font-data text-[12px]">{o.name}</Td>
               <Td className="font-data text-[12px] break-all text-muted">
                 {o.sensitive ? (
-                  <span title="Sensitive outputs are never stored nor propagated (SPECS §9.1)">
-                    ••• sensitive
-                  </span>
+                  <span title="Sensitive outputs are never stored nor propagated">••• sensitive</span>
                 ) : (
                   (o.value ?? "")
                 )}

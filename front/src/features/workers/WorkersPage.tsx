@@ -96,7 +96,7 @@ export function WorkersPage() {
               Workers
             </h2>
             <p className="text-[12px] text-muted">
-              Grouped by pool. A run goes to a worker whose labels cover the environment's labels (SPECS §7).
+              Grouped by pool. A run goes to a worker whose labels cover the environment's labels.
             </p>
             {h.workers.items.length === 0 ? (
               <EmptyState title="No worker registered.">

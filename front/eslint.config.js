@@ -10,6 +10,24 @@ import globals from "globals";
 const COLOR_PROPS =
   "/^(color|background|backgroundColor|border|borderColor|borderTop|borderRight|borderBottom|borderLeft|borderTopColor|borderBottomColor|borderLeftColor|borderRightColor|fill|stroke|outline|outlineColor|boxShadow)$/";
 
+// Colour lives in tokens only (CLAUDE §4, DESIGN §8): an inline colour style is an error.
+const NO_INLINE_COLOUR = {
+  selector: `JSXAttribute[name.name='style'] Property[key.name=${COLOR_PROPS}]`,
+  message: "No inline colour style: use the token utilities (DESIGN §8).",
+};
+
+// The decision documents (SPECS, DESIGN, AUDIT…) are for the team, never for users: no "§x.y",
+// "SPECS.md" or "AUDIT A5" in text the UI can show. Comments are not AST nodes, so they stay free.
+const DOC_REF = "/§|\\b(SPECS|DESIGN|AUDIT|PLAN|DEV|CLAUDE)(\\.md|\\s+A[0-9])/";
+const NO_DOC_REF = [
+  `Literal[value=${DOC_REF}]`,
+  `TemplateElement[value.raw=${DOC_REF}]`,
+  `JSXText[value=${DOC_REF}]`,
+].map((selector) => ({
+  selector,
+  message: "No reference to the project's decision documents in user-facing text.",
+}));
+
 export default tseslint.config(
   { ignores: ["dist", "build", "node_modules", "playwright-report", "test-results"] },
   js.configs.recommended,
@@ -40,15 +58,13 @@ export default tseslint.config(
         "error",
         { controlComponents: ["Input", "NativeSelect", "Checkbox"], depth: 3 },
       ],
-      // Colour lives in tokens only (CLAUDE §4, DESIGN §8): an inline colour style is an error.
-      "no-restricted-syntax": [
-        "error",
-        {
-          selector: `JSXAttribute[name.name='style'] Property[key.name=${COLOR_PROPS}]`,
-          message: "No inline colour style: use the token utilities (DESIGN §8).",
-        },
-      ],
+      "no-restricted-syntax": ["error", NO_INLINE_COLOUR, ...NO_DOC_REF],
     },
+  },
+  {
+    // Tests and stories are read by the team: their names may cite the documents.
+    files: ["**/*.test.{ts,tsx}", "**/*.stories.tsx", "**/__fixtures__/**", ".ladle/**", "e2e/**"],
+    rules: { "no-restricted-syntax": ["error", NO_INLINE_COLOUR] },
   },
   {
     files: ["*.config.{js,ts}", "e2e/**/*.ts", "scripts/**/*.{js,mjs}"],

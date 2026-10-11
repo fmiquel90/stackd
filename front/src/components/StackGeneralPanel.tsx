@@ -147,7 +147,7 @@ function StackGeneralForm({ stack }: { stack: Stack }) {
             <TextInput value={form.description} onChange={(e) => set({ description: e.target.value })} />
           </Field>
 
-          <Field label="Labels (matched by variable-set selectors, §3.4)">
+          <Field label="Labels (matched by variable-set selectors)">
             <LabelsEditor value={form.labels} onChange={(labels) => set({ labels })} />
           </Field>
 

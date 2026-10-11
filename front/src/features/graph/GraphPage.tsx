@@ -211,8 +211,7 @@ export function GraphPage() {
       </div>
       <p className="text-[12px] text-muted">
         Edges name the outputs they pass. <span className="text-mocked">◆ mock</span> = the downstream's
-        current run used a mock value; ◇ = a mock is defined but unused. Run groups are not exposed by the API
-        yet (AUDIT A5).
+        current run used a mock value; ◇ = a mock is defined but unused.
       </p>
 
       {data.entries.length === 0 ? (

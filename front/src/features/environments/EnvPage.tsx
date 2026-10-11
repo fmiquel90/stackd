@@ -280,7 +280,7 @@ export function EnvPage() {
       <Dialog open={dialog === "promote"} onOpenChange={(v) => setDialog(v ? "promote" : null)}>
         <DialogContent
           title={`Promote to ${env.name}`}
-          description="Re-deploy the commit currently applied on a sibling environment (SPECS §9.7). The apply is confirmed as usual."
+          description="Re-deploy the commit currently applied on a sibling environment. The apply is confirmed as usual."
         >
           <PromotePanel envId={env.id} siblings={siblings} />
         </DialogContent>
@@ -289,7 +289,7 @@ export function EnvPage() {
         <DialogContent
           wide
           title={`Run a command on ${env.name}`}
-          description="One allowlisted subcommand (SPECS §4.3). Mutating commands need the apply permission."
+          description="One allowlisted subcommand. Mutating commands need the apply permission."
         >
           <CommandPanel envId={env.id} />
         </DialogContent>

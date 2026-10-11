@@ -148,7 +148,7 @@ export function VariableSetsPage() {
       <p className="max-w-[720px] text-[12px] text-muted">
         Shared variables for {current?.name ?? "this space"}. A set reaches an environment through an
         attachment (stack, environment or tier), a label rule, or auto-attach; the environment&apos;s own
-        values still win (SPECS §3.4).
+        values still win.
       </p>
       {error && (
         <Banner tone="failed" role="alert" title="The variable sets could not be loaded.">

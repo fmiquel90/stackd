@@ -302,7 +302,7 @@ function NewEnvironmentDialog({ stackId, base }: { stackId: string; base: string
           <Checkbox
             checked={form.managed_state ?? true}
             onChange={(v) => setForm({ ...form, managed_state: v })}
-            label="managed state — Stackd stores and locks the state (SPECS §11)"
+            label="managed state — Stackd stores and locks the state"
           />
           {create.error && (
             <Banner tone="failed" role="alert" title="The environment was not created">

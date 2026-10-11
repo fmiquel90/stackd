@@ -163,7 +163,7 @@ export function EnvSettings({
           <Checkbox
             checked={!!form.managed_state}
             onChange={(v) => set({ managed_state: v })}
-            label="managed state (Stackd's HTTP backend, SPECS §11)"
+            label="managed state (Stackd's HTTP backend)"
           />
           {!form.managed_state && (
             <>
@@ -189,7 +189,7 @@ export function EnvSettings({
         </fieldset>
 
         <fieldset disabled={disabled}>
-          <Field label="Labels" help="Matched by variable-set selectors (SPECS §3.4).">
+          <Field label="Labels" help="Matched by variable-set selectors.">
             <LabelsEditor value={form.labels} onChange={(labels) => set({ labels })} />
           </Field>
         </fieldset>
