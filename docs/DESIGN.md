@@ -658,7 +658,7 @@ hooks, notifications, secret sources; URL `?tab=`).
 - **Target size**: ≥ 24 × 24 px everywhere (WCAG 2.2 AA), **44 × 44 px** on the on-call mobile path (run page, attention zone, confirm/discard).
   - Below 768 px, form fields and `md` buttons are 44 px tall and fields use 16 px text (below that, iOS zooms into a focused field); checkboxes grow to 20 px.
   - A link standing alone in a table cell or list row uses `.cell-link` (24 px hit area), so adjacent rows never share a target.
-  - Log rows are 18 px with a mouse and 24 px on touch screens. **Known exception**: with a mouse, the line-number and comment targets stay 18 px tall to keep log density; they fail WCAG 2.5.8 there.
+  - Log rows are 24 px tall, so the line-number and comment targets meet 24 px with any pointer (density traded for target size).
   - Nothing is revealed on hover alone for touch: hover-only actions are always visible on coarse pointers.
 - **Tabular figures**: `tabular-nums` on any data aligned in a column.
 - **Async action buttons**: `Confirm`/`Discard`/`Cancel`/`Plan`/`Re-plan` go into a `loading` state (spinner + disabled, label kept) during the call — distinct from the permission-disabled state, which carries its reason.

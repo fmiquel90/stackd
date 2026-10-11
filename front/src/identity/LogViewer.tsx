@@ -376,8 +376,8 @@ function Line({
     <div id={`L-${line.id}`}>
       <div
         className={cn(
-          // Dense 18 px rows for a mouse; 24 px on touch screens so line targets meet WCAG 2.5.8.
-          "group flex items-start font-data text-[12px] leading-[18px] pointer-coarse:leading-6 max-md:leading-6",
+          // 24 px rows: the line-number and comment targets meet WCAG 2.5.8 with any pointer.
+          "group flex items-start font-data text-[12px] leading-6",
           targeted && "bg-raised outline outline-1 -outline-offset-1 outline-ring",
           hit && !targeted && "bg-raised",
           line.isError && "border-l-2 border-st-failed",
