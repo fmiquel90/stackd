@@ -1,0 +1,292 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8" />
+<style>
+  @font-face { font-family: "Plex"; font-weight: 400; src: url("../../../front/node_modules/@fontsource/ibm-plex-sans/files/ibm-plex-sans-latin-400-normal.woff2"); }
+  @font-face { font-family: "Plex"; font-weight: 600; src: url("../../../front/node_modules/@fontsource/ibm-plex-sans/files/ibm-plex-sans-latin-600-normal.woff2"); }
+  @font-face { font-family: "Mono"; font-weight: 400; src: url("../../../front/node_modules/@fontsource/jetbrains-mono/files/jetbrains-mono-latin-400-normal.woff2"); }
+  @font-face { font-family: "Mono"; font-weight: 500; src: url("../../../front/node_modules/@fontsource/jetbrains-mono/files/jetbrains-mono-latin-500-normal.woff2"); }
+  :root {
+    --base: #0c1118; --surface: #141b24; --raised: #1d2733; --border: #2a3542; --control: #6b7a8b;
+    --text: #e8eef4; --muted: #9aa6b2; --brand: #8b6cf0; --focus: #a28bff;
+    --decision: #f0b445; --finished: #4cc35e; --failed: #ff7b72; --running: #6ea8ff; --mock: #f07cc0;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { width: 1920px; height: 1080px; overflow: hidden; background: var(--base); color: var(--text); font-family: "Plex", sans-serif; }
+  #stage { position: absolute; inset: 0; overflow: hidden; }
+  /* Blueprint grid, drifting slowly. */
+  #grid { position: absolute; inset: -80px; background-image:
+      linear-gradient(to right, rgba(154,166,178,0.06) 1px, transparent 1px),
+      linear-gradient(to bottom, rgba(154,166,178,0.06) 1px, transparent 1px);
+    background-size: 48px 48px; }
+  #glow { position: absolute; width: 1400px; height: 1400px; border-radius: 50%;
+    background: radial-gradient(circle, rgba(139,108,240,0.16) 0%, rgba(139,108,240,0) 60%); }
+  .layer { position: absolute; inset: 0; opacity: 0; will-change: transform, opacity; }
+
+  /* Captions */
+  .cap { position: absolute; left: 120px; top: 0; bottom: 0; width: 470px; display: flex; flex-direction: column; justify-content: center; gap: 22px; }
+  .eyebrow { font-family: "Mono"; font-weight: 500; font-size: 17px; letter-spacing: 0.14em; text-transform: uppercase; color: var(--muted); display: flex; align-items: center; gap: 12px; }
+  .eyebrow .num { color: var(--brand); }
+  .title { font-weight: 600; font-size: 58px; line-height: 1.08; letter-spacing: -0.015em; }
+  .title .w { display: inline-block; }
+  .sub { font-size: 22px; line-height: 1.45; color: var(--muted); }
+  .sub b { color: var(--text); font-weight: 600; }
+
+  /* Screen card */
+  .card { position: absolute; left: 650px; top: 165px; width: 1180px; height: 737.5px; border-radius: 16px; overflow: hidden;
+    border: 1px solid var(--border); background: var(--surface);
+    box-shadow: 0 40px 120px rgba(0,0,0,0.55), 0 0 0 1px rgba(255,255,255,0.02); transform-origin: 50% 50%; }
+  .card img { position: absolute; left: 0; top: 0; width: 1440px; height: 900px; transform-origin: 0 0; }
+  .hl { position: absolute; border-radius: 10px; pointer-events: none; transform-origin: 0 0; }
+
+  /* Intro / outro */
+  .center { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 28px; }
+  .brand { display: flex; align-items: center; gap: 26px; }
+  .word { font-weight: 600; font-size: 120px; letter-spacing: -0.02em; }
+  .word .d { color: var(--brand); }
+  .tagline { font-family: "Mono"; font-size: 30px; color: var(--muted); display: flex; gap: 22px; }
+  .tagline span { display: inline-block; }
+  .tagline .amber { color: var(--decision); }
+  .rail { display: flex; gap: 10px; }
+  .rail i { display: block; width: 64px; height: 8px; border-radius: 4px; background: var(--border); }
+  .pill { font-family: "Mono"; font-size: 20px; color: var(--muted); border: 1px solid var(--control); border-radius: 8px; padding: 10px 18px; }
+
+  /* Progress rail (a nod to the PhaseRail) */
+  #progress { position: absolute; left: 120px; right: 90px; bottom: 56px; display: flex; gap: 10px; opacity: 0; }
+  #progress .seg { flex: 1; height: 5px; border-radius: 3px; background: var(--border); overflow: hidden; }
+  #progress .seg > div { height: 100%; width: 0; background: var(--muted); }
+  #progress .seg.active > div { background: var(--brand); }
+</style>
+</head>
+<body>
+<div id="stage">
+  <div id="grid"></div>
+  <div id="glow"></div>
+
+  <!-- 0 · Intro -->
+  <div class="layer" id="intro">
+    <div class="center">
+      <div class="brand">
+        <svg id="mark" width="132" height="132" viewBox="0 0 24 24" fill="none">
+          <path id="m1" d="M12 2.5 21 7l-9 4.5L3 7l9-4.5Z" fill="#8b6cf0" />
+          <path id="m2" d="M3 11l9 4.5L21 11" stroke="#8b6cf0" stroke-width="2" stroke-linejoin="round" opacity="0.7" />
+          <path id="m3" d="M3 15l9 4.5L21 15" stroke="#8b6cf0" stroke-width="2" stroke-linejoin="round" opacity="0.45" />
+        </svg>
+        <div class="word" id="word">Stack<span class="d">D</span></div>
+      </div>
+      <div class="tagline" id="tagline"><span>plan</span><span>→</span><span class="amber">a human confirms</span><span>→</span><span>apply</span></div>
+    </div>
+  </div>
+
+  <!-- Scenes are generated from SCENES below -->
+  <div id="scenes"></div>
+
+  <!-- 7 · Outro -->
+  <div class="layer" id="outro">
+    <div class="center">
+      <div class="brand">
+        <svg width="104" height="104" viewBox="0 0 24 24" fill="none">
+          <path d="M12 2.5 21 7l-9 4.5L3 7l9-4.5Z" fill="#8b6cf0" />
+          <path d="M3 11l9 4.5L21 11" stroke="#8b6cf0" stroke-width="2" stroke-linejoin="round" opacity="0.7" />
+          <path d="M3 15l9 4.5L21 15" stroke="#8b6cf0" stroke-width="2" stroke-linejoin="round" opacity="0.45" />
+        </svg>
+        <div class="word" style="font-size: 96px">Stack<span class="d">D</span></div>
+      </div>
+      <div class="sub" id="outsub" style="font-size: 28px; text-align: center">Self-hosted Terraform &amp; OpenTofu orchestration.</div>
+      <div style="display: flex; gap: 14px" id="pills">
+        <span class="pill">pull-mode workers</span><span class="pill">four-eyes</span><span class="pill">OIDC credentials</span><span class="pill">full audit</span>
+      </div>
+    </div>
+  </div>
+
+  <div id="progress"></div>
+</div>
+
+<script>
+const IMG = "../screens/";
+// Card geometry: the screenshots are 1440×900 CSS px (captured @2x, so zooms stay sharp).
+const CW = 1180, CH = 737.5, BASE = CW / 1440;
+
+const SCENES = [
+  { id: "overview", start: 3.0, end: 7.7, img: "02-overview-needs-you.png", n: "01", eyebrow: "Overview",
+    title: ["Every", "environment,", "one", "glance."],
+    sub: "Decisions that <b>need you</b> come first — amber is reserved for them.",
+    cam: [[0, 720, 450, 1], [0.32, 720, 450, 1], [0.95, 650, 245, 1.75]],
+    hl: { x: 234, y: 160, w: 1180, h: 196, color: "var(--decision)", from: 0.55 } },
+  { id: "plan", start: 7.5, end: 12.2, img: "06-run-plan-review.png", n: "02", eyebrow: "Review",
+    title: ["Read", "the", "plan,", "not", "the", "logs."],
+    sub: "A parsed diff with counts. <b>Destroys are never collapsed.</b>",
+    cam: [[0, 720, 450, 1], [0.28, 720, 450, 1], [0.95, 905, 520, 1.6]],
+    hl: { x: 432, y: 418, w: 984, h: 202, color: "var(--failed)", from: 0.6 } },
+  { id: "confirm", start: 12.0, end: 16.7, img: "09-run-confirm-prod.png", n: "03", eyebrow: "Confirm",
+    title: ["Friction", "that", "follows", "the", "risk."],
+    sub: "Four-eyes on prod: someone else confirms — and <b>types the name</b>.",
+    cam: [[0, 720, 450, 1], [0.28, 720, 450, 1], [0.95, 360, 420, 2.0]],
+    type: { x: 148, y: 487, text: "prod", from: 0.45, to: 0.7 } },
+  { id: "graph", start: 16.5, end: 21.0, img: "12-graph.png", n: "04", eyebrow: "Cascade",
+    title: ["Outputs", "flow", "downstream."],
+    sub: "Dependencies trigger the next plan. A <b>mock</b> stays visibly not real — and blocks apply.",
+    cam: [[0, 820, 470, 1.05], [0.3, 820, 470, 1.05], [0.95, 820, 700, 1.7]],
+    hl: { x: 706, y: 738, w: 236, h: 32, color: "var(--mock)", from: 0.62, dashed: true } },
+  { id: "ops", start: 20.8, end: 24.8, imgs: ["13-queue.png", "14-workers.png"], n: "05", eyebrow: "Operate",
+    title: ["Your", "workers.", "Your", "cloud."],
+    sub: "Pull-mode agents, short-lived <b>OIDC</b> credentials, and a queue that says why a run waits." },
+  { id: "audit", start: 24.6, end: 27.6, img: "15-audit.png", n: "06", eyebrow: "Audit",
+    title: ["Every", "action,", "on", "the", "record."],
+    sub: "Who triggered, who confirmed, what changed — <b>written with the action itself</b>.",
+    cam: [[0, 720, 450, 1], [0.3, 720, 450, 1], [1, 820, 330, 1.35]] },
+];
+const INTRO = [0, 3.2], OUTRO = [27.4, 30];
+
+/* ---------- build DOM ---------- */
+const root = document.getElementById("scenes");
+for (const s of SCENES) {
+  const el = document.createElement("div");
+  el.className = "layer"; el.id = s.id;
+  const words = s.title.map((w) => `<span class="w">${w}</span>`).join(" ");
+  let card = "";
+  if (s.imgs) {
+    card = s.imgs.map((src, i) => `<div class="card" data-i="${i}"><img src="${IMG + src}"></div>`).join("");
+  } else {
+    card = `<div class="card"><img src="${IMG + s.img}">${s.hl ? '<div class="hl"></div>' : ""}${s.type ? '<div class="typed" style="position:absolute;font-family:Mono;color:var(--text)"></div>' : ""}</div>`;
+  }
+  el.innerHTML = `<div class="cap"><div class="eyebrow"><span class="num">${s.n}</span><span>—</span><span>${s.eyebrow}</span></div>
+    <div class="title">${words}</div><div class="sub">${s.sub}</div></div>${card}`;
+  root.appendChild(el);
+}
+const prog = document.getElementById("progress");
+for (const s of SCENES) prog.insertAdjacentHTML("beforeend", '<div class="seg"><div></div></div>');
+
+/* ---------- easing & helpers ---------- */
+const clamp = (v, a = 0, b = 1) => Math.min(b, Math.max(a, v));
+const lerp = (a, b, k) => a + (b - a) * k;
+const easeInOut = (k) => (k < 0.5 ? 4 * k * k * k : 1 - Math.pow(-2 * k + 2, 3) / 2);
+const easeOut = (k) => 1 - Math.pow(1 - k, 4);
+const back = (k) => { const c1 = 1.4, c3 = c1 + 1; return 1 + c3 * Math.pow(k - 1, 3) + c1 * Math.pow(k - 1, 2); };
+const seg = (t, a, b) => clamp((t - a) / (b - a));
+
+function camAt(cam, u) {
+  for (let i = 0; i < cam.length - 1; i++) {
+    const [u0, ...p0] = cam[i], [u1, ...p1] = cam[i + 1];
+    if (u <= u1) { const k = easeInOut(clamp((u - u0) / (u1 - u0))); return p0.map((v, j) => lerp(v, p1[j], k)); }
+  }
+  return cam[cam.length - 1].slice(1);
+}
+function placeImg(img, fx, fy, z) {
+  const s = BASE * z;
+  let tx = CW / 2 - fx * s, ty = CH / 2 - fy * s;
+  tx = clamp(tx, CW - 1440 * s, 0); ty = clamp(ty, CH - 900 * s, 0);
+  img.style.transform = `translate(${tx}px, ${ty}px) scale(${s})`;
+  return { s, tx, ty };
+}
+
+/* ---------- render ---------- */
+function render(t) {
+  // Background drift
+  document.getElementById("grid").style.transform = `translate(${-(t * 6) % 48}px, ${-(t * 3) % 48}px)`;
+  const g = document.getElementById("glow");
+  g.style.left = `${lerp(-200, 900, t / 30)}px`; g.style.top = `${-300 + Math.sin(t / 4) * 120}px`;
+
+  // Intro
+  const intro = document.getElementById("intro");
+  const iIn = 1, iOut = 1 - easeInOut(seg(t, INTRO[1] - 0.5, INTRO[1]));
+  intro.style.opacity = iIn * iOut;
+  intro.style.transform = `scale(${lerp(1, 1.06, seg(t, INTRO[1] - 0.5, INTRO[1]))})`;
+  [["m1", 0.1], ["m2", 0.3], ["m3", 0.5]].forEach(([id, d]) => {
+    const k = back(seg(t, d, d + 0.55));
+    const el = document.getElementById(id);
+    el.style.transform = `translateY(${lerp(-10, 0, k)}px)`; el.style.opacity = seg(t, d, d + 0.3) * (id === "m1" ? 1 : id === "m2" ? 0.7 : 0.45);
+  });
+  const w = document.getElementById("word");
+  w.style.opacity = seg(t, 0.7, 1.2); w.style.transform = `translateX(${lerp(-24, 0, easeOut(seg(t, 0.7, 1.3)))}px)`;
+  [...document.getElementById("tagline").children].forEach((sp, i) => {
+    const a = 1.35 + i * 0.22; sp.style.opacity = seg(t, a, a + 0.3);
+    sp.style.transform = `translateY(${lerp(14, 0, easeOut(seg(t, a, a + 0.45)))}px)`;
+  });
+
+  // Scenes
+  SCENES.forEach((s, i) => {
+    const el = document.getElementById(s.id);
+    const dur = s.end - s.start, u = (t - s.start) / dur;
+    if (t < s.start - 0.01 || t > s.end + 0.01) { el.style.opacity = 0; return; }
+    const fin = easeOut(seg(t, s.start, s.start + 0.6)), fout = 1 - easeInOut(seg(t, s.end - 0.45, s.end));
+    el.style.opacity = Math.min(fin, fout);
+    // caption
+    const cap = el.querySelector(".cap");
+    cap.style.transform = `translateX(${lerp(-40, 0, fin) + lerp(0, -30, 1 - fout)}px)`;
+    el.querySelectorAll(".title .w").forEach((wd, j) => {
+      const a = s.start + 0.2 + j * 0.08; wd.style.opacity = seg(t, a, a + 0.35);
+      wd.style.transform = `translateY(${lerp(26, 0, easeOut(seg(t, a, a + 0.5)))}px)`;
+    });
+    const sub = el.querySelector(".sub"); const sa = s.start + 0.75;
+    sub.style.opacity = seg(t, sa, sa + 0.5); sub.style.transform = `translateY(${lerp(12, 0, easeOut(seg(t, sa, sa + 0.6)))}px)`;
+    el.querySelector(".eyebrow").style.opacity = seg(t, s.start + 0.05, s.start + 0.45);
+
+    if (s.imgs) {
+      // Two screens fanned like a deck, then spread.
+      const k = easeInOut(seg(u, 0.15, 0.75));
+      el.querySelectorAll(".card").forEach((c, j) => {
+        const sign = j === 0 ? -1 : 1;
+        const x = lerp(0, sign * 120, k), y = lerp(sign * 40 + 40, sign * 60, k);
+        const r = lerp(0, sign * 3.2, k), sc = lerp(0.86, 0.8, k);
+        const enter = easeOut(seg(t, s.start + j * 0.18, s.start + 0.8 + j * 0.18));
+        c.style.transform = `translate(${x}px, ${y + lerp(140, 0, enter)}px) rotate(${r}deg) scale(${sc})`;
+        c.style.zIndex = j === 1 ? 2 : 1;
+        placeImg(c.querySelector("img"), 720, 450, 1);
+      });
+      return;
+    }
+    const card = el.querySelector(".card");
+    const enter = easeOut(seg(t, s.start, s.start + 0.9));
+    card.style.transform = `perspective(2200px) translateY(${lerp(120, 0, enter)}px) rotateX(${lerp(14, 0, enter)}deg) rotateY(${lerp(-10, 0, enter)}deg) scale(${lerp(0.94, 1, enter)})`;
+    const [fx, fy, z] = camAt(s.cam, u);
+    const { s: sc, tx, ty } = placeImg(card.querySelector("img"), fx, fy, z);
+    if (s.hl) {
+      const h = card.querySelector(".hl"), k = easeOut(seg(u, s.hl.from, s.hl.from + 0.12));
+      h.style.left = `${tx + s.hl.x * sc}px`; h.style.top = `${ty + s.hl.y * sc}px`;
+      h.style.width = `${s.hl.w * sc}px`; h.style.height = `${s.hl.h * sc}px`;
+      h.style.border = `${3}px ${s.hl.dashed ? "dashed" : "solid"} ${s.hl.color}`;
+      h.style.boxShadow = `0 0 0 ${lerp(30, 0, k)}px rgba(0,0,0,0), 0 0 40px ${s.hl.color === "var(--decision)" ? "rgba(240,180,69,0.35)" : s.hl.color === "var(--mock)" ? "rgba(240,124,192,0.35)" : "rgba(255,123,114,0.3)"}`;
+      h.style.opacity = k; h.style.transform = `scale(${lerp(1.04, 1, k)})`;
+    }
+    if (s.type) {
+      // Re-type the confirmation name live, with a caret.
+      const tp = card.querySelector(".typed"), k = seg(u, s.type.from, s.type.to);
+      const n = Math.round(k * s.type.text.length);
+      const caret = Math.floor(t * 2.2) % 2 === 0 ? "▏" : " ";
+      tp.textContent = s.type.text.slice(0, n) + caret;
+      tp.style.left = `${tx + s.type.x * sc}px`; tp.style.top = `${ty + (s.type.y - 9) * sc}px`;
+      tp.style.fontSize = `${13 * sc}px`; tp.style.lineHeight = `${18 * sc}px`;
+      tp.style.background = "var(--base)"; tp.style.padding = `0 ${4 * sc}px`;
+      tp.style.minWidth = `${420 * sc}px`;
+      tp.style.opacity = u > s.type.from - 0.02 ? 1 : 0;
+    }
+  });
+
+  // Progress rail
+  const p = document.getElementById("progress");
+  p.style.opacity = Math.min(seg(t, 3.0, 3.6), 1 - seg(t, 27.2, 27.6));
+  [...p.children].forEach((sg, i) => {
+    const s = SCENES[i]; const k = seg(t, s.start, s.end);
+    sg.firstChild.style.width = `${k * 100}%`;
+    sg.classList.toggle("active", t >= s.start && t < s.end);
+  });
+
+  // Outro
+  const out = document.getElementById("outro");
+  const oin = easeOut(seg(t, OUTRO[0], OUTRO[0] + 0.7));
+  out.style.opacity = oin * (1 - seg(t, 29.6, 30));
+  out.style.transform = `scale(${lerp(0.96, 1, oin)})`;
+  document.getElementById("outsub").style.opacity = seg(t, OUTRO[0] + 0.4, OUTRO[0] + 0.9);
+  [...document.getElementById("pills").children].forEach((pl, i) => {
+    const a = OUTRO[0] + 0.8 + i * 0.15; pl.style.opacity = seg(t, a, a + 0.3);
+    pl.style.transform = `translateY(${lerp(12, 0, easeOut(seg(t, a, a + 0.4)))}px)`;
+  });
+}
+window.render = render;
+window.ready = Promise.all([document.fonts.ready, ...[...document.images].map((i) => i.decode().catch(() => {}))]);
+render(0);
+</script>
+</body>
+</html>

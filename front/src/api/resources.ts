@@ -121,15 +121,13 @@ export const stacks = {
   create: (body: NewStack) => api<Stack>("/stacks", { body }),
   update: (id: string, body: StackPatch) => api<Stack>(`/stacks/${id}`, { method: "PATCH", body }),
   remove: (id: string) => api<void>(`/stacks/${id}`, { method: "DELETE" }),
-  checkRepo: (id: string) =>
-    api<CheckRepoResult>(`/stacks/${id}/check-repo`, { method: "POST" }),
+  checkRepo: (id: string) => api<CheckRepoResult>(`/stacks/${id}/check-repo`, { method: "POST" }),
   environments: (id: string) => api<Environment[]>(`/stacks/${id}/environments`),
   createEnvironment: (id: string, body: NewEnvironment) =>
     api<Environment>(`/stacks/${id}/environments`, { body }),
   // Stack-level variables (environment_id NULL — common to every env of the stack).
   variables: (id: string) => api<Variable[]>(`/stacks/${id}/variables`),
-  addVariable: (id: string, body: NewVariable) =>
-    api<Variable>(`/stacks/${id}/variables`, { body }),
+  addVariable: (id: string, body: NewVariable) => api<Variable>(`/stacks/${id}/variables`, { body }),
   updateVariable: (id: string, varId: string, body: VariablePatch) =>
     api<Variable>(`/stacks/${id}/variables/${varId}`, { method: "PATCH", body }),
   removeVariable: (id: string, varId: string) =>
@@ -155,14 +153,12 @@ export interface EnvironmentPatch {
 
 export const environments = {
   get: (id: string) => api<Environment>(`/environments/${id}`),
-  resolvedVariables: (id: string) =>
-    api<ResolvedVariable[]>(`/environments/${id}/resolved-variables`),
+  resolvedVariables: (id: string) => api<ResolvedVariable[]>(`/environments/${id}/resolved-variables`),
   update: (id: string, body: EnvironmentPatch) =>
     api<Environment>(`/environments/${id}`, { method: "PATCH", body }),
   remove: (id: string) => api<void>(`/environments/${id}`, { method: "DELETE" }),
   // Force-refresh the tracked branch HEAD from the remote (returns the updated environment).
-  refreshHead: (id: string) =>
-    api<Environment>(`/environments/${id}/refresh-head`, { method: "POST" }),
+  refreshHead: (id: string) => api<Environment>(`/environments/${id}/refresh-head`, { method: "POST" }),
   outputs: (id: string) => api<EnvOutput[]>(`/environments/${id}/outputs`),
   // Introspect the repo and create the required root-module inputs as env vars with placeholders.
   discoverInputs: (id: string) =>
@@ -172,8 +168,7 @@ export const environments = {
     ),
   // Environment-level variables (override the stack-level value of the same name, SPECS §3.4).
   variables: (id: string) => api<Variable[]>(`/environments/${id}/variables`),
-  addVariable: (id: string, body: NewVariable) =>
-    api<Variable>(`/environments/${id}/variables`, { body }),
+  addVariable: (id: string, body: NewVariable) => api<Variable>(`/environments/${id}/variables`, { body }),
   updateVariable: (id: string, varId: string, body: VariablePatch) =>
     api<Variable>(`/environments/${id}/variables/${varId}`, { method: "PATCH", body }),
   removeVariable: (id: string, varId: string) =>
@@ -210,7 +205,7 @@ export interface Attachment {
 
 export const variableSets = {
   list: () => api<VariableSet[]>("/variable-sets"),
-  create: (body: { name: string; description?: string; auto_attach?: boolean }) =>
+  create: (body: { name: string; description?: string; auto_attach?: boolean; space_id?: string }) =>
     api<VariableSet>("/variable-sets", { body }),
   update: (
     id: string,
@@ -244,23 +239,24 @@ export interface NewComment {
 
 export const comments = {
   list: (runId: string) => api<RunComment[]>(`/runs/${runId}/comments`),
-  create: (runId: string, body: NewComment) =>
-    api<RunComment>(`/runs/${runId}/comments`, { body }),
+  create: (runId: string, body: NewComment) => api<RunComment>(`/runs/${runId}/comments`, { body }),
   update: (runId: string, cid: string, body: { body?: string; resolved?: boolean }) =>
     api<RunComment>(`/runs/${runId}/comments/${cid}`, { method: "PATCH", body }),
-  remove: (runId: string, cid: string) =>
-    api<void>(`/runs/${runId}/comments/${cid}`, { method: "DELETE" }),
+  remove: (runId: string, cid: string) => api<void>(`/runs/${runId}/comments/${cid}`, { method: "DELETE" }),
 };
 
 export const runs = {
   list: (envId: string) => api<Run[]>(`/environments/${envId}/runs`),
   get: (id: string) => api<Run>(`/runs/${id}`),
-  trigger: (envId: string, type: "tracked" | "destroy" = "tracked") =>
-    api<Run>(`/environments/${envId}/runs`, { body: { type } }),
+  trigger: (envId: string, type: "tracked" | "destroy" = "tracked", withDownstream = false) =>
+    api<Run>(`/environments/${envId}/runs`, { body: { type, with_downstream: withDownstream } }),
   confirm: (id: string) => api<Run>(`/runs/${id}/confirm`, { method: "POST" }),
   discard: (id: string) => api<Run>(`/runs/${id}/discard`, { method: "POST" }),
   cancel: (id: string) => api<Run>(`/runs/${id}/cancel`, { method: "POST" }),
   logs: (id: string) => api<LogChunk[]>(`/runs/${id}/logs`),
+  /** Chunks of one phase after a seq — the incremental fetch a WS log signal triggers (SPECS §5.3). */
+  logsAfter: (id: string, phase: string, afterSeq: number) =>
+    api<LogChunk[]>(`/runs/${id}/logs?phase=${encodeURIComponent(phase)}&after_seq=${afterSeq}`),
   command: (envId: string, command: string, args: string[]) =>
     api<Run>(`/environments/${envId}/commands`, { body: { command, args } }),
   promote: (targetEnvId: string, fromEnvId: string) =>
@@ -326,12 +322,7 @@ export const workers = {
 };
 
 export type HookStage =
-  | "before_init"
-  | "after_init"
-  | "before_plan"
-  | "after_plan"
-  | "before_apply"
-  | "after_apply";
+  "before_init" | "after_init" | "before_plan" | "after_plan" | "before_apply" | "after_apply";
 
 export interface Hook {
   id: string;
@@ -386,12 +377,15 @@ export interface NotificationCreate {
 
 // Reuses HookScope ("stacks" | "environments") — notifications attach exactly like platform hooks.
 export const notificationsApi = {
-  list: (scope: HookScope, id: string) =>
-    api<NotificationTarget[]>(`/${scope}/${id}/notifications`),
+  list: (scope: HookScope, id: string) => api<NotificationTarget[]>(`/${scope}/${id}/notifications`),
   create: (scope: HookScope, id: string, body: NotificationCreate) =>
     api<NotificationTarget>(`/${scope}/${id}/notifications`, { body }),
-  update: (scope: HookScope, id: string, targetId: string, body: Partial<NotificationCreate> & { enabled?: boolean }) =>
-    api<NotificationTarget>(`/${scope}/${id}/notifications/${targetId}`, { method: "PATCH", body }),
+  update: (
+    scope: HookScope,
+    id: string,
+    targetId: string,
+    body: Partial<NotificationCreate> & { enabled?: boolean },
+  ) => api<NotificationTarget>(`/${scope}/${id}/notifications/${targetId}`, { method: "PATCH", body }),
   remove: (scope: HookScope, id: string, targetId: string) =>
     api<void>(`/${scope}/${id}/notifications/${targetId}`, { method: "DELETE" }),
   test: (scope: HookScope, id: string, targetId: string) =>
@@ -451,8 +445,7 @@ export interface StateVersion {
 
 export const stateApi = {
   versions: (envId: string) => api<StateVersion[]>(`/environments/${envId}/state/versions`),
-  forceUnlock: (envId: string) =>
-    api<void>(`/environments/${envId}/state/lock`, { method: "DELETE" }),
+  forceUnlock: (envId: string) => api<void>(`/environments/${envId}/state/lock`, { method: "DELETE" }),
 };
 
 export interface CloudIntegration {
@@ -466,12 +459,9 @@ export interface CloudIntegration {
 
 export const cloudApi = {
   get: (envId: string) => api<CloudIntegration>(`/environments/${envId}/cloud-integration`),
-  put: (
-    envId: string,
-    body: { plan_role_arn: string; apply_role_arn: string; region?: string | null },
-  ) => api<CloudIntegration>(`/environments/${envId}/cloud-integration`, { method: "PUT", body }),
-  remove: (envId: string) =>
-    api<void>(`/environments/${envId}/cloud-integration`, { method: "DELETE" }),
+  put: (envId: string, body: { plan_role_arn: string; apply_role_arn: string; region?: string | null }) =>
+    api<CloudIntegration>(`/environments/${envId}/cloud-integration`, { method: "PUT", body }),
+  remove: (envId: string) => api<void>(`/environments/${envId}/cloud-integration`, { method: "DELETE" }),
   test: (envId: string) =>
     api<{ assumed_role: string }>(`/environments/${envId}/cloud-integration/test`, { method: "POST" }),
 };

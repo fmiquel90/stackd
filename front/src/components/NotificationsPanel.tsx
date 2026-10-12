@@ -7,13 +7,23 @@ import {
   type NotificationKind,
   type NotificationState,
 } from "@/api/resources";
-import { Badge, Button, Card, Checkbox, DeleteButton, Field, ItemTile, Select, TextInput } from "@/components/ui";
+import {
+  Badge,
+  Button,
+  Card,
+  Checkbox,
+  DeleteButton,
+  Field,
+  ItemTile,
+  Select,
+  TextInput,
+} from "@/components/ui";
 
 const STATES: NotificationState[] = ["unconfirmed", "finished", "failed"];
 
 // Each fire-on state pairs a token color with its label (color is never the only signal).
 const STATE_COLOR: Record<NotificationState, string> = {
-  unconfirmed: "var(--color-state-unconfirmed)",
+  unconfirmed: "var(--color-state-decision)",
   finished: "var(--color-state-finished)",
   failed: "var(--color-state-failed)",
 };
@@ -55,15 +65,13 @@ export function NotificationsPanel({ scope, id }: { scope: HookScope; id: string
   const flipState = (s: NotificationState) =>
     setForm((f) => ({
       ...f,
-      on_states: f.on_states.includes(s)
-        ? f.on_states.filter((x) => x !== s)
-        : [...f.on_states, s],
+      on_states: f.on_states.includes(s) ? f.on_states.filter((x) => x !== s) : [...f.on_states, s],
     }));
 
   return (
     <Card>
       <div className="mb-1 text-[13px] font-medium">Notifications</div>
-      <div className="mb-2 text-[12px]" style={{ color: "var(--color-text-secondary)" }}>
+      <div className="mb-2 text-[12px] text-muted">
         Outbound webhooks fired on run events — close the approval loop without watching the UI.
       </div>
       <div className="flex flex-col gap-2">
@@ -71,73 +79,40 @@ export function NotificationsPanel({ scope, id }: { scope: HookScope; id: string
           <ItemTile key={t.id} dimmed={!t.enabled}>
             <div className="flex items-start justify-between gap-3">
               <div className="flex min-w-0 flex-wrap items-center gap-2">
-                <span
-                  aria-hidden
-                  style={{
-                    width: 8,
-                    height: 8,
-                    borderRadius: 4,
-                    backgroundColor: t.enabled
-                      ? "var(--color-state-finished)"
-                      : "var(--color-state-queued)",
-                  }}
-                />
+                <span aria-hidden className="font-data text-[12px] text-muted">
+                  {t.enabled ? "●" : "○"}
+                </span>
                 <span className="font-data text-[13px] font-medium">{t.name}</span>
                 <Badge icon={t.kind === "slack" ? MessageSquare : Webhook}>{t.kind}</Badge>
-                <span className="font-data text-[11px]" style={{ color: "var(--color-text-secondary)" }}>
-                  {t.enabled ? "enabled" : "disabled"}
-                </span>
+                <span className="font-data text-[11px] text-muted">{t.enabled ? "enabled" : "disabled"}</span>
               </div>
               <div className="flex shrink-0 items-center gap-2">
-                {tested[t.id] === "ok" && (
-                  <span className="text-[12px]" style={{ color: "var(--color-state-finished)" }}>sent ✓</span>
-                )}
-                {tested[t.id] === "fail" && (
-                  <span className="text-[12px]" style={{ color: "var(--color-state-failed)" }}>failed</span>
-                )}
-                <button
-                  type="button"
-                  className="ui-btn rounded-base px-2 py-1 text-[12px]"
-                  onClick={() => sendTest.mutate(t.id)}
-                  disabled={sendTest.isPending}
-                  style={{ border: "1px solid var(--color-border)", color: "var(--color-accent)" }}
-                >
-                  Test
-                </button>
-                <button
-                  type="button"
-                  className="ui-btn rounded-base px-2 py-1 text-[12px]"
-                  onClick={() => toggle.mutate({ id: t.id, enabled: t.enabled })}
-                  style={{ border: "1px solid var(--color-border)", color: "var(--color-text-secondary)" }}
-                >
+                {tested[t.id] === "ok" && <span className="text-[12px] text-st-finished">sent ✓</span>}
+                {tested[t.id] === "fail" && <span className="text-[12px] text-st-failed">failed</span>}
+                <Button onClick={() => sendTest.mutate(t.id)} disabled={sendTest.isPending}>
+                  Send a test
+                </Button>
+                <Button onClick={() => toggle.mutate({ id: t.id, enabled: t.enabled })}>
                   {t.enabled ? "Disable" : "Enable"}
-                </button>
+                </Button>
                 <DeleteButton label="Delete notification target" onClick={() => remove.mutate(t.id)} />
               </div>
             </div>
             <div className="mt-2 flex flex-wrap items-center gap-2">
-              <span className="font-data text-[11px]" style={{ color: "var(--color-text-secondary)" }}>
-                fires on
-              </span>
+              <span className="font-data text-[11px] text-muted">fires on</span>
               {t.on_states.map((s) => (
                 <Badge key={s} color={STATE_COLOR[s]}>
                   {s}
                 </Badge>
               ))}
             </div>
-            <div
-              className="font-data mt-1 truncate text-[11px]"
-              style={{ color: "var(--color-text-secondary)" }}
-              title={t.url}
-            >
+            <div className="font-data mt-1 truncate text-[11px] text-muted" title={t.url}>
               {t.url}
             </div>
           </ItemTile>
         ))}
         {data && data.length === 0 && (
-          <span className="font-data text-[12px]" style={{ color: "var(--color-text-secondary)" }}>
-            No notification targets.
-          </span>
+          <span className="font-data text-[12px] text-muted">No notification targets.</span>
         )}
       </div>
       <form
@@ -148,7 +123,11 @@ export function NotificationsPanel({ scope, id }: { scope: HookScope; id: string
         }}
       >
         <Field label="Name">
-          <TextInput value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} required />
+          <TextInput
+            value={form.name}
+            onChange={(e) => setForm({ ...form, name: e.target.value })}
+            required
+          />
         </Field>
         <Field label="Kind">
           <Select
@@ -165,7 +144,12 @@ export function NotificationsPanel({ scope, id }: { scope: HookScope; id: string
         <Field label="On states">
           <div className="flex items-center gap-3 pb-1">
             {STATES.map((s) => (
-              <Checkbox key={s} checked={form.on_states.includes(s)} onChange={() => flipState(s)} label={s} />
+              <Checkbox
+                key={s}
+                checked={form.on_states.includes(s)}
+                onChange={() => flipState(s)}
+                label={s}
+              />
             ))}
           </div>
         </Field>

@@ -145,6 +145,7 @@ export type RunState =
   | "unconfirmed"
   | "confirmed"
   | "applying"
+  | "running"
   | "finished"
   | "failed"
   | "discarded"
@@ -158,16 +159,24 @@ export type CheckResult = {
   stage?: string;
 };
 
+export type RunType = "tracked" | "proposed" | "destroy" | "command";
+export type TriggeredBy = "manual" | "webhook" | "dependency" | "api" | "schedule";
+
+/** Mirrors the API's `RunOut` (api/app/runs/schemas.py). */
 export interface Run {
   id: string;
   environment_id: string;
-  type: "tracked" | "proposed" | "destroy";
+  type: RunType;
   state: RunState;
+  /** Command runs only: the allowlisted subcommand and its args (SPECS §4.3). */
+  command: { name: string; args: string[] } | null;
   commit_sha: string | null;
   commit_message: string | null;
-  triggered_by: "manual" | "webhook" | "dependency" | "api";
+  commit_author: string | null;
+  triggered_by: TriggeredBy;
   trigger_user_id: string | null;
   confirmed_by_user_id: string | null;
+  worker_id: string | null;
   plan_summary: { add?: number; change?: number; destroy?: number } | null;
   // `results`: every hook check result (ok/warn/fail) with its stage; `checks`: the warn/fail ones.
   check_results: { checks?: CheckResult[]; results?: CheckResult[] } | null;
@@ -175,8 +184,11 @@ export interface Run {
   used_secret_fallback: boolean;
   variable_provenance: Record<string, string> | null;
   error: string | null;
-  created_at: string;
+  claimed_at: string | null;
+  /** Set by a human confirm and by the system auto-confirm alike: "an apply was decided". */
+  confirmed_at: string | null;
   finished_at: string | null;
+  created_at: string;
 }
 
 export interface LogChunk {
@@ -187,11 +199,7 @@ export interface LogChunk {
 }
 
 export type NotificationKindInbox =
-  | "approval_request"
-  | "run_finished"
-  | "run_failed"
-  | "comment_reply"
-  | "mention";
+  "approval_request" | "run_finished" | "run_failed" | "comment_reply" | "mention";
 
 export interface UserNotification {
   id: string;

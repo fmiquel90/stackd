@@ -7,7 +7,7 @@ function Demo() {
   const [a, setA] = useState(true);
   const [b, setB] = useState(false);
   return (
-    <div className="flex flex-col gap-3 p-4" style={{ backgroundColor: "var(--color-bg-surface)", width: 280 }}>
+    <div className="flex w-[280px] flex-col gap-3 bg-surface p-4">
       <Checkbox checked={a} onChange={setA} label="sensitive" />
       <Checkbox checked={b} onChange={setB} label="managed state" />
       <Checkbox checked onChange={() => {}} label="checked + disabled" disabled />

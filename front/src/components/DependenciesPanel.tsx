@@ -1,8 +1,7 @@
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { X } from "lucide-react";
 import { dependenciesApi, graphApi, stacks } from "@/api/resources";
-import { Button, Card, Field, Select, TextInput } from "@/components/ui";
+import { Button, Card, DeleteButton, Field, Select, TextInput } from "@/components/ui";
 
 export function DependenciesPanel({ envId }: { envId: string }) {
   const qc = useQueryClient();
@@ -57,20 +56,18 @@ export function DependenciesPanel({ envId }: { envId: string }) {
       <div className="flex flex-col gap-1">
         {(deps ?? []).map((d) => (
           <div key={d.id} className="font-data flex items-center gap-2 text-[12px]">
-            <span style={{ color: "var(--color-accent)" }}>{labelFor(d.upstream_env_id)}</span>
-            <span style={{ color: "var(--color-text-secondary)" }}>{d.trigger_policy}</span>
-            <span style={{ color: "var(--color-text-secondary)" }}>
-              {d.references.map((r) => `${r.output_name}→${r.input_name}${r.has_mock ? " (mock)" : ""}`).join(", ")}
+            <span className="text-primary underline underline-offset-2">{labelFor(d.upstream_env_id)}</span>
+            <span className="text-muted">{d.trigger_policy}</span>
+            <span className="text-muted">
+              {d.references
+                .map((r) => `${r.output_name}→${r.input_name}${r.has_mock ? " (mock)" : ""}`)
+                .join(", ")}
             </span>
-            <button type="button" aria-label="Delete dependency" onClick={() => remove.mutate(d.id)} style={{ color: "var(--color-text-secondary)" }}>
-              <X size={13} strokeWidth={1.75} aria-hidden />
-            </button>
+            <DeleteButton label="Delete this dependency" onClick={() => remove.mutate(d.id)} />
           </div>
         ))}
         {deps && deps.length === 0 && (
-          <span className="font-data text-[12px]" style={{ color: "var(--color-text-secondary)" }}>
-            No dependencies.
-          </span>
+          <span className="font-data text-[12px] text-muted">No dependencies.</span>
         )}
       </div>
       <form
@@ -95,16 +92,30 @@ export function DependenciesPanel({ envId }: { envId: string }) {
           </Select>
         </Field>
         <Field label="Output">
-          <TextInput value={form.output_name} onChange={(e) => setForm({ ...form, output_name: e.target.value })} required />
+          <TextInput
+            value={form.output_name}
+            onChange={(e) => setForm({ ...form, output_name: e.target.value })}
+            required
+          />
         </Field>
         <Field label="→ Input (TF_VAR)">
-          <TextInput value={form.input_name} onChange={(e) => setForm({ ...form, input_name: e.target.value })} required />
+          <TextInput
+            value={form.input_name}
+            onChange={(e) => setForm({ ...form, input_name: e.target.value })}
+            required
+          />
         </Field>
         <Field label="Mock (optional)">
-          <TextInput value={form.mock_value} onChange={(e) => setForm({ ...form, mock_value: e.target.value })} />
+          <TextInput
+            value={form.mock_value}
+            onChange={(e) => setForm({ ...form, mock_value: e.target.value })}
+          />
         </Field>
         <Field label="Trigger">
-          <Select value={form.trigger_policy} onChange={(e) => setForm({ ...form, trigger_policy: e.target.value })}>
+          <Select
+            value={form.trigger_policy}
+            onChange={(e) => setForm({ ...form, trigger_policy: e.target.value })}
+          >
             <option value="on_output_change">on_output_change</option>
             <option value="always">always</option>
             <option value="never">never</option>

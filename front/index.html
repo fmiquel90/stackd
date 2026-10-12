@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="en" data-theme="dark">
+<html lang="en">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
@@ -7,7 +7,14 @@
     <link rel="icon" href="/favicon.ico" sizes="32x32" />
     <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
     <link rel="manifest" href="/site.webmanifest" />
-    <meta name="theme-color" content="#0c1118" />
+    <meta name="theme-color" content="#0c1118" media="(prefers-color-scheme: dark)" />
+    <meta name="theme-color" content="#f6f8fa" media="(prefers-color-scheme: light)" />
+    <!-- Theme before first paint: follow the OS only (no browser storage, DESIGN §8). -->
+    <script>
+      document.documentElement.dataset.theme = matchMedia("(prefers-color-scheme: light)").matches
+        ? "light"
+        : "dark";
+    </script>
     <title>StackD</title>
   </head>
   <body>
