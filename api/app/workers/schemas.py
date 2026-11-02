@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import uuid
 from datetime import datetime
+from typing import Literal
 
 from pydantic import BaseModel, ConfigDict
 
@@ -12,6 +13,9 @@ class RegisterIn(BaseModel):
     name: str
     labels: dict | None = None
     version: str | None = None
+    # The execution runner (§7.4). Absent from an agent that predates it: a production API treats
+    # that as "not docker" and refuses the worker (fail closed).
+    runner: Literal["local", "docker"] | None = None
 
 
 class RegisterOut(BaseModel):
@@ -77,6 +81,7 @@ class WorkerOut(BaseModel):
     status: WorkerStatus
     labels: dict | None
     version: str | None
+    runner: str | None
     last_heartbeat_at: datetime | None
 
 

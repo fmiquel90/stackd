@@ -821,7 +821,7 @@ def run() -> None:
     # the first 5xx and never comes back without a restart.
     while True:
         try:
-            client.register(settings.pool_token, settings.worker_name)
+            client.register(settings.pool_token, settings.worker_name, runner=settings.runner)
             break
         except Exception as exc:  # noqa: BLE001
             log.warning(

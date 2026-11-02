@@ -3,7 +3,7 @@ from __future__ import annotations
 import base64
 from functools import lru_cache
 
-from pydantic import field_validator
+from pydantic import field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -80,6 +80,26 @@ class Settings(BaseSettings):
         if v and info.data.get("stackd_env") == "production":
             raise ValueError("STACKD_DEV_AUTH cannot be enabled when STACKD_ENV=production")
         return v
+
+    @model_validator(mode="after")
+    def _production_ready(self) -> Settings:
+        """Refuse to start a production API on dev-grade settings (§13): a master key that does not
+        decode to 32 bytes, a short session-signing secret, or a public URL that is not https (the
+        OIDC issuer AWS fetches, the session cookies)."""
+        if not self.is_production:
+            return self
+        problems: list[str] = []
+        try:
+            self.encryption_key_bytes  # noqa: B018 — validates the decoded length
+        except ValueError:
+            problems.append("STACKD_ENCRYPTION_KEY must be a base64-encoded 32-byte key")
+        if len(self.stackd_jwt_secret) < 32:
+            problems.append("STACKD_JWT_SECRET must be at least 32 characters")
+        if not self.stackd_public_url.startswith("https://"):
+            problems.append("STACKD_PUBLIC_URL must be an https:// URL")
+        if problems:
+            raise ValueError("STACKD_ENV=production: " + "; ".join(problems))
+        return self
 
     @property
     def apply_reclaim_window_seconds(self) -> int:

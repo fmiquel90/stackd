@@ -14,13 +14,20 @@ class ApiClient:
         self._pool_token: str | None = None
         self._name: str | None = None
         self._labels: dict | None = None
+        self._runner: str | None = None
 
-    def register(self, pool_token: str, name: str, labels: dict | None = None) -> str:
+    def register(
+        self, pool_token: str, name: str, labels: dict | None = None, runner: str | None = None
+    ) -> str:
         self._pool_token, self._name, self._labels = pool_token, name, labels
+        if runner is not None:
+            self._runner = runner
         resp = self._http.post(
             "/worker/v1/register",
             headers={"Authorization": f"Bearer {pool_token}"},
-            json={"name": name, "labels": labels},
+            # The runner is declared on every (re-)registration: a production API refuses any
+            # worker that is not on the `docker` runner (SPECS §7.4).
+            json={"name": name, "labels": labels, "runner": self._runner},
         )
         resp.raise_for_status()
         self._worker_token = resp.json()["worker_token"]

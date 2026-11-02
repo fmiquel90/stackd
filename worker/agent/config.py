@@ -4,6 +4,9 @@ import os
 from dataclasses import dataclass
 
 
+RUNNERS = frozenset({"local", "docker"})
+
+
 @dataclass(frozen=True)
 class Settings:
     api_url: str
@@ -15,6 +18,11 @@ class Settings:
     workspace_root: str
     leak_action: str  # "warn" (default) | "fail" — cleartext-tripwire policy (§5.1, Phase C)
     max_concurrent_jobs: int  # in-flight jobs across environments (§7, Phase E; default 1)
+
+    def __post_init__(self) -> None:
+        # A typo must not fall back to `local` silently: that runner has no isolation (§7.4).
+        if self.runner not in RUNNERS:
+            raise ValueError(f"STACKD_RUNNER must be one of {sorted(RUNNERS)}, got {self.runner!r}")
 
     @classmethod
     def from_env(cls) -> "Settings":

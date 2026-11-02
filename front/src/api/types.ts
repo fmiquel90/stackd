@@ -286,6 +286,8 @@ export interface HealthWorker {
   last_heartbeat_at: string | null;
   seconds_since_heartbeat: number | null;
   version: string | null;
+  /** Execution runner the agent declared (SPECS §7.4): `docker` (prod) or `local` (trusted dev). */
+  runner: string | null;
 }
 
 export interface Health {
