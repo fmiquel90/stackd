@@ -218,6 +218,7 @@ def _job(phase: str, url: str, sha: str | None, tofu: Path, **extra: Any) -> dic
     return {
         "job_id": "run-1",
         "phase": phase,
+        "repo_hooks_at_apply": True,  # a tier allowing repo hooks at the apply stages (§8.3)
         "environment": {
             "tool": "opentofu",
             "repo_url": url,

@@ -156,6 +156,7 @@ def _job(phase: str) -> dict:
     return {
         "job_id": "run-1",
         "phase": phase,
+        "repo_hooks_at_apply": True,  # a tier allowing repo hooks at the apply stages (§8.3)
         "cred_phase": "plan",
         "command": {"name": "state list", "args": []},
         "environment": {

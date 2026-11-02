@@ -156,6 +156,39 @@ def _merge_hooks(platform: dict, repo: dict) -> dict[str, list[dict]]:
     return merged
 
 
+_APPLY_STAGES = ("before_apply", "after_apply")
+
+
+def _apply_repo_hook_policy(
+    hooks: dict[str, list[dict]],
+    job: dict[str, Any],
+    checks: list[dict[str, Any]],
+    streamer: LogStreamer,
+) -> dict[str, list[dict]]:
+    """Repo hooks at the apply stages run only on a tier that allows them (`repo_hooks_at_apply`,
+    §8.3): they would run next to the apply role's credentials. Otherwise each is skipped with a
+    visible warning — a `warn` check result and a log line — and the platform hooks still run.
+    An absent flag (an older API) counts as not allowed: fail closed."""
+    if job.get("repo_hooks_at_apply") is True:
+        return hooks
+    out = dict(hooks)
+    for stage in _APPLY_STAGES:
+        kept = [h for h in hooks.get(stage, []) if h.get("source") != "repo"]
+        for h in hooks.get(stage, []):
+            if h.get("source") == "repo":
+                detail = "skipped: this tier does not allow repo hooks at the apply stages"
+                checks.append(
+                    {"name": h["name"], "status": "warn", "detail": detail, "stage": stage}
+                )
+                streamer.emit(
+                    "applying",
+                    [f"[stackd] repo hook {h['name']} {detail}"],
+                    section=f"hook:{h['name']}",
+                )
+        out[stage] = kept
+    return out
+
+
 def _summary_from_events(events: list[dict]) -> dict:
     """Plan/apply counts straight from tofu's authoritative `change_summary` event (last wins)."""
     for evt in reversed(events):
@@ -592,6 +625,7 @@ def handle_apply(
         if backend:
             ws.write_backend_override(cwd)
         hooks = _merge_hooks(job.get("hooks", {}), ws.load_stackd_yml(cwd))
+        hooks = _apply_repo_hook_policy(hooks, job, checks, streamer)
         platform_env = _run_env(ws, job, runner.name)
         repo_env = {**_repo_environ(runner.name), **job.get("env", {})}
         tf_env = _tofu_env(platform_env, backend)  # + state-backend creds, for tofu only

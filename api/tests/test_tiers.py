@@ -64,3 +64,41 @@ async def test_delete_tier_in_use_blocked(client: httpx.AsyncClient) -> None:
     qa = next(t for t in tiers if t["name"] == "qa-used")
     blocked = await client.delete(f"/api/v1/tiers/{qa['id']}", headers=admin)
     assert blocked.status_code == 409
+
+
+async def test_repo_hooks_at_apply_is_off_unless_the_tier_allows_it(
+    client: httpx.AsyncClient,
+) -> None:
+    """§8.3: the claim tells the worker whether the repo's hooks may run at the apply stages —
+    a tier's flag, off by default, settable (and audited) by an admin."""
+    from tests.conftest_phase2 import make_env, make_stack, register_worker
+
+    admin = await login(client, "admin")
+    tier = await client.post("/api/v1/tiers", headers=admin, json={"name": "qa-hooks"})
+    assert tier.status_code == 201 and tier.json()["repo_hooks_at_apply"] is False
+    wh = await register_worker(client, admin, "pool-repo-hooks")
+    env_id = await make_env(
+        client, admin, await make_stack(client, admin, "hooks-st"), "e", "qa-hooks"
+    )
+
+    await client.post(f"/api/v1/environments/{env_id}/runs", headers=admin, json={})
+    payload = (await client.post("/worker/v1/jobs/claim", headers=wh)).json()
+    assert payload["repo_hooks_at_apply"] is False
+
+    alice = await login(client, "alice")
+    url = f"/api/v1/tiers/{tier.json()['id']}"
+    assert (
+        await client.patch(url, headers=alice, json={"repo_hooks_at_apply": True})
+    ).status_code == 403
+    updated = await client.patch(url, headers=admin, json={"repo_hooks_at_apply": True})
+    assert updated.status_code == 200 and updated.json()["repo_hooks_at_apply"] is True
+    audit = (await client.get("/api/v1/audit?action=tier.updated", headers=admin)).json()
+    items = audit["items"] if isinstance(audit, dict) else audit
+    assert any((e.get("context") or {}).get("values", {}).get("repo_hooks_at_apply") for e in items)
+
+
+async def test_default_tiers_disallow_repo_apply_hooks(client: httpx.AsyncClient) -> None:
+    """Fail closed: no tier allows them until an admin says so — the default catalog included."""
+    admin = await login(client, "admin")
+    tiers = {t["name"]: t for t in (await client.get("/api/v1/tiers", headers=admin)).json()}
+    assert not any(tiers[n]["repo_hooks_at_apply"] for n in ("dev", "staging", "prod"))

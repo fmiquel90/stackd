@@ -92,6 +92,10 @@ function TierRow({
     mutationFn: () => tiers.update(tier.id, { requires_four_eyes: true }),
     onSuccess: invalidate,
   });
+  const forbidRepoHooks = useMutation({
+    mutationFn: () => tiers.update(tier.id, { repo_hooks_at_apply: false }),
+    onSuccess: invalidate,
+  });
   return (
     <li className="flex flex-wrap items-center gap-3 rounded-base border border-line bg-surface px-3 py-2">
       <span className="min-w-[96px] font-data font-semibold">{tier.name}</span>
@@ -99,6 +103,11 @@ function TierRow({
         <Badge glyph="◉◉">four-eyes</Badge>
       ) : (
         <span className="font-data text-[12px] text-muted">single confirmer</span>
+      )}
+      {tier.repo_hooks_at_apply ? (
+        <Badge glyph="⚠">repo hooks at apply</Badge>
+      ) : (
+        <span className="font-data text-[12px] text-muted">platform hooks only at apply</span>
       )}
       {usedBy !== null && (
         <span className="font-data text-[12px] text-muted">
@@ -145,6 +154,30 @@ function TierRow({
             Require four-eyes
           </Button>
         )}
+        {tier.repo_hooks_at_apply ? (
+          <Button
+            variant="ghost"
+            size="sm"
+            loading={forbidRepoHooks.isPending}
+            onClick={() => forbidRepoHooks.mutate()}
+          >
+            Forbid repo hooks at apply
+          </Button>
+        ) : (
+          <TypeNameDialog
+            trigger={
+              <Button variant="ghost" size="sm">
+                Allow repo hooks at apply…
+              </Button>
+            }
+            title={`Allow repo hooks at the apply stages on ${tier.name}?`}
+            consequence={`Hooks declared in a repository's .stackd.yml will run at before_apply and after_apply on ${tier.name} environments, in the job that holds the apply credentials. Anyone who can push to those repositories decides what they run.`}
+            name={tier.name}
+            confirmLabel="Allow repo hooks at apply"
+            variant="decision"
+            onConfirm={() => tiers.update(tier.id, { repo_hooks_at_apply: true }).then(invalidate)}
+          />
+        )}
         <TypeNameDialog
           trigger={
             <Button variant="ghost" size="sm">
@@ -162,6 +195,13 @@ function TierRow({
           onConfirm={() => tiers.remove(tier.id).then(invalidate)}
         />
       </span>
+      {forbidRepoHooks.isError && (
+        <div className="basis-full">
+          <Banner tone="failed" role="alert" title="The API refused">
+            {(forbidRepoHooks.error as Error).message}
+          </Banner>
+        </div>
+      )}
       {require.isError && (
         <div className="basis-full">
           <Banner tone="failed" role="alert" title="The API refused">
