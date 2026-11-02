@@ -39,6 +39,38 @@ AWS STS fetches the JWKS from these endpoints to validate the workload token.
     will fail every `AssumeRoleWithWebIdentity`. Expose it publicly, or use the provided
     Terraform module that registers the identity provider with its thumbprint.
 
+## The signing key
+
+Whoever holds the issuer's private key can mint a token for any role that trusts Stackd, so in
+production the key lives in **AWS KMS**: the API signs through `kms:Sign` and never sees the
+private key. A production API refuses to start on a local key unless you acknowledge it
+(`STACKD_ALLOW_LOCAL_SIGNER=true`).
+
+| Setting | Default | Purpose |
+|---|---|---|
+| `STACKD_OIDC_SIGNER` | `local` | `kms` (production) or `local` (a key AES-GCM encrypted in the database) |
+| `STACKD_OIDC_KMS_KEY_ARN` | — | the KMS key: asymmetric, `RSA_2048` or larger, usage `SIGN_VERIFY` |
+
+The API's IAM identity needs only `kms:Sign` and `kms:GetPublicKey` on that key:
+
+```json
+{
+  "Effect": "Allow",
+  "Action": ["kms:Sign", "kms:GetPublicKey"],
+  "Resource": "arn:aws:kms:eu-west-1:123456789012:key/…"
+}
+```
+
+Switching `STACKD_OIDC_SIGNER` to `kms` is the whole migration: on the next token it signs, the
+issuer rotates from its local key to the configured KMS key.
+
+**Rotation.** `POST /api/v1/oidc/keys/rotate` (admin) makes a new key the signing one — a new KMS
+key named in `{"kms_key_arn": "…"}`, or a new local key on a local issuer. The previous key stays
+in the JWKS, so the tokens it signed keep verifying, and leaves it automatically once the longest
+of them has expired (the apply budget plus grace, plus five minutes of clock skew).
+`GET /api/v1/oidc/keys` lists the keys and their status. Both rotations and retirements are
+audited (`oidc_key.rotated`, `oidc_key.retired`).
+
 ## 1. Configure the cloud provider (AWS)
 
 On the AWS account, create an **IAM OIDC identity provider** trusting the Stackd issuer,

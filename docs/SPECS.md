@@ -356,13 +356,17 @@ oidc_signing_keys (
   kid text unique,                   -- exposed in the JWKS and the JWT header
   algorithm text default 'RS256',
   public_jwk jsonb,                  -- published on /oidc/jwks
-  private_key_encrypted bytea,       -- AES-256-GCM (§1) OR KMS reference (key never in clear at rest)
-  status enum('active','retiring','retired'),  -- only 1 'active' at a time (signs); 'retiring' still in the JWKS
-  created_at, retired_at nullable
+  private_key_encrypted bytea null,  -- local key: AES-256-GCM (§1)
+  kms_key_arn text null,             -- KMS key: only its ARN; the private key never leaves KMS
+  status enum('active','retiring','retired'),  -- only 1 'active' at a time (partial unique index)
+  created_at, retiring_at nullable, retired_at nullable
+  -- CHECK num_nonnulls(private_key_encrypted, kms_key_arn) = 1
 )
 ```
 
-Rotation: a new `active` key, the old one moves to `retiring` (still in the JWKS, no longer signs), then `retired` (out of the JWKS) once the max TTL of a token has elapsed. KMS option: `private_key_encrypted` becomes an ARN reference, signing goes through `kms:Sign` (the private key never leaves KMS) — recommended in prod (see risk §13 / PLAN §5).
+**Signer.** `STACKD_OIDC_SIGNER=local` (default) keeps an RSA-2048 key AES-GCM encrypted in the row and signs in process; `STACKD_OIDC_SIGNER=kms` + `STACKD_OIDC_KMS_KEY_ARN` signs every workload token through `kms:Sign` (`RSASSA_PKCS1_V1_5_SHA_256` = RS256; the API builds the JWS itself), the private key never entering the API — required in production unless `STACKD_ALLOW_LOCAL_SIGNER=true` acknowledges a local key (the API refuses to start otherwise; see risk §13 / PLAN §5). A KMS key is registered from `kms:GetPublicKey`: it must be `SIGN_VERIFY`, RSA ≥ 2048, support RS256 (else 422); its `kid` is derived from its public key like a local key's. The API needs `kms:Sign` + `kms:GetPublicKey` on it, nothing else.
+
+**Rotation.** A new `active` key, the old one moves to `retiring` (`retiring_at` set; still in the JWKS, no longer signs), then `retired` (out of the JWKS) once the longest token it can have signed has expired: max(plan cap 30 min, apply budget + grace) + 5 min clock skew — a scheduler task (§7.5, advisory-locked) does it. Triggers: `POST /api/v1/oidc/keys/rotate` (admin; `{"kms_key_arn"}` for a KMS key, empty for a new local key — refused 422 on a KMS issuer), and, automatically, an issuer configured for KMS whose active key is still local (or absent) rotates to the configured key on its next signature — switching the setting is the whole migration. `GET /api/v1/oidc/keys` (admin) lists them (public metadata only). Audited: `oidc_key.rotated` (actor the admin, or `system`; context kid, backend, ARN, previous kid), `oidc_key.retired` (`system`).
 
 ---
 
@@ -529,7 +533,9 @@ run.check_warned                  # a job (plan or apply) ended — finished or 
 state.force_unlocked / state.import_session_created   # §11.2, §11.4
 dependency.created / dependency.deleted / dependency.mock_consumed   # created: also via link-by-name
 cloud_integration.created / cloud_integration.updated / cloud_integration.deleted
+oidc_key.rotated / oidc_key.retired            # issuer signing key (§3.11)
 worker_pool.created / worker_pool.deleted
+worker.rejected                                # a non-docker runner refused in production (§7.4)
 worker.diagnostics_requested                   # read-only debug bundle (cf. §observability)
 user.role_changed / user.apply_tier_changed / user.destroy_permission_changed / user.disabled
 tier.created / tier.updated / tier.deleted     # configurable tier catalog (§2.4)
@@ -832,6 +838,7 @@ The loop ticks every 10 s.
 | Drift detection | every tick, per-env gate | enqueue the due `-refresh-only` runs (§19.2) |
 | Git staleness polling | 15 min (`stackd_head_poll_interval`) | `git ls-remote` per (repo, branch, credentials) → update `head_sha` (§9.6); its own task, so slow git calls never delay the others |
 | Cold log archiving | end of run | `run_logs` → S3 gz, purge hot > 7 d (§5.2) — **not implemented yet**: logs stay in `run_logs` |
+| OIDC key retirement | every tick | `retiring` keys past the longest token TTL → `retired`, out of the JWKS (§3.11) |
 | Refresh token / audit purge | daily | expired families (§2.5), audit > 2 years (§6.1, audited purge) — **not implemented yet** |
 
 **Single-execution guarantee**: each task takes a dedicated **PG advisory lock** (`pg_try_advisory_lock(<task_key>)`) before running; a replica that does not obtain the lock skips its tick. The lock is session-level, so it is taken and released on a **dedicated connection** held for the task's whole run, separate from the task's own DB session — the tasks commit mid-way, which returns the session's connection to the pool, and an unlock through it could land on another connection and leak the lock. No permanently elected leader (no external dependency), no double execution. The tasks are **idempotent** anyway (re-running a staleness computation or an archive breaks nothing) — the advisory lock mainly avoids redundant work and races on the `worker_lost` transitions.
@@ -1287,7 +1294,7 @@ Specified but **not served yet**: `GET /api/v1/runs/{id}/logs/download` (§5.2) 
 |---|---|
 | Human auth | Google OIDC + PKCE, JWKS/nonce, `hd` restriction, rotating refresh |
 | Cloud credentials | **OIDC workload by default**: tokens signed per run/phase, trust policies on claims, session name = run_id (CloudTrail ↔ Stackd audit). Static = fallback |
-| OIDC signing key | KMS or encrypted volume (`oidc_signing_keys` §3.11), rotation with overlap, short token TTL. `sub` wildcard allowed **only** on the stack segment; never on `tier` nor `phase` (§10.3) |
+| OIDC signing key | KMS (`kms:Sign`, required in production unless explicitly acknowledged) or AES-GCM in the DB (`oidc_signing_keys` §3.11), rotation with overlap and automatic retirement, short token TTL. `sub` wildcard allowed **only** on the stack segment; never on `tier` nor `phase` (§10.3) |
 | Static secrets | AES-256-GCM, write-only, decrypted at claim, masked in the logs |
 | Hooks | platform hooks not bypassable by PR; repo hooks without `sensitive_env` **nor cloud credentials**, with an allowlisted env, a masked `plan.json`, and no saved plan, tfvars, OIDC token file or repo token on disk while they run; the agent's `STACKD_*` settings reach no hook nor tofu; masking of sensitive values in their stdout; the process group killed when the hook exits, or past its 10 min timeout; a failing `fail` check stops the job at any stage (§8.3); on the `docker` runner each hook in its own container, a repo hook seeing the checkout only (§7.4). Not implemented yet: repo hooks forbidden at the `*_apply` stages on tier=prod (pending a decision) |
 | Mocks | apply forbidden by default (`allow_mock_apply=false`), badge, audit `mock_consumed` |

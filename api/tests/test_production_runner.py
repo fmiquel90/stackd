@@ -18,6 +18,7 @@ PROD_ENV = {
     "STACKD_ENV": "production",
     "STACKD_DEV_AUTH": "false",
     "STACKD_PUBLIC_URL": "https://stackd.example.com",
+    "STACKD_ALLOW_LOCAL_SIGNER": "true",  # the KMS signer has its own tests (test_oidc_kms.py)
 }
 
 
@@ -106,14 +107,20 @@ def test_production_settings_refuse_dev_grade_values() -> None:
         "stackd_encryption_key": KEY,
         "stackd_jwt_secret": "s" * 32,
         "stackd_public_url": "https://stackd.example.com",
+        "stackd_oidc_signer": "kms",
+        "stackd_oidc_kms_key_arn": "arn:aws:kms:eu-west-1:123456789012:key/abc",
     }
     Settings(**good)  # type: ignore[arg-type]
     for field, bad in (
         ("stackd_encryption_key", ""),
         ("stackd_jwt_secret", "short"),
         ("stackd_public_url", "http://stackd.example.com"),
+        ("stackd_oidc_signer", "local"),  # a signing key in the DB: only with an acknowledgement
     ):
         with pytest.raises(ValueError, match="STACKD_ENV=production"):
             Settings(**{**good, field: bad})  # type: ignore[arg-type]
+    Settings(**{**good, "stackd_oidc_signer": "local", "stackd_allow_local_signer": True})  # type: ignore[arg-type]
+    with pytest.raises(ValueError, match="STACKD_OIDC_KMS_KEY_ARN"):
+        Settings(stackd_oidc_signer="kms")  # type: ignore[call-arg]
     # Development keeps its defaults.
     Settings(stackd_env="development")  # type: ignore[call-arg]
