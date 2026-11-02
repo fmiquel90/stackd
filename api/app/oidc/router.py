@@ -198,7 +198,7 @@ class RotateIn(BaseModel):
     kms_key_arn: str | None = None
 
 
-def _key_out(k: OidcSigningKey) -> dict:
+def _key_out(k: OidcSigningKey) -> dict[str, str | None]:
     return {
         "kid": k.kid,
         "status": k.status.value,
@@ -211,7 +211,7 @@ def _key_out(k: OidcSigningKey) -> dict:
 
 
 @keys_router.get("/keys", dependencies=[Admin])
-async def list_keys(session: DbSession) -> list[dict]:
+async def list_keys(session: DbSession) -> list[dict[str, str | None]]:
     """The issuer's signing keys (§3.11), newest first — public metadata only."""
     keys = (
         (await session.execute(select(OidcSigningKey).order_by(OidcSigningKey.created_at.desc())))
@@ -222,7 +222,7 @@ async def list_keys(session: DbSession) -> list[dict]:
 
 
 @keys_router.post("/keys/rotate", dependencies=[Admin])
-async def rotate(body: RotateIn, user: CurrentUser, session: DbSession) -> dict:
+async def rotate(body: RotateIn, user: CurrentUser, session: DbSession) -> dict[str, str | None]:
     """Rotate the signing key (§3.11): the new key signs from now on, the previous one stays in
     the JWKS until the tokens it signed have expired. Audited (`oidc_key.rotated`)."""
     if body.kms_key_arn is None and get_settings().stackd_oidc_signer == "kms":

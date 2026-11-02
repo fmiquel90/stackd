@@ -6,6 +6,7 @@ import hashlib
 import json
 import uuid
 from datetime import UTC, datetime, timedelta
+from typing import Any
 
 import boto3
 import jwt
@@ -40,7 +41,7 @@ def _b64u_uint(value: int) -> str:
     return _b64u(value.to_bytes((value.bit_length() + 7) // 8, "big"))
 
 
-def _b64u_json(obj: dict) -> str:
+def _b64u_json(obj: dict[str, Any]) -> str:
     return _b64u(json.dumps(obj, separators=(",", ":")).encode())
 
 
@@ -48,7 +49,7 @@ def _kid(der: bytes) -> str:
     return hashlib.sha256(der).hexdigest()[:16]
 
 
-def _rsa_jwk(public: rsa.RSAPublicKey, kid: str) -> dict:
+def _rsa_jwk(public: rsa.RSAPublicKey, kid: str) -> dict[str, str]:
     numbers = public.public_numbers()
     return {
         "kty": "RSA",
@@ -92,8 +93,8 @@ async def _new_kms_key(arn: str) -> OidcSigningKey:
     """Register a KMS key: only its public half and its ARN are kept (§3.11). It must be an RSA
     signing key of at least 2048 bits that can sign RS256."""
 
-    def _fetch() -> dict:
-        return _kms_client(arn).get_public_key(KeyId=arn)
+    def _fetch() -> dict[str, Any]:
+        return dict(_kms_client(arn).get_public_key(KeyId=arn))
 
     try:
         pub = await asyncio.to_thread(_fetch)
@@ -231,7 +232,7 @@ async def retire_keys(session: AsyncSession, now: datetime) -> int:
     return len(due)
 
 
-async def _sign(key: OidcSigningKey, payload: dict) -> str:
+async def _sign(key: OidcSigningKey, payload: dict[str, Any]) -> str:
     """A compact RS256 JWS. A local key signs in process; a KMS key through `kms:Sign` — the
     private key never enters this process (§13)."""
     if key.kms_key_arn is None:
@@ -246,7 +247,7 @@ async def _sign(key: OidcSigningKey, payload: dict) -> str:
         resp = _kms_client(arn).sign(
             KeyId=arn, Message=signing_input, MessageType="RAW", SigningAlgorithm=KMS_ALGORITHM
         )
-        return resp["Signature"]
+        return bytes(resp["Signature"])
 
     signature = await asyncio.to_thread(_kms_sign)
     return f"{signing_input.decode()}.{_b64u(signature)}"
