@@ -125,9 +125,14 @@ not be able to assume the apply role and exfiltrate). Platform hooks always get 
 ## Fallback and coexistence
 
 With no `cloud_integration`, Stackd falls back to classic static variables (for example an
-`aws-credentials` variable set). Don't resolve both on one environment: Stackd does not warn
-about it yet, and a static `AWS_ACCESS_KEY_ID` stays in tofu's environment, where the AWS SDK
-normally uses it before the OIDC token.
+`aws-credentials` variable set).
+
+With a `cloud_integration`, the OIDC role is the job's **only** AWS identity: Stackd drops every
+static AWS credential resolved for the environment (`AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`,
+`AWS_SESSION_TOKEN`, `AWS_PROFILE`, the credential files…) before the job starts — the AWS SDK
+would otherwise use them before the OIDC token — and the worker drops its own. The environment's
+cloud panel warns about each one it drops (by name), and the run's inputs show it as
+`NOT PASSED (OIDC)`. Settings such as `AWS_REGION` are kept.
 
 ## See also
 
