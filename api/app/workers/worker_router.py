@@ -119,6 +119,7 @@ async def register(body: RegisterIn, request: Request, session: DbSession) -> Re
     worker.labels = body.labels
     worker.version = body.version
     worker.runner = body.runner
+    worker.tools = body.tools
     worker.status = WorkerStatus.idle
     worker.last_heartbeat_at = datetime.now(UTC)
     await session.commit()

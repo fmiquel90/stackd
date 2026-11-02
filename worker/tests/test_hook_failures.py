@@ -125,6 +125,7 @@ def _run(
         "save_plan": True,
         "environment": {
             "tool": "opentofu",
+            "tool_version": "1.12",
             "repo_url": "file:///repos/x",
             "commit_sha": "c" * 40,
             "branch": "main",
@@ -137,7 +138,11 @@ def _run(
         ),
     }
     client = _Client()
-    settings = SimpleNamespace(workspace_root=str(tmp_path), leak_action="warn")
+    settings = SimpleNamespace(
+        workspace_root=str(tmp_path),
+        leak_action="warn",
+        available_tools=lambda: {"opentofu": ["1.12.2"]},
+    )
     if fail_at is None:
         getattr(main, handler)(cast(ApiClient, client), job, cast(Settings, settings))
         return client, tofu

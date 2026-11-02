@@ -171,7 +171,7 @@ The platform becomes an **OIDC issuer** (the same mechanism as GitHub Actions OI
 
 #### 2c. The worker agent
 - [ ] Loop claim → clone → tool setup → **hooks** → init → plan → upload → confirmation → **hooks** → apply → report — *status: the run is pinned to the commit its plan checked out, and the apply clones that commit and applies the uploaded saved plan, never a fresh plan (SPECS §7.3)*
-- [ ] Ephemeral workspace, Docker runner, secret masking in the logs — *status: workspace and masking done; the Docker runner is not: the agent runs every command as a local subprocess whatever `STACKD_RUNNER` says, and does not enforce `tool_version` (SPECS §7.4)*
+- [ ] Ephemeral workspace, Docker runner, secret masking in the logs — *status: workspace and masking done; `tool_version` enforced (claim + agent check) and runner images signature-verified, run by digest; production refuses any runner but `docker`; the Docker runner itself is not done yet: the agent runs every command as a local subprocess (SPECS §7.4)*
 
 #### 2d. Hooks & checks (custom flows, see SPECS §8)
 - [ ] **YAML** declaration in two places, merged: `.stackd.yml` file in the repo (versioned with the code) + hooks defined at the stack/environment level in the UI (governance imposed by the platform, not bypassable by a PR)

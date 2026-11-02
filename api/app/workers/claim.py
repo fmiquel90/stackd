@@ -32,6 +32,7 @@ from app.runs.transition import transition
 from app.statebackend.tokens import StateScope, mint_state_token
 from app.variables.resolution import ResolvedVariable, provenance_snapshot, resolve_variables
 from app.workers.hooks import platform_hooks
+from app.workers.tools import SQL_WORKER_CAN_RUN
 
 # Derived from ACTIVE_STATES so the claim guard can never drift from the one_active_run_per_env
 # index / the enum (a past bug: `running` was added to both but not here).
@@ -44,11 +45,13 @@ _SELECT_CANDIDATE = text(
     SELECT r.id AS run_id, r.state AS run_state
     FROM runs r
     JOIN environments e ON e.id = r.environment_id
+    JOIN stacks s ON s.id = e.stack_id
     WHERE r.state IN ('queued', 'confirmed')
       AND e.locked = false
       -- NULLIF guards against JSONB 'null' (SQLAlchemy writes Python None as JSON null by default).
       AND COALESCE(NULLIF(e.labels, 'null'::jsonb), '{{}}'::jsonb) <@ CAST(:labels AS jsonb)
-      AND (
+      -- Only a run whose stack's tool version this worker can run (§7.4).
+      {SQL_WORKER_CAN_RUN}      AND (
         r.state = 'queued'
         OR r.worker_id = :wid
         OR r.confirmed_at < now() - make_interval(secs => :affinity)
@@ -71,7 +74,10 @@ async def claim_one(session: AsyncSession, worker: Worker, affinity_seconds: int
     row = (
         await session.execute(
             _SELECT_CANDIDATE.bindparams(
-                wid=worker.id, labels=json.dumps(worker.labels or {}), affinity=affinity_seconds
+                wid=worker.id,
+                labels=json.dumps(worker.labels or {}),
+                tools=json.dumps(worker.tools) if worker.tools is not None else None,
+                affinity=affinity_seconds,
             )
         )
     ).first()

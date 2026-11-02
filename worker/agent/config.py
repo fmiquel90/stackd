@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import os
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+
+from agent.tools import parse_runner_images, probe_local, tools_from_images
 
 
 RUNNERS = frozenset({"local", "docker"})
@@ -18,6 +20,8 @@ class Settings:
     workspace_root: str
     leak_action: str  # "warn" (default) | "fail" — cleartext-tripwire policy (§5.1, Phase C)
     max_concurrent_jobs: int  # in-flight jobs across environments (§7, Phase E; default 1)
+    # docker runner (§7.4): {"opentofu:1.12.2": "<repo>@sha256:<digest>"}, from STACKD_RUNNER_IMAGES
+    runner_images: dict[str, str] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         # A typo must not fall back to `local` silently: that runner has no isolation (§7.4).
@@ -42,4 +46,12 @@ class Settings:
             if os.environ.get("STACKD_LEAK_TRIPWIRE", "warn") == "fail"
             else "warn",
             max_concurrent_jobs=max(1, int(os.environ.get("STACKD_MAX_CONCURRENT_JOBS", "1"))),
+            runner_images=parse_runner_images(os.environ.get("STACKD_RUNNER_IMAGES", "")),
         )
+
+    def available_tools(self) -> dict[str, list[str]]:
+        """The tool versions this worker can run (§7.4): its runner images' on the docker runner,
+        the binaries on PATH on the local one."""
+        if self.runner == "docker":
+            return tools_from_images(self.runner_images)
+        return probe_local()

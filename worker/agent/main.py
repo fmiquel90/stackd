@@ -16,6 +16,7 @@ from agent.client import ApiClient
 from agent.config import Settings
 from agent.logging import get_logger, setup as setup_logging
 from agent.masking import Masker, mask_plan_json
+from agent.tools import pick
 from agent.runner import (
     _DEFAULT_TIMEOUT_SECONDS,
     LogStreamer,
@@ -781,6 +782,10 @@ def _run_job(client: ApiClient, job: dict, settings: Settings) -> None:
     )
     checks: list[dict[str, Any]] = []  # the job's check results so far (§8.3)
     try:
+        # §7.4: the stack's tool version, on this worker, before anything runs — else the job fails
+        # (ToolUnavailable, reported below) instead of running another version.
+        env_info = job["environment"]
+        pick(settings.available_tools(), env_info["tool"], env_info["tool_version"])
         if job["phase"] == "plan":
             handle_plan(client, job, settings, checks)
         elif job["phase"] == "apply":
@@ -821,7 +826,12 @@ def run() -> None:
     # the first 5xx and never comes back without a restart.
     while True:
         try:
-            client.register(settings.pool_token, settings.worker_name, runner=settings.runner)
+            client.register(
+                settings.pool_token,
+                settings.worker_name,
+                runner=settings.runner,
+                tools=settings.available_tools(),
+            )
             break
         except Exception as exc:  # noqa: BLE001
             log.warning(

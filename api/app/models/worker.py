@@ -40,5 +40,7 @@ class Worker(Base):
     version: Mapped[str | None] = mapped_column(String, default=None)
     # Execution runner the agent declared at registration (§7.4): `local` | `docker`.
     runner: Mapped[str | None] = mapped_column(String, default=None)
+    # Tool versions the agent can run (§7.4): {"opentofu": ["1.12.2"], "terraform": [...]}.
+    tools: Mapped[dict | None] = mapped_column(JSONB(none_as_null=True), default=None)
     last_heartbeat_at: Mapped[datetime | None] = mapped_column(default=None)
     registered_at: Mapped[datetime] = created_at_col()

@@ -15,19 +15,28 @@ class ApiClient:
         self._name: str | None = None
         self._labels: dict | None = None
         self._runner: str | None = None
+        self._tools: dict[str, list[str]] | None = None
 
     def register(
-        self, pool_token: str, name: str, labels: dict | None = None, runner: str | None = None
+        self,
+        pool_token: str,
+        name: str,
+        labels: dict | None = None,
+        runner: str | None = None,
+        tools: dict[str, list[str]] | None = None,
     ) -> str:
         self._pool_token, self._name, self._labels = pool_token, name, labels
         if runner is not None:
             self._runner = runner
+        if tools is not None:
+            self._tools = tools
         resp = self._http.post(
             "/worker/v1/register",
             headers={"Authorization": f"Bearer {pool_token}"},
             # The runner is declared on every (re-)registration: a production API refuses any
             # worker that is not on the `docker` runner (SPECS §7.4).
-            json={"name": name, "labels": labels, "runner": self._runner},
+            # …and the tool versions it can run: the API hands it only runs it can execute.
+            json={"name": name, "labels": labels, "runner": self._runner, "tools": self._tools},
         )
         resp.raise_for_status()
         self._worker_token = resp.json()["worker_token"]
