@@ -21,7 +21,16 @@ def test_unknown_runner_is_refused(monkeypatch: pytest.MonkeyPatch) -> None:
 @pytest.mark.parametrize("runner", ["local", "docker"])
 def test_known_runners_load(monkeypatch: pytest.MonkeyPatch, runner: str) -> None:
     monkeypatch.setenv("STACKD_RUNNER", runner)
+    images = {"opentofu:1.12.2": "r@sha256:" + "a" * 64}
+    monkeypatch.setenv("STACKD_RUNNER_IMAGES", json.dumps(images))
     assert Settings.from_env().runner == runner
+
+
+def test_docker_runner_needs_images(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("STACKD_RUNNER", "docker")
+    monkeypatch.delenv("STACKD_RUNNER_IMAGES", raising=False)
+    with pytest.raises(ValueError, match="STACKD_RUNNER_IMAGES"):
+        Settings.from_env()
 
 
 def test_register_declares_the_runner_on_every_registration() -> None:

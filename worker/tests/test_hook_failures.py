@@ -139,6 +139,7 @@ def _run(
     }
     client = _Client()
     settings = SimpleNamespace(
+        runner="local",
         workspace_root=str(tmp_path),
         leak_action="warn",
         available_tools=lambda: {"opentofu": ["1.12.2"]},

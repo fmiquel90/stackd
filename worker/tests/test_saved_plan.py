@@ -125,7 +125,7 @@ def _patch(
 
 
 def _settings(tmp_path: Path) -> SimpleNamespace:
-    return SimpleNamespace(workspace_root=str(tmp_path), leak_action="warn")
+    return SimpleNamespace(runner="local", workspace_root=str(tmp_path), leak_action="warn")
 
 
 # --- plan job ----------------------------------------------------------------------------------

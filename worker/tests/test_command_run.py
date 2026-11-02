@@ -77,7 +77,7 @@ def _run(
     main.handle_command_run(
         client,
         _job(name, cred_phase),
-        SimpleNamespace(workspace_root=str(tmp_path)),
+        SimpleNamespace(runner="local", workspace_root=str(tmp_path)),
     )
     return client, timeouts
 

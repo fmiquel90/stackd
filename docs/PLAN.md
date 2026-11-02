@@ -171,7 +171,7 @@ The platform becomes an **OIDC issuer** (the same mechanism as GitHub Actions OI
 
 #### 2c. The worker agent
 - [ ] Loop claim → clone → tool setup → **hooks** → init → plan → upload → confirmation → **hooks** → apply → report — *status: the run is pinned to the commit its plan checked out, and the apply clones that commit and applies the uploaded saved plan, never a fresh plan (SPECS §7.3)*
-- [ ] Ephemeral workspace, Docker runner, secret masking in the logs — *status: workspace and masking done; `tool_version` enforced (claim + agent check) and runner images signature-verified, run by digest; production refuses any runner but `docker`; the Docker runner itself is not done yet: the agent runs every command as a local subprocess (SPECS §7.4)*
+- [ ] Ephemeral workspace, Docker runner, secret masking in the logs — *status: done — workspace and masking; `tool_version` enforced (claim + agent check); runner images signature-verified, run by digest; the `docker` runner runs each command in its own hardened container (repo hooks see the checkout only), and production refuses any other runner (SPECS §7.4)*
 
 #### 2d. Hooks & checks (custom flows, see SPECS §8)
 - [ ] **YAML** declaration in two places, merged: `.stackd.yml` file in the repo (versioned with the code) + hooks defined at the stack/environment level in the UI (governance imposed by the platform, not bypassable by a PR)
@@ -288,7 +288,7 @@ The platform becomes an **OIDC issuer** (the same mechanism as GitHub Actions OI
 
 | Risk / decision | Impact | Mitigation / current position |
 |---|---|---|
-| Execution security (providers/provisioners = arbitrary code) | High | Self-hosted workers, Docker per run (not implemented yet, SPECS §7.4), no multi-tenant. Platform hooks (non-bypassable) are the governance safeguard |
+| Execution security (providers/provisioners = arbitrary code) | High | Self-hosted workers, a hardened container per command on the `docker` runner (required in production, SPECS §7.4), no multi-tenant. Platform hooks (non-bypassable) are the governance safeguard |
 | Repo hooks (`.stackd.yml`) modifiable by PR | Medium | The **platform** hooks (stack/env) always run and are not bypassable; critical security checks go there, not in the repo. Repo hooks run without secrets: an allowlisted env, a masked `plan.json`, no tfvars, saved plan or token on disk (SPECS §8.3) |
 | OIDC issuer: compromise of the signing key = access to all roles | High | Keys in KMS (`kms:Sign` signing, key never in memory) or encrypted volume, rotation with overlap, JWKS with kid, token TTL ≤ run duration, precise claims in the trust policies (`sub` wildcard tolerated only on the stack segment, never tier/phase) |
 | OIDC issuer and state backend in the same API process | Medium | In the MVP, all surfaces (human API, worker API, state backend, OIDC issuer, webhooks) share one process → a flaw in any one of them approaches the signing key. Strong mitigation = KMS (the private key never resides in the process). Isolating the signer in a dedicated service = Phase 7 track if the threat model requires it |

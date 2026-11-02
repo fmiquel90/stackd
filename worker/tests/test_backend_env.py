@@ -205,7 +205,9 @@ def _run(
     job = _job(phase)
     job["env"].update(run_env or {})
     getattr(main, handler)(
-        client, job, SimpleNamespace(workspace_root=str(tmp_path), leak_action="warn")
+        client,
+        job,
+        SimpleNamespace(runner="local", workspace_root=str(tmp_path), leak_action="warn"),
     )
     return calls, client
 
