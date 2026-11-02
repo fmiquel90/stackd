@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 from datetime import UTC, datetime
 
-from sqlalchemy import text
+from sqlalchemy import select, text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -21,9 +21,11 @@ from app.enums import (
 )
 from app.errors import ProblemException
 from app.models.environment import Environment
+from app.models.oidc import CloudIntegration
 from app.models.run import Run
 from app.models.stack import Stack
 from app.models.worker import Worker
+from app.oidc.precedence import split_shadowed
 from app.runs.artifacts import SAVED_PLAN_TYPES
 from app.runs.commands import is_mutating
 from app.runs.transition import transition
@@ -162,6 +164,15 @@ async def build_job_payload(session: AsyncSession, run: Run) -> dict:
         # the repo, or fails with "No value for required variable" — never a stand-in value.
         resolved = [rv for rv in resolved if not _is_secret(rv)]
 
+    # §10.5: with a cloud integration, the workload credentials are the job's only cloud
+    # credentials. A static AWS credential resolved for the env is dropped before anything below
+    # sees it — not fetched (an external reference), not in the env, the tfvars or `mask_values` —
+    # and recorded in the provenance as `shadowed:<layer>`.
+    integration = await _cloud_integration(session, env)
+    shadowed: list[ResolvedVariable] = []
+    if integration is not None:
+        resolved, shadowed = split_shadowed(resolved)
+
     # Resolve external secret references (§15): fetch live values, or apply the configured fallback.
     # Raises SecretUnavailable (caught by the claim endpoint → run failed) when a reference can't
     # resolve and no fallback applies. Done before any run mutation so a failure leaves nothing half
@@ -226,6 +237,7 @@ async def build_job_payload(session: AsyncSession, run: Run) -> dict:
     provenance = provenance_snapshot(resolved)
     provenance.update(dep.provenance)
     provenance.update(secret_provenance)  # §15: secret:/secret_fallback:/secret_override:
+    provenance.update({rv.injected_name: f"shadowed:{rv.provenance}" for rv in shadowed})
     run.variable_provenance = provenance
 
     # The repo token stays with a proposed run: it clones the pull request's commit, and reaches
@@ -269,7 +281,7 @@ async def build_job_payload(session: AsyncSession, run: Run) -> dict:
 
     # §10: a proposed run keeps its OIDC credentials — those of the plan role, read-only by design
     # (§10.3: "a PR plan physically cannot modify the infra"), which a plan needs to refresh.
-    cloud_credentials = await _cloud_credentials(session, env, stack, run, cred_phase)
+    cloud_credentials = await _cloud_credentials(session, integration, env, stack, run, cred_phase)
 
     # Literal secret values the agent masks in ALL log output (§5.1) — sensitive variables, the
     # short-lived state-backend and OIDC tokens, and the repo auth token (it rides inside the clone
@@ -327,18 +339,20 @@ async def build_job_payload(session: AsyncSession, run: Run) -> dict:
     }
 
 
-async def _cloud_credentials(session, env, stack, run, phase) -> dict | None:  # type: ignore[no-untyped-def]
-    """OIDC workload credentials for the phase (§10): plan vs apply assume different roles."""
-    from sqlalchemy import select
-
-    from app.models.oidc import CloudIntegration
-    from app.oidc.issuer import sign_workload_token
-
-    ci = (
+async def _cloud_integration(session: AsyncSession, env: Environment) -> CloudIntegration | None:
+    return (
         await session.execute(
             select(CloudIntegration).where(CloudIntegration.environment_id == env.id)
         )
     ).scalar_one_or_none()
+
+
+async def _cloud_credentials(  # type: ignore[no-untyped-def]
+    session, ci: CloudIntegration | None, env, stack, run, phase
+) -> dict | None:
+    """OIDC workload credentials for the phase (§10): plan vs apply assume different roles."""
+    from app.oidc.issuer import sign_workload_token
+
     if ci is None:
         return None
     token = await sign_workload_token(session, env, stack, run, phase, ttl=ci.session_duration)

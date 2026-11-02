@@ -51,6 +51,14 @@ export function CloudPanel({ envId }: { envId: string }) {
         </span>
       </div>
 
+      {configured &&
+        data!.warnings.map((w) => (
+          <p key={w.code} role="alert" className="font-data mb-2 text-[12px] text-st-decision">
+            <span aria-hidden="true">⚠ </span>
+            Not passed to runs: {w.variables.join(", ")}. {w.detail}
+          </p>
+        ))}
+
       {/* Editing OIDC roles is admin-only (server enforces it on PUT/DELETE/test). Others see it read-only. */}
       {!isAdmin ? (
         <div className="font-data flex flex-col gap-1 text-[12px] text-muted">

@@ -187,11 +187,36 @@ def _tool_bin(tool: str) -> str:
 _OIDC_TOKEN_FILE = "oidc_token"
 
 
+# What the AWS SDK's credential chain reads before the web identity token (§10.5): static keys, a
+# session token, a named profile and the files holding them, a container credentials endpoint.
+_STATIC_AWS_CREDENTIAL_VARS = frozenset(
+    {
+        "AWS_ACCESS_KEY_ID",
+        "AWS_SECRET_ACCESS_KEY",
+        "AWS_SESSION_TOKEN",
+        "AWS_SECURITY_TOKEN",
+        "AWS_PROFILE",
+        "AWS_DEFAULT_PROFILE",
+        "AWS_SHARED_CREDENTIALS_FILE",
+        "AWS_CONFIG_FILE",
+        "AWS_CONTAINER_CREDENTIALS_FULL_URI",
+        "AWS_CONTAINER_CREDENTIALS_RELATIVE_URI",
+        "AWS_CONTAINER_AUTHORIZATION_TOKEN",
+    }
+)
+
+
 def _run_env(ws: Workspace, job: dict[str, Any]) -> dict[str, str]:
     """`_job_environ`, then the run's env, its sensitive env and the OIDC workload env (§10.4):
-    what platform hooks run with, and tofu with the state backend's settings on top."""
+    what platform hooks run with, and tofu with the state backend's settings on top. With OIDC
+    credentials, the worker host's own AWS credentials (a mounted ~/.aws on the trusted-dev `local`
+    runner) are dropped: the role the integration names is the job's only identity (§10.5). The
+    API drops the run's static AWS credentials at claim for the same reason."""
+    base = _job_environ()
+    if job.get("cloud_credentials"):
+        base = {k: v for k, v in base.items() if k not in _STATIC_AWS_CREDENTIAL_VARS}
     return {
-        **_job_environ(),
+        **base,
         **job.get("env", {}),
         **job.get("sensitive_env", {}),
         **_cloud_env(ws, job),

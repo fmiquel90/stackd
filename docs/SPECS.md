@@ -1072,7 +1072,13 @@ Fallback: no `cloud_integration` → classic static variables (variable set `aws
 
 ### 10.5 Priority and coexistence
 
-If a `cloud_integration` exists AND static `AWS_*` variables are resolved → the OIDC variables win, config warning displayed (a classic source of confusion). **Not implemented yet**: no warning is displayed, and the agent only sets the OIDC variables on top of the run's — a static `AWS_ACCESS_KEY_ID`/`AWS_SECRET_ACCESS_KEY` stays in tofu's environment, where the AWS SDK's own precedence normally picks it before the web identity token. Do not resolve both on one environment.
+If a `cloud_integration` exists AND static AWS credentials are resolved → the OIDC credentials win, config warning displayed (a classic source of confusion). "Win" has to be literal: the AWS SDK's credential chain reads static keys **before** the web identity token, so layering the OIDC variables on top is not enough. Hence:
+
+- **At claim (API)**: every environment-kind variable the SDK reads as a credential — `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `AWS_SESSION_TOKEN`, `AWS_SECURITY_TOKEN`, `AWS_PROFILE`, `AWS_DEFAULT_PROFILE`, `AWS_SHARED_CREDENTIALS_FILE`, `AWS_CONFIG_FILE`, `AWS_CONTAINER_CREDENTIALS_{FULL,RELATIVE}_URI`, `AWS_CONTAINER_AUTHORIZATION_TOKEN` — is dropped before the payload is built: not in `env`/`sensitive_env`, not fetched when it is an external reference (§15), not in `mask_values`. The run's `variable_provenance` records it as `shadowed:<layer>` (e.g. `shadowed:set:aws-credentials`). Settings that are not credentials (`AWS_REGION`, …) stay.
+- **On the worker**: the same names are dropped from the worker host's own environment (the trusted-dev `local` runner's mounted `~/.aws`) for tofu and platform hooks of a job carrying OIDC credentials.
+- **Warning**: `GET`/`PUT /environments/{id}/cloud-integration` return `warnings: [{code: "static_aws_credentials_shadowed", variables: [names], detail}]` — names only, never values — shown on the env's cloud panel.
+
+Without a `cloud_integration`, static credentials are the env's fallback (§10.4) and pass unchanged.
 
 ---
 

@@ -21,7 +21,9 @@ from app.models.oidc import CloudIntegration
 from app.models.run import Run
 from app.models.stack import Stack
 from app.oidc.issuer import ensure_active_key, jwks, openid_configuration, sign_workload_token
+from app.oidc.precedence import SHADOWED_WARNING, split_shadowed
 from app.spaces import guard_env_id
+from app.variables.resolution import resolve_variables
 
 issuer_router = APIRouter(tags=["oidc"])
 cloud_router = APIRouter(prefix="/api/v1/environments", tags=["cloud-integration"])
@@ -48,8 +50,29 @@ class CloudIntegrationIn(BaseModel):
     session_duration: int = 3600
 
 
-def _out(ci: CloudIntegration) -> dict:
+async def _warnings(session: AsyncSession, env_id: uuid.UUID) -> list[dict]:
+    """Configuration warnings (SPECS §10.5): static AWS credentials resolved for the env are
+    shadowed by the integration — dropped from every job. Names only, never values."""
+    env = await session.get(Environment, env_id)
+    if env is None:
+        return []
+    resolved = await resolve_variables(session, env, reveal_sensitive=False)
+    _, shadowed = split_shadowed(resolved)
+    if not shadowed:
+        return []
+    return [
+        {
+            "code": SHADOWED_WARNING,
+            "variables": sorted({rv.name for rv in shadowed}),
+            "detail": "These static AWS credentials are not passed to runs: "
+            "the OIDC role credentials replace them.",
+        }
+    ]
+
+
+def _out(ci: CloudIntegration, warnings: list[dict] | None = None) -> dict:
     return {
+        "warnings": warnings or [],
         "id": str(ci.id),
         "provider": ci.provider.value,
         "plan_role_arn": ci.plan_role_arn,
@@ -69,7 +92,7 @@ async def get_integration(env_id: uuid.UUID, user: CurrentUser, session: DbSessi
     ).scalar_one_or_none()
     if ci is None:
         raise ProblemException(404, "No cloud integration", None)
-    return _out(ci)
+    return _out(ci, await _warnings(session, env_id))
 
 
 @cloud_router.put("/{env_id}/cloud-integration", dependencies=[Admin])
@@ -103,7 +126,7 @@ async def put_integration(
     )
     await session.commit()
     await session.refresh(ci)
-    return _out(ci)
+    return _out(ci, await _warnings(session, env_id))
 
 
 @cloud_router.delete("/{env_id}/cloud-integration", status_code=204, dependencies=[Admin])

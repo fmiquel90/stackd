@@ -455,6 +455,8 @@ export interface CloudIntegration {
   apply_role_arn: string;
   region: string | null;
   session_duration: number;
+  /** Configuration warnings (SPECS §10.5) — e.g. static AWS credentials the roles replace. */
+  warnings: { code: string; variables: string[]; detail: string }[];
 }
 
 export const cloudApi = {

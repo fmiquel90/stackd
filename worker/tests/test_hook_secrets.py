@@ -512,8 +512,10 @@ def test_platform_hooks_get_none_of_the_agents_own_settings(
         "STACKD_ENCRYPTION_KEY": "enc-key-2",
     }
     # …but the rest of the worker's environment, the run's variables and its cloud credentials.
-    host = {"INFRACOST_API_KEY": "ico-3", "AWS_PROFILE": "ops"}
-    for name, value in {**agent_own, **host}.items():
+    host = {"INFRACOST_API_KEY": "ico-3", "AWS_CA_BUNDLE": "/etc/ca.pem"}
+    # …minus the host's own AWS credentials: the job's OIDC role is its only identity (§10.5).
+    host_creds = {"AWS_PROFILE": "ops", "AWS_ACCESS_KEY_ID": "AKIAHOST"}
+    for name, value in {**agent_own, **host, **host_creds}.items():
         monkeypatch.setenv(name, value)
     dump = "env | sed 's/^/PLATFORM {} /'"
     platform = {
@@ -536,5 +538,6 @@ def test_platform_hooks_get_none_of_the_agents_own_settings(
         env = dict(line.split("=", 1) for line in lines if "=" in line)
         assert env, (stage, client.lines)
         assert not set(agent_own) & set(env), (stage, sorted(env))  # names only, never a value
+        assert not set(host_creds) & set(env), (stage, sorted(env))
         assert {k: env.get(k) for k in {**host, **run_env}} == {**host, **run_env}, stage
         assert env["DB_PASSWORD"] == "db-pw-4" and env["AWS_ROLE_ARN"] == CLOUD["role_arn"], stage
