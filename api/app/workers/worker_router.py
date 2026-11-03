@@ -3,7 +3,7 @@ from __future__ import annotations
 import asyncio
 import re
 import uuid
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, Request, Response
@@ -26,11 +26,13 @@ from app.enums import (
 )
 from app.errors import ProblemException
 from app.logging import get_logger
+from app.models.audit import AuditEvent
 from app.models.environment import Environment
 from app.models.run import Run
 from app.models.run_log import RunLog
 from app.models.worker import Worker
 from app.models.worker_command import WorkerCommand
+from app.oidc.issuer import WorkloadSigningError
 from app.runs.artifacts import (
     MAX_PLAN_BYTES,
     PLAN_FILE,
@@ -91,16 +93,33 @@ def _runner_refused(runner: str | None) -> ProblemException:
 async def register(body: RegisterIn, request: Request, session: DbSession) -> RegisterOut:
     pool = await pool_from_token(request, session)
     if get_settings().is_production and body.runner != PRODUCTION_RUNNER:
-        # Audited and committed before refusing: an operator sees which worker tried, from where.
-        await record_audit(
-            session,
-            action="worker.rejected",
-            actor_kind=AuditActorKind.worker,
-            target_kind="worker_pool",
-            target_id=pool.id,
-            context={"name": body.name, "runner": body.runner, "reason": "runner_not_allowed"},
-        )
-        await session.commit()
+        # Audited and committed before refusing: an operator sees which worker tried. Once per
+        # (pool, worker name, runner) and hour — the agent keeps retrying, the audit must not grow
+        # by one row per attempt.
+        context = {"name": body.name, "runner": body.runner, "reason": "runner_not_allowed"}
+        since = datetime.now(UTC) - timedelta(hours=1)
+        recent = (
+            await session.execute(
+                select(AuditEvent.id)
+                .where(
+                    AuditEvent.action == "worker.rejected",
+                    AuditEvent.target_id == pool.id,
+                    AuditEvent.created_at >= since,
+                    AuditEvent.context["name"].astext == body.name,
+                )
+                .limit(1)
+            )
+        ).scalar_one_or_none()
+        if recent is None:
+            await record_audit(
+                session,
+                action="worker.rejected",
+                actor_kind=AuditActorKind.worker,
+                target_kind="worker_pool",
+                target_id=pool.id,
+                context=context,
+            )
+            await session.commit()
         raise _runner_refused(body.runner)
     # Reuse the row for this (pool, name) if it exists: a worker that restarts/hot-reloads is the
     # same worker — re-inserting would litter the list with stale offline duplicates. Most-recent
@@ -201,10 +220,16 @@ async def claim(worker: CurrentWorker, session: DbSession, wait: int = 0) -> dic
             worker.status = WorkerStatus.busy
             try:
                 payload = await build_job_payload(session, run)
-            except (DependencyError, SecretUnavailable) as exc:
-                # Unresolvable dependency (§9.3) or external secret (§15.2) → fail the run closed,
-                # hand the worker nothing.
-                reason = "secret" if isinstance(exc, SecretUnavailable) else "dependency"
+            except (DependencyError, SecretUnavailable, WorkloadSigningError) as exc:
+                # Unresolvable dependency (§9.3), external secret (§15.2) or workload token (§10)
+                # → fail the run closed, hand the worker nothing.
+                reason = (
+                    "secret"
+                    if isinstance(exc, SecretUnavailable)
+                    else "oidc"
+                    if isinstance(exc, WorkloadSigningError)
+                    else "dependency"
+                )
                 await transition(
                     session,
                     run,

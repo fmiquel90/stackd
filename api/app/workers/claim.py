@@ -372,7 +372,15 @@ async def _cloud_credentials(  # type: ignore[no-untyped-def]
 
     if ci is None:
         return None
-    token = await sign_workload_token(session, env, stack, run, phase, ttl=ci.session_duration)
+    from app.oidc.issuer import WorkloadSigningError
+
+    try:
+        token = await sign_workload_token(session, env, stack, run, phase, ttl=ci.session_duration)
+    except (ProblemException, WorkloadSigningError) as exc:
+        detail = getattr(exc, "detail", None) or str(exc)
+        raise WorkloadSigningError(f"oidc_signing:{detail}") from exc
+    except Exception as exc:  # KMS unreachable, throttled, access denied…
+        raise WorkloadSigningError(f"oidc_signing:{type(exc).__name__}") from exc
     role_arn = ci.plan_role_arn if phase == JobPhase.plan else ci.apply_role_arn
     return {
         "provider": ci.provider.value,

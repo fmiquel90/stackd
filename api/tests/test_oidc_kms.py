@@ -170,3 +170,52 @@ async def test_retiring_key_leaves_the_jwks_once_its_tokens_expired(
 
     kids = {k["kid"] for k in (await client.get("/oidc/jwks")).json()["keys"]}
     assert old_kid not in kids
+
+
+async def test_switching_back_to_a_known_kms_key_reactivates_it(
+    client: httpx.AsyncClient, kms_key: tuple[str, Callable[[], None]]
+) -> None:
+    """kms → local → kms on the same key: the key signs again (same kid), no 409 on the JWKS."""
+    _arn, switch = kms_key
+    admin = await login(client, "admin")
+    await client.get("/oidc/jwks")
+    switch()
+    try:
+        first = jwt.get_unverified_header(await _claim_token(client, admin, "kms-back-1"))["kid"]
+        await _back_to_local()  # the KMS key retires, a local key signs
+        r = await client.get("/oidc/jwks")
+        assert r.status_code == 200
+        # Still configured for KMS: the next signature switches back to the same key.
+        second = jwt.get_unverified_header(await _claim_token(client, admin, "kms-back-2"))["kid"]
+        assert second == first
+        assert (await client.get("/oidc/jwks")).status_code == 200
+    finally:
+        await _back_to_local()
+
+
+async def test_a_job_whose_token_cannot_be_signed_fails_closed(
+    client: httpx.AsyncClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """KMS unusable at claim time: the run fails (reason oidc), the worker gets nothing (§10)."""
+    from app.oidc import issuer
+
+    admin = await login(client, "admin")
+    wh = await register_worker(client, admin, "pool-oidc-fail")
+    env_id = await make_env(
+        client, admin, await make_stack(client, admin, "oidc-fail"), "dev", "dev"
+    )
+    await client.put(
+        f"/api/v1/environments/{env_id}/cloud-integration",
+        headers=admin,
+        json={"plan_role_arn": PLAN_ROLE, "apply_role_arn": PLAN_ROLE},
+    )
+
+    async def broken(*args: object, **kwargs: object) -> str:
+        raise RuntimeError("kms unreachable")
+
+    monkeypatch.setattr(issuer, "_sign", broken)
+    run = (await client.post(f"/api/v1/environments/{env_id}/runs", headers=admin, json={})).json()
+    r = await client.post("/worker/v1/jobs/claim", headers=wh)
+    assert r.status_code == 204
+    failed = (await client.get(f"/api/v1/runs/{run['id']}", headers=admin)).json()
+    assert failed["state"] == "failed" and "oidc_signing" in (failed["error"] or "")

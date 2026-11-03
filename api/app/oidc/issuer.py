@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import functools
 import hashlib
 import json
 import uuid
@@ -45,6 +46,11 @@ def _b64u_json(obj: dict[str, Any]) -> str:
     return _b64u(json.dumps(obj, separators=(",", ":")).encode())
 
 
+class WorkloadSigningError(RuntimeError):
+    """The issuer could not sign a workload token (no usable key, KMS unreachable or refusing): the
+    job is refused, its run failed closed — never handed out without its credentials (§10)."""
+
+
 def _kid(der: bytes) -> str:
     return hashlib.sha256(der).hexdigest()[:16]
 
@@ -81,12 +87,19 @@ def _new_local_key() -> OidcSigningKey:
     )
 
 
-def _kms_client(arn: str):  # type: ignore[no-untyped-def]
+@functools.lru_cache(maxsize=16)
+def _kms_client_for(region: str) -> Any:
+    # One client per region: building one loads the service model and the credential chain, which
+    # does not belong on the claim path (a signature per claimed job).
+    return boto3.client("kms", region_name=region)
+
+
+def _kms_client(arn: str) -> Any:
     # arn:aws:kms:<region>:<account>:key/<id> — the key's own region, whatever AWS_REGION says.
     parts = arn.split(":")
     if len(parts) < 6 or parts[2] != "kms":
         raise ProblemException(422, "Invalid KMS key ARN", f"not a KMS key ARN: {arn!r}")
-    return boto3.client("kms", region_name=parts[3])
+    return _kms_client_for(parts[3])
 
 
 async def _new_kms_key(arn: str) -> OidcSigningKey:
@@ -139,16 +152,24 @@ async def rotate_key(
     verifying — and leaves it once the longest of them has expired (`retire_keys`). Audited in the
     same transaction; the caller commits."""
     new = await _new_kms_key(kms_key_arn) if kms_key_arn else _new_local_key()
-    if (
+    known = (
         await session.execute(select(OidcSigningKey).where(OidcSigningKey.kid == new.kid))
-    ).scalar_one_or_none() is not None:
-        raise ProblemException(409, "Key already registered", f"kid {new.kid} is already known")
+    ).scalar_one_or_none()
+    if known is not None and known.status == OidcKeyStatus.active:
+        raise ProblemException(409, "Key already active", f"kid {new.kid} already signs")
     old = await _active(session)
     if old is not None:
         old.status = OidcKeyStatus.retiring
         old.retiring_at = datetime.now(UTC)
         await session.flush()  # one active key at a time (unique index): demote first
-    session.add(new)
+    if known is not None:
+        # A KMS key used before (switching back to it): it signs again — same kid, same JWKS entry.
+        known.status = OidcKeyStatus.active
+        known.retiring_at = None
+        known.retired_at = None
+        new = known
+    else:
+        session.add(new)
     await session.flush()
     await record_audit(
         session,
@@ -178,18 +199,27 @@ async def ensure_active_key(session: AsyncSession) -> OidcSigningKey:
     wants_kms = settings.stackd_oidc_signer == "kms"
     if key is not None and (key.kms_key_arn is not None or not wants_kms):
         return key
-    try:
-        key = await rotate_key(
-            session, kms_key_arn=settings.stackd_oidc_kms_key_arn if wants_kms else None
+    # Provisioned in a session of its own, committed there: the caller's transaction (a job claim,
+    # holding the run's transition) is never committed nor rolled back by key management.
+    from app.db import SessionLocal
+
+    async with SessionLocal() as own:
+        try:
+            await rotate_key(
+                own, kms_key_arn=settings.stackd_oidc_kms_key_arn if wants_kms else None
+            )
+            await own.commit()
+        except IntegrityError:
+            await own.rollback()  # another replica made it first (one active key): use theirs
+    key = (
+        await session.execute(
+            select(OidcSigningKey)
+            .where(OidcSigningKey.status == OidcKeyStatus.active)
+            .execution_options(populate_existing=True)
         )
-        await session.commit()
-    except IntegrityError:
-        # Another replica created it first (one active key): use theirs.
-        await session.rollback()
-        key = await _active(session)
-        assert key is not None
-        return key
-    await session.refresh(key)
+    ).scalar_one_or_none()
+    if key is None:
+        raise ProblemException(503, "No signing key", "The OIDC issuer has no active key.")
     return key
 
 
