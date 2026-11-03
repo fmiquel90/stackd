@@ -621,7 +621,7 @@ hooks, notifications, secret sources; URL `?tab=`).
 **Environment page** `/s/:space/stacks/:stack/envs/:env` (new in v2):
 
 - **Header**: `stack / env`, tier, branch, deployed commit vs head (`2af0351 → 125304e ↑`, refresh-head button), drift (`≈ drifted, checked 1h ago → drift run`), lock, protection badges.
-- **Primary actions** (writer+): **Plan** (primary button), and a "More" menu: Plan with downstream (`with_downstream`), Destroy… (shown only with `can_destroy`; opens a dialog explaining the run will need typed confirmation at apply), Promote from… (sibling env, SPECS §9.7), Run command… (allowlist, SPECS §4.3), New environment from… (this env preselected as the model) and Roll out… (SPECS §21, DESIGN §5.11).
+- **Primary actions** (writer+): **Plan** (primary button), and a "More" menu: Plan with downstream (`with_downstream`), Destroy… (shown only with `can_destroy`; opens a dialog explaining the run will need typed confirmation at apply), Promote from… (sibling env, SPECS §9.7), Run command… (allowlist, SPECS §4.3), New environment from… (this env preselected as the model) and Roll out every “<name>” environment… (SPECS §21, DESIGN §5.11).
 - **Tabs** (URL): **Runs** (default) — history table: run short ID, type (`tracked`, `destroy`, `PR`, `drift`, `command`), trigger (who/how), outcome badge, plan summary, commit, age, duration; filter by type; paginated client-side **[today]**. **Inputs** (Resolved with provenance / Environment overrides / Discover inputs), **Outputs**, **Dependencies**, **State** (versions; force-unlock admin-only per §5.7), **Settings** (name, tier, branch, flags with the §5.7 friction, backend config, labels, hooks, notifications, cloud integration), and a **Danger zone** at the bottom of Settings (delete environment, typed name).
 
 ### 5.9 `/workers` — workers & pools
@@ -674,7 +674,7 @@ On the overview, a banner per rollout awaiting approval, paused or running, link
 **Rollout page** `/rollouts/:id` (space-less, like `/runs/:id`; linked from the overview banners, the
 list, the notifications and every member run):
 - **Header**: environment name, state badge (`StateBadge` vocabulary: awaiting approval = decision
-  amber, running, paused = decision amber, succeeded, failed), creator, approver and approval expiry
+  amber, running, paused = decision amber, succeeded, failed, canceled), creator, approver and approval expiry
   ("approved by alice · expires in 21 h"), actions: **Approve…** / **Approve again…** — shown when
   the API says an approval is what the rollout waits for (`approvable`: the first approval, or a
   re-approval after an expiry, a lost right or a member changed since the approval); replaced, for

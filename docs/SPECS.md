@@ -437,6 +437,8 @@ Command runs (§4.3) take a shorter path: `queued → preparing → running → 
 | `checking → unconfirmed` | worker | checks OK or warn; non-empty diff. A warn **forces** confirmation even if autodeploy |
 | `checking → confirmed` | system | all checks OK, non-empty diff, `autodeploy=true`, env not protected, `used_mocks=false`, the run belongs to no rollout — **or** the run belongs to a started rollout whose gate is open and passes its gate (§21.5) |
 | `planning/checking → finished` | worker | empty diff (outputs captured after refresh) |
+| `queued / unconfirmed → canceled` | user, or system | a user's cancel; the system when a PR closes (its proposed runs, §18.3) or a rollout is canceled (its member runs, §21.4 step 8) |
+| `confirmed → canceled` | system | a rollout's cancel, the run not claimed yet (§21.4 step 8); a run already `applying` is never canceled |
 | `unconfirmed → confirmed` | user (or system: a rollout re-approval, §21.6) | `can_apply(user, env)` = role∈{approver,admin} AND `env.tier ∈ allowed_tiers` (§2.4); ≠ triggerer if the tier requires four-eyes, the env is `protected` or sets `require_second_pair_of_eyes`; for a `destroy` run: `can_destroy` required; **blocked if `used_mocks` and `allow_mock_apply=false`** |
 | `confirmed → applying` | worker (claim) | the plan's worker within the affinity window, then any compatible worker (§7.2); re-checks `allow_mock_apply` and the secret-fallback gate against the apply-time resolution (§9.3/§15.5). The apply job clones the pinned commit and applies the run's **saved plan** (§7.3); a missing or unreadable plan fails the run — it never re-plans |
 | `applying → finished` | worker | apply exit 0 + outputs uploaded + no failing `after_apply` check (one that fails → `failed`, the outputs still recorded, nothing cascades, §8.3) |
@@ -521,7 +523,8 @@ The exhaustive list of actions the API emits (to check it: `grep -rn 'action="' 
 auth.login / auth.logout / auth.domain_denied / auth.refresh_reuse_detected
 space.created / space.member_set / space.member_removed            # Phase F memberships (§2.4)
 stack.created / stack.updated / stack.deleted
-environment.created / environment.updated / environment.deleted
+environment.created / environment.updated / environment.deleted   # created: also by a clone
+                                  #   (context cloned_from, autodeploy, autodeploy_off_reason, §21.2)
 environment.head_refreshed        # manual head refresh (§9.6) — context: branch, old_sha, new_sha
 environment.inputs_discovered     # discover-inputs created placeholder env variables (§20.3)
 environment.drift_detected / environment.drift_cleared               # §19.4
@@ -539,7 +542,8 @@ run.triggered / run.destroy_triggered / run.command_triggered / run.promoted   #
 run.confirmed ⭐                  # a human confirm, or the system: on autodeploy (context
                                   #   autodeploy), or under a rollout's approval (context via =
                                   #   rollout, rollout_id, approved_by, approved_by_email, §21.5)
-run.discarded / run.canceled      # canceled: a user, or the system when a PR closes (reason pr_closed)
+run.discarded / run.canceled      # canceled: a user, or the system when a PR closes (reason pr_closed);
+                                  #   a rollout's cancel: the canceller, context via = rollout (§21.8)
 run.plan_finished                 # plan-only terminal: empty diff, or a proposed/drift run
 run.applied ⭐ / run.command_executed
 run.apply_failed                  # any failed run, whatever its phase, unless a check failed it —
@@ -550,7 +554,8 @@ run.check_failed                  # a hook check with on_failure=fail failed the
 run.check_warned                  # a job (plan or apply) ended — finished or failed — with warn
                                   #   checks; context: checks (their names), stages (where they ran)
 state.force_unlocked / state.import_session_created   # §11.2, §11.4
-dependency.created / dependency.deleted / dependency.mock_consumed   # created: also via link-by-name
+dependency.created / dependency.deleted / dependency.mock_consumed   # created: also via link-by-name,
+                                  #   or a clone (via = clone, upstream_kind, §21.2)
 cloud_integration.created / cloud_integration.updated / cloud_integration.deleted
 oidc_key.rotated / oidc_key.retired            # issuer signing key (§3.11)
 worker_pool.created / worker_pool.deleted
@@ -1011,7 +1016,8 @@ unprotected environment, with no mock and no `warn` check.
   group, and the rollout plans it in its turn, reading the then-current outputs at claim. If that
   member had already planned (status other than `pending`), the rollout's creator and approver get
   a `rollout_upstream_changed` notification (§17.1) instead of a run planned behind the rollout's
-  back. Rollout runs carry no `run_group_id`: the rollout is their group.
+  back, naming the run that would have been its parent (the rule above). Like any decision of the
+  group, this one is taken once. Rollout runs carry no `run_group_id`: the rollout is their group.
 
 Resolution of inputs at claim time (fresh values), snapshot frozen in `resolved_inputs`.
 
@@ -1705,6 +1711,11 @@ mention | rollout_paused | rollout_succeeded | rollout_failed | rollout_upstream
   user's email local-part or full email) notify the mentioned users. Never the author. The composer
   offers `@` autocomplete from `GET /users/mentionable` (a minimal directory readable by any auth),
   inserting `@<email-local-part>` so it resolves against the parser.
+- **rollouts** (§21.7): `advance_rollout()` notifies the rollout's creator and approver of a pause or
+  a change of pause reason (`rollout_paused`) and of the end (`rollout_succeeded` /
+  `rollout_failed`); the cascade (§9.2) notifies them of an upstream applied under a member that
+  already planned (`rollout_upstream_changed`). A member run is an ordinary run for the
+  `transition()` notifications above (its triggerer is the rollout's creator).
 
 ### 17.2 Live delivery — private per-user channel
 
@@ -2086,11 +2097,13 @@ again, with the new and the previous reason, and notified (`rollout_paused`, §2
 
 ```
 create ──▶ awaiting_approval ──approve──▶ running ⇄ paused ──▶ succeeded | failed
-                 │                          │
+                 │                          │    ▲                              │
+                 │                          │    └──────────── retry ───────────┘
                  └──────── cancel ──────────┴──▶ canceled
 ```
 
-1. **Create** — `POST /api/v1/rollouts {space_id, env_name | environment_ids}` (`writer`). Members:
+1. **Create** — `POST /api/v1/rollouts {space_id?, env_name | environment_ids}` (`writer`;
+   `space_id` defaults to the bootstrap space, as for any create, §3.0). Members:
    the environments named `env_name` in the space (typically the output of a clone), or the explicit
    list (same space). Levels are computed from the edges **between members**; an upstream outside the
    members must already have outputs (or a mock) — the preview says which members will plan on mocks,
@@ -2265,7 +2278,8 @@ them to the rollout page:
 
 ### 21.8 Audit taxonomy additions (extends §6.2)
 
-The exhaustive list (each a `target_kind=rollout` event, except the run ones):
+The exhaustive list (each a `target_kind=rollout` event, except `environment.cloned` — the space —
+and the run ones — the run); a clone's per-item events are the existing actions (§21.2, §6.2):
 
 ```
 environment.cloned          # §21.2 summary (target: the space)

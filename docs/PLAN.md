@@ -222,7 +222,7 @@ The platform becomes an **OIDC issuer** (the same mechanism as GitHub Actions OI
   - used when the upstream has **never produced** the output (bootstrapping a new cascade) or on **proposed runs** if the upstream is not applied
   - a run that has consumed at least one mock is marked `used_mocks: true`: visible badge, **apply forbidden** (validation plan-only) unless explicit opt-in per env
   - solves the chicken-and-egg problem: write `app/dev` and plan its config before `network/dev` has run
-- [ ] Propagation scheduler: topological cascade, policies, multi-parents, stop on failure — *status: done — policies, multi-parent gating within a run group, stop on failure, computed group status (SPECS §9.2)*
+- [x] Propagation scheduler: topological cascade, policies, multi-parents, stop on failure — *status: done — policies, multi-parent gating within a run group, stop on failure, computed group status (SPECS §9.2)*
 - [ ] Run groups + graph view; the cascade never bypasses the protections
 
 **Deliverable: plan `app/dev` with `vpc_id = "vpc-mock00000"` before the first apply of `network/dev`, then a real cascade.**
