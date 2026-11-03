@@ -1,212 +1,303 @@
 # Deploying to AWS
 
-Stackd ships production-ready Terraform/OpenTofu in `deploy/terraform/`. One `tofu apply` creates
-the full AWS stack; a six-step bootstrap sequence gets you to a running instance.
+`deploy/terraform/` is an OpenTofu/Terraform module that deploys Stackd to one AWS account and
+region. The first apply builds the infrastructure. You then push the images, set two secrets by
+hand and apply again with the image digests.
+
+!!! warning "Not validated against AWS yet"
+    The module has not been through `tofu validate` or a real `apply`. The images, the worker
+    agent's drain and the API's TLS and proxy-header handling were tested locally. Treat a first
+    deployment as a trial run.
 
 ## Architecture
 
 ```
-Browser ──HTTPS──▶ CloudFront ──/api/* /worker/* /.well-known/*──▶ VPC Origin ──▶ internal ALB ──▶ ECS API
-                               ──/* (SPA)                         ──▶ S3 (OAC)
+browser ──HTTPS──▶ CloudFront ──┬── /* ─────────────────────────────▶ S3: SPA (Origin Access Control)
+                                └── /api/* /.well-known/* /oidc/* /healthz
+                                      │ HTTPS, VPC origin
+worker hosts (EC2 + Docker) ──HTTPS──▶ internal ALB :443 ──HTTPS──▶ API (ECS Fargate) ──▶ RDS PostgreSQL 18
+   (docker runner: one container                                          ├──▶ S3: states, saved plans (SSE-KMS)
+    per command)                                                          └──▶ KMS: OIDC signing key (kms:Sign)
 ```
 
 | Component | AWS service | Notes |
 |---|---|---|
-| API | ECS Fargate | FastAPI, stateless, scales horizontally |
-| Workers | ECS Fargate | Pull-based, **local runner** (no Docker-in-Docker on Fargate) |
-| Database | RDS PostgreSQL | Encrypted, deletion-protected, optional Multi-AZ |
-| Object storage | S3 | `tfstate`, logs, artifacts + SPA assets (separate bucket) |
-| Secrets | Secrets Manager + KMS | All sensitive config; never in task env vars |
-| TLS | ACM + CloudFront | Certificate in `us-east-1` (CloudFront requirement) |
-| Container registry | ECR | Two repos: `api` and `worker` |
+| API | ECS Fargate | Production image `api/Dockerfile`, which does not contain the dev login. Behind an **internal** ALB |
+| Workers | EC2 Auto Scaling group | Amazon Linux 2023 + Docker. The agent runs with the **`docker` runner**, the only one a production API accepts. Fargate cannot run it: it has no Docker daemon |
+| Database | RDS PostgreSQL **18** | The migrations use the native `uuidv7()`. Encrypted, TLS enforced (`rds.force_ssl`), optional Multi-AZ |
+| Object storage | S3 | `states/`, `artifacts/` (saved plans), `logs/`: SSE-KMS and versioning. The SPA has a separate bucket |
+| Workload OIDC | KMS | An asymmetric RSA key. The API signs workload tokens with `kms:Sign`, and the private key never leaves KMS (SPECS §3.11) |
+| Secrets | Secrets Manager + KMS | None of them is in the state, the plan or a tfvars file (see [Secrets](#secrets)) |
+| TLS | ACM | One certificate for CloudFront (in us-east-1) and one for the internal ALB (in your region) |
+| Registry | ECR | Three repositories: `api`, `worker`, `runner`. Tags are immutable and images are deployed **by digest** |
 
-The ALB is **internal** — it has no public IP. CloudFront reaches it through a **VPC Origin**
-(CloudFront creates ENIs in your private subnets). Nothing in the architecture requires a public
-load balancer or static cloud credentials.
+**Every hop uses TLS.** CloudFront reaches the internal ALB through a VPC origin over HTTPS, and
+checks the ALB's ACM certificate for `internal_domain_name`. Workers connect to that same name
+over HTTPS. The ALB has no plain-HTTP listener. It forwards to the API tasks over HTTPS too:
+the image generates a self-signed certificate at startup. The ALB does not verify target
+certificates, so this last hop is encrypted but not authenticated. The security groups only let
+the ALB reach the tasks.
 
-!!! warning "Fargate runner"
-    Fargate has no Docker daemon, so workers run with `STACKD_RUNNER=local`. The tools
-    (`tofu`/`terraform`, `tfsec`, `infracost`, `jq`) must be bundled in your worker image.
-    If you need full container isolation per run, use an ECS cluster on EC2 with Docker available
-    and set `STACKD_RUNNER=docker` in the worker environment variables.
+**Public routes:** `/api/*` (REST, WebSocket, Google callback), `/.well-known/*` and `/oidc/*`
+(the workload issuer's discovery document and JWKS, which AWS STS fetches), and `/healthz`.
+`/worker/*` and `/state/v1/*` are **not public**. Workers run inside the VPC and use the internal
+URL for both. External workers outside the VPC are not supported by this module.
+
+**Client IPs.** The API trusts `X-Forwarded-For` only from the private subnets, where the ALB
+nodes and CloudFront's VPC origin interfaces live (uvicorn `--proxy-headers`,
+`FORWARDED_ALLOW_IPS`). The audit `ip` field and the rate limiter therefore see the browser's
+address. Workers run in their own subnets, so a job container cannot pose as another client by
+forging the header.
 
 ## Prerequisites
 
-- Terraform or OpenTofu ≥ 1.10
-- AWS CLI configured (`aws configure` or environment variables)
-- An AWS account with permissions to create IAM roles, ECS, RDS, S3, CloudFront, Secrets Manager
-- *(Recommended)* A custom domain with a Route 53 hosted zone
+- **OpenTofu ≥ 1.11** (or Terraform ≥ 1.11). The module needs ephemeral resources and write-only
+  arguments.
+- AWS CLI v2, Docker with `buildx`, `pnpm` (through corepack), and bash.
+- A domain you control, for example `stackd.acme.com`. Ideally it is in a public Route 53 zone.
+  The domain is **required**: its URL is the OIDC issuer that your cloud accounts trust, so it
+  must not change. A `*.cloudfront.net` name changes whenever the distribution is replaced.
+- A Google OAuth client (Google Cloud Console → APIs & Services → Credentials → OAuth client ID,
+  type "Web application"). Google is the only way to sign in to a production API: the dev login
+  is not in the production image.
 
-## Quick start
+## Bootstrap
+
+The examples are in `deploy/terraform/examples/` (`minimal`, `production`):
 
 ```bash
 cd deploy/terraform/examples/minimal
-cp terraform.tfvars.example terraform.tfvars
-# set aws_region at minimum — see variable reference below
+cp terraform.tfvars.example terraform.tfvars   # domain_name, route53_zone_id, google_*
 tofu init
+```
+
+Set `google_allowed_domains` to your Workspace domain(s). The module refuses an empty list,
+because an empty allowlist would admit **any** Google account, and the first account to sign in
+becomes admin.
+
+### 1. Infrastructure
+
+```bash
 tofu apply
 ```
 
-The first apply creates all infrastructure. ECS tasks will fail to start because no images are
-pushed yet — that is expected. Proceed with the bootstrap sequence below.
+Leave `api_image` unset for this apply. It creates the network, RDS, the buckets, KMS, the
+secrets, ECR, the ALB, CloudFront and the certificates. It creates no ECS service, no migration
+and no worker.
 
-## Bootstrap sequence
+!!! note "Without a Route 53 zone (two steps)"
+    The certificates must be validated before the ALB and CloudFront can use them. Run this
+    first:
 
-### 1 — Push container images
+    ```bash
+    tofu apply -target=module.stackd.module.certificates
+    tofu output acm_validation_records    # or: aws acm describe-certificate
+    ```
 
-After `tofu apply`, two ECR repositories are ready:
+    Create the CNAME records it lists with your DNS provider, then run the full `tofu apply`. It
+    waits until the certificates are issued. Afterwards, create the two records listed in
+    `tofu output dns_records`:
 
-```bash
-# Authenticate to ECR
-aws ecr get-login-password --region $REGION | \
-  docker login --username AWS --password-stdin \
-  $(tofu output -raw ecr_api_repository_url | cut -d/ -f1)
+    - `domain_name` → the CloudFront domain
+    - `internal_domain_name` → the internal ALB, which has private addresses
 
-# Build and push
-docker build -t $(tofu output -raw ecr_api_repository_url):latest api/
-docker push $(tofu output -raw ecr_api_repository_url):latest
+    You can also skip ACM here and pass your own validated certificates through
+    `certificate_arn` (us-east-1) and `internal_certificate_arn` (your region).
 
-docker build -t $(tofu output -raw ecr_worker_repository_url):latest worker/
-docker push $(tofu output -raw ecr_worker_repository_url):latest
+### 2. Images
 
-# Re-apply to update the ECS task definitions
-tofu apply \
-  -var "api_image=$(tofu output -raw ecr_api_repository_url):latest" \
-  -var "worker_image=$(tofu output -raw ecr_worker_repository_url):latest"
-```
-
-### 2 — Set up Google OIDC (recommended)
-
-!!! note "Skip for now"
-    You can complete the bootstrap without Google OIDC and add it later. When both
-    `google_client_id` and `google_client_secret` are empty, only the dev login is available —
-    **do not leave dev login enabled on a production instance**.
-
-1. Go to [Google Cloud Console → APIs & Services → Credentials](https://console.cloud.google.com/apis/credentials).
-2. Create an **OAuth 2.0 Client ID** → Web application.
-3. Add the redirect URI shown by Stackd:
-   ```bash
-   tofu output google_oauth_redirect_uri
-   # e.g. https://stackd.acme.com/api/v1/auth/google/callback
-   ```
-4. Apply with the credentials:
-   ```bash
-   tofu apply \
-     -var "google_client_id=<client-id>" \
-     -var "google_client_secret=<client-secret>" \
-     -var "google_allowed_domains=acme.com"
-   ```
-
-### 3 — Custom domain (if not set from the start)
-
-If you did not set `domain_name` on the first apply, the instance runs on the CloudFront default
-domain (`*.cloudfront.net`). To switch to a custom domain later:
+Build the images and push them to the ECR repositories from `tofu output ecr_repository_urls`:
 
 ```bash
-tofu apply -var "domain_name=stackd.acme.com" -var "route53_zone_id=Z123..."
+REGISTRY=$(tofu output -json ecr_repository_urls | jq -r .api | cut -d/ -f1)
+aws ecr get-login-password | docker login --username AWS --password-stdin "$REGISTRY"
+
+API=$(tofu output -json ecr_repository_urls | jq -r .api)
+WORKER=$(tofu output -json ecr_repository_urls | jq -r .worker)
+RUNNER=$(tofu output -json ecr_repository_urls | jq -r .runner)
+V=$(git rev-parse --short HEAD)
+
+docker buildx build -f api/Dockerfile --platform linux/amd64 -t "$API:$V" --push api
+docker buildx build -f worker/Dockerfile --platform linux/amd64 -t "$WORKER:$V" --push worker
+docker buildx build -f deploy/images/opentofu.Dockerfile --build-arg OPENTOFU_VERSION=1.12.2 \
+  --platform linux/amd64 -t "$RUNNER:opentofu-1.12.2" --push .
 ```
 
-If your DNS is not in Route 53, `tofu output acm_validation_records` gives the CNAME records to
-create manually. Apply a second time once the certificate is validated.
-
-### 4 — Log in and create a worker pool
-
-Open `tofu output -raw public_url` in a browser, log in, then navigate to
-**Settings → Workers → New pool**. Copy the token — it is shown only once.
-
-### 5 — Register the worker pool token
+Then get the digests. The module accepts nothing else, and tags are immutable:
 
 ```bash
-tofu apply -var "worker_pool_token=wpt_..."
+aws ecr describe-images --repository-name stackd-api --image-ids imageTag=$V \
+  --query 'imageDetails[0].imageDigest' --output text
 ```
 
-This stores the token in Secrets Manager and injects it into the worker ECS task. Workers will
-register with the API automatically within a minute (ECS task replacement).
+### 3. Secrets set by hand
 
-### 6 — Verify
+Two values come from outside AWS. You put them into Secrets Manager yourself, so they never
+appear in the state or in a tfvars file.
 
-On the **Workers & health** page, one or more workers should appear as `online`. Create a stack,
-trigger a plan, and watch the run page light up.
+```bash
+# Google OAuth client secret. Must be set before the API starts.
+aws secretsmanager put-secret-value \
+  --secret-id "$(tofu output -raw google_client_secret_arn)" --secret-string 'GOCSPX-…'
+```
 
----
+Register `tofu output google_oauth_redirect_uri` as an authorized redirect URI of the Google
+OAuth client.
 
-## Variable reference
-
-| Variable | Default | Description |
-|---|---|---|
-| `name` | `"stackd"` | Name prefix for all resources |
-| `aws_region` | — | AWS region |
-| `availability_zones` | — | AZ list (min 2) |
-| `domain_name` | `null` | Custom domain; null = CloudFront default |
-| `route53_zone_id` | `null` | Route 53 zone for automated DNS + cert validation |
-| `certificate_arn` | `null` | BYO ACM certificate (us-east-1); overrides `domain_name` |
-| `google_client_id` | `""` | Google OAuth Client ID |
-| `google_client_secret` | `""` | Google OAuth Client Secret |
-| `google_allowed_domains` | `""` | Comma-separated `hd` allowlist (e.g. `"acme.com"`) |
-| `worker_pool_token` | `""` | Pool token from step 4 |
-| `db_instance_class` | `db.t4g.medium` | RDS instance class |
-| `db_multi_az` | `false` | Enable Multi-AZ standby |
-| `api_cpu` / `api_memory` | `512` / `1024` | ECS task sizing for the API |
-| `worker_cpu` / `worker_memory` | `1024` / `2048` | ECS task sizing per worker |
-| `worker_desired_count` | `1` | Initial number of workers |
-| `worker_autoscaling_enabled` | `false` | Enable Application Auto Scaling |
-| `worker_autoscaling_min_count` | `1` | Autoscaling floor |
-| `worker_autoscaling_max_count` | `10` | Autoscaling ceiling |
-| `worker_autoscaling_cpu_target` | `70` | CPU % target for the scaling policy |
-| `api_image` / `worker_image` | *(ECR latest)* | Full image URI; set after pushing |
-| `tags` | `{}` | Extra tags on all resources |
-
-## Examples
-
-Two ready-to-use examples are in `deploy/terraform/examples/`:
-
-**`minimal/`** — single region, two AZs, `db.t4g.micro`, `256` CPU / `512` MB API. For evaluation
-and small teams. No autoscaling.
-
-**`production/`** — three AZs, `db.r8g.large` Multi-AZ, `1024` CPU / `2048` MB API × 2,
-`2048` CPU / `4096` MB workers with autoscaling (min 2, max 20, CPU target 70%).
-
-## Autoscaling workers
-
-When `worker_autoscaling_enabled = true`, Stackd configures an Application Auto Scaling
-TargetTracking policy on the worker ECS service:
-
-- **Metric**: `ECSServiceAverageCPUUtilization`
-- **Scale out**: within 60s when CPU exceeds the target — keeps the job queue from building up
-- **Scale in**: after 300s below the target — conservative to avoid thrashing
-
-The environment is the unit of parallelism (one active run per environment). Adding workers beyond
-the number of environments with queued work does not increase throughput — they will idle. See
-[Workers & scaling](workers-and-scaling.md#scale) for the full picture.
-
-## State backend
-
-Stackd's own `tfstate` is in S3. Set up a remote backend before collaborating:
+### 4. API
 
 ```hcl
-# In examples/production/main.tf, uncomment:
-backend "s3" {
-  bucket = "my-tfstate-bucket"
-  key    = "stackd/production/terraform.tfstate"
-  region = "eu-west-1"
-}
+# terraform.tfvars
+api_image = "123456789012.dkr.ecr.eu-west-1.amazonaws.com/stackd-api@sha256:…"
 ```
 
-Run `tofu init -migrate-state` after adding the backend to move the local state to S3.
+```bash
+tofu apply
+```
+
+This apply runs the **migration task** before the service starts. The task runs
+`alembic upgrade head`, then `python -m app.seed --base`, which creates the `default` space and
+the tier catalog. The task is started with bash and the AWS CLI from the machine that runs
+`tofu`, and the apply waits for it to succeed. If you set `run_migrations = false`, run
+`tofu output -raw migrate_command` yourself before the service rolls.
+
+Publish the front:
+
+```bash
+deploy/terraform/scripts/publish-spa.sh "$(tofu output -raw spa_bucket)" \
+  "$(tofu output -raw cloudfront_distribution_id)"
+```
+
+Open `tofu output public_url` and sign in with Google. **The first account to sign in becomes
+admin**, so sign in yourself before anyone else can.
+
+### 5. Workers
+
+1. In Stackd, open **Workers** and create a pool. Copy the token: it is shown once and is
+   43 URL-safe characters. Put it into Secrets Manager:
+
+   ```bash
+   aws secretsmanager put-secret-value \
+     --secret-id "$(tofu output -raw worker_pool_token_secret_arn)" --secret-string '<token>'
+   ```
+
+2. Add the worker images and apply:
+
+   ```hcl
+   worker_image  = "…/stackd-worker@sha256:…"
+   runner_images = { "opentofu:1.12.2" = "…/stackd-runner@sha256:…" }
+   ```
+
+The hosts start, wait for the pool token, pull the images by digest and register. A worker only
+takes runs whose stack's `tool_version` has an entry in `runner_images`.
+
+### 6. Check
+
+- `https://<domain>/healthz` returns `{"status":"ok"}`.
+- `https://<domain>/.well-known/openid-configuration` lists `jwks_uri = https://<domain>/oidc/jwks`,
+  and that URL serves the JWKS (JSON, not the SPA).
+- **Workers** shows the hosts online, with the `docker` runner.
+- A demo plan → confirm → apply goes through.
+
+## Secrets
+
+| Secret | Created by | Rotation |
+|---|---|---|
+| `STACKD_ENCRYPTION_KEY` | 32 random bytes, generated as an ephemeral value and written **write-only** | **Never.** Everything encrypted in the database depends on it, and there is no re-encryption tool. The module protects it with `prevent_destroy` |
+| `STACKD_JWT_SECRET` | ephemeral random value, write-only | Bump `jwt_secret_version` and apply, then redeploy the API (`aws ecs update-service --force-new-deployment`). Every user is signed out |
+| Database password, `DATABASE_URL` | ephemeral random value, written write-only to Secrets Manager. RDS and `DATABASE_URL` (`?ssl=require`) both read it back from there | Bump `db_password_version`, apply, redeploy the API |
+| `GOOGLE_CLIENT_SECRET` | you (`put-secret-value`) | Put a new value, redeploy the API |
+| Worker pool token | you (`put-secret-value`) | Delete the pool and create a new one in Stackd. Put the new token, then start an instance refresh on the worker group |
+
+The state holds no secret value, but it still maps the whole deployment. Keep it in an
+encrypted, versioned bucket with locking, as the production example's backend does
+(`encrypt = true`, `use_lockfile = true`).
+
+The ECS execution role reads only the API's four secrets. The worker instance role reads only
+the pool token. The API task role can reach the artifacts bucket and the KMS keys (data key
+through S3; `kms:Sign` and `kms:GetPublicKey` on the OIDC key), nothing else. RDS-managed master
+passwords (`manage_master_user_password`) are not used: they rotate every 7 days by default, and
+the API reads `DATABASE_URL` once, at startup.
+
+## Workers on EC2
+
+Each host is an Amazon Linux 2023 instance in the worker subnets. It runs two units:
+
+- `stackd-worker`: the agent container (`worker/Dockerfile`, `STACKD_RUNNER=docker`). It mounts
+  the Docker socket and `/var/lib/stackd/ws` at the same path on the host and in the container.
+  Each tofu command and each hook runs in its own hardened container (SPECS §7.4).
+- `stackd-lifecycle`: on scale-in or replacement, it stops the agent, which drains, then
+  completes the Auto Scaling termination hook.
+
+**Containment.** The host keeps what job containers (repo code) can reach to a minimum:
+
+- IMDSv2 only, hop limit 1, and the metadata address is also dropped at the Docker bridge. Job
+  containers cannot get the instance role.
+- The instance role only pulls the Stackd images, reads the pool token, writes the agent's logs
+  and completes its own termination hook. It has no database, S3 or signing access: workers
+  reach states and saved plans through the API.
+- There is no inbound rule. Shell access through Session Manager is off by default
+  (`worker_enable_ssm`).
+
+The Docker socket is root on the host. Treat the worker hosts as dedicated, and use runner images
+you trust.
+
+**Scaling and rollouts.** The group has a fixed size, `worker_count`. Change the count and apply
+to scale. There is no CPU-based autoscaling, because workers waiting on the claim long-poll use
+almost no CPU even when the queue is full (see
+[Workers & scaling](workers-and-scaling.md#autoscaling-on-aws)). A new launch template triggers
+an instance refresh, new hosts first. That happens on a new worker or runner image digest, a new
+AMI or new settings. A host that leaves the group receives SIGTERM. The agent stops claiming and
+lets its running jobs finish, for up to `worker_shutdown_timeout_seconds` (default 1800 s,
+above the 900 s apply budget). Only then does the instance terminate. Past that budget, the
+agent reports the jobs still running as failed and kills them.
 
 ## Upgrading
 
-Stackd uses `deletion_protection = true` on the RDS instance. Destructive schema changes require
-disabling it temporarily:
+1. Build and push the new images, then take their digests.
+2. Set `api_image` (and `worker_image` if it changed) and apply. Migrations run first, then the
+   ECS service rolls (with circuit breaker and rollback). The worker group then refreshes, and
+   draining hosts finish their jobs.
+3. Run `scripts/publish-spa.sh` if the front changed.
 
-```bash
-tofu apply -var "..." # normal upgrade — no action needed for most changes
-```
+Migrations must stay compatible with the API version that is still running during the roll.
 
-For a major Postgres version upgrade, see the [RDS upgrade guide](https://docs.aws.amazon.com/AmazonRDS/latest/UserGuide/USER_UpgradeDBInstance.PostgreSQL.html).
+## Tearing down
+
+`db_deletion_protection` and `alb_deletion_protection` default to `true`, and the master key is
+`prevent_destroy`. To destroy a deployment on purpose:
+
+1. Set both deletion protections to `false` and apply.
+2. Remove the master key from the state:
+
+   ```bash
+   tofu state rm 'module.stackd.module.secrets.aws_secretsmanager_secret_version.encryption_key' \
+     'module.stackd.module.secrets.aws_secretsmanager_secret.encryption_key'
+   ```
+
+3. Run `tofu destroy`.
+4. Delete the encryption key secret yourself (`aws secretsmanager delete-secret`) once you no
+   longer need the database snapshot.
+
+## Known limitations
+
+- **Not validated against AWS yet.** No `tofu validate` or `plan` has been run against this
+  module (see the note at the top).
+- **One region, one account.** Cross-region DR is not covered (RDS snapshots and S3 replication
+  are up to you).
+- **No WAF** in front of CloudFront. Attach one to the distribution if you need it.
+- **The last hop, ALB → API task, is encrypted but not authenticated** (self-signed certificate,
+  which the ALB does not verify).
+- **External workers** outside the VPC are not supported: the worker protocol and the state
+  backend are not routed through CloudFront.
+- **The migration runs from the operator's machine** (bash + AWS CLI). Set
+  `run_migrations = false` to run `migrate_command` from CI instead.
+- The worker AMI follows the latest Amazon Linux 2023 release unless you set `worker_ami_id`. A
+  new AMI rolls the hosts on the next apply.
 
 ## See also
 
 - [Workers & scaling](workers-and-scaling.md)
 - [Cloud credentials (OIDC)](cloud-credentials.md)
-- [Exit & data portability](leaving.md) — how to migrate away
+- [`deploy/images/`](https://github.com/fmiquel90/stackd/tree/main/deploy/images): the runner images
+- [DEV §3](../DEV.md): why the dev login is not in the production image
