@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { RolloutMember } from "@/api/resources";
-import { MEMBER_STATUS, ROLLOUT_STATE, byLevel, progress, summaryText } from "./rolloutModel";
+import { MEMBER_STATUS, ROLLOUT_STATE, byLevel, memberLook, progress, summaryText } from "./rolloutModel";
 
 const member = (over: Partial<RolloutMember>): RolloutMember => ({
   environment_id: "e",
@@ -33,6 +33,12 @@ describe("rollout model", () => {
     expect(summaryText(member({}))).toBeNull();
     expect(summaryText(member({ plan_summary: { add: 3, change: 0, destroy: 0 } }))).toBe("+3 ~0 -0");
     expect(summaryText(member({ plan_summary: { add: 1, import: 2 } }))).toBe("+1 ~0 -0 ⇣2");
+  });
+
+  it("shows a pending member as not started before the approval and at level 0", () => {
+    expect(memberLook(member({ level: 1 }), "awaiting_approval").label).toBe("not started");
+    expect(memberLook(member({ level: 0 }), "running").label).toBe("not started");
+    expect(memberLook(member({ level: 1 }), "running").label).toBe("waiting for its upstreams");
   });
 
   it("counts progress", () => {

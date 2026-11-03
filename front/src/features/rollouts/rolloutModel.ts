@@ -30,6 +30,16 @@ export const PAUSE_REASON: Record<NonNullable<Rollout["pause_reason"]>, string> 
   approver_lost_rights: "the approver may no longer apply on a member: approve again",
 };
 
+/** A member's look; before the approval, a pending member is simply not started yet. */
+export function memberLook(
+  m: RolloutMember,
+  state: RolloutState,
+): { label: string; tone: Tone; glyph: string } {
+  if (m.status === "pending" && (state === "awaiting_approval" || m.level === 0))
+    return { label: "not started", tone: "queued", glyph: "○" };
+  return MEMBER_STATUS[m.status];
+}
+
 /** Members grouped by topological level, level 0 first. */
 export function byLevel(members: RolloutMember[]): RolloutMember[][] {
   const levels: RolloutMember[][] = [];

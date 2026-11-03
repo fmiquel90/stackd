@@ -8,7 +8,7 @@ import { Button } from "@/ui/Button";
 import { ConfirmPopover } from "@/ui/ConfirmPopover";
 import { TypeNameDialog } from "@/ui/TypeNameDialog";
 import { Badge, Banner, EmptyState, RelativeTime, Skeleton } from "@/ui/primitives";
-import { MEMBER_STATUS, PAUSE_REASON, ROLLOUT_STATE, byLevel, progress, summaryText } from "./rolloutModel";
+import { PAUSE_REASON, ROLLOUT_STATE, byLevel, memberLook, progress, summaryText } from "./rolloutModel";
 
 // A rollout (SPECS §21, DESIGN §5.11): the members level by level, why each one waits, and the one
 // decision the page exists for — the approval.
@@ -159,7 +159,7 @@ export function RolloutPage() {
             </h2>
             <ul className="flex flex-col gap-2">
               {level.map((m) => {
-                const st = MEMBER_STATUS[m.status];
+                const st = memberLook(m, r.state);
                 const sum = summaryText(m);
                 return (
                   <li key={m.environment_id} className="rounded-base border border-line bg-surface px-3 py-2">
