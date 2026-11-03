@@ -105,6 +105,14 @@ async def transition(
             409, "Illegal transition", f"{from_state.value} → {to_state.value} is not allowed."
         )
 
+    # Lock order (§21.3): a rollout member's run locks its rollout BEFORE its own row, as the
+    # rollout's own paths do (approve, cancel, retry: the rollout, then its runs) — so a worker
+    # claim or event, a human confirm and a cancel never wait on each other in a cycle.
+    if run.rollout_id is not None:
+        from app.rollouts.service import lock_rollout
+
+        await lock_rollout(session, run.rollout_id)
+
     # Guarded, atomic: lock the row and re-check the state we believe we are leaving.
     locked = (
         await session.execute(

@@ -4,7 +4,7 @@ import json
 from datetime import UTC, datetime
 
 from sqlalchemy import select, text
-from sqlalchemy.exc import IntegrityError
+from sqlalchemy.exc import DBAPIError, IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import get_settings
@@ -22,6 +22,7 @@ from app.enums import (
 from app.errors import ProblemException
 from app.models.environment import Environment
 from app.models.oidc import CloudIntegration
+from app.models.rollout import EnvRollout
 from app.models.run import Run
 from app.models.stack import Stack
 from app.models.tier import Tier
@@ -38,6 +39,9 @@ from app.workers.tools import SQL_WORKER_CAN_RUN
 # Derived from ACTIVE_STATES so the claim guard can never drift from the one_active_run_per_env
 # index / the enum (a past bug: `running` was added to both but not here).
 _ACTIVE_SQL = ", ".join(f"'{s.value}'" for s in ACTIVE_STATES)
+# SQLSTATEs on which a claim gives way: lock_not_available, deadlock_detected,
+# serialization_failure.
+_RETRYABLE = frozenset({"55P03", "40P01", "40001"})
 
 # Candidate selection (SPECS §7.2). FOR UPDATE OF e SKIP LOCKED serializes claims per environment;
 # the one_active_run_per_env unique index (caught as 23505 below) is the real correctness guard.
@@ -89,6 +93,14 @@ async def claim_one(session: AsyncSession, worker: Worker, affinity_seconds: int
     assert run is not None
     target = RunState.preparing if run.state == RunState.queued else RunState.applying
     try:
+        if run.rollout_id is not None:
+            # The rollout's lock comes before the run's (§21.3), and a claim, holding its env's
+            # row, never waits for it: a rollout busy right now is claimed at a later poll.
+            await session.execute(
+                select(EnvRollout.id)
+                .where(EnvRollout.id == run.rollout_id)
+                .with_for_update(nowait=True)
+            )
         await transition(
             session,
             run,
@@ -99,6 +111,13 @@ async def claim_one(session: AsyncSession, worker: Worker, affinity_seconds: int
         )
     except (ProblemException, IntegrityError):
         # Lost the race (another worker won, or one_active_run_per_env 23505) → nothing to claim.
+        await session.rollback()
+        return None
+    except DBAPIError as exc:
+        # A lock not available now (55P03), a deadlock (40P01) or a serialization failure: the
+        # claim gives way, the worker polls again — never a 500.
+        if getattr(exc.orig, "sqlstate", None) not in _RETRYABLE:
+            raise
         await session.rollback()
         return None
     # Claim latency (§H): how long the run waited in queue before a worker picked it up.
