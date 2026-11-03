@@ -2,8 +2,8 @@ output "vpc_id" {
   value = aws_vpc.this.id
 }
 
-output "public_subnet_ids" {
-  value = aws_subnet.public[*].id
+output "vpc_cidr" {
+  value = aws_vpc.this.cidr_block
 }
 
 output "private_subnet_ids" {
@@ -14,6 +14,10 @@ output "private_subnet_cidrs" {
   value = local.private_cidrs
 }
 
-output "vpc_cidr" {
-  value = aws_vpc.this.cidr_block
+output "worker_subnet_ids" {
+  value = aws_subnet.worker[*].id
+}
+
+output "worker_subnet_cidrs" {
+  value = local.worker_cidrs
 }

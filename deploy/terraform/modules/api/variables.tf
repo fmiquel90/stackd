@@ -2,13 +2,31 @@ variable "name" {
   type = string
 }
 
+variable "region" {
+  type = string
+}
+
+variable "enabled" {
+  description = "Create the task definitions, the migration and the service (false on the bootstrap apply)."
+  type        = bool
+}
+
 variable "vpc_id" {
   type = string
 }
 
 variable "subnet_ids" {
-  description = "Private subnets for ECS tasks and the internal ALB"
+  description = "Private subnets: the internal ALB and the API tasks."
   type        = list(string)
+}
+
+variable "certificate_arn" {
+  description = "Validated ACM certificate of the internal hostname (HTTPS listener)."
+  type        = string
+}
+
+variable "alb_deletion_protection" {
+  type = bool
 }
 
 variable "execution_role_arn" {
@@ -20,37 +38,40 @@ variable "task_role_arn" {
 }
 
 variable "image" {
-  type = string
+  type    = string
+  default = null
 }
 
 variable "cpu" {
-  type    = number
-  default = 512
+  type = number
 }
 
 variable "memory" {
-  type    = number
-  default = 1024
+  type = number
 }
 
-variable "desired_count" {
-  type    = number
-  default = 1
-}
-
-variable "aws_region" {
+variable "cpu_architecture" {
   type = string
 }
 
-variable "environment_variables" {
-  description = "Non-sensitive environment variables for the API container"
+variable "desired_count" {
+  type = number
+}
+
+variable "environment" {
+  description = "Plain environment variables of the API container."
   type        = map(string)
-  default     = {}
 }
 
 variable "secrets" {
-  description = "Sensitive environment variables injected from Secrets Manager. Map of ENV_VAR_NAME → secret ARN (with optional :key:: suffix for JSON secrets)"
+  description = "Environment variables injected from Secrets Manager: NAME → secret ARN."
   type        = map(string)
-  default     = {}
-  sensitive   = true
+}
+
+variable "run_migrations" {
+  type = bool
+}
+
+variable "log_retention_days" {
+  type = number
 }

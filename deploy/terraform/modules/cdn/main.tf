@@ -1,49 +1,35 @@
+# CloudFront in front of everything:
+#   default            → the SPA bucket (Origin Access Control)
+#   /api/*             → the API (REST, WebSocket /api/v1/ws, Google OAuth callback)
+#   /.well-known/*     → the API (OIDC discovery of the workload issuer)
+#   /oidc/*            → the API (JWKS: the discovery's jwks_uri, fetched by AWS STS)
+#   /healthz           → the API
+# The worker protocol (/worker/*) and the state backend (/state/v1/*) are NOT public: workers run
+# in the VPC and reach the internal ALB directly (STACKD_INTERNAL_URL).
+#
+# The API origin is the internal ALB through a CloudFront VPC origin, over HTTPS: CloudFront
+# connects to internal_domain_name and verifies the ALB's ACM certificate for it.
+
 locals {
-  use_custom_domain   = var.domain_name != null
-  use_existing_cert   = var.certificate_arn != null
-  use_r53_validation  = local.use_custom_domain && !local.use_existing_cert && var.route53_zone_id != null
-  create_cert         = local.use_custom_domain && !local.use_existing_cert
-
-  resolved_cert_arn = local.use_existing_cert ? var.certificate_arn : (
-    local.create_cert ? aws_acm_certificate_validation.this[0].certificate_arn : null
-  )
+  api_paths = ["/api/*", "/.well-known/*", "/oidc/*", "/healthz"]
 }
 
-# ── ACM certificate (us-east-1 required for CloudFront) ────────────────────────
-
-resource "aws_acm_certificate" "this" {
-  count    = local.create_cert ? 1 : 0
-  provider = aws.us_east_1
-
-  domain_name       = var.domain_name
-  validation_method = "DNS"
-
-  lifecycle {
-    create_before_destroy = true
-  }
+data "aws_cloudfront_cache_policy" "disabled" {
+  name = "Managed-CachingDisabled"
 }
 
-resource "aws_route53_record" "cert_validation" {
-  count = local.use_r53_validation ? 1 : 0
-
-  zone_id = var.route53_zone_id
-  name    = tolist(aws_acm_certificate.this[0].domain_validation_options)[0].resource_record_name
-  type    = tolist(aws_acm_certificate.this[0].domain_validation_options)[0].resource_record_type
-  records = [tolist(aws_acm_certificate.this[0].domain_validation_options)[0].resource_record_value]
-  ttl     = 60
+data "aws_cloudfront_cache_policy" "optimized" {
+  name = "Managed-CachingOptimized"
 }
 
-resource "aws_acm_certificate_validation" "this" {
-  count    = local.create_cert ? 1 : 0
-  provider = aws.us_east_1
-
-  certificate_arn = aws_acm_certificate.this[0].arn
-  validation_record_fqdns = local.use_r53_validation ? [
-    aws_route53_record.cert_validation[0].fqdn
-  ] : []
+# Every viewer header, cookie and query string, except Host: the origin sees internal_domain_name.
+data "aws_cloudfront_origin_request_policy" "all_viewer_except_host" {
+  name = "Managed-AllViewerExceptHostHeader"
 }
 
-# ── CloudFront VPC Origin (internal ALB) ───────────────────────────────────────
+data "aws_cloudfront_response_headers_policy" "security_headers" {
+  name = "Managed-SecurityHeadersPolicy"
+}
 
 resource "aws_cloudfront_vpc_origin" "api" {
   vpc_origin_endpoint_config {
@@ -51,52 +37,50 @@ resource "aws_cloudfront_vpc_origin" "api" {
     arn                    = var.alb_arn
     http_port              = 80
     https_port             = 443
-    origin_protocol_policy = "http-only"
+    origin_protocol_policy = "https-only"
+
+    origin_ssl_protocols {
+      items    = ["TLSv1.2"]
+      quantity = 1
+    }
   }
 }
-
-# ── CloudFront distribution ────────────────────────────────────────────────────
 
 resource "aws_cloudfront_distribution" "this" {
   enabled             = true
   is_ipv6_enabled     = true
+  http_version        = "http2and3"
   comment             = var.name
   default_root_object = "index.html"
   price_class         = var.price_class
+  aliases             = [var.domain_name]
 
-  aliases = local.use_custom_domain ? [var.domain_name] : []
-
-  # S3 origin for SPA assets
   origin {
     origin_id                = "spa"
     domain_name              = var.spa_bucket_regional_domain_name
     origin_access_control_id = var.spa_oac_id
   }
 
-  # Internal ALB via VPC Origin
   origin {
     origin_id   = "api"
-    domain_name = var.alb_dns_name
+    domain_name = var.internal_domain_name
 
     vpc_origin_config {
       vpc_origin_id            = aws_cloudfront_vpc_origin.api.id
       origin_keepalive_timeout = 60
-      origin_read_timeout      = 60
+      # Above the claim long-poll; CloudFront's default quota is 60 s.
+      origin_read_timeout = 60
     }
   }
 
-  # Default behavior → SPA (S3)
   default_cache_behavior {
-    target_origin_id       = "spa"
-    viewer_protocol_policy = "redirect-to-https"
-    allowed_methods        = ["GET", "HEAD", "OPTIONS"]
-    cached_methods         = ["GET", "HEAD"]
-    compress               = true
-
-    forwarded_values {
-      query_string = false
-      cookies { forward = "none" }
-    }
+    target_origin_id           = "spa"
+    viewer_protocol_policy     = "redirect-to-https"
+    allowed_methods            = ["GET", "HEAD", "OPTIONS"]
+    cached_methods             = ["GET", "HEAD"]
+    compress                   = true
+    cache_policy_id            = data.aws_cloudfront_cache_policy.optimized.id
+    response_headers_policy_id = data.aws_cloudfront_response_headers_policy.security_headers.id
 
     function_association {
       event_type   = "viewer-request"
@@ -104,87 +88,24 @@ resource "aws_cloudfront_distribution" "this" {
     }
   }
 
-  # API + WebSocket — no cache, all methods, all headers/cookies forwarded
-  ordered_cache_behavior {
-    path_pattern           = "/api/*"
-    target_origin_id       = "api"
-    viewer_protocol_policy = "redirect-to-https"
-    allowed_methods        = ["DELETE", "GET", "HEAD", "OPTIONS", "PATCH", "POST", "PUT"]
-    cached_methods         = ["GET", "HEAD"]
-    compress               = false
-
-    forwarded_values {
-      query_string = true
-      headers      = ["*"]
-      cookies { forward = "all" }
+  dynamic "ordered_cache_behavior" {
+    for_each = local.api_paths
+    content {
+      path_pattern             = ordered_cache_behavior.value
+      target_origin_id         = "api"
+      viewer_protocol_policy   = "https-only"
+      allowed_methods          = ["DELETE", "GET", "HEAD", "OPTIONS", "PATCH", "POST", "PUT"]
+      cached_methods           = ["GET", "HEAD"]
+      compress                 = true
+      cache_policy_id          = data.aws_cloudfront_cache_policy.disabled.id
+      origin_request_policy_id = data.aws_cloudfront_origin_request_policy.all_viewer_except_host.id
     }
-
-    min_ttl     = 0
-    default_ttl = 0
-    max_ttl     = 0
-  }
-
-  ordered_cache_behavior {
-    path_pattern           = "/worker/*"
-    target_origin_id       = "api"
-    viewer_protocol_policy = "redirect-to-https"
-    allowed_methods        = ["DELETE", "GET", "HEAD", "OPTIONS", "PATCH", "POST", "PUT"]
-    cached_methods         = ["GET", "HEAD"]
-    compress               = false
-
-    forwarded_values {
-      query_string = true
-      headers      = ["*"]
-      cookies { forward = "all" }
-    }
-
-    min_ttl     = 0
-    default_ttl = 0
-    max_ttl     = 0
-  }
-
-  # OIDC discovery docs — short cache (5 min)
-  ordered_cache_behavior {
-    path_pattern           = "/.well-known/*"
-    target_origin_id       = "api"
-    viewer_protocol_policy = "redirect-to-https"
-    allowed_methods        = ["GET", "HEAD"]
-    cached_methods         = ["GET", "HEAD"]
-    compress               = true
-
-    forwarded_values {
-      query_string = false
-      cookies { forward = "none" }
-    }
-
-    min_ttl     = 0
-    default_ttl = 300
-    max_ttl     = 300
-  }
-
-  ordered_cache_behavior {
-    path_pattern           = "/healthz"
-    target_origin_id       = "api"
-    viewer_protocol_policy = "redirect-to-https"
-    allowed_methods        = ["GET", "HEAD"]
-    cached_methods         = ["GET", "HEAD"]
-    compress               = false
-
-    forwarded_values {
-      query_string = false
-      cookies { forward = "none" }
-    }
-
-    min_ttl     = 0
-    default_ttl = 0
-    max_ttl     = 0
   }
 
   viewer_certificate {
-    acm_certificate_arn            = local.resolved_cert_arn
-    cloudfront_default_certificate = local.resolved_cert_arn == null
-    ssl_support_method             = local.resolved_cert_arn != null ? "sni-only" : null
-    minimum_protocol_version       = local.resolved_cert_arn != null ? "TLSv1.2_2021" : "TLSv1"
+    acm_certificate_arn      = var.certificate_arn
+    ssl_support_method       = "sni-only"
+    minimum_protocol_version = "TLSv1.2_2021"
   }
 
   restrictions {
@@ -194,7 +115,7 @@ resource "aws_cloudfront_distribution" "this" {
   }
 }
 
-# CloudFront function: rewrite SPA routes without a dot to /index.html
+# SPA routes (no file extension) → /index.html.
 resource "aws_cloudfront_function" "spa_rewrite" {
   name    = "${var.name}-spa-rewrite"
   runtime = "cloudfront-js-2.0"
@@ -211,14 +132,12 @@ resource "aws_cloudfront_function" "spa_rewrite" {
   JS
 }
 
-# ── Route 53 alias for custom domain ──────────────────────────────────────────
-
-resource "aws_route53_record" "cloudfront" {
-  count = local.use_custom_domain && var.route53_zone_id != null ? 1 : 0
+resource "aws_route53_record" "public" {
+  for_each = var.route53_zone_id == null ? toset([]) : toset(["A", "AAAA"])
 
   zone_id = var.route53_zone_id
   name    = var.domain_name
-  type    = "A"
+  type    = each.value
 
   alias {
     name                   = aws_cloudfront_distribution.this.domain_name

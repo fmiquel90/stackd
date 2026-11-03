@@ -1,128 +1,94 @@
-data "aws_caller_identity" "current" {}
+# The API's ECS roles. The worker hosts have their own instance role (modules/worker): each side
+# reads only its own secrets.
 
-# ── ECS Task Execution Role ────────────────────────────────────────────────────
-# Used by the ECS agent to pull images and inject secrets. Both api and worker share this role.
+data "aws_region" "current" {}
 
-resource "aws_iam_role" "execution" {
-  name = "${var.name}-ecs-execution"
-
-  assume_role_policy = jsonencode({
-    Version = "2012-10-17"
-    Statement = [{
-      Effect    = "Allow"
-      Principal = { Service = "ecs-tasks.amazonaws.com" }
-      Action    = "sts:AssumeRole"
-    }]
-  })
+data "aws_iam_policy_document" "ecs_tasks_assume" {
+  statement {
+    actions = ["sts:AssumeRole"]
+    principals {
+      type        = "Service"
+      identifiers = ["ecs-tasks.amazonaws.com"]
+    }
+  }
 }
 
-resource "aws_iam_role_policy_attachment" "execution_base" {
-  role       = aws_iam_role.execution.name
+# ── Execution role: the ECS agent pulls the image, writes logs, injects the API's secrets ──────
+
+resource "aws_iam_role" "api_execution" {
+  name               = "${var.name}-api-execution"
+  assume_role_policy = data.aws_iam_policy_document.ecs_tasks_assume.json
+}
+
+resource "aws_iam_role_policy_attachment" "api_execution_base" {
+  role       = aws_iam_role.api_execution.name
   policy_arn = "arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy"
 }
 
-resource "aws_iam_role_policy" "execution_secrets" {
-  name = "read-secrets"
-  role = aws_iam_role.execution.id
-
-  policy = jsonencode({
-    Version = "2012-10-17"
-    Statement = [
-      {
-        Effect   = "Allow"
-        Action   = ["secretsmanager:GetSecretValue"]
-        Resource = var.secret_arns
-      },
-      {
-        Effect   = "Allow"
-        Action   = ["kms:Decrypt"]
-        Resource = [var.kms_key_arn]
-      },
-    ]
-  })
+data "aws_iam_policy_document" "api_execution_secrets" {
+  statement {
+    sid       = "ApiSecrets"
+    actions   = ["secretsmanager:GetSecretValue"]
+    resources = var.api_secret_arns
+  }
+  statement {
+    sid       = "DecryptThroughSecretsManager"
+    actions   = ["kms:Decrypt"]
+    resources = [var.data_key_arn]
+    condition {
+      test     = "StringEquals"
+      variable = "kms:ViaService"
+      values   = ["secretsmanager.${data.aws_region.current.region}.amazonaws.com"]
+    }
+  }
 }
 
-# ── API Task Role ──────────────────────────────────────────────────────────────
-# Permissions the API process itself uses at runtime.
-
-resource "aws_iam_role" "api" {
-  name = "${var.name}-api-task"
-
-  assume_role_policy = jsonencode({
-    Version = "2012-10-17"
-    Statement = [{
-      Effect    = "Allow"
-      Principal = { Service = "ecs-tasks.amazonaws.com" }
-      Action    = "sts:AssumeRole"
-    }]
-  })
+resource "aws_iam_role_policy" "api_execution_secrets" {
+  name   = "api-secrets"
+  role   = aws_iam_role.api_execution.id
+  policy = data.aws_iam_policy_document.api_execution_secrets.json
 }
 
-resource "aws_iam_role_policy" "api_s3" {
-  name = "s3-artifacts"
-  role = aws_iam_role.api.id
+# ── Task role: what the API process itself calls ─────────────────────────────────────────────
 
-  policy = jsonencode({
-    Version = "2012-10-17"
-    Statement = [{
-      Effect = "Allow"
-      Action = [
-        "s3:GetObject",
-        "s3:PutObject",
-        "s3:DeleteObject",
-        "s3:ListBucket",
-      ]
-      Resource = [
-        var.artifacts_bucket_arn,
-        "${var.artifacts_bucket_arn}/*",
-      ]
-    }]
-  })
+resource "aws_iam_role" "api_task" {
+  name               = "${var.name}-api-task"
+  assume_role_policy = data.aws_iam_policy_document.ecs_tasks_assume.json
 }
 
-resource "aws_iam_role_policy" "api_kms" {
-  name = "kms-decrypt"
-  role = aws_iam_role.api.id
-
-  policy = jsonencode({
-    Version = "2012-10-17"
-    Statement = [{
-      Effect   = "Allow"
-      Action   = ["kms:GenerateDataKey", "kms:Decrypt"]
-      Resource = [var.kms_key_arn]
-    }]
-  })
+data "aws_iam_policy_document" "api_task" {
+  # States, saved plans (SPECS §11). ListBucket: HeadBucket, and a 404 rather than a 403 on a miss.
+  statement {
+    sid       = "ArtifactsBucket"
+    actions   = ["s3:ListBucket"]
+    resources = [var.artifacts_bucket_arn]
+  }
+  statement {
+    sid       = "ArtifactsObjects"
+    actions   = ["s3:GetObject", "s3:PutObject", "s3:DeleteObject"]
+    resources = ["${var.artifacts_bucket_arn}/*"]
+  }
+  # SSE-KMS of the artifacts bucket.
+  statement {
+    sid       = "ArtifactsEncryption"
+    actions   = ["kms:GenerateDataKey", "kms:Decrypt"]
+    resources = [var.data_key_arn]
+    condition {
+      test     = "StringEquals"
+      variable = "kms:ViaService"
+      values   = ["s3.${data.aws_region.current.region}.amazonaws.com"]
+    }
+  }
+  # The workload OIDC issuer (SPECS §3.11): kms:Sign + kms:GetPublicKey, on that key only.
+  statement {
+    sid       = "OidcSigning"
+    actions   = ["kms:Sign", "kms:GetPublicKey"]
+    resources = [var.oidc_signing_key_arn]
+  }
 }
 
-# ── Worker Task Role ───────────────────────────────────────────────────────────
-# Workers call the API's HTTP state backend (not S3 directly) and use OIDC tokens
-# from the API to assume customer-configured cloud roles via STS.
-
-resource "aws_iam_role" "worker" {
-  name = "${var.name}-worker-task"
-
-  assume_role_policy = jsonencode({
-    Version = "2012-10-17"
-    Statement = [{
-      Effect    = "Allow"
-      Principal = { Service = "ecs-tasks.amazonaws.com" }
-      Action    = "sts:AssumeRole"
-    }]
-  })
-}
-
-# Workers need to call STS AssumeRoleWithWebIdentity using the OIDC JWT the API mints.
-# The actual target roles are customer-managed; this allows calling the STS endpoint.
-resource "aws_iam_role_policy" "worker_sts" {
-  name = "sts-assume-role"
-  role = aws_iam_role.worker.id
-
-  policy = jsonencode({
-    Version = "2012-10-17"
-    Statement = [{
-      Effect   = "Allow"
-      Action   = ["sts:AssumeRoleWithWebIdentity"]
-      Resource = "*"
-    }]
-  })
+resource "aws_iam_role_policy" "api_task" {
+  name   = "api"
+  role   = aws_iam_role.api_task.id
+  policy = data.aws_iam_policy_document.api_task.json
 }
