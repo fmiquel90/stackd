@@ -152,7 +152,8 @@ Safeguard: the prod build of the API image **removes the dev_auth module** (not 
 
 ## 5. Worker in dev
 
-- Launched by compose with `STACKD_RUNNER=local`: terraform commands run directly inside the worker container (image including OpenTofu + jq + git). **No Docker-in-Docker** — the `docker` runner is not implemented in the agent yet (SPECS §7.4), so there is nothing to exercise in dev.
+- Launched by compose with `STACKD_RUNNER=local`: terraform commands run directly inside the worker container (image including OpenTofu + jq + git). **No Docker-in-Docker** in the dev stack.
+- The `docker` runner (SPECS §7.4, required in production) is exercised by the worker's tests against the host's Docker daemon: `tests/test_docker_runner.py` (isolation: one container per command, a `setsid` daemon contained, repo hooks seeing the checkout only, read-only rootfs, timeout) and `tests/test_docker_job.py` (a real plan → apply with tofu inside the container). They need `alpine:3.20` and the test image `docker build -f worker/tests/docker/tofu-test.Dockerfile -t stackd-test/tofu:1.12.2 worker/tests/docker`, and are skipped without a daemon. To run a worker on it by hand: `STACKD_RUNNER=docker`, `STACKD_RUNNER_IMAGES='{"opentofu:1.12.2": "<repo>@sha256:<digest>"}'` (an image built from `deploy/images/` and pushed), the Docker socket reachable, `STACKD_WORKSPACE_ROOT` at the same path on the host and in the agent, and `STACKD_DOCKER_NETWORK` set to a network that reaches the API.
 - Tool binaries: **OpenTofu and Terraform** pre-installed in the dev image (no download on first run). A stack's `tool` picks which one runs — no separate "terraform worker", any dev worker handles both.
 - Agent hot reload (watchfiles): modifying `worker/` cleanly restarts the poll loop (the current job finishes).
 - Multi-workers to test concurrency and affinity: `docker compose -f deploy/docker-compose.dev.yml up -d --scale worker=3`, or `STACKD_MAX_CONCURRENT_JOBS` for several jobs per worker.
@@ -235,7 +236,7 @@ Every tracked plan goes through S3 (saved encrypted after the plan, downloaded b
 | Out of scope for local dev | Where it is tested |
 |---|---|
 | Real STS exchange (workload OIDC) | AWS sandbox account + provided Terraform module |
-| Docker runner (per-container isolation) | not implemented yet (SPECS §7.4) |
+| Docker runner (per-container isolation) | not in the dev stack (`local` runner); covered by the worker's docker tests (SPECS §7.4) |
 | Real GitHub/GitLab webhooks | Gitea (git profile) covers 95%; the rest in staging |
 | Load (N workers × M runs) | not covered yet (no load scenario) |
 | Light theme / mobile responsive | Ladle stories + manual review |

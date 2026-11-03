@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 from datetime import UTC, datetime
 
-from sqlalchemy import text
+from sqlalchemy import select, text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -21,15 +21,19 @@ from app.enums import (
 )
 from app.errors import ProblemException
 from app.models.environment import Environment
+from app.models.oidc import CloudIntegration
 from app.models.run import Run
 from app.models.stack import Stack
+from app.models.tier import Tier
 from app.models.worker import Worker
+from app.oidc.precedence import split_shadowed
 from app.runs.artifacts import SAVED_PLAN_TYPES
 from app.runs.commands import is_mutating
 from app.runs.transition import transition
 from app.statebackend.tokens import StateScope, mint_state_token
 from app.variables.resolution import ResolvedVariable, provenance_snapshot, resolve_variables
 from app.workers.hooks import platform_hooks
+from app.workers.tools import SQL_WORKER_CAN_RUN
 
 # Derived from ACTIVE_STATES so the claim guard can never drift from the one_active_run_per_env
 # index / the enum (a past bug: `running` was added to both but not here).
@@ -42,11 +46,13 @@ _SELECT_CANDIDATE = text(
     SELECT r.id AS run_id, r.state AS run_state
     FROM runs r
     JOIN environments e ON e.id = r.environment_id
+    JOIN stacks s ON s.id = e.stack_id
     WHERE r.state IN ('queued', 'confirmed')
       AND e.locked = false
       -- NULLIF guards against JSONB 'null' (SQLAlchemy writes Python None as JSON null by default).
       AND COALESCE(NULLIF(e.labels, 'null'::jsonb), '{{}}'::jsonb) <@ CAST(:labels AS jsonb)
-      AND (
+      -- Only a run whose stack's tool version this worker can run (§7.4).
+      {SQL_WORKER_CAN_RUN}      AND (
         r.state = 'queued'
         OR r.worker_id = :wid
         OR r.confirmed_at < now() - make_interval(secs => :affinity)
@@ -69,7 +75,10 @@ async def claim_one(session: AsyncSession, worker: Worker, affinity_seconds: int
     row = (
         await session.execute(
             _SELECT_CANDIDATE.bindparams(
-                wid=worker.id, labels=json.dumps(worker.labels or {}), affinity=affinity_seconds
+                wid=worker.id,
+                labels=json.dumps(worker.labels or {}),
+                tools=json.dumps(worker.tools) if worker.tools is not None else None,
+                affinity=affinity_seconds,
             )
         )
     ).first()
@@ -127,7 +136,7 @@ def withholds_secrets(run: Run) -> bool:
     code is a pull request's, which nobody has reviewed, and repo code runs inside tofu (`data
     "external"`, provisioners) with everything tofu gets. A drift run is a proposed run too, but it
     plans the environment's last applied commit (§19.2) — code that already ran with those secrets
-    — so it keeps them. The per-environment opt-in of §13 is not implemented: always withheld."""
+    — so it keeps them. No per-environment opt-in: always withheld (§13, decided)."""
     return run.type == RunType.proposed and not run.is_drift
 
 
@@ -161,6 +170,15 @@ async def build_job_payload(session: AsyncSession, run: Run) -> dict:
         # fetched. One the plan needs gets no value: tofu falls back to the variable's default in
         # the repo, or fails with "No value for required variable" — never a stand-in value.
         resolved = [rv for rv in resolved if not _is_secret(rv)]
+
+    # §10.5: with a cloud integration, the workload credentials are the job's only cloud
+    # credentials. A static AWS credential resolved for the env is dropped before anything below
+    # sees it — not fetched (an external reference), not in the env, the tfvars or `mask_values` —
+    # and recorded in the provenance as `shadowed:<layer>`.
+    integration = await _cloud_integration(session, env)
+    shadowed: list[ResolvedVariable] = []
+    if integration is not None:
+        resolved, shadowed = split_shadowed(resolved)
 
     # Resolve external secret references (§15): fetch live values, or apply the configured fallback.
     # Raises SecretUnavailable (caught by the claim endpoint → run failed) when a reference can't
@@ -226,6 +244,7 @@ async def build_job_payload(session: AsyncSession, run: Run) -> dict:
     provenance = provenance_snapshot(resolved)
     provenance.update(dep.provenance)
     provenance.update(secret_provenance)  # §15: secret:/secret_fallback:/secret_override:
+    provenance.update({rv.injected_name: f"shadowed:{rv.provenance}" for rv in shadowed})
     run.variable_provenance = provenance
 
     # The repo token stays with a proposed run: it clones the pull request's commit, and reaches
@@ -269,7 +288,7 @@ async def build_job_payload(session: AsyncSession, run: Run) -> dict:
 
     # §10: a proposed run keeps its OIDC credentials — those of the plan role, read-only by design
     # (§10.3: "a PR plan physically cannot modify the infra"), which a plan needs to refresh.
-    cloud_credentials = await _cloud_credentials(session, env, stack, run, cred_phase)
+    cloud_credentials = await _cloud_credentials(session, integration, env, stack, run, cred_phase)
 
     # Literal secret values the agent masks in ALL log output (§5.1) — sensitive variables, the
     # short-lived state-backend and OIDC tokens, and the repo auth token (it rides inside the clone
@@ -316,6 +335,9 @@ async def build_job_payload(session: AsyncSession, run: Run) -> dict:
         "hcl_tfvars": hcl_tfvars,  # §3.4 — verbatim HCL values, written to a separate .auto.tfvars
         "mask_values": mask_values,
         "hooks": await platform_hooks(session, stack_id=stack.id, env_id=env.id),
+        # §8.3: may the repo's own hooks run at before_apply/after_apply on this env's tier? Off
+        # unless the tier says so (a missing tier row: off).
+        "repo_hooks_at_apply": await _repo_hooks_at_apply(session, env),
         "backend": backend,  # §11 — the managed HTTP backend (None when unmanaged)
         # Unmanaged state only: a repo-relative `-backend-config=<file>` and/or inline key=value
         # `-backend-config` settings passed at init.
@@ -327,18 +349,27 @@ async def build_job_payload(session: AsyncSession, run: Run) -> dict:
     }
 
 
-async def _cloud_credentials(session, env, stack, run, phase) -> dict | None:  # type: ignore[no-untyped-def]
-    """OIDC workload credentials for the phase (§10): plan vs apply assume different roles."""
-    from sqlalchemy import select
+async def _repo_hooks_at_apply(session: AsyncSession, env: Environment) -> bool:
+    allowed = (
+        await session.execute(select(Tier.repo_hooks_at_apply).where(Tier.name == env.tier))
+    ).scalar_one_or_none()
+    return bool(allowed)
 
-    from app.models.oidc import CloudIntegration
-    from app.oidc.issuer import sign_workload_token
 
-    ci = (
+async def _cloud_integration(session: AsyncSession, env: Environment) -> CloudIntegration | None:
+    return (
         await session.execute(
             select(CloudIntegration).where(CloudIntegration.environment_id == env.id)
         )
     ).scalar_one_or_none()
+
+
+async def _cloud_credentials(  # type: ignore[no-untyped-def]
+    session, ci: CloudIntegration | None, env, stack, run, phase
+) -> dict | None:
+    """OIDC workload credentials for the phase (§10): plan vs apply assume different roles."""
+    from app.oidc.issuer import sign_workload_token
+
     if ci is None:
         return None
     token = await sign_workload_token(session, env, stack, run, phase, ttl=ci.session_duration)

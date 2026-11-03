@@ -54,8 +54,10 @@ export interface NewTier {
 export const tiers = {
   list: () => api<TierDef[]>("/tiers"),
   create: (body: NewTier) => api<TierDef>("/tiers", { body }),
-  update: (id: string, body: { requires_four_eyes?: boolean; position?: number }) =>
-    api<TierDef>(`/tiers/${id}`, { method: "PATCH", body }),
+  update: (
+    id: string,
+    body: { requires_four_eyes?: boolean; repo_hooks_at_apply?: boolean; position?: number },
+  ) => api<TierDef>(`/tiers/${id}`, { method: "PATCH", body }),
   remove: (id: string) => api<void>(`/tiers/${id}`, { method: "DELETE" }),
 };
 
@@ -455,6 +457,8 @@ export interface CloudIntegration {
   apply_role_arn: string;
   region: string | null;
   session_duration: number;
+  /** Configuration warnings (SPECS §10.5) — e.g. static AWS credentials the roles replace. */
+  warnings: { code: string; variables: string[]; detail: string }[];
 }
 
 export const cloudApi = {

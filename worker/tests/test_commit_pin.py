@@ -157,7 +157,9 @@ def _handle(monkeypatch, tmp_path: Path, handler: str, commit_sha: str | None) -
             "project_root": ".",
         },
     }
-    getattr(main, handler)(client, job, SimpleNamespace(workspace_root=str(tmp_path)))
+    getattr(main, handler)(
+        client, job, SimpleNamespace(runner="local", workspace_root=str(tmp_path))
+    )
     return client
 
 

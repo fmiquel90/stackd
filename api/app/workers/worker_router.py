@@ -72,9 +72,36 @@ _PHASE_TO_STATE = {
 }
 
 
+# The only runner a production API accepts (§7.4): one ephemeral, hardened container per command.
+# `local` runs every command as the agent's own OS user — trusted dev only.
+PRODUCTION_RUNNER = "docker"
+
+
+def _runner_refused(runner: str | None) -> ProblemException:
+    return ProblemException(
+        403,
+        "Runner not allowed",
+        f"STACKD_ENV=production accepts only the `{PRODUCTION_RUNNER}` runner; this worker "
+        f"declared `{runner or 'none'}`. Set STACKD_RUNNER={PRODUCTION_RUNNER} on the worker.",
+        code="runner_not_allowed",
+    )
+
+
 @router.post("/register", response_model=RegisterOut)
 async def register(body: RegisterIn, request: Request, session: DbSession) -> RegisterOut:
     pool = await pool_from_token(request, session)
+    if get_settings().is_production and body.runner != PRODUCTION_RUNNER:
+        # Audited and committed before refusing: an operator sees which worker tried, from where.
+        await record_audit(
+            session,
+            action="worker.rejected",
+            actor_kind=AuditActorKind.worker,
+            target_kind="worker_pool",
+            target_id=pool.id,
+            context={"name": body.name, "runner": body.runner, "reason": "runner_not_allowed"},
+        )
+        await session.commit()
+        raise _runner_refused(body.runner)
     # Reuse the row for this (pool, name) if it exists: a worker that restarts/hot-reloads is the
     # same worker — re-inserting would litter the list with stale offline duplicates. Most-recent
     # wins if legacy duplicates predate this behaviour.
@@ -91,6 +118,8 @@ async def register(body: RegisterIn, request: Request, session: DbSession) -> Re
         session.add(worker)
     worker.labels = body.labels
     worker.version = body.version
+    worker.runner = body.runner
+    worker.tools = body.tools
     worker.status = WorkerStatus.idle
     worker.last_heartbeat_at = datetime.now(UTC)
     await session.commit()
@@ -160,6 +189,10 @@ async def command_result(
 @router.post("/jobs/claim", response_model=None)
 async def claim(worker: CurrentWorker, session: DbSession, wait: int = 0) -> dict | Response:
     settings = get_settings()
+    # A worker registered before the API switched to production (its token is still valid) must
+    # not take a job either: the runner is checked where the job is handed out.
+    if settings.is_production and worker.runner != PRODUCTION_RUNNER:
+        raise _runner_refused(worker.runner)
     affinity = settings.stackd_apply_affinity_seconds
     deadline = wait
     while True:

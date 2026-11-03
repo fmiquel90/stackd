@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import uuid
 from datetime import datetime
+from typing import Literal
 
 from pydantic import BaseModel, ConfigDict
 
@@ -12,6 +13,12 @@ class RegisterIn(BaseModel):
     name: str
     labels: dict | None = None
     version: str | None = None
+    # The execution runner (§7.4). Absent from an agent that predates it: a production API treats
+    # that as "not docker" and refuses the worker (fail closed).
+    runner: Literal["local", "docker"] | None = None
+    # The tool versions it can run (§7.4), e.g. {"opentofu": ["1.12.2"]}: the claim hands it only
+    # runs whose stack's tool_version it has.
+    tools: dict[str, list[str]] | None = None
 
 
 class RegisterOut(BaseModel):
@@ -77,6 +84,8 @@ class WorkerOut(BaseModel):
     status: WorkerStatus
     labels: dict | None
     version: str | None
+    runner: str | None
+    tools: dict | None
     last_heartbeat_at: datetime | None
 
 

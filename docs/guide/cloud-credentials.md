@@ -39,6 +39,38 @@ AWS STS fetches the JWKS from these endpoints to validate the workload token.
     will fail every `AssumeRoleWithWebIdentity`. Expose it publicly, or use the provided
     Terraform module that registers the identity provider with its thumbprint.
 
+## The signing key
+
+Whoever holds the issuer's private key can mint a token for any role that trusts Stackd, so in
+production the key lives in **AWS KMS**: the API signs through `kms:Sign` and never sees the
+private key. A production API refuses to start on a local key unless you acknowledge it
+(`STACKD_ALLOW_LOCAL_SIGNER=true`).
+
+| Setting | Default | Purpose |
+|---|---|---|
+| `STACKD_OIDC_SIGNER` | `local` | `kms` (production) or `local` (a key AES-GCM encrypted in the database) |
+| `STACKD_OIDC_KMS_KEY_ARN` | — | the KMS key: asymmetric, `RSA_2048` or larger, usage `SIGN_VERIFY` |
+
+The API's IAM identity needs only `kms:Sign` and `kms:GetPublicKey` on that key:
+
+```json
+{
+  "Effect": "Allow",
+  "Action": ["kms:Sign", "kms:GetPublicKey"],
+  "Resource": "arn:aws:kms:eu-west-1:123456789012:key/…"
+}
+```
+
+Switching `STACKD_OIDC_SIGNER` to `kms` is the whole migration: on the next token it signs, the
+issuer rotates from its local key to the configured KMS key.
+
+**Rotation.** `POST /api/v1/oidc/keys/rotate` (admin) makes a new key the signing one — a new KMS
+key named in `{"kms_key_arn": "…"}`, or a new local key on a local issuer. The previous key stays
+in the JWKS, so the tokens it signed keep verifying, and leaves it automatically once the longest
+of them has expired (the apply budget plus grace, plus five minutes of clock skew).
+`GET /api/v1/oidc/keys` lists the keys and their status. Both rotations and retirements are
+audited (`oidc_key.rotated`, `oidc_key.retired`).
+
 ## 1. Configure the cloud provider (AWS)
 
 On the AWS account, create an **IAM OIDC identity provider** trusting the Stackd issuer,
@@ -125,9 +157,14 @@ not be able to assume the apply role and exfiltrate). Platform hooks always get 
 ## Fallback and coexistence
 
 With no `cloud_integration`, Stackd falls back to classic static variables (for example an
-`aws-credentials` variable set). Don't resolve both on one environment: Stackd does not warn
-about it yet, and a static `AWS_ACCESS_KEY_ID` stays in tofu's environment, where the AWS SDK
-normally uses it before the OIDC token.
+`aws-credentials` variable set).
+
+With a `cloud_integration`, the OIDC role is the job's **only** AWS identity: Stackd drops every
+static AWS credential resolved for the environment (`AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`,
+`AWS_SESSION_TOKEN`, `AWS_PROFILE`, the credential files…) before the job starts — the AWS SDK
+would otherwise use them before the OIDC token — and the worker drops its own. The environment's
+cloud panel warns about each one it drops (by name), and the run's inputs show it as
+`NOT PASSED (OIDC)`. Settings such as `AWS_REGION` are kept.
 
 ## See also
 

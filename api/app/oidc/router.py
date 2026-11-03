@@ -12,16 +12,25 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.audit import record_audit
 from app.auth.deps import CurrentUser, require_role
+from app.config import get_settings
 from app.db import get_session
 from app.enums import AuditActorKind, CloudProvider, JobPhase, Role, TriggeredBy
 from app.errors import ProblemException
 from app.ids import uuid7
 from app.models.environment import Environment
-from app.models.oidc import CloudIntegration
+from app.models.oidc import CloudIntegration, OidcSigningKey
 from app.models.run import Run
 from app.models.stack import Stack
-from app.oidc.issuer import ensure_active_key, jwks, openid_configuration, sign_workload_token
+from app.oidc.issuer import (
+    ensure_active_key,
+    jwks,
+    openid_configuration,
+    rotate_key,
+    sign_workload_token,
+)
+from app.oidc.precedence import SHADOWED_WARNING, split_shadowed
 from app.spaces import guard_env_id
+from app.variables.resolution import resolve_variables
 
 issuer_router = APIRouter(tags=["oidc"])
 cloud_router = APIRouter(prefix="/api/v1/environments", tags=["cloud-integration"])
@@ -48,8 +57,29 @@ class CloudIntegrationIn(BaseModel):
     session_duration: int = 3600
 
 
-def _out(ci: CloudIntegration) -> dict:
+async def _warnings(session: AsyncSession, env_id: uuid.UUID) -> list[dict]:
+    """Configuration warnings (SPECS §10.5): static AWS credentials resolved for the env are
+    shadowed by the integration — dropped from every job. Names only, never values."""
+    env = await session.get(Environment, env_id)
+    if env is None:
+        return []
+    resolved = await resolve_variables(session, env, reveal_sensitive=False)
+    _, shadowed = split_shadowed(resolved)
+    if not shadowed:
+        return []
+    return [
+        {
+            "code": SHADOWED_WARNING,
+            "variables": sorted({rv.name for rv in shadowed}),
+            "detail": "These static AWS credentials are not passed to runs: "
+            "the OIDC role credentials replace them.",
+        }
+    ]
+
+
+def _out(ci: CloudIntegration, warnings: list[dict] | None = None) -> dict:
     return {
+        "warnings": warnings or [],
         "id": str(ci.id),
         "provider": ci.provider.value,
         "plan_role_arn": ci.plan_role_arn,
@@ -69,7 +99,7 @@ async def get_integration(env_id: uuid.UUID, user: CurrentUser, session: DbSessi
     ).scalar_one_or_none()
     if ci is None:
         raise ProblemException(404, "No cloud integration", None)
-    return _out(ci)
+    return _out(ci, await _warnings(session, env_id))
 
 
 @cloud_router.put("/{env_id}/cloud-integration", dependencies=[Admin])
@@ -103,7 +133,7 @@ async def put_integration(
     )
     await session.commit()
     await session.refresh(ci)
-    return _out(ci)
+    return _out(ci, await _warnings(session, env_id))
 
 
 @cloud_router.delete("/{env_id}/cloud-integration", status_code=204, dependencies=[Admin])
@@ -157,3 +187,55 @@ async def test_assume_role(env_id: uuid.UUID, _: CurrentUser, session: DbSession
         return await asyncio.to_thread(_assume)
     except Exception as exc:
         raise ProblemException(422, "AssumeRole failed", str(exc)) from exc
+
+
+keys_router = APIRouter(prefix="/api/v1/oidc", tags=["oidc"])
+
+
+class RotateIn(BaseModel):
+    # The KMS key to sign with from now on; omitted → a new local key (STACKD_OIDC_SIGNER=local),
+    # refused on a KMS issuer (name the new KMS key).
+    kms_key_arn: str | None = None
+
+
+def _key_out(k: OidcSigningKey) -> dict[str, str | None]:
+    return {
+        "kid": k.kid,
+        "status": k.status.value,
+        "backend": "kms" if k.kms_key_arn else "local",
+        "kms_key_arn": k.kms_key_arn,
+        "created_at": k.created_at.isoformat() if k.created_at else None,
+        "retiring_at": k.retiring_at.isoformat() if k.retiring_at else None,
+        "retired_at": k.retired_at.isoformat() if k.retired_at else None,
+    }
+
+
+@keys_router.get("/keys", dependencies=[Admin])
+async def list_keys(session: DbSession) -> list[dict[str, str | None]]:
+    """The issuer's signing keys (§3.11), newest first — public metadata only."""
+    keys = (
+        (await session.execute(select(OidcSigningKey).order_by(OidcSigningKey.created_at.desc())))
+        .scalars()
+        .all()
+    )
+    return [_key_out(k) for k in keys]
+
+
+@keys_router.post("/keys/rotate", dependencies=[Admin])
+async def rotate(body: RotateIn, user: CurrentUser, session: DbSession) -> dict[str, str | None]:
+    """Rotate the signing key (§3.11): the new key signs from now on, the previous one stays in
+    the JWKS until the tokens it signed have expired. Audited (`oidc_key.rotated`)."""
+    if body.kms_key_arn is None and get_settings().stackd_oidc_signer == "kms":
+        raise ProblemException(
+            422, "KMS key required", "STACKD_OIDC_SIGNER=kms: name the new key in `kms_key_arn`"
+        )
+    key = await rotate_key(
+        session,
+        kms_key_arn=body.kms_key_arn,
+        actor_kind=AuditActorKind.user,
+        actor_id=user.id,
+        actor_email=user.email,
+    )
+    await session.commit()
+    await session.refresh(key)
+    return _key_out(key)
