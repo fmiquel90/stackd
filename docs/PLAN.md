@@ -222,7 +222,7 @@ The platform becomes an **OIDC issuer** (the same mechanism as GitHub Actions OI
   - used when the upstream has **never produced** the output (bootstrapping a new cascade) or on **proposed runs** if the upstream is not applied
   - a run that has consumed at least one mock is marked `used_mocks: true`: visible badge, **apply forbidden** (validation plan-only) unless explicit opt-in per env
   - solves the chicken-and-egg problem: write `app/dev` and plan its config before `network/dev` has run
-- [ ] Propagation scheduler: topological cascade, policies, multi-parents, stop on failure — *status: done — policies, multi-parent gating within a run group, stop on failure, computed group status (SPECS §9.2)*
+- [x] Propagation scheduler: topological cascade, policies, multi-parents, stop on failure — *status: done — policies, multi-parent gating within a run group, stop on failure, computed group status (SPECS §9.2)*
 - [ ] Run groups + graph view; the cascade never bypasses the protections
 
 **Deliverable: plan `app/dev` with `vpc_id = "vpc-mock00000"` before the first apply of `network/dev`, then a real cascade.**
@@ -256,10 +256,10 @@ The platform becomes an **OIDC issuer** (the same mechanism as GitHub Actions OI
 ### Phase 7 — Production-ready (ongoing)
 
 - [ ] RBAC per space, Google group mapping — extends per-tier permissions (§2.4) toward per-space/team scopes — *status: per-space memberships shipped (SPECS §2.4 Phase F) and tiers are now a non-linear set; Google group mapping and per-stack grants remain*
-- [ ] **Environment rollouts** (SPECS §21, specified): declare a new environment or region once across every stack (clone of a reference env: settings, governance, dependency edges) and apply the whole graph with a single approval — creates-only plans auto-confirmed under it, anything else stops for a human. Three lots:
+- [x] **Environment rollouts** (SPECS §21, shipped): declare a new environment or region once across every stack (clone of a reference env: settings, governance, dependency edges) and apply the whole graph with a single approval — creates-only plans in never-applied environments, on one commit per stack, auto-confirmed under it; anything else stops for a human. Three lots:
   - [x] (1) cascade gaps of SPECS §9.2: multi-parent gating within a run group, stop on failure, computed group status
-  - [ ] (2) `environment-clones` (SPECS §21.2) + "New environment from…" dialog
-  - [ ] (3) rollouts: model, approval, gate, `advance_rollout()`, rollout page (SPECS §21.3–§21.8, DESIGN §5.11)
+  - [x] (2) `environment-clones` (SPECS §21.2) + "New environment from…" dialog
+  - [x] (3) rollouts: model, approval, gate, `advance_rollout()`, rollout page (SPECS §21.3–§21.8, DESIGN §5.11)
 - [ ] **Environment matrix** (track, not specified): declare `{eu-west-1, us-east-1} × {dev, prod}` on a stack and generate/synchronize the corresponding environments — multi-region is done by naming convention + variable sets in the MVP; standing one up across stacks is the job of environment rollouts above (one-shot, no synchronization)
 - [ ] HTTP run tasks (blocking external webhooks), advanced policies (OPA) if there is a real need
 - [ ] OIDC to GCP/Azure (the `CloudIntegration` interface is already generic)
