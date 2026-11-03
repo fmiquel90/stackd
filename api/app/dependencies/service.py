@@ -241,6 +241,21 @@ async def _scope(
     return order, incoming, out
 
 
+def _reachable(out: dict[uuid.UUID, list[EnvDependency]], start: uuid.UUID) -> set[uuid.UUID]:
+    seen = {start}
+    stack = [start]
+    while stack:
+        for dep in out.get(stack.pop(), []):
+            if dep.downstream_env_id not in seen:
+                seen.add(dep.downstream_env_id)
+                stack.append(dep.downstream_env_id)
+    return seen
+
+
+def _finished_order(r: Run) -> tuple[float, uuid.UUID]:
+    return (r.finished_at.timestamp() if r.finished_at is not None else 0.0, r.id)
+
+
 async def cascade(session: AsyncSession, run: Run) -> list[Run]:
     """Propagate through a run group after one of its tracked runs ended `finished` (§9.2) — after
     an apply, and after an empty plan too (it may be the parent a downstream waits for).
@@ -251,11 +266,17 @@ async def cascade(session: AsyncSession, run: Run) -> list[Run]:
     - it has a run in the group: `done` (finished; *applied* if it was confirmed), `broken`
       (failed, discarded, canceled) or `active`;
     - otherwise, from its upstreams in the scope: one `broken` → `broken` (stop on failure, also
-      through environments that never got a run); one `active` or `waiting` → `waiting`
-      (multi-parent gating, whatever the order the edges are read in); all settled → a run is
-      created if an edge from an *applied* upstream passes its policy, else `skipped`.
-    A downstream gets at most one run per group. The cascade never bypasses protections: a
-    protected downstream still stops at `unconfirmed`, its confirm being gated independently.
+      through environments that never got a run); else one `active` or `waiting` → `waiting`
+      (multi-parent gating, whatever the order the edges are read in); else (all settled) it is
+      decided — once: only when it is reachable from `run`'s env, i.e. `run` settled its last
+      upstream just now. A run is created if an edge from an *applied* upstream passes its policy,
+      else it is `skipped`. An environment not reachable from `run` with every upstream settled
+      was decided by an earlier cascade of the group, and is not re-evaluated (it would have a run
+      otherwise): a `skipped` decision is final, whatever happens to the live outputs later.
+    A downstream gets at most one run per group; its `parent_run_id` is the run of the applied
+    upstream, among those whose edge passed, that finished last (not necessarily `run`, which may
+    be an empty plan). The cascade never bypasses protections: a protected downstream still stops
+    at `unconfirmed`, its confirm being gated independently.
     """
     if run.type != RunType.tracked or run.state != RunState.finished:
         return []
@@ -270,7 +291,8 @@ async def cascade(session: AsyncSession, run: Run) -> list[Run]:
     ).scalar_one_or_none()
     if root is None:
         return []
-    order, incoming, _ = await _scope(session, root.environment_id)
+    order, incoming, out = await _scope(session, root.environment_id)
+    released = _reachable(out, run.environment_id)
 
     members = (
         (
@@ -312,24 +334,27 @@ async def cascade(session: AsyncSession, run: Run) -> list[Run]:
         if "active" in ups or "waiting" in ups:
             status[env_id] = "waiting"
             continue
+        if env_id not in released:
+            status[env_id] = "skipped"  # decided by an earlier cascade of the group
+            continue
         downstream = await session.get(Environment, env_id)
-        fire = False
+        feeding: list[Run] = []
         if downstream is not None:
             for dep in incoming[env_id]:
                 if dep.upstream_env_id in applied and await _should_trigger(
                     session, dep, downstream
                 ):
-                    fire = True
-                    break
-        if not fire:
+                    feeding.append(by_env[dep.upstream_env_id])
+        if not feeding:
             status[env_id] = "skipped"
             continue
+        parent = max(feeding, key=_finished_order)
         child = Run(
             environment_id=env_id,
             type=RunType.tracked,
             state=RunState.queued,
             triggered_by=TriggeredBy.dependency,
-            parent_run_id=run.id,
+            parent_run_id=parent.id,
             run_group_id=group_id,
         )
         session.add(child)
@@ -340,7 +365,11 @@ async def cascade(session: AsyncSession, run: Run) -> list[Run]:
             actor_kind=AuditActorKind.system,
             target_kind="run",
             target_id=child.id,
-            context={"via": "cascade", "parent_run_id": str(run.id)},
+            context={
+                "via": "cascade",
+                "parent_run_id": str(parent.id),
+                "released_by_run_id": str(run.id),
+            },
         )
         status[env_id] = "active"
         triggered.append(child)

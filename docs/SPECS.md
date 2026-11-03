@@ -936,20 +936,34 @@ At `applying → finished`, parsing of `outputs.json`:
 6. downstream env protected → stops at unconfirmed (never bypassed)
 ```
 
-Steps 4–5, as implemented (`cascade()`, called when a tracked run of a group ends `finished` —
-after its apply, and after an **empty plan** too, since it may be the parent a downstream waits for):
+Steps 4–5, as implemented (`cascade()`, called when a tracked run ends `finished`: after any
+tracked apply — a run without a group roots its own, the runs it triggers carry its id as
+`run_group_id` — and after an **empty plan** of a run that carries a group, since it may be the
+parent a downstream waits for):
 - *The whole group is decided at once*, under a lock on the group's root run (two parents finishing
   at the same moment are serialized: the second sees the first's outcome). Every environment
-  reachable from the root's env — the group's *scope* — is settled in topological order: with a run
-  in the group it is `done` (finished; *applied* if confirmed), `broken` (failed, discarded,
-  canceled) or `active`; without one, from its upstreams in the scope: one `broken` → `broken`, one
-  `active` or `waiting` → `waiting`, all settled → a run is created if an edge from an *applied*
-  upstream passes its policy, else `skipped` (settled, no run).
+  reachable from the root's env — the group's *scope*, loaded edge level by edge level from the
+  root's env — is settled in topological order. With a run in the group it is `done` (finished;
+  *applied* if confirmed), `broken` (failed, discarded, canceled) or `active`. Without one, from its
+  upstreams in the scope, in this order: one `broken` → `broken`; else one `active` or `waiting` →
+  `waiting`; else (all settled) it is *decided*: a run is created if an edge from an *applied*
+  upstream passes its policy (step 2), else it is `skipped` (settled, no run).
+- *A decision is taken once.* An environment is decided by the cascade of the run that settles its
+  last upstream — the only cascade from which it is reachable once all its upstreams are settled.
+  A later cascade of the group (from a run that is not upstream of it) keeps it as it is: a
+  `skipped` environment is never revisited, even if an upstream's live outputs change meanwhile
+  (e.g. an apply of that upstream outside the group), so it never gets a late run in the group.
+  `on_output_change` is therefore read once, against the outputs current at that decision.
 - *Multi-parent gating.* So a downstream waits for every upstream in the scope that may still run —
-  a direct parent, or one only reached through another environment of the group — whatever the
-  order the edges are read in, and is triggered once, by the last of them. An upstream outside the
-  scope does not hold it back (its current outputs are used). A downstream gets at most one run per
-  group.
+  a direct parent, or one only reached through another environment of the group, also one still
+  `waiting` itself — whatever the order the edges are read in, and is triggered once, by the last of
+  them. An upstream outside the scope does not hold it back (its current outputs are used). A
+  downstream gets at most one run per group.
+- *Parent.* A triggered run's `parent_run_id` is the run of an *applied* upstream whose edge passed
+  its policy — of those, the one that finished last (ties: the greater run id). It is not
+  necessarily the run that released the downstream (e.g. an empty plan, or a parent whose `never`
+  edge did not pass); that one is recorded in the `run.triggered` audit context as
+  `released_by_run_id`, next to `parent_run_id`.
 - *Stop on failure.* A run of the group ending `failed`, `discarded` or `canceled` triggers nothing
   downstream, and every environment reachable from it — also through environments that never got a
   run — gets no run in that group.
