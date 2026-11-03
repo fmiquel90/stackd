@@ -1,7 +1,7 @@
-output "key_arn" {
-  value = aws_kms_key.this.arn
+output "data_key_arn" {
+  value = aws_kms_key.data.arn
 }
 
-output "key_id" {
-  value = aws_kms_key.this.key_id
+output "oidc_signing_key_arn" {
+  value = aws_kms_key.oidc_signing.arn
 }

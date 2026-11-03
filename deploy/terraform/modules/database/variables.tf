@@ -10,32 +10,34 @@ variable "subnet_ids" {
   type = list(string)
 }
 
-variable "allowed_security_group_ids" {
-  description = "Security groups allowed to reach the DB (API and worker task SGs)"
-  type        = list(string)
-  default     = []
+variable "kms_key_arn" {
+  type = string
+}
+
+variable "engine_version" {
+  type = string
 }
 
 variable "instance_class" {
-  type    = string
-  default = "db.t4g.medium"
+  type = string
 }
 
 variable "multi_az" {
-  type    = bool
-  default = false
+  type = bool
 }
 
 variable "allocated_storage" {
-  type    = number
-  default = 20
+  type = number
 }
 
 variable "max_allocated_storage" {
-  type    = number
-  default = 100
+  type = number
 }
 
-variable "kms_key_arn" {
-  type = string
+variable "deletion_protection" {
+  type = bool
+}
+
+variable "password_version" {
+  type = number
 }

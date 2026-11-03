@@ -6,7 +6,6 @@ output "endpoint" {
   value = aws_db_instance.this.endpoint
 }
 
-output "database_url" {
-  value     = "postgresql+asyncpg://stackd:${random_password.db.result}@${aws_db_instance.this.endpoint}/stackd"
-  sensitive = true
+output "database_url_secret_arn" {
+  value = aws_secretsmanager_secret.database_url.arn
 }
