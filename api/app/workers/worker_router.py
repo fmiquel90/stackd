@@ -330,6 +330,9 @@ async def _decide_after_plan(session: AsyncSession, worker: Worker, run: Run, re
             audit_action="run.plan_finished",
             audit_context={"has_changes": result.get("has_changes", False)},
         )
+        # An empty plan in a run group may be the last parent a downstream waits for (§9.2).
+        if run.run_group_id is not None:
+            await cascade(session, run)
         return
 
     env = await session.get(Environment, run.environment_id)

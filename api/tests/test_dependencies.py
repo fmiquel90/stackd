@@ -320,3 +320,109 @@ async def test_graph_hides_edges_outside_caller_spaces(client: httpx.AsyncClient
     assert {private_edge, cross_in, cross_out, visible.json()["id"]} <= admin_edges.keys()
     assert admin_edges[private_edge]["references"] == 1
     assert admin_edges[private_edge]["has_mock"] is True
+
+
+# --- §9.2 steps 4-5: multi-parent gating and stop on failure within a run group ---
+
+
+async def _diamond(client: httpx.AsyncClient, admin: dict, prefix: str) -> dict[str, str]:
+    """root → a, root → b, a → c, b → c — `c` has two parents in the same group."""
+    envs: dict[str, str] = {}
+    for name in ("root", "a", "b", "c"):
+        stack = await make_stack(client, admin, f"{prefix}-{name}")
+        envs[name] = await make_env(client, admin, stack, "dev", "dev")
+    for down, up in (("a", "root"), ("b", "root"), ("c", "a"), ("c", "b")):
+        r = await _dep(client, admin, envs[down], envs[up], mock="m", policy="always")
+        assert r.status_code == 201, r.text
+    return envs
+
+
+async def _claim(client: httpx.AsyncClient, wh: dict) -> dict:
+    r = await client.post("/worker/v1/jobs/claim", headers=wh)
+    assert r.status_code == 200, r.text
+    return r.json()
+
+
+async def _plan(client, wh, admin, job: dict, *, changes: bool = True) -> None:
+    await event(client, wh, job["job_id"], "phase_started", phase="planning")
+    result = CHANGES if changes else {"has_changes": False, "summary": {}}
+    await event(client, wh, job["job_id"], "phase_finished", result=result)
+
+
+async def _apply(client, wh, admin, run_id: str) -> None:
+    assert (await client.post(f"/api/v1/runs/{run_id}/confirm", headers=admin)).status_code == 200
+    job = await _claim(client, wh)
+    assert job["job_id"] == run_id and job["phase"] == "apply"
+    outputs = {"network_name": {"value": f"net-{run_id[:4]}", "sensitive": False}}
+    await event(client, wh, run_id, "phase_finished", result={"outputs": outputs})
+
+
+async def _env_runs(client, admin, env_id: str) -> list[dict]:
+    return (await client.get(f"/api/v1/environments/{env_id}/runs", headers=admin)).json()
+
+
+async def _start_diamond(client, admin, wh, envs) -> tuple[str, dict[str, dict]]:
+    """Root planned + applied with downstream; returns the root run id and the two jobs a, b."""
+    root = (
+        await client.post(
+            f"/api/v1/environments/{envs['root']}/runs",
+            headers=admin,
+            json={"with_downstream": True},
+        )
+    ).json()
+    await _plan(client, wh, admin, await _claim(client, wh))
+    await _apply(client, wh, admin, root["id"])
+    jobs = {}
+    for _ in range(2):
+        job = await _claim(client, wh)
+        name = "a" if job["environment"]["id"] == envs["a"] else "b"
+        jobs[name] = job
+    return root["id"], jobs
+
+
+async def test_downstream_waits_for_all_its_parents(client: httpx.AsyncClient) -> None:
+    admin = await login(client, "admin")
+    wh = await register_worker(client, admin, "pool-gating")
+    envs = await _diamond(client, admin, "gate")
+    root_id, jobs = await _start_diamond(client, admin, wh, envs)
+
+    await _plan(client, wh, admin, jobs["a"])
+    await _apply(client, wh, admin, jobs["a"]["job_id"])
+    assert await _env_runs(client, admin, envs["c"]) == []  # b is still running: c waits
+
+    await _plan(client, wh, admin, jobs["b"])
+    await _apply(client, wh, admin, jobs["b"]["job_id"])
+    c_runs = await _env_runs(client, admin, envs["c"])
+    assert len(c_runs) == 1  # triggered once, by the last parent
+    group = (await client.get(f"/api/v1/runs/{root_id}", headers=admin)).json()["run_group"]
+    assert group == {"id": root_id, "status": "running"}  # c is queued
+    child = (await client.get(f"/api/v1/runs/{c_runs[0]['id']}", headers=admin)).json()
+    assert child["run_group_id"] == root_id and child["run_group"]["id"] == root_id
+
+
+async def test_a_failed_parent_stops_its_branch(client: httpx.AsyncClient) -> None:
+    admin = await login(client, "admin")
+    wh = await register_worker(client, admin, "pool-stop")
+    envs = await _diamond(client, admin, "stop")
+    root_id, jobs = await _start_diamond(client, admin, wh, envs)
+
+    await _plan(client, wh, admin, jobs["a"])
+    await _apply(client, wh, admin, jobs["a"]["job_id"])
+    await event(client, wh, jobs["b"]["job_id"], "job_failed", phase="plan", result={"error": "x"})
+
+    assert await _env_runs(client, admin, envs["c"]) == []  # never: a parent failed
+    group = (await client.get(f"/api/v1/runs/{root_id}", headers=admin)).json()["run_group"]
+    assert group["status"] == "partial_failure"
+
+
+async def test_an_empty_plan_releases_a_waiting_downstream(client: httpx.AsyncClient) -> None:
+    admin = await login(client, "admin")
+    wh = await register_worker(client, admin, "pool-empty")
+    envs = await _diamond(client, admin, "empty")
+    _, jobs = await _start_diamond(client, admin, wh, envs)
+
+    await _plan(client, wh, admin, jobs["a"])
+    await _apply(client, wh, admin, jobs["a"]["job_id"])
+    await _plan(client, wh, admin, jobs["b"], changes=False)  # b: nothing to apply, finished
+
+    assert len(await _env_runs(client, admin, envs["c"])) == 1  # a's apply triggers c

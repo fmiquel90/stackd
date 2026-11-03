@@ -930,18 +930,19 @@ At `applying → finished`, parsing of `outputs.json`:
 6. downstream env protected → stops at unconfirmed (never bypassed)
 ```
 
-Steps 4–5 are **not implemented yet**: each finished upstream apply triggers its downstream runs on
-its own (a downstream with two parents can run twice), and no run group is marked `partial_failure`.
-**Specified for delivery (§21, lot 1)**:
+Steps 4–5, as implemented (`cascade()`, called when a tracked run of a group ends `finished` —
+after its apply, and after an **empty plan** too, since it may be the parent a downstream waits for):
 - *Multi-parent gating.* Within a run group, a downstream environment with several upstream edges
   whose upstreams have a run **in the same group** is triggered once, when the last of those runs is
-  `finished`; until then nothing is created for it. An upstream with no run in the group does not
-  hold it back (its current outputs are used).
+  `finished`; until then nothing is created for it. It is triggered if an edge from an upstream whose
+  group run **applied** passes its policy; an upstream with no run in the group neither holds it back
+  (its current outputs are used) nor triggers it. A downstream gets at most one run per group.
 - *Stop on failure.* A run of the group ending `failed`, `discarded` or `canceled` triggers nothing
   downstream, and every environment reachable from it gets no run in that group.
-- *Group status*, computed (not stored) and exposed on `GET /api/v1/runs/{id}` as `run_group`:
-  `running` while a run of the group is active, else `partial_failure` if one failed, discarded or
-  was canceled, else `succeeded`.
+- *Group status*, computed (not stored) and exposed on `GET /api/v1/runs/{id}` as `run_group`
+  (`{id, status}`, for the group the run belongs to or roots; runs also carry `run_group_id` and
+  `parent_run_id`): `running` while a run of the group is queued or active, else `partial_failure`
+  if one failed, was discarded or canceled, else `succeeded`.
 A cascade run is routed like any other plan (§4.2): it auto-confirms only on an `autodeploy`,
 unprotected environment, with no mock and no `warn` check.
 
@@ -1802,9 +1803,9 @@ by state/phase/result, never by run id).
 
 ## 21. Environment rollouts — declare once, apply the graph (post-MVP)
 
-> **Status: specified, not implemented.** Delivery in three lots (PLAN Phase 7): (1) the cascade
-> gaps of §9.2 (multi-parent gating, stop on failure); (2) the multi-stack declaration (§21.2);
-> (3) the rollout itself (§21.3–§21.8).
+> **Status:** delivery in three lots (PLAN Phase 7): (1) the cascade gaps of §9.2 (multi-parent
+> gating, stop on failure) — **done**; (2) the multi-stack declaration (§21.2); (3) the rollout
+> itself (§21.3–§21.8).
 
 **Need.** Standing up a new environment or a new region today means creating one environment per
 stack, re-creating its dependency edges, then planning and confirming every environment by hand, in

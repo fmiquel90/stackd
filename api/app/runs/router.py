@@ -9,12 +9,20 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.deps import CurrentUser, require_role
 from app.db import get_session
+from app.dependencies.service import group_status
 from app.enums import Role, TriggeredBy
 from app.errors import ProblemException
 from app.models.run import Run
 from app.models.run_log import RunLog
 from app.models.vcs import VcsOutbox
-from app.runs.schemas import CommandTriggerIn, LogChunkOut, PromoteIn, RunOut, TriggerRunIn
+from app.runs.schemas import (
+    CommandTriggerIn,
+    LogChunkOut,
+    PromoteIn,
+    RunGroupOut,
+    RunOut,
+    TriggerRunIn,
+)
 from app.runs.service import (
     cancel_run,
     confirm_run,
@@ -104,8 +112,21 @@ async def list_runs(env_id: uuid.UUID, user: CurrentUser, session: DbSession) ->
 
 
 @router.get("/runs/{run_id}", response_model=RunOut)
-async def get_run(run_id: uuid.UUID, user: CurrentUser, session: DbSession) -> Run:
-    return await guard_run_id(session, user, run_id)
+async def get_run(run_id: uuid.UUID, user: CurrentUser, session: DbSession) -> RunOut:
+    run = await guard_run_id(session, user, run_id)
+    out = RunOut.model_validate(run)
+    # The group: the one it carries, or the one it roots (a run whose apply cascaded, §9.4).
+    group_id = run.run_group_id
+    if (
+        group_id is None
+        and (
+            await session.execute(select(Run.id).where(Run.run_group_id == run.id).limit(1))
+        ).scalar_one_or_none()
+    ):
+        group_id = run.id
+    if group_id is not None:
+        out.run_group = RunGroupOut(id=group_id, status=await group_status(session, group_id))
+    return out
 
 
 @router.post("/runs/{run_id}/confirm", response_model=RunOut)
