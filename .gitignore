@@ -37,6 +37,8 @@ pnpm-debug.log*
 .terraform/
 *.tfstate
 *.tfstate.*
+# Deployment settings of the AWS module examples (the *.example files are the templates)
+deploy/terraform/**/terraform.tfvars
 *.tfplan
 crash.log
 override.tf

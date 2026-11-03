@@ -1,15 +1,19 @@
-aws_region = "eu-west-1"
-name       = "stackd"
+# Copy to terraform.tfvars. Nothing here is secret: the generated secrets never leave AWS, and the
+# Google client secret and the worker pool token are put into Secrets Manager by hand (see the
+# guide), never into a tfvars file.
 
-# Optional: custom domain (recommended — see README bootstrap section)
-# domain_name     = "stackd.acme.com"
-# route53_zone_id = "Z1234567890ABC"
+aws_region  = "eu-west-1"
+domain_name = "stackd.acme.com"
+# A public Route 53 zone holding domain_name: certificates validated and records created for you.
+# Without one, follow the two-step bootstrap of the guide.
+route53_zone_id = "Z0123456789ABCDEFGHIJ"
 
-# Google OIDC — create an app at console.cloud.google.com/apis/credentials
-# Register the redirect URI from output.google_oauth_redirect_uri before setting these.
-# google_client_id       = "123456789-abc.apps.googleusercontent.com"
-# google_client_secret   = "GOCSPX-..."
-# google_allowed_domains = "acme.com"
+google_client_id       = "123456789-abc.apps.googleusercontent.com"
+google_allowed_domains = ["acme.com"] # required: an empty list would admit any Google account
 
-# Worker pool token — generate in the Stackd UI after first login, then re-apply.
-# worker_pool_token = "wpt_..."
+# Bootstrap: leave these unset for the first apply, then set the digests you pushed.
+# api_image    = "123456789012.dkr.ecr.eu-west-1.amazonaws.com/stackd-api@sha256:<digest>"
+# worker_image = "123456789012.dkr.ecr.eu-west-1.amazonaws.com/stackd-worker@sha256:<digest>"
+# runner_images = {
+#   "opentofu:1.12.2" = "123456789012.dkr.ecr.eu-west-1.amazonaws.com/stackd-runner@sha256:<digest>"
+# }

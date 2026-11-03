@@ -1,31 +1,47 @@
+# Production deployment: three AZs, Multi-AZ RDS, two API tasks, a worker fleet.
+# Bootstrap and day-2 steps: docs/guide/deploying-to-aws.md.
+
 terraform {
-  required_version = ">= 1.10"
+  required_version = ">= 1.11"
+
   required_providers {
     aws = {
       source  = "hashicorp/aws"
-      version = ">= 5.77"
+      version = "~> 6.50"
     }
     random = {
       source  = "hashicorp/random"
-      version = ">= 3.6"
+      version = "~> 3.9"
     }
   }
 
+  # Create the bucket beforehand: versioning on, public access blocked, default encryption.
+  # The state holds no secret value (write-only arguments), but it maps the whole deployment.
   backend "s3" {
-    # Fill in before first apply
-    bucket = "REPLACE_ME_tfstate-bucket"
-    key    = "stackd/production/terraform.tfstate"
-    region = "REPLACE_ME_aws_region"
+    bucket       = "REPLACE_ME-tfstate"
+    key          = "stackd/production/terraform.tfstate"
+    region       = "REPLACE_ME"
+    encrypt      = true
+    use_lockfile = true # S3-native locking (OpenTofu >= 1.10, Terraform >= 1.10)
   }
 }
 
 provider "aws" {
   region = var.aws_region
+
+  default_tags {
+    tags = { Project = var.name, Environment = "production", Owner = var.owner, ManagedBy = "opentofu" }
+  }
 }
 
+# CloudFront certificates live in us-east-1.
 provider "aws" {
   alias  = "us_east_1"
   region = "us-east-1"
+
+  default_tags {
+    tags = { Project = var.name, Environment = "production", Owner = var.owner, ManagedBy = "opentofu" }
+  }
 }
 
 module "stackd" {
@@ -36,14 +52,22 @@ module "stackd" {
     aws.us_east_1 = aws.us_east_1
   }
 
-  name       = var.name
-  aws_region = var.aws_region
-
+  name               = var.name
   availability_zones = [
     "${var.aws_region}a",
     "${var.aws_region}b",
     "${var.aws_region}c",
   ]
+
+  domain_name     = var.domain_name
+  route53_zone_id = var.route53_zone_id
+
+  google_client_id       = var.google_client_id
+  google_allowed_domains = var.google_allowed_domains
+
+  api_image     = var.api_image
+  worker_image  = var.worker_image
+  runner_images = var.runner_images
 
   db_instance_class        = "db.r8g.large"
   db_multi_az              = true
@@ -54,45 +78,102 @@ module "stackd" {
   api_memory        = 2048
   api_desired_count = 2
 
-  worker_cpu           = 2048
-  worker_memory        = 4096
-  worker_desired_count = 2
-
-  worker_autoscaling_enabled    = true
-  worker_autoscaling_min_count  = 2
-  worker_autoscaling_max_count  = 20
-  worker_autoscaling_cpu_target = 70
-
-  google_client_id       = var.google_client_id
-  google_client_secret   = var.google_client_secret
-  google_allowed_domains = var.google_allowed_domains
-
-  domain_name     = var.domain_name
-  route53_zone_id = var.route53_zone_id
-
-  worker_pool_token = var.worker_pool_token
-
-  tags = {
-    Owner = var.team_email
-  }
+  worker_count                    = 3
+  worker_instance_type            = "m7i.large"
+  worker_max_concurrent_jobs      = 2
+  worker_shutdown_timeout_seconds = 1800
+  worker_docker_memory            = "3g"
 }
 
-variable "name"       { default = "stackd" }
-variable "aws_region" { default = "eu-west-1" }
-variable "team_email" { default = "" }
+variable "name" {
+  type    = string
+  default = "stackd"
+}
 
-variable "google_client_id"       { sensitive = true }
-variable "google_client_secret"   { sensitive = true }
-variable "google_allowed_domains" { default = "" }
+variable "aws_region" {
+  type = string
+}
 
-variable "domain_name"     {}
-variable "route53_zone_id" { default = null }
+variable "owner" {
+  type = string
+}
 
-variable "worker_pool_token" { sensitive = true }
+variable "domain_name" {
+  type = string
+}
 
-output "public_url"                { value = module.stackd.public_url }
-output "google_oauth_redirect_uri" { value = module.stackd.google_oauth_redirect_uri }
-output "ecr_api_repository_url"    { value = module.stackd.ecr_api_repository_url }
-output "ecr_worker_repository_url" { value = module.stackd.ecr_worker_repository_url }
-output "cloudfront_distribution_id" { value = module.stackd.cloudfront_distribution_id }
-output "ecs_cluster_name"           { value = module.stackd.ecs_cluster_name }
+variable "route53_zone_id" {
+  type    = string
+  default = null
+}
+
+variable "google_client_id" {
+  type = string
+}
+
+variable "google_allowed_domains" {
+  type = list(string)
+}
+
+variable "api_image" {
+  type    = string
+  default = null
+}
+
+variable "worker_image" {
+  type    = string
+  default = null
+}
+
+variable "runner_images" {
+  type    = map(string)
+  default = {}
+}
+
+output "public_url" {
+  value = module.stackd.public_url
+}
+
+output "google_oauth_redirect_uri" {
+  value = module.stackd.google_oauth_redirect_uri
+}
+
+output "acm_validation_records" {
+  value = module.stackd.acm_validation_records
+}
+
+output "dns_records" {
+  value = module.stackd.dns_records
+}
+
+output "ecr_repository_urls" {
+  value = module.stackd.ecr_repository_urls
+}
+
+output "google_client_secret_arn" {
+  value = module.stackd.google_client_secret_arn
+}
+
+output "worker_pool_token_secret_arn" {
+  value = module.stackd.worker_pool_token_secret_arn
+}
+
+output "spa_bucket" {
+  value = module.stackd.spa_bucket
+}
+
+output "cloudfront_distribution_id" {
+  value = module.stackd.cloudfront_distribution_id
+}
+
+output "migrate_command" {
+  value = module.stackd.migrate_command
+}
+
+output "ecs_cluster_name" {
+  value = module.stackd.ecs_cluster_name
+}
+
+output "worker_autoscaling_group" {
+  value = module.stackd.worker_autoscaling_group
+}

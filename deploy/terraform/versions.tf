@@ -1,32 +1,21 @@
 terraform {
-  required_version = ">= 1.10"
+  # Write-only arguments (`*_wo`) and ephemeral resources keep the generated secrets out of the
+  # state and the plan: OpenTofu >= 1.11 or Terraform >= 1.11.
+  required_version = ">= 1.11"
 
   required_providers {
     aws = {
-      source  = "hashicorp/aws"
-      version = ">= 6.0"
+      source = "hashicorp/aws"
+      # 6.50 fixes `secret_string_wo_version` referencing a resource created in the same apply.
+      version = "~> 6.50"
+      # The caller configures the providers (see examples/): this module declares none. The alias
+      # is the us-east-1 provider CloudFront certificates must be created with.
+      configuration_aliases = [aws.us_east_1]
     }
     random = {
-      source  = "hashicorp/random"
-      version = ">= 3.6"
+      source = "hashicorp/random"
+      # 3.9 adds the ephemeral `random_bytes` (the master encryption key).
+      version = "~> 3.9"
     }
-  }
-}
-
-provider "aws" {
-  region = var.aws_region
-
-  default_tags {
-    tags = local.common_tags
-  }
-}
-
-# ACM certificates for CloudFront must live in us-east-1
-provider "aws" {
-  alias  = "us_east_1"
-  region = "us-east-1"
-
-  default_tags {
-    tags = local.common_tags
   }
 }
