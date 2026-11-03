@@ -20,7 +20,7 @@ output "acm_validation_records" {
 
 output "dns_records" {
   description = "Records to create when route53_zone_id is null."
-  value       = [
+  value = [
     for r in [
       { name = var.domain_name, type = "CNAME", value = module.cdn.distribution_domain_name },
       { name = local.internal_domain_name, type = "CNAME", value = module.api.alb_dns_name },

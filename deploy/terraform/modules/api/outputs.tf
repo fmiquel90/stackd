@@ -32,7 +32,7 @@ output "log_group_name" {
 
 output "migrate_command" {
   description = "Runs the migration task by hand (when run_migrations = false)."
-  value       = var.enabled ? format(
+  value = var.enabled ? format(
     "%s bash deploy/terraform/scripts/run-migrations.sh",
     join(" ", [for k, v in local.migrate_env : "${k}='${v}'"]),
   ) : null

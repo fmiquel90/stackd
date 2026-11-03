@@ -37,7 +37,7 @@ resource "aws_ecr_lifecycle_policy" "this" {
       {
         rulePriority = 1
         description  = "Drop untagged images (a digest still deployed should keep its tag)"
-        selection    = {
+        selection = {
           tagStatus   = "untagged"
           countType   = "sinceImagePushed"
           countUnit   = "days"
@@ -48,7 +48,7 @@ resource "aws_ecr_lifecycle_policy" "this" {
       {
         rulePriority = 2
         description  = "Keep the last ${var.image_retention_count} tagged images"
-        selection    = {
+        selection = {
           tagStatus      = "tagged"
           tagPatternList = ["*"]
           countType      = "imageCountMoreThan"

@@ -27,7 +27,7 @@ locals {
   ami_id    = coalesce(var.ami_id, try(data.aws_ssm_parameter.al2023[0].insecure_value, null))
 
   # Registries to log in to: the ECR registries of the agent and runner images.
-  images         = concat([var.worker_image], values(var.runner_images))
+  images = concat([var.worker_image], values(var.runner_images))
   ecr_registries = distinct([
     for ref in local.images : split("/", ref)[0]
     if can(regex("^[0-9]{12}\\.dkr\\.ecr\\.[a-z0-9-]+\\.amazonaws\\.com$", split("/", ref)[0]))
@@ -133,8 +133,8 @@ data "aws_iam_policy_document" "worker" {
     resources = ["${aws_cloudwatch_log_group.worker.arn}:*"]
   }
   statement {
-    sid       = "OwnTerminationHook"
-    actions   = ["autoscaling:CompleteLifecycleAction"]
+    sid     = "OwnTerminationHook"
+    actions = ["autoscaling:CompleteLifecycleAction"]
     resources = [
       "arn:aws:autoscaling:${var.region}:${data.aws_caller_identity.current.account_id}:autoScalingGroup:*:autoScalingGroupName/${local.asg_name}",
     ]

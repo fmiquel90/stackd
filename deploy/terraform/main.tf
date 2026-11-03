@@ -97,7 +97,7 @@ resource "aws_acm_certificate_validation" "internal" {
 module "iam" {
   source = "./modules/iam"
 
-  name            = var.name
+  name = var.name
   api_secret_arns = [
     module.database.database_url_secret_arn,
     module.secrets.encryption_key_secret_arn,
@@ -227,9 +227,9 @@ data "aws_iam_policy_document" "spa_bucket" {
     }
   }
   statement {
-    sid       = "DenyInsecureTransport"
-    effect    = "Deny"
-    actions   = ["s3:*"]
+    sid     = "DenyInsecureTransport"
+    effect  = "Deny"
+    actions = ["s3:*"]
     resources = [
       module.storage.spa_bucket_arn,
       "${module.storage.spa_bucket_arn}/*",

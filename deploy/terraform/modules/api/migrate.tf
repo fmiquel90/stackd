@@ -32,7 +32,7 @@ resource "aws_ecs_task_definition" "migrate" {
 
     logConfiguration = {
       logDriver = "awslogs"
-      options   = {
+      options = {
         "awslogs-group"         = aws_cloudwatch_log_group.api.name
         "awslogs-region"        = var.region
         "awslogs-stream-prefix" = "migrate"

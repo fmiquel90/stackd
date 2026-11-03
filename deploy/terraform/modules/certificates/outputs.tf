@@ -16,7 +16,7 @@ output "internal_validation_fqdns" {
 
 output "validation_records" {
   description = "DNS records that validate the certificates (create them yourself without a Route 53 zone)."
-  value       = [
+  value = [
     for d in sort(tolist(local.validation_domains)) : {
       for_domain = d
       name       = local.validation_options[d].resource_record_name

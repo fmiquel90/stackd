@@ -52,7 +52,7 @@ module "stackd" {
     aws.us_east_1 = aws.us_east_1
   }
 
-  name               = var.name
+  name = var.name
   availability_zones = [
     "${var.aws_region}a",
     "${var.aws_region}b",

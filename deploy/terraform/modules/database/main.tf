@@ -115,7 +115,7 @@ resource "aws_secretsmanager_secret" "database_url" {
 }
 
 resource "aws_secretsmanager_secret_version" "database_url" {
-  secret_id        = aws_secretsmanager_secret.database_url.id
+  secret_id = aws_secretsmanager_secret.database_url.id
   secret_string_wo = format(
     "postgresql+asyncpg://stackd:%s@%s:%d/stackd?ssl=require",
     ephemeral.aws_secretsmanager_secret_version.password.secret_string,
