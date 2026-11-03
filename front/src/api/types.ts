@@ -6,6 +6,8 @@ export interface TierDef {
   id: string;
   name: string;
   requires_four_eyes: boolean;
+  /** Whether repo hooks (`.stackd.yml`) may run at before_apply/after_apply on this tier (SPECS §8.3). */
+  repo_hooks_at_apply: boolean;
   position: number;
   created_at: string;
 }

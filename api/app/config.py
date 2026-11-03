@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import base64
 from functools import lru_cache
+from typing import Literal
 
 from pydantic import field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -43,6 +44,13 @@ class Settings(BaseSettings):
     # GitHub API base for VCS post-back (§18); override for GitHub Enterprise.
     stackd_github_api_url: str = "https://api.github.com"
 
+    # Workload OIDC issuer signing key (§3.11, §10): `local` (an RSA key AES-GCM encrypted in the
+    # DB, signing in process) or `kms` (an AWS KMS RSA key: the private key never leaves KMS).
+    stackd_oidc_signer: Literal["local", "kms"] = "local"
+    stackd_oidc_kms_key_arn: str | None = None
+    # Production requires `kms` unless this explicit acknowledgement is set.
+    stackd_allow_local_signer: bool = False
+
     # Object storage
     s3_endpoint_url: str | None = None
     s3_bucket: str = "stackd"
@@ -82,6 +90,12 @@ class Settings(BaseSettings):
         return v
 
     @model_validator(mode="after")
+    def _kms_signer_has_a_key(self) -> Settings:
+        if self.stackd_oidc_signer == "kms" and not self.stackd_oidc_kms_key_arn:
+            raise ValueError("STACKD_OIDC_SIGNER=kms needs STACKD_OIDC_KMS_KEY_ARN")
+        return self
+
+    @model_validator(mode="after")
     def _production_ready(self) -> Settings:
         """Refuse to start a production API on dev-grade settings (§13): a master key that does not
         decode to 32 bytes, a short session-signing secret, or a public URL that is not https (the
@@ -97,6 +111,11 @@ class Settings(BaseSettings):
             problems.append("STACKD_JWT_SECRET must be at least 32 characters")
         if not self.stackd_public_url.startswith("https://"):
             problems.append("STACKD_PUBLIC_URL must be an https:// URL")
+        if self.stackd_oidc_signer == "local" and not self.stackd_allow_local_signer:
+            problems.append(
+                "STACKD_OIDC_SIGNER must be `kms` (or acknowledge a local signing key with "
+                "STACKD_ALLOW_LOCAL_SIGNER=true)"
+            )
         if problems:
             raise ValueError("STACKD_ENV=production: " + "; ".join(problems))
         return self
