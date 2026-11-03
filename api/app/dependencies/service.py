@@ -12,7 +12,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.audit import record_audit
 from app.enums import (
     ACTIVE_STATES,
-    TERMINAL_STATES,
     AuditActorKind,
     RunState,
     RunType,
@@ -196,82 +195,122 @@ async def group_status(session: AsyncSession, group_id: uuid.UUID) -> str:
     return "succeeded"
 
 
-async def _decide_downstream(
-    session: AsyncSession, group_id: uuid.UUID, downstream: Environment
-) -> bool:
-    """Should `downstream` get its run in the group now (§9.2 steps 4-5)?
-
-    - it already has one in the group → no (a downstream runs once per group);
-    - one of its upstreams has a run in the group that is not terminal → not yet (multi-parent
-      gating: the last parent to finish triggers it);
-    - one of those runs ended failed / discarded / canceled → never (stop on failure: the branch
-      stops there, and nothing reachable from it gets a run in the group);
-    - otherwise → yes if an edge from an upstream whose group run *applied* passes its trigger
-      policy. An upstream with no run in the group does not hold it back (its current outputs are
-      used) and does not trigger it either.
-    """
-    group_runs = (
-        (await session.execute(select(Run).where(_in_group(group_id), Run.type == RunType.tracked)))
-        .scalars()
-        .all()
-    )
-    if any(r.environment_id == downstream.id for r in group_runs):
-        return False
-    by_env: dict[uuid.UUID, list[Run]] = {}
-    for r in group_runs:
-        by_env.setdefault(r.environment_id, []).append(r)
-    incoming = (
-        (
-            await session.execute(
-                select(EnvDependency).where(EnvDependency.downstream_env_id == downstream.id)
-            )
-        )
-        .scalars()
-        .all()
-    )
-    applied_edges: list[EnvDependency] = []
-    for dep in incoming:
-        runs = by_env.get(dep.upstream_env_id, [])
-        if any(r.state not in TERMINAL_STATES for r in runs):
-            return False
-        if any(r.state in _BROKEN_STATES for r in runs):
-            return False
-        if any(r.state == RunState.finished and r.confirmed_at is not None for r in runs):
-            applied_edges.append(dep)
-    for dep in applied_edges:
-        if await _should_trigger(session, dep, downstream):
-            return True
-    return False
+async def _scope(
+    session: AsyncSession, root_env: uuid.UUID
+) -> tuple[list[uuid.UUID], dict[uuid.UUID, list[EnvDependency]]]:
+    """The group's scope: every environment reachable from the root's env, in topological order,
+    with each one's incoming edges from inside the scope. The graph is acyclic (§3.8)."""
+    edges = (await session.execute(select(EnvDependency))).scalars().all()
+    out: dict[uuid.UUID, list[EnvDependency]] = {}
+    for dep in edges:
+        out.setdefault(dep.upstream_env_id, []).append(dep)
+    scope: set[uuid.UUID] = {root_env}
+    stack = [root_env]
+    while stack:
+        for dep in out.get(stack.pop(), []):
+            if dep.downstream_env_id not in scope:
+                scope.add(dep.downstream_env_id)
+                stack.append(dep.downstream_env_id)
+    incoming: dict[uuid.UUID, list[EnvDependency]] = {e: [] for e in scope}
+    for dep in edges:
+        if dep.upstream_env_id in scope and dep.downstream_env_id in scope:
+            incoming[dep.downstream_env_id].append(dep)
+    indegree = {e: len(incoming[e]) for e in scope}
+    order: list[uuid.UUID] = []
+    ready = sorted(e for e in scope if indegree[e] == 0)
+    while ready:
+        node = ready.pop()
+        order.append(node)
+        for dep in out.get(node, []):
+            if dep.downstream_env_id in indegree:
+                indegree[dep.downstream_env_id] -= 1
+                if indegree[dep.downstream_env_id] == 0:
+                    ready.append(dep.downstream_env_id)
+    return order, incoming
 
 
 async def cascade(session: AsyncSession, run: Run) -> list[Run]:
-    """Propagate downstream after a run of the group ended `finished` (§9.2): after an apply, and
-    also after an empty plan — it may be the last parent a downstream was waiting for.
+    """Propagate through a run group after one of its tracked runs ended `finished` (§9.2) — after
+    an apply, and after an empty plan too (it may be the parent a downstream waits for).
 
-    Every downstream environment of the run's env is decided by `_decide_downstream` (multi-parent
-    gating, stop on failure, trigger policy). The cascade never bypasses protections: a protected
-    downstream still stops at `unconfirmed` because its confirm is gated independently.
+    The whole group is decided at once, under a lock on the group's root run (two parents
+    finishing at the same moment are serialized: the second sees the first's outcome). Every
+    environment reachable from the root's env (the scope) is settled in topological order:
+    - it has a run in the group: `done` (finished; *applied* if it was confirmed), `broken`
+      (failed, discarded, canceled) or `active`;
+    - otherwise, from its upstreams in the scope: one `broken` → `broken` (stop on failure, also
+      through environments that never got a run); one `active` or `waiting` → `waiting`
+      (multi-parent gating, whatever the order the edges are read in); all settled → a run is
+      created if an edge from an *applied* upstream passes its policy, else `skipped`.
+    A downstream gets at most one run per group. The cascade never bypasses protections: a
+    protected downstream still stops at `unconfirmed`, its confirm being gated independently.
     """
     if run.type != RunType.tracked or run.state != RunState.finished:
         return []
-    outgoing = (
+    group_id = run.run_group_id or run.id
+    root = (
+        await session.execute(
+            select(Run)
+            .where(Run.id == group_id)
+            .with_for_update()
+            .execution_options(populate_existing=True)
+        )
+    ).scalar_one_or_none()
+    if root is None:
+        return []
+    order, incoming = await _scope(session, root.environment_id)
+
+    group_runs = (
         (
             await session.execute(
-                select(EnvDependency).where(EnvDependency.upstream_env_id == run.environment_id)
+                select(Run)
+                .where(_in_group(group_id), Run.type == RunType.tracked)
+                .execution_options(populate_existing=True)
             )
         )
         .scalars()
         .all()
     )
+    by_env: dict[uuid.UUID, Run] = {}
+    for r in sorted(group_runs, key=lambda r: r.created_at):
+        by_env[r.environment_id] = r  # the latest run of an env in the group
 
-    group_id = run.run_group_id or run.id
+    status: dict[uuid.UUID, str] = {}
+    applied: set[uuid.UUID] = set()
     triggered: list[Run] = []
-    for downstream_id in dict.fromkeys(dep.downstream_env_id for dep in outgoing):
-        downstream = await session.get(Environment, downstream_id)
-        if downstream is None or not await _decide_downstream(session, group_id, downstream):
+    for env_id in order:
+        existing = by_env.get(env_id)
+        if existing is not None:
+            if existing.state == RunState.finished:
+                status[env_id] = "done"
+                if existing.confirmed_at is not None:
+                    applied.add(env_id)
+            elif existing.state in _BROKEN_STATES:
+                status[env_id] = "broken"
+            else:
+                status[env_id] = "active"
+            continue
+        ups = [status.get(dep.upstream_env_id, "skipped") for dep in incoming[env_id]]
+        if "broken" in ups:
+            status[env_id] = "broken"
+            continue
+        if "active" in ups or "waiting" in ups:
+            status[env_id] = "waiting"
+            continue
+        downstream = await session.get(Environment, env_id)
+        fire = False
+        if downstream is not None:
+            for dep in incoming[env_id]:
+                if dep.upstream_env_id in applied and await _should_trigger(
+                    session, dep, downstream
+                ):
+                    fire = True
+                    break
+        if not fire:
+            status[env_id] = "skipped"
             continue
         child = Run(
-            environment_id=downstream.id,
+            environment_id=env_id,
             type=RunType.tracked,
             state=RunState.queued,
             triggered_by=TriggeredBy.dependency,
@@ -288,5 +327,6 @@ async def cascade(session: AsyncSession, run: Run) -> list[Run]:
             target_id=child.id,
             context={"via": "cascade", "parent_run_id": str(run.id)},
         )
+        status[env_id] = "active"
         triggered.append(child)
     return triggered

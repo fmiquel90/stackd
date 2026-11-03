@@ -932,13 +932,21 @@ At `applying → finished`, parsing of `outputs.json`:
 
 Steps 4–5, as implemented (`cascade()`, called when a tracked run of a group ends `finished` —
 after its apply, and after an **empty plan** too, since it may be the parent a downstream waits for):
-- *Multi-parent gating.* Within a run group, a downstream environment with several upstream edges
-  whose upstreams have a run **in the same group** is triggered once, when the last of those runs is
-  `finished`; until then nothing is created for it. It is triggered if an edge from an upstream whose
-  group run **applied** passes its policy; an upstream with no run in the group neither holds it back
-  (its current outputs are used) nor triggers it. A downstream gets at most one run per group.
+- *The whole group is decided at once*, under a lock on the group's root run (two parents finishing
+  at the same moment are serialized: the second sees the first's outcome). Every environment
+  reachable from the root's env — the group's *scope* — is settled in topological order: with a run
+  in the group it is `done` (finished; *applied* if confirmed), `broken` (failed, discarded,
+  canceled) or `active`; without one, from its upstreams in the scope: one `broken` → `broken`, one
+  `active` or `waiting` → `waiting`, all settled → a run is created if an edge from an *applied*
+  upstream passes its policy, else `skipped` (settled, no run).
+- *Multi-parent gating.* So a downstream waits for every upstream in the scope that may still run —
+  a direct parent, or one only reached through another environment of the group — whatever the
+  order the edges are read in, and is triggered once, by the last of them. An upstream outside the
+  scope does not hold it back (its current outputs are used). A downstream gets at most one run per
+  group.
 - *Stop on failure.* A run of the group ending `failed`, `discarded` or `canceled` triggers nothing
-  downstream, and every environment reachable from it gets no run in that group.
+  downstream, and every environment reachable from it — also through environments that never got a
+  run — gets no run in that group.
 - *Group status*, computed (not stored) and exposed on `GET /api/v1/runs/{id}` as `run_group`
   (`{id, status}`, for the group the run belongs to or roots; runs also carry `run_group_id` and
   `parent_run_id`): `running` while a run of the group is queued or active, else `partial_failure`
