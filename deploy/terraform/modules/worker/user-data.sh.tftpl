@@ -1,0 +1,162 @@
+#!/bin/bash
+# Stackd worker host bootstrap (Amazon Linux 2023), rendered by deploy/terraform/modules/worker.
+# Installs Docker and two systemd units:
+#   stackd-worker     the agent container (docker runner); `systemctl stop` drains it
+#   stackd-lifecycle  waits for the ASG termination hook, drains the agent, then lets it proceed
+set -euo pipefail
+
+dnf install -y docker
+
+install -d -m 0755 /etc/docker
+cat > /etc/docker/daemon.json <<'JSON'
+{
+  "icc": false,
+  "no-new-privileges": true,
+  "live-restore": false,
+  "log-driver": "json-file",
+  "log-opts": { "max-size": "10m", "max-file": "3" }
+}
+JSON
+systemctl enable --now docker
+
+install -d -m 0700 /etc/stackd /var/lib/stackd /var/lib/stackd/ws
+install -d -m 0755 /usr/local/libexec/stackd
+
+# The agent's settings (never secrets: the pool token is a file, fetched at start).
+cat > /etc/stackd/worker.env <<'ENV'
+${agent_env}
+ENV
+chmod 0600 /etc/stackd/worker.env
+
+# ── ExecStartPre: IMDS fence, registry login, pool token, images ─────────────────────────────
+cat > /usr/local/libexec/stackd/prepare.sh <<'SH'
+#!/bin/bash
+set -euo pipefail
+REGION="${region}"
+
+# Job containers must never reach the instance role. IMDSv2 with hop limit 1 already stops a
+# container on the bridge; drop the address at the bridge as well.
+if command -v iptables >/dev/null; then
+  iptables -C DOCKER-USER -d 169.254.169.254/32 -j DROP 2>/dev/null \
+    || iptables -I DOCKER-USER -d 169.254.169.254/32 -j DROP
+else
+  echo "stackd: iptables missing, relying on the IMDS hop limit alone" >&2
+fi
+
+imds_token="$(curl -sf -X PUT http://169.254.169.254/latest/api/token \
+  -H 'X-aws-ec2-metadata-token-ttl-seconds: 60')"
+instance_id="$(curl -sf -H "X-aws-ec2-metadata-token: $imds_token" \
+  http://169.254.169.254/latest/meta-data/instance-id)"
+install -d -m 0700 /run/stackd
+printf 'STACKD_WORKER_NAME=%s\n' "$instance_id" > /run/stackd/runtime.env
+
+for registry in ${ecr_registries}; do
+  aws ecr get-login-password --region "$REGION" \
+    | docker login --username AWS --password-stdin "$registry" >/dev/null
+done
+
+# The pool token is put into Secrets Manager once the pool exists in Stackd: wait for it.
+until token="$(aws secretsmanager get-secret-value --region "$REGION" \
+  --secret-id '${pool_token_secret_arn}' --query SecretString --output text 2>/dev/null)" \
+  && [ -n "$token" ] && [ "$token" != "None" ]; do
+  echo "stackd: waiting for the worker pool token in Secrets Manager"
+  sleep 30
+done
+(umask 077 && printf '%s' "$token" > /run/stackd/pool-token)
+
+# Pinned by digest: the agent never pulls a tag, and has no registry credentials of its own.
+for image in ${images}; do
+  docker pull --quiet "$image" >/dev/null
+done
+docker rm -f stackd-worker >/dev/null 2>&1 || true
+SH
+
+# ── ExecStart: the agent container ───────────────────────────────────────────────────────────
+cat > /usr/local/libexec/stackd/run.sh <<'SH'
+#!/bin/bash
+set -euo pipefail
+. /run/stackd/runtime.env
+# The workspace root is mounted at the same path on both sides: job containers mount it by host
+# path. `--init` forwards `docker stop`'s SIGTERM to the agent, which drains.
+exec /usr/bin/docker run --rm --name stackd-worker --init \
+  --env-file /etc/stackd/worker.env \
+  --env "STACKD_WORKER_NAME=$STACKD_WORKER_NAME" \
+  --log-driver awslogs \
+  --log-opt awslogs-region=${region} \
+  --log-opt awslogs-group=${log_group} \
+  --log-opt "awslogs-stream=$STACKD_WORKER_NAME" \
+  --stop-timeout ${docker_stop_timeout} \
+  --volume /var/run/docker.sock:/var/run/docker.sock \
+  --volume /var/lib/stackd/ws:/var/lib/stackd/ws \
+  --volume /run/stackd/pool-token:/run/stackd/pool-token:ro \
+  '${worker_image}'
+SH
+
+# ── Termination hook: drain, then complete the lifecycle action ──────────────────────────────
+cat > /usr/local/libexec/stackd/lifecycle.sh <<'SH'
+#!/bin/bash
+set -uo pipefail
+imds() {
+  local token
+  token="$(curl -sf -X PUT http://169.254.169.254/latest/api/token \
+    -H 'X-aws-ec2-metadata-token-ttl-seconds: 60')" || return 1
+  curl -sf -H "X-aws-ec2-metadata-token: $token" "http://169.254.169.254/latest/meta-data/$1"
+}
+until instance_id="$(imds instance-id)"; do sleep 5; done
+while true; do
+  if [ "$(imds autoscaling/target-lifecycle-state || true)" = "Terminated" ]; then
+    echo "stackd: instance terminating, draining the worker agent"
+    systemctl stop stackd-worker.service
+    for _ in 1 2 3 4 5 6; do
+      aws autoscaling complete-lifecycle-action --region '${region}' \
+        --auto-scaling-group-name '${asg_name}' --lifecycle-hook-name '${hook_name}' \
+        --instance-id "$instance_id" --lifecycle-action-result CONTINUE && exit 0
+      sleep 10
+    done
+    exit 1 # the hook times out and the termination proceeds anyway
+  fi
+  sleep 10
+done
+SH
+chmod 0700 /usr/local/libexec/stackd/*.sh
+
+cat > /etc/systemd/system/stackd-worker.service <<'UNIT'
+[Unit]
+Description=Stackd worker agent
+After=docker.service network-online.target
+Requires=docker.service
+Wants=network-online.target
+StartLimitIntervalSec=0
+
+[Service]
+Type=simple
+TimeoutStartSec=infinity
+ExecStartPre=/usr/local/libexec/stackd/prepare.sh
+ExecStart=/usr/local/libexec/stackd/run.sh
+ExecStop=/usr/bin/docker stop --time ${docker_stop_timeout} stackd-worker
+TimeoutStopSec=${systemd_stop_timeout}
+Restart=always
+RestartSec=15
+
+[Install]
+WantedBy=multi-user.target
+UNIT
+
+cat > /etc/systemd/system/stackd-lifecycle.service <<'UNIT'
+[Unit]
+Description=Stackd worker: drain on Auto Scaling termination
+After=stackd-worker.service
+
+[Service]
+Type=simple
+ExecStart=/usr/local/libexec/stackd/lifecycle.sh
+Restart=on-failure
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target
+UNIT
+
+systemctl daemon-reload
+systemctl enable --now stackd-lifecycle.service
+systemctl enable --now --no-block stackd-worker.service

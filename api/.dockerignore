@@ -1,0 +1,7 @@
+# Keeps local artifacts out of both images' build context (Dockerfile, Dockerfile.dev).
+.venv
+**/__pycache__
+**/*.pyc
+.pytest_cache
+.mypy_cache
+.ruff_cache

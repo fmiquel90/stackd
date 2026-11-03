@@ -60,6 +60,7 @@ nav:
   - Home: index.md
   - Guide:
       - Getting started: guide/getting-started.md
+      - Deploying to AWS: guide/deploying-to-aws.md
       - Stacks & environments: guide/stacks-and-environments.md
       - Variables & secrets: guide/variables.md
       - External secret sources: guide/external-secrets.md

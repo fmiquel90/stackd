@@ -123,6 +123,7 @@ The worker agent has its own suite: `cd worker && uv run pytest`.
 | 🏗️ [Architecture](docs/ARCHITECTURE.md) | How it works inside, with diagrams |
 | 📐 [Specification](docs/SPECS.md) | The technical source of truth |
 | 🗺️ [Plan & scope](docs/PLAN.md) | What is built, what is next, what is out of scope |
+| ☁️ [Deploying to AWS](https://fmiquel90.github.io/stackd/guide/deploying-to-aws/) | Production deployment with the Terraform module in `deploy/terraform` |
 | 🛠️ [Dev environment](docs/DEV.md) · 🧪 [Testing](docs/TESTING.md) | Working on Stackd itself |
 | 🤖 [`CLAUDE.md`](CLAUDE.md) | Working rules and invariants — read before changing behaviour |
 
@@ -132,7 +133,7 @@ The worker agent has its own suite: `cd worker && uv run pytest`.
 api/      FastAPI (Python 3.13) — REST + worker API, auth, audit, OIDC issuer, state backend
 worker/   Pull-model agent (Python)
 front/    React 19 + Vite + TypeScript
-deploy/   Local stack (docker compose)
+deploy/   Local stack (docker compose), runner images, AWS Terraform module (deploy/terraform)
 docs/     User guide and reference docs (published with MkDocs)
 ```
 

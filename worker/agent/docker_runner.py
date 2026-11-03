@@ -25,6 +25,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from agent import shutdown
 from agent.docker_engine import DockerEngine, LineSplitter
 
 # The runner images' user (deploy/images): a root agent hands the workspace to it.
@@ -153,11 +154,13 @@ class DockerRunner:
         try:
             self._engine.start(cid)
             timer.start()
-            lines = LineSplitter(on_output)
-            for kind, data in self._engine.logs(cid):
-                lines.feed(kind, data)
-            lines.flush()
-            rc = self._engine.wait(cid)
+            # A shutdown abort (agent.shutdown) kills the container too — not a timeout.
+            with shutdown.SHUTDOWN.command(lambda: self._engine.kill(cid)):
+                lines = LineSplitter(on_output)
+                for kind, data in self._engine.logs(cid):
+                    lines.feed(kind, data)
+                lines.flush()
+                rc = self._engine.wait(cid)
         finally:
             timer.cancel()
             # Whatever happened — exit, timeout, an error streaming the output — the container and

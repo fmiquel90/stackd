@@ -159,6 +159,22 @@ tasks:
       - docker build -f deploy/images/opentofu.Dockerfile -t stackd/opentofu:1.12.2 .
       - docker build -f deploy/images/terraform.Dockerfile -t stackd/terraform:1.9.8 .
 
+  tf:check:
+    desc: "AWS module: tofu fmt + validate (module and every example)"
+    dir: deploy/terraform
+    cmds:
+      - tofu fmt -check -recursive -diff .
+      - for: [minimal, production, ministack]
+        cmd: tofu -chdir=examples/{{.ITEM}} init -backend=false -input=false >/dev/null && tofu -chdir=examples/{{.ITEM}} validate
+
+  tf:sim:
+    desc: "AWS module: apply, re-plan and destroy against MiniStack (KEEP=1 to keep it applied)"
+    cmds: [bash deploy/terraform/scripts/sim.sh]
+
+  tf:sim:down:
+    desc: Stop MiniStack
+    cmds: [docker compose -f deploy/terraform/examples/ministack/compose.yml down -v]
+
   lint:
     desc: ruff + mypy
     cmds:

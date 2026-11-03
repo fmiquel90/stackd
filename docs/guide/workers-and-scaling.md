@@ -96,6 +96,7 @@ STACKD_POOL_TOKEN=$POOL_TOKEN \
 | `STACKD_LEAK_TRIPWIRE` | `warn` | `fail` fails a plan whose non-sensitive output shows a secret |
 | `STACKD_WORKSPACE_ROOT` | `/tmp/stackd-ws` | where each job's workspace is created, then removed |
 | `STACKD_HEARTBEAT_INTERVAL`, `STACKD_POLL_WAIT` | `20`, `25` (s) | heartbeat period, claim long-poll |
+| `STACKD_SHUTDOWN_TIMEOUT_SECONDS` | `1800` | on SIGTERM, how long the running jobs may take to finish ([Stopping a worker](#stopping-a-worker)) |
 
 These `STACKD_*` settings are the agent's own: **they never reach tofu or a hook**, so repo code
 can't read the pool token from its environment.
@@ -123,7 +124,13 @@ Every job runs in its own workspace, removed when the job ends. `STACKD_RUNNER` 
     Access to the Docker socket is root-equivalent on that host: give the worker a dedicated VM, ideally with rootless Docker. If the agent itself runs in a container, mount `STACKD_WORKSPACE_ROOT` at the **same path** on the host and in the agent's container: the job containers mount it by host path.
 
 !!! warning "Fargate"
-    The `docker` runner launches containers; **AWS Fargate does not allow this**. A worker on Fargate can only use the `local` runner, which a production API refuses.
+    The `docker` runner launches containers; **AWS Fargate does not allow this**. A worker on Fargate can only use the `local` runner, which a production API refuses. Run production workers on hosts with a Docker daemon: the [AWS module](deploying-to-aws.md#workers-on-ec2) uses an EC2 Auto Scaling group.
+
+### Stopping a worker
+
+On `SIGTERM` (or `SIGINT`) — `docker stop`, a systemd stop, a scale-in — the agent **drains**: it stops claiming jobs and lets the ones it is running finish, for up to `STACKD_SHUTDOWN_TIMEOUT_SECONDS` (default 1800 s). It keeps heartbeating meanwhile, so it is not taken for lost. Past that budget, or on a second signal, it reports each job still running as failed ("worker stopped before the job finished") and kills its commands, then exits.
+
+Set the budget above the API's apply budget (`STACKD_APPLY_TIMEOUT_SECONDS`, 900 s by default) so a drain never cuts an apply, and give the orchestrator's own stop timeout more than the budget (`docker stop -t`, a lifecycle hook): a `SIGKILL` before the drain ends leaves the job to the [worker-lost](#worker-loss) reaper.
 
 ## Dedicate a pool with labels
 
@@ -144,7 +151,15 @@ This is the recommended isolation for sensitive environments: combine it with pr
 
 Because the environment is the unit of parallelism, **throughput ≈ min(workers, environments with queued work)**. Adding workers beyond the number of environments that currently have queued runs buys nothing; they will idle on `204`.
 
-There is **no built-in autoscaler**, but the signals you need are exposed:
+### Autoscaling on AWS
+
+The [AWS module](deploying-to-aws.md) runs a **fixed** number of worker hosts (`worker_count`): scale by changing it. It has no CPU-based policy on purpose: a worker waiting on the claim long-poll uses almost no CPU even when the queue is long, and a busy one may be waiting on a slow provider, so CPU says little about demand. Scale-in is safe either way: a host leaving the group drains its agent through a termination lifecycle hook before it is terminated.
+
+If you need elasticity, drive the worker count from the queue, not from CPU: count the runs `GET /api/v1/queue` lists as waiting, minus those held for `no_compatible_worker` (a label mismatch more workers won't fix), and change `worker_count` (from CI, or a scheduled apply for working hours). The module does not change the group's size on its own: a capacity set outside it is reset on the next apply.
+
+### Monitoring signals
+
+Regardless of autoscaling strategy, these endpoints expose the right signals:
 
 - `GET /api/v1/health` — DB, workers (online/total + last heartbeat), runs active/queued, recent errors.
 - `GET /api/v1/queue` — waiting runs and *why* they wait (`active_run` | `env_locked` | `no_compatible_worker` | `apply_affinity_hold`).

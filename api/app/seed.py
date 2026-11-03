@@ -31,11 +31,17 @@ TOKEN_PATH = os.environ.get("STACKD_SEED_TOKEN_PATH", "/stackd-dev/pool.token")
 REPO_BASE = os.environ.get("STACKD_SEED_REPO_BASE", "file:///stackd-dev/repos")
 
 
-async def seed() -> None:
+_BASE_SPACES = (("default", "Default space"),)
+_DEV_SPACES = (*_BASE_SPACES, ("demo", "Demo space"))
+
+
+async def seed(*, include_demo_space: bool = True) -> None:
     """Idempotent base data the app (and tests) require: the spaces (SPECS §3.0) and the default
-    tier catalog (§2.4) — dev/staging/prod, prod requiring four-eyes (old hardcoded behavior)."""
+    tier catalog (§2.4) — dev/staging/prod, prod requiring four-eyes (old hardcoded behavior).
+    `include_demo_space=False` is the production bootstrap (`python -m app.seed --base`): the
+    `default` space and the tiers only, nothing of the demo."""
     async with SessionLocal() as session:
-        for name, desc in (("default", "Default space"), ("demo", "Demo space")):
+        for name, desc in _DEV_SPACES if include_demo_space else _BASE_SPACES:
             exists = (
                 await session.execute(select(Space).where(Space.name == name))
             ).scalar_one_or_none()
@@ -243,8 +249,16 @@ async def seed_demo() -> None:
 
 
 if __name__ == "__main__":
+    import sys
+
+    # `--base`: the production bootstrap, run after `alembic upgrade head` on every deploy — the
+    # `default` space and the tier catalog only. No flag: the dev seed (DEV §7), demo data included.
+    base_only = "--base" in sys.argv[1:]
 
     async def _main() -> None:
+        if base_only:
+            await seed(include_demo_space=False)
+            return
         await seed()
         await seed_demo()
 

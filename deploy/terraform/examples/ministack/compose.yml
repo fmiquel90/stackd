@@ -1,0 +1,17 @@
+# MiniStack, the local AWS emulator the `ministack` example applies against (task tf:sim).
+# No Docker socket on purpose: RDS, ECS and EC2 stay control-plane only (no real containers),
+# which is all a plan/apply/destroy check of the module needs.
+name: stackd-tf-sim
+
+services:
+  ministack:
+    image: ministackorg/ministack:${MINISTACK_VERSION:-latest}
+    environment:
+      MINISTACK_REGION: eu-west-3
+      MINISTACK_ACCOUNT_ID: "000000000000"
+    ports: ["127.0.0.1:4566:4566"]
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:4566/_ministack/health')"]
+      interval: 2s
+      timeout: 2s
+      retries: 30

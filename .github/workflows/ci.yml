@@ -115,3 +115,30 @@ jobs:
         run: pnpm exec vitest run --passWithNoTests
       - name: Build
         run: pnpm build
+
+  # The AWS module (deploy/terraform): static checks, then a full apply / re-plan / destroy
+  # against MiniStack. It proves the API shapes and the graph, not real AWS behaviour.
+  terraform:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: deploy/terraform
+    steps:
+      - uses: actions/checkout@v6
+      - uses: opentofu/setup-opentofu@v1
+        with:
+          tofu_version: 1.12.2
+          tofu_wrapper: false
+      - name: Format (tofu fmt)
+        run: tofu fmt -check -recursive -diff .
+      - name: Validate (module and examples)
+        run: |
+          for ex in minimal production ministack; do
+            tofu -chdir=examples/$ex init -backend=false -input=false >/dev/null
+            tofu -chdir=examples/$ex validate
+          done
+      - name: Apply against MiniStack
+        run: |
+          # S3 Control calls go to <account id>.localhost.
+          echo "127.0.0.1 000000000000.localhost" | sudo tee -a /etc/hosts
+          bash scripts/sim.sh

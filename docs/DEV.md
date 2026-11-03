@@ -129,7 +129,7 @@ STACKD_DEV_AUTH=true        # rejected if STACKD_ENV=production (assert at start
 - Sessions, roles and audit events are strictly the same as with Google — only the `google_sub` is synthetic (`dev:admin`).
 - The real Google flow remains testable in dev by setting `GOOGLE_CLIENT_ID/SECRET` (the two coexist).
 
-Safeguard: the prod build of the API image **removes the dev_auth module** (not just the flag) — a configuration oversight cannot expose the bypass.
+Safeguard: the prod build of the API image (`api/Dockerfile`) **removes the dev_auth module** (not just the flag) — a configuration oversight cannot expose the bypass. The build deletes `app/auth/dev.py` and fails if the module is still importable; the image bakes `STACKD_ENV=production`, under which the config also refuses `STACKD_DEV_AUTH=true`. Setting `STACKD_DEV_AUTH=true` on that image with another `STACKD_ENV` fails at startup (the module is gone): it fails closed.
 
 ---
 
