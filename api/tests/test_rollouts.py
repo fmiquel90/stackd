@@ -773,6 +773,75 @@ async def test_cascade_leaves_the_members_of_an_active_rollout_alone(
     assert changed and changed[0]["context"]["environment_id"] == app
 
 
+async def test_a_group_cascade_reaching_a_rollout_member_creates_no_run_there(
+    client: httpx.AsyncClient,
+) -> None:
+    """core → mid → app → edge, app the only member of an active rollout. A run group started on
+    core reaches app two levels down (§9.2 decide-once): app gets no cascade run — the rollout's
+    people are told, naming mid's run (the applied upstream it would have been parented to) — and
+    app's downstream, whose only upstream settled as skipped, gets none either."""
+    admin = await login(client, "admin")
+    wh = await register_worker(client, admin, "pool-ro-grp")
+
+    async def env(name: str) -> str:
+        return await _env(
+            client, admin, await make_stack(client, admin, f"ro-grp-{name}"), name, "dev"
+        )
+
+    core, mid, app, edge = (
+        await env("rogrp-core"),
+        await env("rogrp-mid"),
+        await env("rogrp"),
+        await env("rogrp-edge"),
+    )
+    for down, up in ((mid, core), (app, mid), (edge, app)):
+        r = await client.post(
+            f"/api/v1/environments/{down}/dependencies",
+            headers=admin,
+            json={
+                "upstream_env_id": up,
+                "trigger_policy": "always",
+                "references": [
+                    {"output_name": "vpc_id", "input_name": "vpc_id", "mock_value": "v"}
+                ],
+            },
+        )
+        assert r.status_code == 201, r.text
+    ro = await _rollout(client, admin, "rogrp")
+    assert [m["environment_id"] for m in ro["members"]] == [app]
+    await _approve(client, admin, ro["id"])
+    member_job = await _plan(client, wh, CHANGES)  # app's member run waits at unconfirmed
+    assert member_job["job_id"] == _member(await _get(client, admin, ro["id"]), app)["run_id"]
+
+    async def plan_confirm_apply(run_id: str) -> None:
+        job = await _plan(client, wh, CHANGES)
+        assert job["job_id"] == run_id
+        assert (
+            await client.post(f"/api/v1/runs/{run_id}/confirm", headers=admin)
+        ).status_code == 200
+        await _apply(client, wh, run_id)
+
+    root = (await client.post(f"/api/v1/environments/{core}/runs", headers=admin, json={})).json()
+    await plan_confirm_apply(root["id"])
+    (mid_run,) = await _runs(client, admin, mid)
+    assert mid_run["triggered_by"] == "dependency" and mid_run["parent_run_id"] == root["id"]
+    await plan_confirm_apply(mid_run["id"])
+
+    assert [r["id"] for r in await _runs(client, admin, app)] == [member_job["job_id"]]
+    assert await _runs(client, admin, edge) == []
+    notes = (await client.get("/api/v1/notifications", headers=admin)).json()
+    changed = [
+        n
+        for n in notes
+        if n["kind"] == "rollout_upstream_changed" and n["context"]["environment_id"] == app
+    ]
+    assert len(changed) == 1  # decided once
+    assert changed[0]["context"]["upstream_env_id"] == mid
+    assert changed[0]["context"]["upstream_run_id"] == mid_run["id"]
+    group = (await client.get(f"/api/v1/runs/{root['id']}", headers=admin)).json()["run_group"]
+    assert group["status"] == "succeeded"  # app's own run is the rollout's, not the group's
+
+
 async def test_a_member_run_finishing_after_a_cancel_does_not_cascade(
     client: httpx.AsyncClient,
 ) -> None:
