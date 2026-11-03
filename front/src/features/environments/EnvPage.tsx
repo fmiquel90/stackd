@@ -3,7 +3,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { ChevronDown, RefreshCw } from "lucide-react";
 import { ApiError } from "@/api/client";
-import { environments, runs, stacks, tiers, users } from "@/api/resources";
+import { environments, rollouts, runs, stacks, tiers, users } from "@/api/resources";
 import { useLiveSignals } from "@/api/stream";
 import { useSpaces } from "@/app/SpaceContext";
 import { useSession } from "@/auth/session";
@@ -66,6 +66,12 @@ export function EnvPage() {
     refetchInterval: 60_000,
   });
   const catalog = useQuery({ queryKey: ["tiers"], queryFn: tiers.list });
+  // A rollout of every environment of this name in the space (SPECS §21): created awaiting
+  // approval; its page shows the order and the approval.
+  const rollOut = useMutation({
+    mutationFn: () => rollouts.create(space!.id, envName ?? ""),
+    onSuccess: (r) => navigate(`/rollouts/${r.id}`),
+  });
   const people = useQuery({ queryKey: ["mentionable"], queryFn: users.mentionable, staleTime: 5 * 60_000 });
 
   useLiveSignals(env ? [`environment:${env.id}`] : [], (s) => {
@@ -112,7 +118,7 @@ export function EnvPage() {
   const stackPath = `/s/${encodeURIComponent(space.name)}/stacks/${encodeURIComponent(stack.name)}`;
   const emailOf = (id: string | null) => (id ? (people.data?.find((u) => u.id === id)?.email ?? null) : null);
   const siblings = (envs.data ?? []).filter((e) => e.id !== env.id).map((e) => ({ id: e.id, name: e.name }));
-  const error = [plan, refresh].find((m) => m.error)?.error;
+  const error = [plan, refresh, rollOut].find((m) => m.error)?.error;
 
   return (
     <div className="flex flex-col gap-4">
@@ -150,6 +156,11 @@ export function EnvPage() {
                     </MenuItem>
                     <MenuItem onSelect={() => setDialog("promote")}>Promote from a sibling…</MenuItem>
                     <MenuItem onSelect={() => setDialog("command")}>Run a command…</MenuItem>
+                    {space && (
+                      <MenuItem onSelect={() => rollOut.mutate()}>
+                        Roll out every “{env.name}” environment…
+                      </MenuItem>
+                    )}
                     {me?.can_destroy && (
                       <MenuItem onSelect={() => setDialog("destroy")}>Plan a destroy…</MenuItem>
                     )}

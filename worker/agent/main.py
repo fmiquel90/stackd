@@ -198,8 +198,10 @@ def _summary_from_events(events: list[dict]) -> dict:
                 "add": c.get("add", 0),
                 "change": c.get("change", 0),
                 "destroy": c.get("remove", 0),
+                # Resources adopted by `import` blocks: a rollout never confirms those (§21.5).
+                "import": c.get("import", 0),
             }
-    return {"add": 0, "change": 0, "destroy": 0}
+    return {"add": 0, "change": 0, "destroy": 0, "import": 0}
 
 
 def _first_error(events: list[dict]) -> str | None:

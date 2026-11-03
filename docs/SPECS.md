@@ -1805,7 +1805,9 @@ by state/phase/result, never by run id).
 
 > **Status:** delivery in three lots (PLAN Phase 7): (1) the cascade gaps of §9.2 (multi-parent
 > gating, stop on failure) — **done**; (2) the multi-stack declaration (§21.2) — **done**; (3) the
-> rollout itself (§21.3–§21.8).
+> rollout itself (§21.3–§21.8) — **done**. Rollout expiry is evaluated when the rollout moves (an
+> event, an approval): a rollout with nothing running when its approval expires shows `running`
+> until its next event, which pauses it — no scheduler task polls it.
 
 **Need.** Standing up a new environment or a new region today means creating one environment per
 stack, re-creating its dependency edges, then planning and confirming every environment by hand, in
@@ -1990,9 +1992,10 @@ claim re-checks the mock and secret-fallback gates as for any run (§4.2).
 
 - the caller passes `can_apply(caller, env)` for **every** member (all or nothing: 403 listing the
   environments it may not apply);
-- **four-eyes**: if any member's tier requires it, or any member is `protected` or sets
-  `require_second_pair_of_eyes`, the approver ≠ the rollout's creator (409 otherwise) — the same
-  rule a confirm applies to a run's triggerer (§2.4);
+- **four-eyes**: if any member's tier requires it (a missing tier row counts as requiring it), or
+  any member is `protected` or sets `require_second_pair_of_eyes`, the approver ≠ the rollout's
+  creator (403 otherwise) — the same rule a confirm applies to a run's triggerer (§2.4), which also
+  applies to a member run's human confirmation (`triggered_by=rollout`, triggerer = the creator);
 - sets `approved_by_user_id`, `approved_at`, `approval_expires_at = now +
   stackd_rollout_approval_ttl_seconds` (default 24 h): an approval does not hang around for days;
 - on a re-approval, a member whose run waits at `unconfirmed` and whose plan passes the gate
@@ -2007,15 +2010,24 @@ its branch head when its turn comes, and the gate judges that plan.
 
 ```
 POST /api/v1/spaces/{space_id}/environment-clones                      # §21.2
-POST /api/v1/rollouts            { space_id, env_name | environment_ids }   # → preview
-GET  /api/v1/rollouts ?space_id=&state= ; GET /api/v1/rollouts/{id}    # members, levels, runs, gates
-POST /api/v1/rollouts/{id}/approve | /retry | /cancel
-WS   sub: rollout:{id}                                                 # membership-gated (§2.4)
+POST /api/v1/rollouts            { space_id?, env_name | environment_ids }  # → the detail (preview)
+GET  /api/v1/rollouts ?space_id=&state=        # summaries: state, members, done
+GET  /api/v1/rollouts/{id}                     # detail
+POST /api/v1/rollouts/{id}/approve | /retry | /cancel   # → the detail
+WS   sub: rollout:{id}                         # membership-gated; signal {kind: rollout_event, rollout_id}
 ```
 
+The detail: the rollout (state, `pause_reason`, creator, approver, approval expiry) and per member:
+stack/env names, tier, `protected`, level, status, run id and state, plan summary, `auto_confirmed`
+(its run was confirmed by the system), `waiting_reason` (why a `needs_confirmation` member's plan
+stopped: changes, destroys, imports, a mock, a fallback, a check), `expected_mocks` (outputs an
+upstream outside the rollout has not published, a mock standing in) — plus the edges between members
+and `can_approve {allowed, reason}` for the viewer. Creating needs `writer` in the space; approving,
+`can_apply` on every member; retry and cancel, `writer`.
+
 WS events invalidate the rollout's queries (DESIGN §6), like run events. Notifications (§17):
-`rollout_paused` (to the creator and the approver, with the member waiting), `rollout_succeeded`,
-`rollout_failed`.
+`rollout_paused`, `rollout_succeeded`, `rollout_failed`, to the rollout's creator and approver,
+context `{rollout_id, name}` (no `run_id`); the inbox links them to the rollout page.
 
 ### 21.8 Audit taxonomy additions (extends §6.2)
 

@@ -2,6 +2,7 @@ import {
   Boxes,
   GitGraph,
   ListOrdered,
+  Rocket,
   ScrollText,
   Server,
   Settings,
@@ -34,6 +35,12 @@ export const NAV: NavItem[] = [
     mobile: true,
   },
   { label: "Graph", icon: GitGraph, to: (sp) => sp("/graph"), match: (p) => inSpace(p, "/graph") },
+  {
+    label: "Rollouts",
+    icon: Rocket,
+    to: (sp) => sp("/rollouts"),
+    match: (p) => inSpace(p, "/rollouts") || p.startsWith("/rollouts/"),
+  },
   {
     label: "Queue",
     icon: ListOrdered,

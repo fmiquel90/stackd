@@ -265,8 +265,24 @@ async def cascade(session: AsyncSession, run: Run) -> list[Run]:
     )
 
     group_id = run.run_group_id or run.id
+    # A rollout drives its own members (§21.4): never also through the generic cascade.
+    rollout_members: set[uuid.UUID] = set()
+    if run.rollout_id is not None:
+        from app.models.rollout import EnvRolloutMember
+
+        rollout_members = set(
+            (
+                await session.execute(
+                    select(EnvRolloutMember.environment_id).where(
+                        EnvRolloutMember.rollout_id == run.rollout_id
+                    )
+                )
+            ).scalars()
+        )
     triggered: list[Run] = []
     for downstream_id in dict.fromkeys(dep.downstream_env_id for dep in outgoing):
+        if downstream_id in rollout_members:
+            continue
         downstream = await session.get(Environment, downstream_id)
         if downstream is None or not await _decide_downstream(session, group_id, downstream):
             continue

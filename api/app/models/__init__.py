@@ -4,6 +4,7 @@ from app.models.environment import Environment
 from app.models.hook import Hook
 from app.models.notification import NotificationOutbox, NotificationTarget
 from app.models.oidc import CloudIntegration, OidcSigningKey
+from app.models.rollout import EnvRollout, EnvRolloutMember
 from app.models.run import Run, RunEvent
 from app.models.run_comment import RunComment
 from app.models.run_log import RunLog
@@ -25,6 +26,8 @@ __all__ = [
     "CloudIntegration",
     "EnvDependency",
     "EnvOutput",
+    "EnvRollout",
+    "EnvRolloutMember",
     "Environment",
     "Hook",
     "NotificationOutbox",

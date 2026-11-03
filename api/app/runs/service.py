@@ -261,7 +261,8 @@ async def confirm_run(session: AsyncSession, run: Run, user: User) -> Run:
     needs_four_eyes = tier_four_eyes or env.protected or env.require_second_pair_of_eyes
     if (
         needs_four_eyes
-        and run.triggered_by == TriggeredBy.manual
+        # A rollout's member runs carry its creator as triggerer (§21.3).
+        and run.triggered_by in (TriggeredBy.manual, TriggeredBy.rollout)
         and run.trigger_user_id is not None
         and run.trigger_user_id == user.id
     ):

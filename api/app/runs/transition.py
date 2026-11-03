@@ -170,6 +170,13 @@ async def transition(
 
     await enqueue_for_transition(session, run, to_state)
 
+    # Environment rollouts (§21): a member follows its run, and the rollout advances — same txn.
+    if locked.rollout_id is not None:
+        from app.rollouts.service import on_run_transition
+
+        await session.flush()
+        await on_run_transition(session, locked, to_state)
+
     # Light WS fan-out signal in the same transaction (§5.3) — content is re-read by replicas.
     signal = json.dumps({"kind": "run_event", "run_id": str(run.id), "to_state": to_state.value})
     await session.execute(

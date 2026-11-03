@@ -335,6 +335,13 @@ async def _decide_after_plan(session: AsyncSession, worker: Worker, run: Run, re
             await cascade(session, run)
         return
 
+    # A rollout member (§21.5): a creates-only plan is confirmed under the rollout's approval.
+    if run.rollout_id is not None:
+        from app.rollouts.service import confirm_under_approval
+
+        if await confirm_under_approval(session, run, fields=fields):
+            return
+
     env = await session.get(Environment, run.environment_id)
     assert env is not None
     autoconfirm = env.autodeploy and not env.protected and not run.used_mocks and not warn

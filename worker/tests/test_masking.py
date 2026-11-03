@@ -34,15 +34,17 @@ def test_summary_from_change_summary_event() -> None:
         {
             "type": "change_summary",
             "@message": "Plan: 3 to add, 1 to change, 2 to destroy.",
-            "changes": {"add": 3, "change": 1, "remove": 2, "import": 0, "operation": "plan"},
+            "changes": {"add": 3, "change": 1, "remove": 2, "import": 1, "operation": "plan"},
         },
     ]
-    assert _summary_from_events(events) == {"add": 3, "change": 1, "destroy": 2}
+    # `import` too: a rollout never confirms a plan that adopts resources (SPECS §21.5).
+    assert _summary_from_events(events) == {"add": 3, "change": 1, "destroy": 2, "import": 1}
 
 
 def test_summary_defaults_when_no_change_summary() -> None:
     assert _summary_from_events([{"type": "version", "@message": "Terraform v1.12"}]) == {
         "add": 0,
+        "import": 0,
         "change": 0,
         "destroy": 0,
     }

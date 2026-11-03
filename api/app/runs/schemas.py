@@ -65,6 +65,7 @@ class RunOut(BaseModel):
     worker_id: uuid.UUID | None
     parent_run_id: uuid.UUID | None = None
     run_group_id: uuid.UUID | None = None
+    rollout_id: uuid.UUID | None = None  # §21: the environment rollout the run belongs to
     # Only on GET /runs/{id}: the group the run belongs to (root or member), with its status.
     run_group: RunGroupOut | None = None
     plan_summary: dict | None

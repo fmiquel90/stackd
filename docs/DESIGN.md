@@ -332,6 +332,7 @@ is reserved to the decision. Zero counts are rendered in `text-secondary` withou
 │ ─────────    ├───────────────────────────────────────────────────────────┤
 │ ▣ Overview 3 │                                                           │
 │ ⎇ Graph      │                       content                             │
+│ ⇧ Rollouts   │                                                           │
 │ ≡ Queue   1  │        (max width 1440 px, tables and matrix full width)  │
 │ ▥ Workers    │                                                           │
 │ ▤ Audit      │                                                           │
@@ -343,7 +344,7 @@ is reserved to the decision. Zero counts are rendered in `text-secondary` withou
 └──────────────┴───────────────────────────────────────────────────────────┘
 ```
 
-- **Side nav (208 px, labels always visible — v1 decision kept)**: Overview (count badge = decisions that need *you*), Graph, Queue (count badge = runs waiting > 2 min), Workers, Audit (admin only, §5.6), Variable sets, Settings. At the bottom: the **space switcher** (a Radix dropdown listing spaces with their stack counts) and the user block (email, role, allowed tiers, theme toggle, sign out). Active item: selection mark (§2.1).
+- **Side nav (208 px, labels always visible — v1 decision kept)**: Overview (count badge = decisions that need *you*), Graph, Rollouts (§5.11), Queue (count badge = runs waiting > 2 min), Workers, Audit (admin only, §5.6), Variable sets, Settings. At the bottom: the **space switcher** (a Radix dropdown listing spaces with their stack counts) and the user block (email, role, allowed tiers, theme toggle, sign out). Active item: selection mark (§2.1).
 - **Top bar**: entity breadcrumb, connection indicator (`● live` / `◌ reconnecting…`), ⌘K button, notification bell.
 - **Breadcrumb**: built from entities, never from path segments: `space / stack / env / run 01a1276c`. Each segment is a link; the run segment copies the run URL on click.
 - **Responsive**: ≥ 1024 px as above. 768–1023 px: the side nav becomes a drawer opened from a menu button in the top bar. < 768 px: a **bottom bar** with three destinations (Overview, Queue, Menu — notifications stay in the top bar at every width) and the run page's action bar docked above it.
@@ -645,24 +646,32 @@ hooks, notifications, secret sources; URL `?tab=`).
   dependency edges that will be created (upstream → downstream, "shared upstream" marked), and what
   the user will still have to fill (sensitive variables, cloud integration). Create = one request.
 - After create: a summary with the `missing_secrets` as a checklist linking to each env's Inputs tab,
-  and the primary button **Roll out prod-euw3…**.
+  and the primary button **Roll out prod-euw3…**, which creates the rollout (awaiting approval) and
+  opens its page. The env page's "More" menu has the same action ("Roll out every `<name>`
+  environment…").
 
-**Rollout page** `/s/:space/rollouts/:id` (linked from the overview attention zone while it needs
-someone, and from every member run):
+**Rollouts list** `/s/:space/rollouts` (side nav): one row per rollout, state badge, `done / members`.
+On the overview, a banner per rollout awaiting approval, paused or running, linking to its page.
+
+**Rollout page** `/rollouts/:id` (space-less, like `/runs/:id`; linked from the overview banners, the
+list, the notifications and every member run):
 - **Header**: environment name, state badge (`StateBadge` vocabulary: awaiting approval = decision
   amber, running, paused = decision amber, succeeded, failed), creator, approver and approval expiry
   ("approved by alice · expires in 21 h"), actions: **Approve…** (§5.7 friction; hidden for the
   creator when four-eyes applies, with the reason), Retry (failed), Cancel.
-- **Body**: the graph (§5.4 component) restricted to the members, nodes coloured by member status,
-  levels left → right; each node shows its run's plan summary and **why it is waiting** when it
-  pauses ("changes 2 resources: needs a confirmation", "consumed a mock", "warn check: infracost").
-  A list view is the accessible equivalent (one row per member: level, env, status, run link, reason).
+- **Body**: the members as **columns per level** (an ordered list of levels, left → right, each a
+  list of member cards — the accessible structure is the markup itself): env link, tier and
+  `protected`, status badge (label + glyph, never colour alone), the plan summary (`+2 ~0 -0`, `⇣n`
+  for imports), the run link, **why it is waiting** when it stopped ("changes 1 resource", "consumed
+  a mock", "check warn: infracost"), "Confirmed under the rollout approval" for an auto-confirmed
+  member, and, before it plans, "Will plan on a mock (…)" when an outside upstream lacks an output.
+  The react-flow graph of §5.4 is not reused here.
 - Before approval, the page *is* the preview (§21.4): members by level, tiers, and the members
   expected to pause.
 
-**Run page**: a member run carries a line under its header — "Part of rollout prod-euw3 · level 2" —
-and, when auto-confirmed, the action bar's who/when reads "Confirmed under the rollout approval of
-alice" (never a plain "confirmed by alice": she approved the rollout, not this plan).
+**Run page**: a member run carries, in its header line, "part of rollout prod-euw3 · level 2" (a
+link), and, when auto-confirmed, the action bar's who/when reads "confirmed by alice@… (rollout
+approval)" — never a plain "confirmed by alice": she approved the rollout, not this plan.
 
 ---
 

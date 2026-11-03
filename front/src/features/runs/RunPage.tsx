@@ -1,9 +1,9 @@
 import { useMemo, useState } from "react";
-import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { MessageSquarePlus } from "lucide-react";
 import { ApiError } from "@/api/client";
-import { runs } from "@/api/resources";
+import { rollouts, runs } from "@/api/resources";
 import type { RunComment } from "@/api/types";
 import { useSpaces } from "@/app/SpaceContext";
 import { useHotkeys } from "@/app/keyboard";
@@ -67,6 +67,15 @@ export function RunPage() {
   const navigate = useNavigate();
   const qc = useQueryClient();
   const d = useRunPage(runId);
+  // The rollout the run belongs to (SPECS §21): its level, and whether it was confirmed under the
+  // rollout's approval rather than by its approver on this plan.
+  const rolloutId = d.run?.rollout_id ?? null;
+  const rollout = useQuery({
+    queryKey: ["rollout", rolloutId],
+    queryFn: () => rollouts.get(rolloutId!),
+    enabled: !!rolloutId,
+  });
+  const rolloutMember = rollout.data?.members.find((m) => m.run_id === runId);
   const space = useSpaceEnvs(d.stack?.space_id, d.me);
   const { list: spaces } = useSpaces();
   const [resourceDraft, setResourceDraft] = useState<string | null>(null);
@@ -155,7 +164,9 @@ export function RunPage() {
   if (!run || !env || !rights || !me) return <RunSkeleton />;
 
   const counts = planCounts(run);
-  const confirmerEmail = d.emailOf(run.confirmed_by_user_id);
+  const confirmerEmail = rolloutMember?.auto_confirmed
+    ? `${d.emailOf(run.confirmed_by_user_id) ?? "the approver"} (rollout approval)`
+    : d.emailOf(run.confirmed_by_user_id);
   const triggererEmail = d.emailOf(run.trigger_user_id);
   const segments = buildSegments(run, model.durations, confirmerEmail ?? undefined);
   const destroyed = d.parsed?.resources.filter((r) => r.action === "destroy").map((r) => r.address) ?? [];
@@ -236,6 +247,15 @@ export function RunPage() {
               ? `triggered by ${triggererEmail ?? "a user"}`
               : `via ${run.triggered_by === "schedule" ? "drift check" : run.triggered_by}`}
           </span>
+          {rollout.data && (
+            <span>
+              · part of{" "}
+              <Link className="link font-data" to={`/rollouts/${rollout.data.id}`}>
+                rollout {rollout.data.name}
+              </Link>
+              {rolloutMember ? ` · level ${rolloutMember.level}` : ""}
+            </span>
+          )}
           <span>
             · <RelativeTime value={run.created_at} />
           </span>

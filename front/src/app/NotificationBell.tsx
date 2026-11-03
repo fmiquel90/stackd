@@ -20,9 +20,14 @@ const WHAT: Record<UserNotification["kind"], string> = {
   run_failed: "Run failed",
   comment_reply: "Reply to your thread",
   mention: "You were mentioned",
+  rollout_paused: "Rollout waiting for someone",
+  rollout_succeeded: "Rollout done",
+  rollout_failed: "Rollout failed",
 };
 
 function hrefOf(n: UserNotification): string | null {
+  if (n.kind.startsWith("rollout_") && n.context?.rollout_id)
+    return `/rollouts/${String(n.context.rollout_id)}`;
   if (!n.run_id) return null;
   if (n.kind === "run_failed") return `/runs/${n.run_id}?tab=logs`;
   if (n.kind === "comment_reply" || n.kind === "mention") return `/runs/${n.run_id}?tab=discussion`;
@@ -62,6 +67,7 @@ export function NotificationBell({ userId }: { userId: string }) {
     const env = envId ? envs.find((e) => e.id === envId) : undefined;
     const stack = env && stackList.data?.find((s) => s.id === env.stack_id);
     if (env && stack) return `${stack.name}/${env.name}`;
+    if (typeof n.context?.name === "string" && n.kind.startsWith("rollout_")) return n.context.name;
     return typeof n.context?.environment === "string" ? n.context.environment : null;
   };
 
