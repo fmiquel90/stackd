@@ -876,6 +876,7 @@ The loop ticks every 10 s.
 
 **Single-execution guarantee**: each task takes a dedicated **PG advisory lock** (`pg_try_advisory_lock(<task_key>)`) before running; a replica that does not obtain the lock skips its tick. The lock is session-level, so it is taken and released on a **dedicated connection** held for the task's whole run, separate from the task's own DB session — the tasks commit mid-way, which returns the session's connection to the pool, and an unlock through it could land on another connection and leak the lock. No permanently elected leader (no external dependency), no double execution. The tasks are **idempotent** anyway (re-running a staleness computation or an archive breaks nothing) — the advisory lock mainly avoids redundant work and races on the `worker_lost` transitions.
 
+**Advisory-lock keys** (one per lock, never shared — two holders of the same key would skip each other's work): 74001 `worker_lost`, 74002 notification outbox, 74003 VCS outbox, 74004 drift, 74005 head poll, 74006 OIDC key retirement, 74007 OIDC key management (the issuer's rotation lock, §3.11), 74008 rollout approval expiry. A new lock takes the next free key and is added here.
 
 ---
 

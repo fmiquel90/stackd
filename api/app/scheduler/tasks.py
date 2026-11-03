@@ -32,7 +32,8 @@ _LOCK_VCS = 74003
 _LOCK_DRIFT = 74004
 _LOCK_HEAD_POLL = 74005
 _LOCK_OIDC_KEYS = 74006
-_LOCK_ROLLOUTS = 74007
+# 74007 is the OIDC issuer's key-management lock (oidc/issuer.py, §3.11): never reuse it here.
+_LOCK_ROLLOUTS = 74008
 _TICK_SECONDS = 10  # the scheduler loop's period
 _HEAD_POLL_CONCURRENCY = 8  # `git ls-remote` calls a head poll runs at once (§9.6)
 _log = get_logger("stackd.scheduler")
