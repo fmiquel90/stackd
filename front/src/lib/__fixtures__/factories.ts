@@ -64,15 +64,30 @@ export function makeEnv(over: Partial<Environment> = {}): Environment {
 }
 
 export const TIERS: TierDef[] = [
-  { id: "t-dev", name: "dev", requires_four_eyes: false, position: 0, created_at: "2026-01-01T00:00:00Z" },
+  {
+    id: "t-dev",
+    name: "dev",
+    requires_four_eyes: false,
+    repo_hooks_at_apply: false,
+    position: 0,
+    created_at: "2026-01-01T00:00:00Z",
+  },
   {
     id: "t-staging",
     name: "staging",
     requires_four_eyes: false,
+    repo_hooks_at_apply: false,
     position: 1,
     created_at: "2026-01-01T00:00:00Z",
   },
-  { id: "t-prod", name: "prod", requires_four_eyes: true, position: 2, created_at: "2026-01-01T00:00:00Z" },
+  {
+    id: "t-prod",
+    name: "prod",
+    requires_four_eyes: true,
+    repo_hooks_at_apply: false,
+    position: 2,
+    created_at: "2026-01-01T00:00:00Z",
+  },
 ];
 
 export function makeUser(over: Partial<User> = {}): User {

@@ -24,6 +24,7 @@ from app.models.environment import Environment
 from app.models.oidc import CloudIntegration
 from app.models.run import Run
 from app.models.stack import Stack
+from app.models.tier import Tier
 from app.models.worker import Worker
 from app.oidc.precedence import split_shadowed
 from app.runs.artifacts import SAVED_PLAN_TYPES
@@ -135,7 +136,7 @@ def withholds_secrets(run: Run) -> bool:
     code is a pull request's, which nobody has reviewed, and repo code runs inside tofu (`data
     "external"`, provisioners) with everything tofu gets. A drift run is a proposed run too, but it
     plans the environment's last applied commit (§19.2) — code that already ran with those secrets
-    — so it keeps them. The per-environment opt-in of §13 is not implemented: always withheld."""
+    — so it keeps them. No per-environment opt-in: always withheld (§13, decided)."""
     return run.type == RunType.proposed and not run.is_drift
 
 
@@ -334,6 +335,9 @@ async def build_job_payload(session: AsyncSession, run: Run) -> dict:
         "hcl_tfvars": hcl_tfvars,  # §3.4 — verbatim HCL values, written to a separate .auto.tfvars
         "mask_values": mask_values,
         "hooks": await platform_hooks(session, stack_id=stack.id, env_id=env.id),
+        # §8.3: may the repo's own hooks run at before_apply/after_apply on this env's tier? Off
+        # unless the tier says so (a missing tier row: off).
+        "repo_hooks_at_apply": await _repo_hooks_at_apply(session, env),
         "backend": backend,  # §11 — the managed HTTP backend (None when unmanaged)
         # Unmanaged state only: a repo-relative `-backend-config=<file>` and/or inline key=value
         # `-backend-config` settings passed at init.
@@ -343,6 +347,13 @@ async def build_job_payload(session: AsyncSession, run: Run) -> dict:
         "resolved_inputs": {f"TF_VAR_{k}": v for k, v in dep.resolved_inputs.items()},
         "mock_inputs": {f"TF_VAR_{k}": v for k, v in dep.mock_inputs.items()},
     }
+
+
+async def _repo_hooks_at_apply(session: AsyncSession, env: Environment) -> bool:
+    allowed = (
+        await session.execute(select(Tier.repo_hooks_at_apply).where(Tier.name == env.tier))
+    ).scalar_one_or_none()
+    return bool(allowed)
 
 
 async def _cloud_integration(session: AsyncSession, env: Environment) -> CloudIntegration | None:

@@ -22,5 +22,8 @@ class Tier(Base):
     id: Mapped[uuid.UUID] = pk_uuid()
     name: Mapped[str] = mapped_column(String, unique=True)
     requires_four_eyes: Mapped[bool] = mapped_column(Boolean, default=False)
+    # Whether repo hooks (`.stackd.yml`) may run at before_apply/after_apply on this tier (§8.3).
+    # Off by default: platform hooks only, at the stages that hold the apply credentials.
+    repo_hooks_at_apply: Mapped[bool] = mapped_column(Boolean, default=False)
     position: Mapped[int] = mapped_column(Integer, default=0)  # display order only, not a rank
     created_at: Mapped[datetime] = created_at_col()
