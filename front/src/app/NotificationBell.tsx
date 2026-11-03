@@ -23,6 +23,7 @@ const WHAT: Record<UserNotification["kind"], string> = {
   rollout_paused: "Rollout waiting for someone",
   rollout_succeeded: "Rollout done",
   rollout_failed: "Rollout failed",
+  rollout_upstream_changed: "Upstream applied under a rollout",
 };
 
 function hrefOf(n: UserNotification): string | null {

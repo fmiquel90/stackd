@@ -28,6 +28,8 @@ export const PAUSE_REASON: Record<NonNullable<Rollout["pause_reason"]>, string> 
   needs_confirmation: "a plan needs a human confirmation",
   approval_expired: "the approval expired: approve again to go on",
   approver_lost_rights: "the approver may no longer apply on a member: approve again",
+  member_changed_since_approval:
+    "a member's tier, protection or four-eyes changed since the approval: approve again",
 };
 
 /** A member's look; before the approval, a pending member is simply not started yet. */
@@ -53,6 +55,9 @@ export function summaryText(m: RolloutMember): string | null {
   if (!s) return null;
   const parts = [`+${s.add ?? 0}`, `~${s.change ?? 0}`, `-${s.destroy ?? 0}`];
   if (s.import) parts.push(`⇣${s.import}`);
+  // Any other kind of action (forget, a newer tool's counters), by name: the gate refuses them.
+  for (const [k, n] of Object.entries(s))
+    if (!["add", "change", "destroy", "import"].includes(k) && n) parts.push(`${k.replace(/_/g, " ")} ${n}`);
   return parts.join(" ");
 }
 

@@ -70,6 +70,23 @@ describe("audit model", () => {
       context: { name: "region", sensitive: true, scope: "env" },
     });
     expect(contextSummary(v, targetOf(v, lookup))).toEqual(["sensitive", "scope env"]);
+    const auto = ev({
+      actor_kind: "system",
+      actor_email: null,
+      context: {
+        from: "planning",
+        to: "confirmed",
+        via: "rollout",
+        rollout_id: "r1",
+        approved_by: "u1",
+        approved_by_email: "alice@dev.local",
+      },
+    });
+    expect(contextSummary(auto, targetOf(auto, lookup))).toEqual([
+      "planning → confirmed",
+      "auto-confirmed under the rollout approval of alice@dev.local",
+      "rollout id r1",
+    ]);
   });
 
   it("flags consequential rows and sign-ins", () => {

@@ -164,9 +164,11 @@ export function RunPage() {
   if (!run || !env || !rights || !me) return <RunSkeleton />;
 
   const counts = planCounts(run);
-  const confirmerEmail = rolloutMember?.auto_confirmed
-    ? `${d.emailOf(run.confirmed_by_user_id) ?? "the approver"} (rollout approval)`
-    : d.emailOf(run.confirmed_by_user_id);
+  // Confirmed by the system under a rollout's approval: the approver never saw this plan.
+  const confirmerEmail =
+    run.confirmed_via === "rollout"
+      ? `${d.emailOf(run.confirmed_by_user_id) ?? "the approver"} (rollout approval)`
+      : d.emailOf(run.confirmed_by_user_id);
   const triggererEmail = d.emailOf(run.trigger_user_id);
   const segments = buildSegments(run, model.durations, confirmerEmail ?? undefined);
   const destroyed = d.parsed?.resources.filter((r) => r.action === "destroy").map((r) => r.address) ?? [];

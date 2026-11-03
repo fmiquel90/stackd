@@ -548,7 +548,14 @@ export interface RolloutMember {
   status: RolloutMemberStatus;
   run_id: string | null;
   run_state: string | null;
-  plan_summary: { add?: number; change?: number; destroy?: number; import?: number } | null;
+  /** add/change/destroy/import/forget, plus any counter a newer tool reports (SPECS §3.5). */
+  plan_summary: {
+    add?: number;
+    change?: number;
+    destroy?: number;
+    import?: number;
+    [k: string]: number | undefined;
+  } | null;
   auto_confirmed: boolean;
   waiting_reason: string | null;
   expected_mocks: string[];
@@ -559,7 +566,12 @@ export interface Rollout {
   space_id: string;
   name: string;
   state: RolloutState;
-  pause_reason: "needs_confirmation" | "approval_expired" | "approver_lost_rights" | null;
+  pause_reason:
+    | "needs_confirmation"
+    | "approval_expired"
+    | "approver_lost_rights"
+    | "member_changed_since_approval"
+    | null;
   created_by: { id: string; email: string };
   approved_by: { id: string; email: string } | null;
   approved_at: string | null;
@@ -569,6 +581,8 @@ export interface Rollout {
   members: RolloutMember[];
   edges: { upstream_env_id: string; downstream_env_id: string }[];
   can_approve: { allowed: boolean; reason: string | null };
+  /** An approval is what it waits for: the first one, or a re-approval reopening its gate. */
+  approvable: boolean;
   /** How long an approval lasts (SPECS §21.6, operator setting). */
   approval_ttl_seconds: number;
 }

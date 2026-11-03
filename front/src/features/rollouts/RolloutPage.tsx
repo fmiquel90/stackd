@@ -28,14 +28,18 @@ function ApproveDialog({ r, onDone }: { r: Rollout; onDone: () => void }) {
   const tiers = [...new Set(r.members.map((m) => m.tier))].join(", ");
   return (
     <TypeNameDialog
-      trigger={<Button variant="decision">{r.state === "paused" ? "Approve again…" : "Approve…"}</Button>}
+      trigger={
+        <Button variant="decision">{r.state === "awaiting_approval" ? "Approve…" : "Approve again…"}</Button>
+      }
       title={`Approve the rollout of ${r.name}?`}
       consequence={
         <div className="flex flex-col gap-2">
           <p>
             For {ttlText(r.approval_ttl_seconds)}, every plan of these environments that{" "}
-            <strong>only creates</strong> resources is applied without asking again. Any plan that changes,
-            destroys or imports something, consumes a mock or raises a warning stops for a human confirmation.
+            <strong>only creates</strong> resources, in an environment never applied before, is applied
+            without asking again — on the commit the first plan of each stack fixes. Any plan that changes,
+            destroys, imports or forgets something, consumes a mock or raises a warning, and any environment
+            that already has infrastructure, stops for a human confirmation.
           </p>
           <ul className="font-data text-[12px]">
             {r.members.map((m) => (
@@ -85,10 +89,7 @@ export function RolloutPage() {
       : "#";
   const state = ROLLOUT_STATE[r.state];
   const over = r.state === "succeeded" || r.state === "failed" || r.state === "canceled";
-  const needsApproval =
-    r.state === "awaiting_approval" ||
-    (r.state === "paused" &&
-      (r.pause_reason === "approval_expired" || r.pause_reason === "approver_lost_rights"));
+  const needsApproval = r.approvable;
 
   return (
     <div className="flex flex-col gap-4">

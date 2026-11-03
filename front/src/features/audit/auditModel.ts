@@ -192,6 +192,16 @@ export function contextSummary(e: AuditEvent, target: Target | null): string[] {
     out.push(`${take("command")}${args ? ` ${args}` : ""}`.trim());
   }
   if (typeof ctx.commit === "string") out.push(`commit ${String(take("commit")).slice(0, 7)}`);
+  // A system confirmation under a rollout's approval (SPECS §21.5): the approver is named, but
+  // never as having confirmed this plan.
+  if (ctx.via === "rollout" && e.action === "run.confirmed") {
+    take("via");
+    take("approved_by");
+    const who = take("approved_by_email");
+    out.push(
+      `auto-confirmed under the rollout approval of ${typeof who === "string" ? who : "its approver"}`,
+    );
+  }
   if (typeof ctx.name === "string" && target?.label.includes(ctx.name)) seen.add("name");
   for (const [k, v] of Object.entries(ctx)) {
     if (seen.has(k) || HIDDEN.test(k) || v === null || v === undefined) continue;

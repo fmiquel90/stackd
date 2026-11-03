@@ -182,6 +182,9 @@ export interface Run {
   run_group_id?: string | null;
   parent_run_id?: string | null;
   run_group?: { id: string; status: "running" | "partial_failure" | "succeeded" } | null;
+  /** GET /runs/{id} only: who confirmed — `rollout` = the system under a rollout's approval, the
+   * confirmer being its approver, who never saw this plan (SPECS §21.5). */
+  confirmed_via?: "user" | "autodeploy" | "rollout" | null;
   /** The environment rollout the run belongs to (SPECS §21). */
   rollout_id?: string | null;
   worker_id: string | null;
@@ -214,7 +217,8 @@ export type NotificationKindInbox =
   | "mention"
   | "rollout_paused"
   | "rollout_succeeded"
-  | "rollout_failed";
+  | "rollout_failed"
+  | "rollout_upstream_changed";
 
 export interface UserNotification {
   id: string;
