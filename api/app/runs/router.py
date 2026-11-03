@@ -31,7 +31,7 @@ from app.runs.service import (
     trigger_command_run,
     trigger_run,
 )
-from app.spaces import guard_env_id, guard_run_id
+from app.spaces import accessible_space_ids, guard_env_id, guard_run_id
 
 router = APIRouter(prefix="/api/v1", tags=["runs"])
 DbSession = Annotated[AsyncSession, Depends(get_session)]
@@ -125,7 +125,12 @@ async def get_run(run_id: uuid.UUID, user: CurrentUser, session: DbSession) -> R
     ):
         group_id = run.id
     if group_id is not None:
-        out.run_group = RunGroupOut(id=group_id, status=await group_status(session, group_id))
+        # A group can cross spaces (dependency edges do): its status counts the runs the caller
+        # may read only (§9.2).
+        spaces = await accessible_space_ids(session, user)
+        out.run_group = RunGroupOut(
+            id=group_id, status=await group_status(session, group_id, spaces)
+        )
     return out
 
 

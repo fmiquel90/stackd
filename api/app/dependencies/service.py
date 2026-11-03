@@ -5,7 +5,7 @@ import json
 import uuid
 from dataclasses import dataclass, field
 
-from sqlalchemy import select, union_all
+from sqlalchemy import ColumnElement, Select, select, union_all
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -179,15 +179,28 @@ async def _should_trigger(
     return False
 
 
-async def group_status(session: AsyncSession, group_id: uuid.UUID) -> str:
+async def group_status(
+    session: AsyncSession, group_id: uuid.UUID, space_ids: set[uuid.UUID] | None = None
+) -> str:
     """Computed run-group status (§9.2): `running` while a run of the group is active (or queued),
-    else `partial_failure` if one failed, was discarded or canceled, else `succeeded`."""
+    else `partial_failure` if one failed, was discarded or canceled, else `succeeded`.
+
+    `space_ids` restricts it to the runs of those spaces — the ones the caller may read (`None`:
+    every space, an instance admin): a group can cross spaces through its dependency edges."""
+
+    def _states(where: ColumnElement[bool]) -> Select[tuple[RunState]]:
+        stmt = select(Run.state).where(where)
+        if space_ids is not None:
+            stmt = (
+                stmt.join(Environment, Environment.id == Run.environment_id)
+                .join(Stack, Stack.id == Environment.stack_id)
+                .where(Stack.space_id.in_(space_ids))
+            )
+        return stmt
+
     # The group = its root (by id) + the runs carrying its id: two index lookups (§9.4).
     rows = await session.execute(
-        union_all(
-            select(Run.state).where(Run.run_group_id == group_id),
-            select(Run.state).where(Run.id == group_id),
-        )
+        union_all(_states(Run.run_group_id == group_id), _states(Run.id == group_id))
     )
     states = set(rows.scalars())
     if states & (ACTIVE_STATES | {RunState.queued}):

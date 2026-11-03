@@ -669,3 +669,32 @@ async def test_a_skipped_downstream_stays_skipped(client: httpx.AsyncClient) -> 
 
     assert len(await _env_runs(client, admin, envs["c"])) == 1  # no second run in the group
     assert (await _group(client, admin, root_id))["status"] == "succeeded"
+
+
+async def test_group_status_counts_the_runs_the_caller_can_read(client: httpx.AsyncClient) -> None:
+    """A group crossing into a space bob is not a member of: bob's status ignores its runs there."""
+    admin = await login(client, "admin")
+    bob = await login(client, "bob")  # logs in first: not provisioned into the space below
+    wh = await register_worker(client, admin, "pool-group-space")
+    space = await client.post("/api/v1/spaces", headers=admin, json={"name": "group-private"})
+    assert space.status_code == 201, space.text
+    private_stack = await client.post(
+        "/api/v1/stacks",
+        headers=admin,
+        json={
+            "space_id": space.json()["id"],
+            "name": "group-private-stack",
+            "repo_url": "file:///repos/x",
+            "tool_version": "1.12.0",
+        },
+    )
+    assert private_stack.status_code == 201, private_stack.text
+    hidden = await make_env(client, admin, private_stack.json()["id"], "dev", "dev")
+    shared = await make_env(
+        client, admin, await make_stack(client, admin, "group-shared"), "dev", "dev"
+    )
+    await _link(client, admin, {"h": hidden, "s": shared}, (("h", "s"),))
+
+    root_id = await _drive_root(client, admin, wh, shared)  # hidden's run is queued
+    assert (await _group(client, admin, root_id))["status"] == "running"
+    assert (await _group(client, bob, root_id)) == {"id": root_id, "status": "succeeded"}

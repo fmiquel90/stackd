@@ -970,7 +970,9 @@ parent a downstream waits for):
 - *Group status*, computed (not stored) and exposed on `GET /api/v1/runs/{id}` as `run_group`
   (`{id, status}`, for the group the run belongs to or roots; runs also carry `run_group_id` and
   `parent_run_id`): `running` while a run of the group is queued or active, else `partial_failure`
-  if one failed, was discarded or canceled, else `succeeded`.
+  if one failed, was discarded or canceled, else `succeeded`. A group can cross spaces (its edges
+  can): the status counts only the runs of the spaces the caller may read (§2.4) — every run for an
+  instance admin.
 A cascade run is routed like any other plan (§4.2): it auto-confirms only on an `autodeploy`,
 unprotected environment, with no mock and no `warn` check.
 
