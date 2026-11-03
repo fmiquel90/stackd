@@ -332,6 +332,7 @@ is reserved to the decision. Zero counts are rendered in `text-secondary` withou
 │ ─────────    ├───────────────────────────────────────────────────────────┤
 │ ▣ Overview 3 │                                                           │
 │ ⎇ Graph      │                       content                             │
+│ ⇧ Rollouts   │                                                           │
 │ ≡ Queue   1  │        (max width 1440 px, tables and matrix full width)  │
 │ ▥ Workers    │                                                           │
 │ ▤ Audit      │                                                           │
@@ -343,7 +344,7 @@ is reserved to the decision. Zero counts are rendered in `text-secondary` withou
 └──────────────┴───────────────────────────────────────────────────────────┘
 ```
 
-- **Side nav (208 px, labels always visible — v1 decision kept)**: Overview (count badge = decisions that need *you*), Graph, Queue (count badge = runs waiting > 2 min), Workers, Audit (admin only, §5.6), Variable sets, Settings. At the bottom: the **space switcher** (a Radix dropdown listing spaces with their stack counts) and the user block (email, role, allowed tiers, theme toggle, sign out). Active item: selection mark (§2.1).
+- **Side nav (208 px, labels always visible — v1 decision kept)**: Overview (count badge = decisions that need *you*), Graph, Rollouts (§5.11), Queue (count badge = runs waiting > 2 min), Workers, Audit (admin only, §5.6), Variable sets, Settings. At the bottom: the **space switcher** (a Radix dropdown listing spaces with their stack counts) and the user block (email, role, allowed tiers, theme toggle, sign out). Active item: selection mark (§2.1).
 - **Top bar**: entity breadcrumb, connection indicator (`● live` / `◌ reconnecting…`), ⌘K button, notification bell.
 - **Breadcrumb**: built from entities, never from path segments: `space / stack / env / run 01a1276c`. Each segment is a link; the run segment copies the run URL on click.
 - **Responsive**: ≥ 1024 px as above. 768–1023 px: the side nav becomes a drawer opened from a menu button in the top bar. < 768 px: a **bottom bar** with three destinations (Overview, Queue, Menu — notifications stay in the top bar at every width) and the run page's action bar docked above it.
@@ -358,6 +359,8 @@ is reserved to the decision. Zero counts are rendered in `text-secondary` withou
 | `/s/:space/stacks/:stack/envs/:env` | Environment page (§5.8) |
 | `/runs/:runId` | Run page (space resolved from the run) |
 | `/s/:space/graph` | Graph |
+| `/s/:space/rollouts` | Rollouts list (§5.11) — the side nav's **Rollouts** entry (§4) |
+| `/rollouts/:rolloutId` | Rollout page (§5.11; space resolved from the rollout, like the run page) |
 | `/queue`, `/workers`, `/audit`, `/settings`, `/variable-sets` | instance or space-scoped pages (variable sets: `/s/:space/variable-sets`) |
 
 Names are used instead of UUIDs where they are unique in their parent (space names; stack per space;
@@ -566,7 +569,7 @@ Cancel in an overflow); tabs scroll horizontally; the confirm popover becomes a 
 - **Edge label** = the output names it carries (`network_name`, `+2` when more), from the downstream env's dependency references (fetched lazily per visible edge). Edge style: solid `text-secondary`; **dashed magenta only when the downstream env's primary run consumed a mock for one of the edge's inputs** (`variable_provenance[input] = "mock"`); a reference with a mock *defined* but unused shows a small neutral `◇ mock` marker. Policy shown on hover (`on_output_change`).
 - React Flow's controls, labels and background are re-skinned onto tokens (no library default colour).
 - **List view** (`?view=list`): the full equivalent — an adjacency table `upstream → downstream · outputs · policy · mock used?` with the same filter, sortable, every row expandable to its references.
-- **Run groups**: not available — the API does not expose `run_group_id` (AUDIT A5). **[today]** a run page's cascade preview and the graph highlight "runs started via dependency after this apply" (downstream env runs with `triggered_by=dependency` created after the upstream's `finished_at`), labelled as such. **[with A5]** the real group view: same graph, nodes colouring live, a group header with progress.
+- **Run groups**: the API now exposes `run_group_id`, `parent_run_id` and `run_group {id, status}` on `GET /runs/{id}` (SPECS §9.2, AUDIT A5); the front does not use them yet. **[today]** a run page's cascade preview and the graph highlight "runs started via dependency after this apply" (downstream env runs with `triggered_by=dependency` created after the upstream's `finished_at`), labelled as such. **[with A5]** the real group view: same graph, nodes colouring live, a group header with progress.
 - **Auto-link by name** moves to a secondary "Link stacks…" action (writer+) in a dialog.
 
 ### 5.5 `/queue` — the execution queue
@@ -584,7 +587,7 @@ waited more than 2 minutes.
 ### 5.6 `/audit`
 
 - **Admin only** (SPECS §2.4 residual): hidden from the nav for other roles; a direct visit says "The audit journal is restricted to administrators" (AUDIT A9).
-- Dense chronological table: mono ISO timestamp (local, with relative on hover), actor (email), action as a neutral badge, **target as a link** (`run 01a1276c · demo-network/prod`, resolved from `target_kind`/`target_id`), context summarised (`+4 ~0 −0`, `tier prod`, `commit 2af0351`).
+- Dense chronological table: mono ISO timestamp (local, with relative on hover), actor (email), action as a neutral badge, **target as a link** (`run 01a1276c · demo-network/prod`, resolved from `target_kind`/`target_id`), context summarised (`+4 ~0 −0`, `tier prod`, `commit 2af0351`). A system `run.confirmed` under a rollout's approval reads "auto-confirmed under the rollout approval of alice@…" (SPECS §21.5) — never as alice's confirm. The CSV export carries the context as a JSON column.
 - `run.confirmed`, `run.applied` and destroys have a slightly contrasted row (`bg-raised`).
 - `auth.login` / `auth.refresh` hidden by default ("Show sign-ins" toggle) — they are 90 % of the volume.
 - Filters (all in the URL, mapped to the API's `actor`, `action`, `target_kind`, `target_id`, `from_`, `to`): actor, action (grouped select by domain), target (picker: stack, env, run), period. CSV export on the right with the same filters.
@@ -618,7 +621,7 @@ hooks, notifications, secret sources; URL `?tab=`).
 **Environment page** `/s/:space/stacks/:stack/envs/:env` (new in v2):
 
 - **Header**: `stack / env`, tier, branch, deployed commit vs head (`2af0351 → 125304e ↑`, refresh-head button), drift (`≈ drifted, checked 1h ago → drift run`), lock, protection badges.
-- **Primary actions** (writer+): **Plan** (primary button), and a "More" menu: Plan with downstream (`with_downstream`), Destroy… (shown only with `can_destroy`; opens a dialog explaining the run will need typed confirmation at apply), Promote from… (sibling env, SPECS §9.7), Run command… (allowlist, SPECS §4.3), Clone to a new environment… and Roll out… (SPECS §21, DESIGN §5.11).
+- **Primary actions** (writer+): **Plan** (primary button), and a "More" menu: Plan with downstream (`with_downstream`), Destroy… (shown only with `can_destroy`; opens a dialog explaining the run will need typed confirmation at apply), Promote from… (sibling env, SPECS §9.7), Run command… (allowlist, SPECS §4.3), New environment from… (this env preselected as the model) and Roll out every “<name>” environment… (SPECS §21, DESIGN §5.11).
 - **Tabs** (URL): **Runs** (default) — history table: run short ID, type (`tracked`, `destroy`, `PR`, `drift`, `command`), trigger (who/how), outcome badge, plan summary, commit, age, duration; filter by type; paginated client-side **[today]**. **Inputs** (Resolved with provenance / Environment overrides / Discover inputs), **Outputs**, **Dependencies**, **State** (versions; force-unlock admin-only per §5.7), **Settings** (name, tier, branch, flags with the §5.7 friction, backend config, labels, hooks, notifications, cloud integration), and a **Danger zone** at the bottom of Settings (delete environment, typed name).
 
 ### 5.9 `/workers` — workers & pools
@@ -633,38 +636,71 @@ hooks, notifications, secret sources; URL `?tab=`).
 - **Variable sets** (`/s/:space/variable-sets`): one row per set with how it reaches envs (`auto-attach`, `rule: team=payments`, `3 attachments`); the row opens a page with tabs Variables / Attachments / Settings. Delete per §5.7.
 - **Settings** (`/settings`): **Preferences** for everyone (theme: system / dark / light; single-key shortcuts on/off — in memory, for the tab only, until A8). Admin only: **Tiers** (name, `requires_four_eyes` with §5.7 friction, position, envs using it, delete per §5.7), **Users & roles** (staged edits, §5.7), **Spaces** (members, per-space role and tiers), **Deployment** (version, environment).
 - **Login**: brand mark, "Sign in with Google"; in dev, the personas show email and role, and their allowed tiers once the dev endpoint returns them (needs API work A12).
-- **Notifications** (bell popover, Radix): each item names what and where ("Run failed · demo-dns/dev · 6m"), links to the run (Logs at first error for failures), mark read on open; "Mark all read" / "Clear read". The bell badge counts unread, neutral (not violet, not amber).
+- **Notifications** (bell popover, Radix): each item names what and where ("Run failed · demo-dns/dev · 6m"), links to the run (Logs at first error for failures) — a rollout notification (`rollout_paused`, `rollout_succeeded`, `rollout_failed`, `rollout_upstream_changed` "Upstream applied under a rollout", SPECS §21.7) to the rollout page —, mark read on open; "Mark all read" / "Clear read". The bell badge counts unread, neutral (not violet, not amber).
 
 ### 5.11 Environment clones and rollouts (SPECS §21)
 
-**New environment from…** (overview header action and the env page "More" menu, writer+): a dialog,
-one column (§5.7).
+**New environment from…** (overview header action, and the env page "More" menu with that env
+preselected as the model — the same label in both places; writer+): a dialog, one column (§5.7).
 - Fields: reference environment name (select of the names present in the space), new name (mono),
   stacks (checklist, default every stack with the reference — the ones without it listed, disabled,
-  with the reason), overrides (tier, branch, labels — label rows show which variable sets their
-  selectors will attach, live from the API), "Copy cloud integration" (admin only).
-- **Preview before create**: per stack, what is copied and what is not (§21.2 table, as text), the
-  dependency edges that will be created (upstream → downstream, "shared upstream" marked), and what
-  the user will still have to fill (sensitive variables, cloud integration). Create = one request.
+  with the reason; at least one must stay checked), overrides (tier, branch, labels as `key=value`,
+  comma-separated — the value is everything after the first `=`; a malformed pair is shown inline
+  under the field and blocks Review, never dropped silently), "Copy cloud integration" (admin only).
+- **Live hint** under the labels (a debounced `dry_run` of the request as typed, SPECS §21.2): which
+  variable sets the labels will attach ("new" in words when the model does not get it, the stacks
+  named when not all), the model's items **not copied** because they would shadow a key of such a set
+  (variable or set attachment, the key and the set named), and the envs whose **autodeploy is forced
+  off** (with the reason: protected, or secrets/settings left to fill). Text only — no colour carries it.
+- **Preview before create** (a `dry_run` of the same request): first, the response's `warnings` as
+  an `info` banner "Check before creating", one line each starting with "Warning:" — an edge from the
+  model of a stack left out of the checklist ("app/prod-euw3 will depend on network/prod — the model
+  itself, in a stack not cloned, not a shared environment"), a tier override away from the model's
+  tier (from → to, and the secret references, set attachments and cloud integration it keeps). Then per
+  stack, what is copied and what is
+  not (§21.2 table, as text, plus the hint above), the dependency edges that will be created
+  (upstream → downstream, marked "shared upstream" or "model of a stack not cloned" in words — never
+  the same label for both), and what the user will still have to fill
+  (sensitive variables — each with the lower-scope value it resolves to meanwhile, when there is one
+  — static fallbacks of secret references, cloud integration). Create = one request.
 - After create: a summary with the `missing_secrets` as a checklist linking to each env's Inputs tab,
-  and the primary button **Roll out prod-euw3…**.
+  and the primary button **Roll out prod-euw3…**, which creates the rollout (awaiting approval) and
+  opens its page. The env page's "More" menu has the same action ("Roll out every `<name>`
+  environment…").
 
-**Rollout page** `/s/:space/rollouts/:id` (linked from the overview attention zone while it needs
-someone, and from every member run):
+**Rollouts list** `/s/:space/rollouts` (side nav): one row per rollout, state badge, `done / members`.
+On the overview, a banner per rollout awaiting approval, paused or running, linking to its page.
+
+**Rollout page** `/rollouts/:id` (space-less, like `/runs/:id`; linked from the overview banners, the
+list, the notifications and every member run):
 - **Header**: environment name, state badge (`StateBadge` vocabulary: awaiting approval = decision
-  amber, running, paused = decision amber, succeeded, failed), creator, approver and approval expiry
-  ("approved by alice · expires in 21 h"), actions: **Approve…** (§5.7 friction; hidden for the
-  creator when four-eyes applies, with the reason), Retry (failed), Cancel.
-- **Body**: the graph (§5.4 component) restricted to the members, nodes coloured by member status,
-  levels left → right; each node shows its run's plan summary and **why it is waiting** when it
-  pauses ("changes 2 resources: needs a confirmation", "consumed a mock", "warn check: infracost").
-  A list view is the accessible equivalent (one row per member: level, env, status, run link, reason).
+  amber, running, paused = decision amber, succeeded, failed, canceled), creator, approver and approval expiry
+  ("approved by alice · expires in 21 h"), actions: **Approve…** / **Approve again…** — shown when
+  the API says an approval is what the rollout waits for (`approvable`: the first approval, or a
+  re-approval after an expiry, a lost right or a member changed since the approval); replaced, for
+  a viewer who may not approve, by the reason (four-eyes against the creator, a tier they lack) —,
+  Retry (failed), Cancel. The approval dialog (§5.7 friction) says what it lets through: plans that
+  only create, in environments never applied, on the commit the first plan of each stack fixes;
+  everything else stops for a human.
+- **Paused banner**: the pause reason in words — "a plan needs a human confirmation", "the approval
+  expired: approve again to go on", "the approver may no longer apply on a member: approve again",
+  "a member's tier, protection or four-eyes changed since the approval: approve again".
+- **Body**: the members as **columns per level** (an ordered list of levels, left → right, each a
+  list of member cards — the accessible structure is the markup itself): env link, tier and
+  `protected`, status badge (label + glyph, never colour alone), the plan summary (`+2 ~0 -0`, `⇣n`
+  for imports, any other kind by name: `forget 1`), the run link, **why it is waiting** when it
+  stopped ("changes 1 resource", "forgets 1 resource", "consumed a mock", "check warn: infracost",
+  "the environment already has infrastructure", "planned commit …, not … the rollout pinned", "its
+  tier, protection or four-eyes changed since the approval"), "Confirmed under the rollout approval" for an auto-confirmed
+  member, and, before it plans, "Will plan on a mock (…)" when an outside upstream lacks an output.
+  The react-flow graph of §5.4 is not reused here.
 - Before approval, the page *is* the preview (§21.4): members by level, tiers, and the members
   expected to pause.
 
-**Run page**: a member run carries a line under its header — "Part of rollout prod-euw3 · level 2" —
-and, when auto-confirmed, the action bar's who/when reads "Confirmed under the rollout approval of
-alice" (never a plain "confirmed by alice": she approved the rollout, not this plan).
+**Run page**: a member run carries, in its header line, "part of rollout prod-euw3 · level 2" (a
+link), and, when auto-confirmed (`confirmed_via: rollout` on the run, SPECS §21.5 — also for an
+earlier run of a retried member), the action bar's who/when reads "confirmed by alice@… (rollout
+approval)" — never a plain "confirmed by alice": she approved the rollout, not this plan.
 
 ---
 
