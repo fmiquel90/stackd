@@ -621,7 +621,7 @@ hooks, notifications, secret sources; URL `?tab=`).
 **Environment page** `/s/:space/stacks/:stack/envs/:env` (new in v2):
 
 - **Header**: `stack / env`, tier, branch, deployed commit vs head (`2af0351 → 125304e ↑`, refresh-head button), drift (`≈ drifted, checked 1h ago → drift run`), lock, protection badges.
-- **Primary actions** (writer+): **Plan** (primary button), and a "More" menu: Plan with downstream (`with_downstream`), Destroy… (shown only with `can_destroy`; opens a dialog explaining the run will need typed confirmation at apply), Promote from… (sibling env, SPECS §9.7), Run command… (allowlist, SPECS §4.3), Roll out… (SPECS §21, DESIGN §5.11).
+- **Primary actions** (writer+): **Plan** (primary button), and a "More" menu: Plan with downstream (`with_downstream`), Destroy… (shown only with `can_destroy`; opens a dialog explaining the run will need typed confirmation at apply), Promote from… (sibling env, SPECS §9.7), Run command… (allowlist, SPECS §4.3), New environment from… (this env preselected as the model) and Roll out… (SPECS §21, DESIGN §5.11).
 - **Tabs** (URL): **Runs** (default) — history table: run short ID, type (`tracked`, `destroy`, `PR`, `drift`, `command`), trigger (who/how), outcome badge, plan summary, commit, age, duration; filter by type; paginated client-side **[today]**. **Inputs** (Resolved with provenance / Environment overrides / Discover inputs), **Outputs**, **Dependencies**, **State** (versions; force-unlock admin-only per §5.7), **Settings** (name, tier, branch, flags with the §5.7 friction, backend config, labels, hooks, notifications, cloud integration), and a **Danger zone** at the bottom of Settings (delete environment, typed name).
 
 ### 5.9 `/workers` — workers & pools
@@ -640,13 +640,29 @@ hooks, notifications, secret sources; URL `?tab=`).
 
 ### 5.11 Environment clones and rollouts (SPECS §21)
 
-**New environment from…** (overview header action, writer+): a dialog, one column (§5.7).
+**New environment from…** (overview header action, and the env page "More" menu with that env
+preselected as the model — the same label in both places; writer+): a dialog, one column (§5.7).
 - Fields: reference environment name (select of the names present in the space), new name (mono),
-  the stacks it applies to (every stack with the reference; the ones without it are named, with the
-  reason), overrides (tier, branch, labels as `key=value`), "Copy cloud integration" (admin only).
-- **Preview before create** (a `dry_run` of the same request): per stack, what is copied and what is not (§21.2 table, as text), the
-  dependency edges that will be created (upstream → downstream, "shared upstream" marked), and what
-  the user will still have to fill (sensitive variables, cloud integration). Create = one request.
+  stacks (checklist, default every stack with the reference — the ones without it listed, disabled,
+  with the reason; at least one must stay checked), overrides (tier, branch, labels as `key=value`,
+  comma-separated — the value is everything after the first `=`; a malformed pair is shown inline
+  under the field and blocks Review, never dropped silently), "Copy cloud integration" (admin only).
+- **Live hint** under the labels (a debounced `dry_run` of the request as typed, SPECS §21.2): which
+  variable sets the labels will attach ("new" in words when the model does not get it, the stacks
+  named when not all), the model's items **not copied** because they would shadow a key of such a set
+  (variable or set attachment, the key and the set named), and the envs whose **autodeploy is forced
+  off** (with the reason: protected, or secrets/settings left to fill). Text only — no colour carries it.
+- **Preview before create** (a `dry_run` of the same request): first, the response's `warnings` as
+  an `info` banner "Check before creating", one line each starting with "Warning:" — an edge from the
+  model of a stack left out of the checklist ("app/prod-euw3 will depend on network/prod — the model
+  itself, in a stack not cloned, not a shared environment"), a tier override away from the model's
+  tier (from → to, and the secret references, set attachments and cloud integration it keeps). Then per
+  stack, what is copied and what is
+  not (§21.2 table, as text, plus the hint above), the dependency edges that will be created
+  (upstream → downstream, marked "shared upstream" or "model of a stack not cloned" in words — never
+  the same label for both), and what the user will still have to fill
+  (sensitive variables — each with the lower-scope value it resolves to meanwhile, when there is one
+  — static fallbacks of secret references, cloud integration). Create = one request.
 - After create: a summary with the `missing_secrets` as a checklist linking to each env's Inputs tab,
   and the primary button **Roll out prod-euw3…**, which creates the rollout (awaiting approval) and
   opens its page. The env page's "More" menu has the same action ("Roll out every `<name>`

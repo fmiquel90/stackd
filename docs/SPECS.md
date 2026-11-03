@@ -283,6 +283,12 @@ CREATE UNIQUE INDEX one_active_run_per_env ON runs (environment_id)
 WHERE state IN ('preparing','planning','checking','unconfirmed','confirmed','applying','running');
 ```
 
+Run-group members (§9.4) are looked up by group — on every cascade, group status and run page:
+
+```sql
+CREATE INDEX ix_runs_run_group_id ON runs (run_group_id) WHERE run_group_id IS NOT NULL;
+```
+
 ### 3.6 `run_events`
 
 ```
@@ -870,6 +876,7 @@ The loop ticks every 10 s.
 
 **Single-execution guarantee**: each task takes a dedicated **PG advisory lock** (`pg_try_advisory_lock(<task_key>)`) before running; a replica that does not obtain the lock skips its tick. The lock is session-level, so it is taken and released on a **dedicated connection** held for the task's whole run, separate from the task's own DB session — the tasks commit mid-way, which returns the session's connection to the pool, and an unlock through it could land on another connection and leak the lock. No permanently elected leader (no external dependency), no double execution. The tasks are **idempotent** anyway (re-running a staleness computation or an archive breaks nothing) — the advisory lock mainly avoids redundant work and races on the `worker_lost` transitions.
 
+
 ---
 
 ## 8. Hooks & checks (custom flows)
@@ -956,27 +963,43 @@ At `applying → finished`, parsing of `outputs.json`:
    created on a member of an active rollout (§21.4)
 ```
 
-Steps 4–5, as implemented (`cascade()`, called when a tracked run of a group ends `finished` —
-after its apply, and after an **empty plan** too, since it may be the parent a downstream waits for):
+Steps 4–5, as implemented (`cascade()`, called when a tracked run ends `finished`: after any
+tracked apply — a run without a group roots its own, the runs it triggers carry its id as
+`run_group_id` — and after an **empty plan** of a run that carries a group, since it may be the
+parent a downstream waits for):
 - *The whole group is decided at once*, under a lock on the group's root run (two parents finishing
   at the same moment are serialized: the second sees the first's outcome). Every environment
-  reachable from the root's env — the group's *scope* — is settled in topological order: with a run
-  in the group it is `done` (finished; *applied* if confirmed), `broken` (failed, discarded,
-  canceled) or `active`; without one, from its upstreams in the scope: one `broken` → `broken`, one
-  `active` or `waiting` → `waiting`, all settled → a run is created if an edge from an *applied*
-  upstream passes its policy, else `skipped` (settled, no run).
+  reachable from the root's env — the group's *scope*, loaded edge level by edge level from the
+  root's env — is settled in topological order. With a run in the group it is `done` (finished;
+  *applied* if confirmed), `broken` (failed, discarded, canceled) or `active`. Without one, from its
+  upstreams in the scope, in this order: one `broken` → `broken`; else one `active` or `waiting` →
+  `waiting`; else (all settled) it is *decided*: a run is created if an edge from an *applied*
+  upstream passes its policy (step 2), else it is `skipped` (settled, no run).
+- *A decision is taken once.* An environment is decided by the cascade of the run that settles its
+  last upstream — the only cascade from which it is reachable once all its upstreams are settled.
+  A later cascade of the group (from a run that is not upstream of it) keeps it as it is: a
+  `skipped` environment is never revisited, even if an upstream's live outputs change meanwhile
+  (e.g. an apply of that upstream outside the group), so it never gets a late run in the group.
+  `on_output_change` is therefore read once, against the outputs current at that decision.
 - *Multi-parent gating.* So a downstream waits for every upstream in the scope that may still run —
-  a direct parent, or one only reached through another environment of the group — whatever the
-  order the edges are read in, and is triggered once, by the last of them. An upstream outside the
-  scope does not hold it back (its current outputs are used). A downstream gets at most one run per
-  group.
+  a direct parent, or one only reached through another environment of the group, also one still
+  `waiting` itself — whatever the order the edges are read in, and is triggered once, by the last of
+  them. An upstream outside the scope does not hold it back (its current outputs are used). A
+  downstream gets at most one run per group.
+- *Parent.* A triggered run's `parent_run_id` is the run of an *applied* upstream whose edge passed
+  its policy — of those, the one that finished last (ties: the greater run id). It is not
+  necessarily the run that released the downstream (e.g. an empty plan, or a parent whose `never`
+  edge did not pass); that one is recorded in the `run.triggered` audit context as
+  `released_by_run_id`, next to `parent_run_id`.
 - *Stop on failure.* A run of the group ending `failed`, `discarded` or `canceled` triggers nothing
   downstream, and every environment reachable from it — also through environments that never got a
   run — gets no run in that group.
 - *Group status*, computed (not stored) and exposed on `GET /api/v1/runs/{id}` as `run_group`
   (`{id, status}`, for the group the run belongs to or roots; runs also carry `run_group_id` and
   `parent_run_id`): `running` while a run of the group is queued or active, else `partial_failure`
-  if one failed, was discarded or canceled, else `succeeded`.
+  if one failed, was discarded or canceled, else `succeeded`. A group can cross spaces (its edges
+  can): the status counts only the runs of the spaces the caller may read (§2.4) — every run for an
+  instance admin.
 A cascade run is routed like any other plan (§4.2): it auto-confirms only on an `autodeploy`,
 unprotected environment, with no mock and no `warn` check.
 - *Environment rollouts* (§21). A run that belongs to a rollout never calls the cascade — even one
@@ -1062,8 +1085,10 @@ network/prod-eu-primary ──▶ network/prod-us-secondary
    not, put the region set on the env by explicit attachment instead of a label selector.
 2. `POST /spaces/{id}/environment-clones {reference_name: "prod", name: "prod-euw3", overrides:
    {labels: {region: "eu-west-3"}}}` creates `prod-euw3` in every stack that has a `prod`, with its
-   governance and its dependency edges — the selector attaches the region set by itself. Fill in the
-   reported `missing_secrets` (and the cloud integrations, if not copied).
+   governance and its dependency edges — the selector attaches the region set by itself, and a
+   model's env variable or explicit attachment that would shadow one of its keys is left out
+   (`not_copied`, §21.2). Fill in the reported `missing_secrets` (and the cloud integrations, if not
+   copied); until then the new envs have `autodeploy` off.
 3. `POST /rollouts {env_name: "prod-euw3"}`, approved once by an approver: the graph is planned and
    applied level by level, every creates-only plan confirmed under the approval; anything else stops
    for a human (§21.5).
@@ -1883,14 +1908,16 @@ POST /api/v1/spaces/{space_id}/environment-clones
   "reference_name": "prod",              # the env each target stack already has
   "name": "prod-euw3",                   # the new env, same name in every stack
   "stack_ids": [...]?,                   # default: every stack of the space with a `reference_name` env
-  "overrides": {                         # optional; applied on top of the reference's settings
+  "overrides": {                         # optional; applied on top of the reference's settings.
+                                         # Each key may be omitted, never `null` (→ 422)
     "tier"?, "branch"?, "labels"?,       # labels: merged onto the reference's (override wins per key);
                                          # they also route the env's runs to workers (§7.2, §9.5 C)
     "autodeploy"?, "protected"?, "require_second_pair_of_eyes"?, "drift_check_enabled"?
   },
   "copy_cloud_integration": false,       # true requires the instance admin role (§10)
   "dry_run": false                       # true: validate and compute everything, then roll back —
-                                         # the response is the preview (DESIGN §5.11)
+                                         # the response is the preview (DESIGN §5.11); no row and
+                                         # no audit event persists
 }
 ```
 
@@ -1899,7 +1926,11 @@ space (what creating environments takes), plus the **instance** `admin` role whe
 `copy_cloud_integration` is true (as `PUT …/cloud-integration`), and `writer` on the space of every
 shared upstream an edge is re-created from (as creating that edge by hand, §3.8) — else 403. Validation first: a target stack
 without a `reference_name` env, or already holding a `name` env → **422** listing the stacks; the tier
-must exist (§2.4); `name` follows the environment naming rules.
+must exist (§2.4); `name` follows the environment naming rules; an override sent as `null` → **422**
+(every overridable setting is required on an environment). Integrity conflicts at write time are
+named for what they are: `name` created concurrently in a target stack → **409**; the override tier
+deleted between the check and the insert → **422** `Unknown tier`; any other concurrent change → **409**
+`Conflicting change`. In every case nothing is created.
 
 What each new environment gets from its stack's reference environment:
 
@@ -1908,12 +1939,32 @@ What each new environment gets from its stack's reference environment:
 | tier, branch, `protected`, `require_second_pair_of_eyes`, `autodeploy`, `managed_state`, `drift_check_enabled`, labels, position | yes (then `overrides`) |
 | `allow_mock_apply`, `allow_fallback_apply` | **no** — always `false` on a new env (§9.3, §15.5) |
 | unmanaged-state backend settings (`backend_config_file`, `backend_config`) | **never**: they would point the new env at the reference's state. A reference with `managed_state=false` → **422** (clone a managed-state env, or create that env by hand) |
-| env-level variables | non-sensitive ones: yes, same value; external secret references (§15): yes, the **reference** (not a value); literal **sensitive** values: **no** — listed in the response as `missing_secrets` (the region's secrets usually differ; a secret is never duplicated silently) |
-| explicit variable-set attachments to the env | yes, same priority. Tier attachments and label selectors (§3.4) apply by themselves — the recommended place for region values, e.g. a set selecting `region=eu-west-3` |
+| env-level variables | non-sensitive ones: yes, same value; external secret references (§15): yes, the **reference** (not a value) — its static fallback is a literal secret: not copied, the mode reset to `error`, listed in `to_configure`; literal **sensitive** values: **no** — listed in the response as `missing_secrets` (the region's secrets usually differ; a secret is never duplicated silently). Except when it **shadows a label set** (below) |
+| explicit variable-set attachments to the env | yes, same priority — except when it **shadows a label set** (below). Tier attachments and label selectors (§3.4) apply by themselves — the recommended place for region values, e.g. a set selecting `region=eu-west-3` |
 | **platform hooks** scoped to the env (§8.1) | **yes, always** — a new env never starts with less governance than its model |
 | notification targets scoped to the env (§17) | yes |
 | cloud integration (§10) | only with `copy_cloud_integration` (admin); otherwise listed as `to_configure`. Role ARNs often differ per region or account |
 | dependency edges (§3.8) | see below |
+
+**Label sets win over the model's region (shadowing).** A set attached by selector sits at the
+weakest resolution layer (§3.4 layer 1), below explicit env attachments (layer 4) and env variables
+(layer 6). A clone whose labels select a set the reference is not selected by (recipe C, §9.5:
+`region=eu-west-3` → `region-euw3`) would otherwise keep the model's value for every key that set
+provides — the new env would plan creates in the old region. So an env-level variable whose
+(kind, name) a **newly selected** label set provides, or an explicit attachment of a set providing
+any such key, is **not copied**; each is listed in `not_copied`
+(`{stack, environment, item: "variable" | "variable_set", name, reason: "shadows_label_set", keys,
+label_sets}`). A set selected by both the reference's and the clone's labels is not "new": an env
+value overriding it in the model keeps doing so in the clone. The shadowing that tier attachments,
+stack attachments and stack variables already exert is not changed (they are not copied).
+
+**Autodeploy is never on while something is left to fill.** A secret not copied leaves the env-level
+input unset, and resolution then falls back to a lower layer holding the same name (a stack variable,
+a set) — e.g. the dev `db_password`. A new env with `missing_secrets` or `to_configure` entries is
+therefore created with `autodeploy=false` whatever the reference or the overrides say
+(`autodeploy_off_reason: "left_to_fill"`; `"protected"` when §3.2 forced it); it is turned on by hand
+once filled. Each `missing_secrets` entry carries `falls_back_to`: the provenance (`stack`, `set:<name>`)
+of the value the input would resolve to meanwhile, or `null` when nothing provides it.
 
 **Dependency edges.** Let *C* be the set of reference environments being cloned. For each edge of the
 reference graph, with its `trigger_policy` and its `output_references` (mocks included):
@@ -1923,13 +1974,36 @@ reference graph, with its `trigger_policy` and its `output_references` (mocks in
 - the downstream outside *C* → **not** copied: an existing environment never starts depending on the
   new one by side effect.
 The resulting edges mirror an acyclic subgraph plus edges from existing envs: no cycle can appear (the
-§3.8 DFS still runs).
+§3.8 DFS still runs). Each edge of the response carries `upstream_kind`: `cloned` (both ends new),
+`shared` (a genuinely shared env: its stack has no `reference_name` env, or it lives in another
+space), or `reference_of_uncloned_stack` — the upstream **is** a `reference_name` env of a stack of
+the space left out of an explicit `stack_ids`. The latter is wired like a shared upstream (nothing else
+exists to wire it to) but usually is not what was meant: the new region's `app` would read the **old**
+region's `network` outputs. It is therefore also listed in `warnings`.
 
-Audit, same transaction: `environment.created` per environment (context `cloned_from`), the existing
-actions for each copied item (`dependency.created`, `variable_set.attached`, `hook.created`,
-`notification_target.created`, `cloud_integration.created`), and one `environment.cloned` summary
-(context: reference name, new name, stacks, `missing_secrets`). Response: the created environments
-and edges, `missing_secrets`, `to_configure`.
+**Warnings** (preview and response, `warnings: [{stack, environment, kind, …}]`; they never block —
+the user decides in the review step, DESIGN §5.11):
+- `reference_upstream` (`upstream`: `stack/env`, `upstream_env_id`): an edge of kind
+  `reference_of_uncloned_stack` (above). Clone that stack too, or re-wire the edge afterwards.
+- `tier_changed` (`reference_tier`, `tier`, `secret_references`, `variable_sets`, `cloud_integration`):
+  a `tier` override moves the clone to another tier than its reference's (e.g. `prod` → `dev`). The
+  clone still carries what was set up for the reference's tier — its external secret references
+  (e.g. prod's vault paths), its explicit set attachments, its platform hooks and, when copied, its
+  cloud integration — now under a tier with other gates and other users allowed to apply (§2.4).
+  Each is named so the user checks it belongs in the new tier. Tier attachments re-select by
+  themselves (§3.4) and are not listed.
+
+Audit, same transaction: `environment.created` per environment (context `cloned_from`, `autodeploy`,
+`autodeploy_off_reason`), the existing actions for each copied item, each with `cloned_from` (the id
+of the item copied, or of the reference env for an attachment or a cloud integration):
+`variable.created` (every copied env-level variable, secret references included — `scope: "env"`),
+`variable_set.attached`, `hook.created`, `notification_target.created`, `cloud_integration.created`,
+`dependency.created` (`via: "clone"`, `upstream_kind`); and one `environment.cloned` summary
+(context: reference name, new name, stacks, `missing_secrets`, `not_copied`, `warnings`). Response: the
+created environments (`id`, `stack_id`, `stack_name`, `name`, `tier`, `autodeploy`,
+`autodeploy_off_reason`, `label_sets`: the sets its labels select, `{name, new}` — `new` when the
+reference is not selected by it), the edges (`upstream_env_id`, `downstream_env_id`, `upstream_kind`),
+`missing_secrets`, `to_configure`, `not_copied`, `warnings`.
 
 ### 21.3 Model
 

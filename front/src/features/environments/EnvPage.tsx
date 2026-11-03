@@ -4,6 +4,7 @@ import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom"
 import { ChevronDown, RefreshCw } from "lucide-react";
 import { ApiError } from "@/api/client";
 import { environments, rollouts, runs, stacks, tiers, users } from "@/api/resources";
+import type { TierDef } from "@/api/types";
 import { useLiveSignals } from "@/api/stream";
 import { useSpaces } from "@/app/SpaceContext";
 import { useSession } from "@/auth/session";
@@ -13,6 +14,7 @@ import { HooksPanel } from "@/components/HooksPanel";
 import { NotificationsPanel } from "@/components/NotificationsPanel";
 import { CloudPanel } from "@/components/CloudPanel";
 import { PromotePanel } from "@/components/PromotePanel";
+import { NewEnvironmentDialog, useCloneEntries } from "@/features/rollouts/NewEnvironmentDialog";
 import { EnvCell } from "@/identity/EnvCell";
 import { ModifierChips } from "@/identity/StateBadge";
 import { summarizeEnv } from "@/lib/envSummary";
@@ -49,7 +51,7 @@ export function EnvPage() {
   const qc = useQueryClient();
   const navigate = useNavigate();
   const [params, setParams] = useSearchParams();
-  const [dialog, setDialog] = useState<null | "promote" | "command" | "destroy">(null);
+  const [dialog, setDialog] = useState<null | "promote" | "command" | "destroy" | "clone">(null);
 
   const stackList = useQuery({ queryKey: ["stacks"], queryFn: stacks.list });
   const stack = stackList.data?.find((s) => s.space_id === space?.id && s.name === stackName);
@@ -69,7 +71,7 @@ export function EnvPage() {
   // A rollout of every environment of this name in the space (SPECS §21): created awaiting
   // approval; its page shows the order and the approval.
   const rollOut = useMutation({
-    mutationFn: () => rollouts.create(space!.id, envName ?? ""),
+    mutationFn: (name: string) => rollouts.create(space!.id, name),
     onSuccess: (r) => navigate(`/rollouts/${r.id}`),
   });
   const people = useQuery({ queryKey: ["mentionable"], queryFn: users.mentionable, staleTime: 5 * 60_000 });
@@ -156,11 +158,10 @@ export function EnvPage() {
                     </MenuItem>
                     <MenuItem onSelect={() => setDialog("promote")}>Promote from a sibling…</MenuItem>
                     <MenuItem onSelect={() => setDialog("command")}>Run a command…</MenuItem>
-                    {space && (
-                      <MenuItem onSelect={() => rollOut.mutate()}>
-                        Roll out every “{env.name}” environment…
-                      </MenuItem>
-                    )}
+                    <MenuItem onSelect={() => setDialog("clone")}>New environment from…</MenuItem>
+                    <MenuItem onSelect={() => rollOut.mutate(env.name)}>
+                      Roll out every “{env.name}” environment…
+                    </MenuItem>
                     {me?.can_destroy && (
                       <MenuItem onSelect={() => setDialog("destroy")}>Plan a destroy…</MenuItem>
                     )}
@@ -305,6 +306,17 @@ export function EnvPage() {
           <CommandPanel envId={env.id} />
         </DialogContent>
       </Dialog>
+      {dialog === "clone" && (
+        <CloneFromHere
+          spaceId={space.id}
+          spaceName={space.name}
+          reference={env.name}
+          tiers={catalog.data ?? []}
+          isAdmin={isAdmin}
+          onClose={() => setDialog(null)}
+          onRollOut={(name) => rollOut.mutate(name)}
+        />
+      )}
       <Dialog open={dialog === "destroy"} onOpenChange={(v) => setDialog(v ? "destroy" : null)}>
         <DialogContent title={`Plan a destroy of ${env.name}`}>
           <p className="mb-3">
@@ -327,5 +339,42 @@ export function EnvPage() {
         </DialogContent>
       </Dialog>
     </div>
+  );
+}
+
+/** "New environment from…" opened from the env page: this env's name preselected as the model. The
+ * space's environments are only fetched while it is open. */
+function CloneFromHere({
+  spaceId,
+  spaceName,
+  reference,
+  tiers: tierDefs,
+  isAdmin,
+  onClose,
+  onRollOut,
+}: {
+  spaceId: string;
+  spaceName: string;
+  reference: string;
+  tiers: TierDef[];
+  isAdmin: boolean;
+  onClose: () => void;
+  /** Offered once created: start a rollout of the new environment. */
+  onRollOut: (envName: string) => void;
+}) {
+  const entries = useCloneEntries(spaceId);
+  return (
+    <NewEnvironmentDialog
+      open
+      onOpenChange={(v) => !v && onClose()}
+      spaceId={spaceId}
+      spaceName={spaceName}
+      spaceBase={`/s/${encodeURIComponent(spaceName)}`}
+      entries={entries}
+      tiers={tierDefs}
+      isAdmin={isAdmin}
+      defaultReference={reference}
+      onRollOut={onRollOut}
+    />
   );
 }
