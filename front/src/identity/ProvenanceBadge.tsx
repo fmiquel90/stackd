@@ -12,10 +12,13 @@ export type Provenance =
   | { kind: "mock" }
   | { kind: "secret"; name: string }
   | { kind: "secret_fallback"; name: string }
-  | { kind: "secret_override"; name: string };
+  | { kind: "secret_override"; name: string }
+  // A static cloud credential the OIDC integration replaced: resolved, never passed (SPECS §10.5).
+  | { kind: "shadowed"; name: string };
 
 /** Parse the API provenance string. Longer prefixes first (`secret_fallback:` before `secret:`). */
 export function parseProvenance(s: string): Provenance {
+  if (s.startsWith("shadowed:")) return { kind: "shadowed", name: s.slice(9) };
   if (s.startsWith("set:")) return { kind: "set", name: s.slice(4) };
   if (s.startsWith("dependency:")) return { kind: "dependency", name: s.slice(11) };
   if (s.startsWith("secret_fallback:")) return { kind: "secret_fallback", name: s.slice(16) };
@@ -40,6 +43,8 @@ export function provenanceLabel(p: Provenance): string {
       return `FALLBACK:${p.name}`;
     case "secret_override":
       return `OVERRIDE:${p.name}`;
+    case "shadowed":
+      return `NOT PASSED (OIDC):${p.name}`;
     default:
       return p.kind;
   }

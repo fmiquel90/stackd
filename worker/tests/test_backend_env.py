@@ -156,6 +156,7 @@ def _job(phase: str) -> dict:
     return {
         "job_id": "run-1",
         "phase": phase,
+        "repo_hooks_at_apply": True,  # a tier allowing repo hooks at the apply stages (§8.3)
         "cred_phase": "plan",
         "command": {"name": "state list", "args": []},
         "environment": {
@@ -205,7 +206,9 @@ def _run(
     job = _job(phase)
     job["env"].update(run_env or {})
     getattr(main, handler)(
-        client, job, SimpleNamespace(workspace_root=str(tmp_path), leak_action="warn")
+        client,
+        job,
+        SimpleNamespace(runner="local", workspace_root=str(tmp_path), leak_action="warn"),
     )
     return calls, client
 

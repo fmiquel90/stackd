@@ -486,7 +486,7 @@ absolute ISO on hover); total duration; worker. A `PR` marker for proposed runs.
    reason. **[today]** computed from `/auth/me`, labelled "based on your instance permissions" when
    the space has per-space memberships the client cannot read; **[with A2]** exact. "Who may still
    confirm" is stated as a rule (**[today]**) — names come with A3.
-4. **Cascade preview**: downstream envs from `GET /graph` (BFS): `always` → "will plan", 
+4. **Cascade preview**: downstream envs from `GET /graph` (BFS): `always` → "will plan",
    `on_output_change` → "plans if <outputs> change", `never` → omitted. Mock edges marked.
 5. **Actions**, right-aligned, in this order: Cancel run · Discard · **Confirm** (amber, the only
    amber button of the app) · next-decision arrows.

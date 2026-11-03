@@ -26,6 +26,13 @@ describe("parseProvenance", () => {
     expect(parseProvenance("secret_override:x").kind).toBe("secret_override");
   });
 
+  it("parses a credential shadowed by the OIDC integration with its original layer", () => {
+    expect(parseProvenance("shadowed:set:aws-credentials")).toEqual({
+      kind: "shadowed",
+      name: "set:aws-credentials",
+    });
+  });
+
   it("parses bare layers", () => {
     expect(parseProvenance("mock")).toEqual({ kind: "mock" });
     expect(parseProvenance("env")).toEqual({ kind: "env" });

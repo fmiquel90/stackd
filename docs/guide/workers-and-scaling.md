@@ -105,10 +105,25 @@ can't read the pool token from its environment.
 
 ### Runners
 
-Every job runs in its own workspace, removed when the job ends. Today the agent runs each tofu and hook command as a **local subprocess**, as its own OS user — whatever `STACKD_RUNNER` says. A **container runner** (`STACKD_RUNNER=docker`: each job in its own container from a runner image, see `deploy/images/`) is specified but **not implemented yet**. Until it exists, a job is isolated neither from the agent's own process nor from the other jobs of its worker: keep `STACKD_MAX_CONCURRENT_JOBS=1` on workers that run code you don't fully trust.
+Every job runs in its own workspace, removed when the job ends. `STACKD_RUNNER` picks how its commands run:
 
-!!! warning "Fargate caveat, for the container runner"
-    A container runner needs to launch containers, i.e. Docker-in-Docker. **AWS Fargate does not allow this.** On Fargate, the worker runs commands locally, as it does today.
+- **`docker`** (required when the API runs with `STACKD_ENV=production`): every tofu command and every hook runs in **its own fresh container** of a runner image (see `deploy/images/`), removed as soon as the command exits — nothing a command starts survives it. Containers drop all capabilities, run unprivileged on a read-only root filesystem, and get none of the worker's environment but its proxy and locale settings. Repo hooks see the checkout only: not the OIDC token file, not the saved plan.
+- **`local`** (trusted dev only): each command is a subprocess of the agent, as its own OS user. A job is then isolated neither from the agent's own process nor from the other jobs of its worker: keep `STACKD_MAX_CONCURRENT_JOBS=1`. A production API refuses such a worker.
+
+| Setting (`docker` runner) | Default | Purpose |
+|---|---|---|
+| `STACKD_RUNNER_IMAGES` | — (required) | JSON `{"opentofu:1.12.2": "<repo>@sha256:<digest>"}`: the image per tool version, **pinned by digest** (a tag is refused). The worker only takes runs whose stack's `tool_version` it has an image for |
+| `STACKD_DOCKER_HOST` | `unix:///var/run/docker.sock` | the Docker Engine socket |
+| `STACKD_DOCKER_NETWORK` | `bridge` | the containers' network: it must reach the API (state backend); the place for an egress allowlist |
+| `STACKD_DOCKER_MEMORY`, `STACKD_DOCKER_CPUS` | unset | per-container limits (`2g`, `1.5`) |
+| `STACKD_DOCKER_PIDS_LIMIT` | `1024` | per-container process limit |
+| `STACKD_DOCKER_RUNTIME` | unset | an alternative OCI runtime, e.g. `runsc` (gVisor) |
+
+!!! warning "The worker's host is privileged"
+    Access to the Docker socket is root-equivalent on that host: give the worker a dedicated VM, ideally with rootless Docker. If the agent itself runs in a container, mount `STACKD_WORKSPACE_ROOT` at the **same path** on the host and in the agent's container: the job containers mount it by host path.
+
+!!! warning "Fargate"
+    The `docker` runner launches containers; **AWS Fargate does not allow this**. A worker on Fargate can only use the `local` runner, which a production API refuses.
 
 ## Dedicate a pool with labels
 
