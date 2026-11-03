@@ -4,6 +4,7 @@ import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom"
 import { ChevronDown, RefreshCw } from "lucide-react";
 import { ApiError } from "@/api/client";
 import { environments, runs, stacks, tiers, users } from "@/api/resources";
+import type { TierDef } from "@/api/types";
 import { useLiveSignals } from "@/api/stream";
 import { useSpaces } from "@/app/SpaceContext";
 import { useSession } from "@/auth/session";
@@ -13,6 +14,7 @@ import { HooksPanel } from "@/components/HooksPanel";
 import { NotificationsPanel } from "@/components/NotificationsPanel";
 import { CloudPanel } from "@/components/CloudPanel";
 import { PromotePanel } from "@/components/PromotePanel";
+import { NewEnvironmentDialog, useCloneEntries } from "@/features/rollouts/NewEnvironmentDialog";
 import { EnvCell } from "@/identity/EnvCell";
 import { ModifierChips } from "@/identity/StateBadge";
 import { summarizeEnv } from "@/lib/envSummary";
@@ -49,7 +51,7 @@ export function EnvPage() {
   const qc = useQueryClient();
   const navigate = useNavigate();
   const [params, setParams] = useSearchParams();
-  const [dialog, setDialog] = useState<null | "promote" | "command" | "destroy">(null);
+  const [dialog, setDialog] = useState<null | "promote" | "command" | "destroy" | "clone">(null);
 
   const stackList = useQuery({ queryKey: ["stacks"], queryFn: stacks.list });
   const stack = stackList.data?.find((s) => s.space_id === space?.id && s.name === stackName);
@@ -150,6 +152,7 @@ export function EnvPage() {
                     </MenuItem>
                     <MenuItem onSelect={() => setDialog("promote")}>Promote from a sibling…</MenuItem>
                     <MenuItem onSelect={() => setDialog("command")}>Run a command…</MenuItem>
+                    <MenuItem onSelect={() => setDialog("clone")}>New environment from…</MenuItem>
                     {me?.can_destroy && (
                       <MenuItem onSelect={() => setDialog("destroy")}>Plan a destroy…</MenuItem>
                     )}
@@ -294,6 +297,16 @@ export function EnvPage() {
           <CommandPanel envId={env.id} />
         </DialogContent>
       </Dialog>
+      {dialog === "clone" && (
+        <CloneFromHere
+          spaceId={space.id}
+          spaceName={space.name}
+          reference={env.name}
+          tiers={catalog.data ?? []}
+          isAdmin={isAdmin}
+          onClose={() => setDialog(null)}
+        />
+      )}
       <Dialog open={dialog === "destroy"} onOpenChange={(v) => setDialog(v ? "destroy" : null)}>
         <DialogContent title={`Plan a destroy of ${env.name}`}>
           <p className="mb-3">
@@ -316,5 +329,38 @@ export function EnvPage() {
         </DialogContent>
       </Dialog>
     </div>
+  );
+}
+
+/** "New environment from…" opened from the env page: this env's name preselected as the model. The
+ * space's environments are only fetched while it is open. */
+function CloneFromHere({
+  spaceId,
+  spaceName,
+  reference,
+  tiers: tierDefs,
+  isAdmin,
+  onClose,
+}: {
+  spaceId: string;
+  spaceName: string;
+  reference: string;
+  tiers: TierDef[];
+  isAdmin: boolean;
+  onClose: () => void;
+}) {
+  const entries = useCloneEntries(spaceId);
+  return (
+    <NewEnvironmentDialog
+      open
+      onOpenChange={(v) => !v && onClose()}
+      spaceId={spaceId}
+      spaceName={spaceName}
+      spaceBase={`/s/${encodeURIComponent(spaceName)}`}
+      entries={entries}
+      tiers={tierDefs}
+      isAdmin={isAdmin}
+      defaultReference={reference}
+    />
   );
 }

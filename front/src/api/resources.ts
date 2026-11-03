@@ -522,10 +522,32 @@ export interface CloneRequest {
 
 export interface CloneResult {
   dry_run: boolean;
-  environments: { id: string; stack_id: string; stack_name: string; name: string; tier: string }[];
+  environments: {
+    id: string;
+    stack_id: string;
+    stack_name: string;
+    name: string;
+    tier: string;
+    autodeploy: boolean;
+    /** Why autodeploy was forced off although the model (or an override) had it on. */
+    autodeploy_off_reason: "protected" | "left_to_fill" | null;
+    /** Sets its labels select; `new` when the model is not selected by it. */
+    label_sets: { name: string; new: boolean }[];
+  }[];
   edges: { upstream_env_id: string; downstream_env_id: string; shared_upstream: "true" | "false" }[];
-  missing_secrets: { stack: string; environment: string; name: string }[];
+  /** `falls_back_to`: the provenance the unset input resolves to meanwhile (`stack`, `set:<name>`). */
+  missing_secrets: { stack: string; environment: string; name: string; falls_back_to: string | null }[];
   to_configure: { stack: string; environment: string; item: string }[];
+  /** Items of the model left out because they would shadow a key of a set the labels attach. */
+  not_copied: {
+    stack: string;
+    environment: string;
+    item: "variable" | "variable_set";
+    name: string;
+    reason: "shadows_label_set";
+    keys: string[];
+    label_sets: string[];
+  }[];
 }
 
 export const environmentClones = {
