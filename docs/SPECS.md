@@ -1846,14 +1846,16 @@ POST /api/v1/spaces/{space_id}/environment-clones
     "tier"?, "branch"?, "labels"?,       # labels: merged onto the reference's (override wins per key)
     "autodeploy"?, "protected"?, "require_second_pair_of_eyes"?, "drift_check_enabled"?
   },
-  "copy_cloud_integration": false,       # true requires the admin role (§10)
+  "copy_cloud_integration": false,       # true requires the instance admin role (§10)
   "dry_run": false                       # true: validate and compute everything, then roll back —
                                          # the response is the preview (DESIGN §5.11)
 }
 ```
 
-All or nothing, in **one transaction**. Permission: `writer` in the space (the role that creates
-environments), plus `admin` when `copy_cloud_integration` is true. Validation first: a target stack
+All or nothing, in **one transaction**. Permission: the global `writer` role and `writer` in the
+space (what creating environments takes), plus the **instance** `admin` role when
+`copy_cloud_integration` is true (as `PUT …/cloud-integration`), and `writer` on the space of every
+shared upstream an edge is re-created from (as creating that edge by hand, §3.8) — else 403. Validation first: a target stack
 without a `reference_name` env, or already holding a `name` env → **422** listing the stacks; the tier
 must exist (§2.4); `name` follows the environment naming rules.
 

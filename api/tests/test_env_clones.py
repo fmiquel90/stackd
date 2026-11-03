@@ -225,3 +225,37 @@ async def test_dry_run_previews_without_creating(client: httpx.AsyncClient) -> N
         ).json()
     ]
     assert names == ["prod"]
+
+
+async def _bob_in(client, admin, space_id: str, role: str) -> dict:
+    users = (await client.get("/api/v1/users", headers=admin)).json()
+    bob_id = next(u["id"] for u in users if u["email"] == "bob@dev.local")
+    r = await client.put(
+        f"/api/v1/spaces/{space_id}/members",
+        headers=admin,
+        json={"user_id": bob_id, "role": role, "allowed_tiers": []},
+    )
+    assert r.status_code in (200, 201), r.text
+    return await login(client, "bob")
+
+
+async def test_a_space_admin_may_not_copy_cloud_integrations(client: httpx.AsyncClient) -> None:
+    """Attaching role ARNs needs the instance admin role, as PUT …/cloud-integration does."""
+    admin = await login(client, "admin")
+    ids = await _world(client, admin, "clone-spadmin")
+    bob = await _bob_in(client, admin, ids["space"], "admin")
+    r = await _clone(client, bob, ids["space"], copy_cloud_integration=True)
+    assert r.status_code == 403 and "instance admin" in r.text
+
+
+async def test_a_shared_upstream_needs_access_to_its_space(client: httpx.AsyncClient) -> None:
+    """Wiring a new consumer of another space's outputs needs writer there too (§3.8)."""
+    admin = await login(client, "admin")
+    ids = await _world(client, admin, "clone-xspace")
+    other = await _space(client, admin, "clone-xspace-other")
+    foreign = await _env(client, admin, await _stack(client, admin, other, "xs-dns"), "global")
+    await _edge(client, admin, ids["net_prod"], foreign)  # by an admin of both spaces
+    bob = await _bob_in(client, admin, ids["space"], "writer")
+    r = await _clone(client, bob, ids["space"])
+    assert r.status_code == 403
+    assert (await _clone(client, admin, ids["space"])).status_code == 201
