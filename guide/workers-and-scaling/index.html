@@ -1530,10 +1530,59 @@ can't read the pool token from its environment.</p>
 <p>The worker needs no database, S3 or signing credential: it reaches states and saved plans through the API. tofu and platform hooks inherit the worker's environment — minus the <code>STACKD_*</code> namespace — and repo code runs inside tofu (<code>data "external"</code>, provisioners). So never give the worker <code>DATABASE_URL</code>, <code>S3_*</code> keys or <code>GOOGLE_CLIENT_SECRET</code>, nor <code>STACKD_ENCRYPTION_KEY</code> or <code>STACKD_JWT_SECRET</code>. The dev compose file blanks them for the worker. Repo hooks get only an allowlist (<code>PATH</code>, <code>HOME</code>, locale, proxy and CA settings), see <a href="../hooks/#what-hooks-can-see">Hooks</a>.</p>
 </div>
 <h3 id="runners">Runners<a class="headerlink" href="#runners" title="Permanent link">&para;</a></h3>
-<p>Every job runs in its own workspace, removed when the job ends. Today the agent runs each tofu and hook command as a <strong>local subprocess</strong>, as its own OS user — whatever <code>STACKD_RUNNER</code> says. A <strong>container runner</strong> (<code>STACKD_RUNNER=docker</code>: each job in its own container from a runner image, see <code>deploy/images/</code>) is specified but <strong>not implemented yet</strong>. Until it exists, a job is isolated neither from the agent's own process nor from the other jobs of its worker: keep <code>STACKD_MAX_CONCURRENT_JOBS=1</code> on workers that run code you don't fully trust.</p>
+<p>Every job runs in its own workspace, removed when the job ends. <code>STACKD_RUNNER</code> picks how its commands run:</p>
+<ul>
+<li><strong><code>docker</code></strong> (required when the API runs with <code>STACKD_ENV=production</code>): every tofu command and every hook runs in <strong>its own fresh container</strong> of a runner image (see <code>deploy/images/</code>), removed as soon as the command exits — nothing a command starts survives it. Containers drop all capabilities, run unprivileged on a read-only root filesystem, and get none of the worker's environment but its proxy and locale settings. Repo hooks see the checkout only: not the OIDC token file, not the saved plan.</li>
+<li><strong><code>local</code></strong> (trusted dev only): each command is a subprocess of the agent, as its own OS user. A job is then isolated neither from the agent's own process nor from the other jobs of its worker: keep <code>STACKD_MAX_CONCURRENT_JOBS=1</code>. A production API refuses such a worker.</li>
+</ul>
+<table>
+<thead>
+<tr>
+<th>Setting (<code>docker</code> runner)</th>
+<th>Default</th>
+<th>Purpose</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>STACKD_RUNNER_IMAGES</code></td>
+<td>— (required)</td>
+<td>JSON <code>{"opentofu:1.12.2": "&lt;repo&gt;@sha256:&lt;digest&gt;"}</code>: the image per tool version, <strong>pinned by digest</strong> (a tag is refused). The worker only takes runs whose stack's <code>tool_version</code> it has an image for</td>
+</tr>
+<tr>
+<td><code>STACKD_DOCKER_HOST</code></td>
+<td><code>unix:///var/run/docker.sock</code></td>
+<td>the Docker Engine socket</td>
+</tr>
+<tr>
+<td><code>STACKD_DOCKER_NETWORK</code></td>
+<td><code>bridge</code></td>
+<td>the containers' network: it must reach the API (state backend); the place for an egress allowlist</td>
+</tr>
+<tr>
+<td><code>STACKD_DOCKER_MEMORY</code>, <code>STACKD_DOCKER_CPUS</code></td>
+<td>unset</td>
+<td>per-container limits (<code>2g</code>, <code>1.5</code>)</td>
+</tr>
+<tr>
+<td><code>STACKD_DOCKER_PIDS_LIMIT</code></td>
+<td><code>1024</code></td>
+<td>per-container process limit</td>
+</tr>
+<tr>
+<td><code>STACKD_DOCKER_RUNTIME</code></td>
+<td>unset</td>
+<td>an alternative OCI runtime, e.g. <code>runsc</code> (gVisor)</td>
+</tr>
+</tbody>
+</table>
 <div class="admonition warning">
-<p class="admonition-title">Fargate caveat, for the container runner</p>
-<p>A container runner needs to launch containers, i.e. Docker-in-Docker. <strong>AWS Fargate does not allow this.</strong> On Fargate, the worker runs commands locally, as it does today.</p>
+<p class="admonition-title">The worker's host is privileged</p>
+<p>Access to the Docker socket is root-equivalent on that host: give the worker a dedicated VM, ideally with rootless Docker. If the agent itself runs in a container, mount <code>STACKD_WORKSPACE_ROOT</code> at the <strong>same path</strong> on the host and in the agent's container: the job containers mount it by host path.</p>
+</div>
+<div class="admonition warning">
+<p class="admonition-title">Fargate</p>
+<p>The <code>docker</code> runner launches containers; <strong>AWS Fargate does not allow this</strong>. A worker on Fargate can only use the <code>local</code> runner, which a production API refuses.</p>
 </div>
 <h2 id="dedicate-a-pool-with-labels">Dedicate a pool with labels<a class="headerlink" href="#dedicate-a-pool-with-labels" title="Permanent link">&para;</a></h2>
 <p>Labels route work to pools. A run is eligible for a worker only when <code>env.labels &lt;@ worker.labels</code> (the environment's labels are a subset of the worker's). To dedicate a pool to production, label both the prod environments and a prod-only worker pool with <code>tier: prod</code>, and give general workers no such label — they will never pick up prod runs.</p>

@@ -621,6 +621,23 @@
     </span>
   </a>
   
+    <nav class="md-nav" aria-label="What hooks can see">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#repo-hooks-at-the-apply-stages" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Repo hooks at the apply stages
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
 </li>
       
         <li class="md-nav__item">
@@ -1216,6 +1233,23 @@
     </span>
   </a>
   
+    <nav class="md-nav" aria-label="What hooks can see">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#repo-hooks-at-the-apply-stages" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Repo hooks at the apply stages
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
 </li>
       
         <li class="md-nav__item">
@@ -1400,15 +1434,15 @@ only while a tofu command runs (their values do show in <code>plan.json</code>, 
 hook's copy). Give a hook what it needs as an environment variable.</p>
 <p>While a repo hook runs, none of these is on disk: the saved plan, the run's variable files, the
 cloud token file, the repo token. Sensitive values are masked in every hook's output.</p>
-<div class="admonition warning">
-<p class="admonition-title">Not implemented yet</p>
-<p>The specification also describes ignoring repo hooks at the <code>*_apply</code> stages of <code>prod</code>
-environments, and a per-environment opt-in giving repo hooks secrets or cloud credentials.
-Neither exists: repo hooks run at every stage, and never get secrets. The <code>prod</code> rule is
-pending a decision, since tiers are a configurable catalog. Until the
-<a href="../workers-and-scaling/#runners">container runner</a> exists, hooks also run as the worker's own
-user, without isolation from other jobs on the same worker (<a href="../../SPECS/">SPECS §8.3</a>).</p>
-</div>
+<h3 id="repo-hooks-at-the-apply-stages">Repo hooks at the apply stages<a class="headerlink" href="#repo-hooks-at-the-apply-stages" title="Permanent link">&para;</a></h3>
+<p><code>before_apply</code> and <code>after_apply</code> run in the job that holds the apply credentials. A repo hook at
+those stages runs only on a <strong>tier that allows it</strong> (Settings → Tiers → <em>Allow repo hooks at
+apply…</em>): off by default on every tier. Elsewhere it is skipped, and the run shows a <code>warn</code> check
+<code>skipped: this tier does not allow repo hooks at the apply stages</code>. Platform hooks always run.</p>
+<p>Repo hooks never get secrets or cloud credentials, on any tier: a hook that needs them belongs on
+the platform side. On the <a href="../workers-and-scaling/#runners"><code>docker</code> runner</a> each hook runs in its
+own container and a repo hook sees the checkout only; on the <code>local</code> runner (dev) hooks run as the
+worker's own user (<a href="../../SPECS/">SPECS §8.3</a>).</p>
 <h2 id="managing-platform-hooks">Managing platform hooks<a class="headerlink" href="#managing-platform-hooks" title="Permanent link">&para;</a></h2>
 <p>Platform hooks are CRUD over the API, scoped to a stack or an environment:</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>curl<span class="w"> </span>-s<span class="w"> </span>-X<span class="w"> </span>POST<span class="w"> </span>localhost:8000/api/v1/stacks/<span class="nv">$STACK_ID</span>/hooks<span class="w"> </span>-H<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$AUTH</span><span class="s2">&quot;</span><span class="w"> </span>-d<span class="w"> </span><span class="s1">&#39;{</span>

@@ -692,6 +692,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#the-signing-key" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The signing key
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#1-configure-the-cloud-provider-aws" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -1175,6 +1186,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#the-signing-key" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The signing key
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#1-configure-the-cloud-provider-aws" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -1292,6 +1314,47 @@ Stackd issuer URL must be reachable from AWS over HTTPS — a private-only deplo
 will fail every <code>AssumeRoleWithWebIdentity</code>. Expose it publicly, or use the provided
 Terraform module that registers the identity provider with its thumbprint.</p>
 </div>
+<h2 id="the-signing-key">The signing key<a class="headerlink" href="#the-signing-key" title="Permanent link">&para;</a></h2>
+<p>Whoever holds the issuer's private key can mint a token for any role that trusts Stackd, so in
+production the key lives in <strong>AWS KMS</strong>: the API signs through <code>kms:Sign</code> and never sees the
+private key. A production API refuses to start on a local key unless you acknowledge it
+(<code>STACKD_ALLOW_LOCAL_SIGNER=true</code>).</p>
+<table>
+<thead>
+<tr>
+<th>Setting</th>
+<th>Default</th>
+<th>Purpose</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>STACKD_OIDC_SIGNER</code></td>
+<td><code>local</code></td>
+<td><code>kms</code> (production) or <code>local</code> (a key AES-GCM encrypted in the database)</td>
+</tr>
+<tr>
+<td><code>STACKD_OIDC_KMS_KEY_ARN</code></td>
+<td>—</td>
+<td>the KMS key: asymmetric, <code>RSA_2048</code> or larger, usage <code>SIGN_VERIFY</code></td>
+</tr>
+</tbody>
+</table>
+<p>The API's IAM identity needs only <code>kms:Sign</code> and <code>kms:GetPublicKey</code> on that key:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="p">{</span>
+<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="w">  </span><span class="nt">&quot;Effect&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;Allow&quot;</span><span class="p">,</span>
+<a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a><span class="w">  </span><span class="nt">&quot;Action&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">[</span><span class="s2">&quot;kms:Sign&quot;</span><span class="p">,</span><span class="w"> </span><span class="s2">&quot;kms:GetPublicKey&quot;</span><span class="p">],</span>
+<a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a><span class="w">  </span><span class="nt">&quot;Resource&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;arn:aws:kms:eu-west-1:123456789012:key/…&quot;</span>
+<a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a><span class="p">}</span>
+</code></pre></div>
+<p>Switching <code>STACKD_OIDC_SIGNER</code> to <code>kms</code> is the whole migration: on the next token it signs, the
+issuer rotates from its local key to the configured KMS key.</p>
+<p><strong>Rotation.</strong> <code>POST /api/v1/oidc/keys/rotate</code> (admin) makes a new key the signing one — a new KMS
+key named in <code>{"kms_key_arn": "…"}</code>, or a new local key on a local issuer. The previous key stays
+in the JWKS, so the tokens it signed keep verifying, and leaves it automatically once the longest
+of them has expired (the apply budget plus grace, plus five minutes of clock skew).
+<code>GET /api/v1/oidc/keys</code> lists the keys and their status. Both rotations and retirements are
+audited (<code>oidc_key.rotated</code>, <code>oidc_key.retired</code>).</p>
 <h2 id="1-configure-the-cloud-provider-aws">1. Configure the cloud provider (AWS)<a class="headerlink" href="#1-configure-the-cloud-provider-aws" title="Permanent link">&para;</a></h2>
 <p>On the AWS account, create an <strong>IAM OIDC identity provider</strong> trusting the Stackd issuer,
 then the roles each run will assume. A provided Terraform module sets this up.</p>
@@ -1302,12 +1365,12 @@ then the roles each run will assume. A provided Terraform module sets this up.</
 </ul>
 <p>Each role's trust policy filters on the <code>sub</code> claim. The wildcard covers <strong>only the
 <code>stack</code> segment</strong> — <code>tier</code> and <code>phase</code> are always pinned:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="c1"># Trust policy of the prod APPLY role — refuses everything else</span>
-<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="nb">condition</span><span class="w"> </span><span class="p">{</span>
-<a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a><span class="w">  </span><span class="na">test</span><span class="w">     </span><span class="o">=</span><span class="w"> </span><span class="s2">&quot;StringLike&quot;</span>
-<a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a><span class="w">  </span><span class="na">variable</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">&quot;stackd.example.com:sub&quot;</span>
-<a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a><span class="w">  </span><span class="na">values</span><span class="w">   </span><span class="o">=</span><span class="w"> </span><span class="p">[</span><span class="s2">&quot;run:prod:*:apply&quot;</span><span class="p">]</span><span class="c1">   # any stack, but tier=prod AND phase=apply</span>
-<a id="__codelineno-2-6" name="__codelineno-2-6" href="#__codelineno-2-6"></a><span class="p">}</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="c1"># Trust policy of the prod APPLY role — refuses everything else</span>
+<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a><span class="nb">condition</span><span class="w"> </span><span class="p">{</span>
+<a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a><span class="w">  </span><span class="na">test</span><span class="w">     </span><span class="o">=</span><span class="w"> </span><span class="s2">&quot;StringLike&quot;</span>
+<a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a><span class="w">  </span><span class="na">variable</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">&quot;stackd.example.com:sub&quot;</span>
+<a id="__codelineno-3-5" name="__codelineno-3-5" href="#__codelineno-3-5"></a><span class="w">  </span><span class="na">values</span><span class="w">   </span><span class="o">=</span><span class="w"> </span><span class="p">[</span><span class="s2">&quot;run:prod:*:apply&quot;</span><span class="p">]</span><span class="c1">   # any stack, but tier=prod AND phase=apply</span>
+<a id="__codelineno-3-6" name="__codelineno-3-6" href="#__codelineno-3-6"></a><span class="p">}</span>
 </code></pre></div>
 <div class="admonition warning">
 <p class="admonition-title">Never wildcard <code>tier</code> or <code>phase</code></p>
@@ -1319,30 +1382,30 @@ token. Keep <code>tier</code> and <code>phase</code> fixed in every condition.</
 <h2 id="2-attach-a-cloud-integration-to-the-environment">2. Attach a cloud integration to the environment<a class="headerlink" href="#2-attach-a-cloud-integration-to-the-environment" title="Permanent link">&para;</a></h2>
 <p>A <code>cloud-integration</code> is configured <strong>per environment</strong> (so each region can point at a
 different role or even a different AWS account). The resource is CRUD over:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a>GET|PUT|DELETE /api/v1/environments/{id}/cloud-integration
+<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a>GET|PUT|DELETE /api/v1/environments/{id}/cloud-integration
 </code></pre></div>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a>curl<span class="w"> </span>-s<span class="w"> </span>-X<span class="w"> </span>PUT<span class="w"> </span>localhost:8000/api/v1/environments/<span class="nv">$PROD</span>/cloud-integration<span class="w"> </span>-H<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$AUTH</span><span class="s2">&quot;</span><span class="w"> </span>-d<span class="w"> </span><span class="s1">&#39;{</span>
-<a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a><span class="s1">  &quot;provider&quot;: &quot;aws&quot;,</span>
-<a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a><span class="s1">  &quot;plan_role_arn&quot;:  &quot;arn:aws:iam::123:role/stackd-prod-plan&quot;,</span>
-<a id="__codelineno-4-4" name="__codelineno-4-4" href="#__codelineno-4-4"></a><span class="s1">  &quot;apply_role_arn&quot;: &quot;arn:aws:iam::123:role/stackd-prod-apply&quot;,</span>
-<a id="__codelineno-4-5" name="__codelineno-4-5" href="#__codelineno-4-5"></a><span class="s1">  &quot;region&quot;: &quot;eu-west-1&quot;,</span>
-<a id="__codelineno-4-6" name="__codelineno-4-6" href="#__codelineno-4-6"></a><span class="s1">  &quot;session_duration&quot;: 3600</span>
-<a id="__codelineno-4-7" name="__codelineno-4-7" href="#__codelineno-4-7"></a><span class="s1">}&#39;</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a>curl<span class="w"> </span>-s<span class="w"> </span>-X<span class="w"> </span>PUT<span class="w"> </span>localhost:8000/api/v1/environments/<span class="nv">$PROD</span>/cloud-integration<span class="w"> </span>-H<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$AUTH</span><span class="s2">&quot;</span><span class="w"> </span>-d<span class="w"> </span><span class="s1">&#39;{</span>
+<a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a><span class="s1">  &quot;provider&quot;: &quot;aws&quot;,</span>
+<a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a><span class="s1">  &quot;plan_role_arn&quot;:  &quot;arn:aws:iam::123:role/stackd-prod-plan&quot;,</span>
+<a id="__codelineno-5-4" name="__codelineno-5-4" href="#__codelineno-5-4"></a><span class="s1">  &quot;apply_role_arn&quot;: &quot;arn:aws:iam::123:role/stackd-prod-apply&quot;,</span>
+<a id="__codelineno-5-5" name="__codelineno-5-5" href="#__codelineno-5-5"></a><span class="s1">  &quot;region&quot;: &quot;eu-west-1&quot;,</span>
+<a id="__codelineno-5-6" name="__codelineno-5-6" href="#__codelineno-5-6"></a><span class="s1">  &quot;session_duration&quot;: 3600</span>
+<a id="__codelineno-5-7" name="__codelineno-5-7" href="#__codelineno-5-7"></a><span class="s1">}&#39;</span>
 </code></pre></div>
 <p>AWS is the MVP target; GCP and Azure come later.</p>
 <h2 id="3-test-it">3. Test it<a class="headerlink" href="#3-test-it" title="Permanent link">&para;</a></h2>
 <p>A built-in <strong>AssumeRole test</strong> verifies the trust chain without launching a run:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a>curl<span class="w"> </span>-s<span class="w"> </span>-X<span class="w"> </span>POST<span class="w"> </span>localhost:8000/api/v1/environments/<span class="nv">$PROD</span>/cloud-integration/test<span class="w"> </span>-H<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$AUTH</span><span class="s2">&quot;</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a>curl<span class="w"> </span>-s<span class="w"> </span>-X<span class="w"> </span>POST<span class="w"> </span>localhost:8000/api/v1/environments/<span class="nv">$PROD</span>/cloud-integration/test<span class="w"> </span>-H<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$AUTH</span><span class="s2">&quot;</span>
 </code></pre></div>
 <p>It signs a probe token and attempts the <code>AssumeRoleWithWebIdentity</code> end to end — a fast
 way to catch a missing identity provider, a too-narrow <code>sub</code> condition, or an
 unreachable issuer.</p>
 <h2 id="what-the-agent-injects">What the agent injects<a class="headerlink" href="#what-the-agent-injects" title="Permanent link">&para;</a></h2>
 <p>When a <code>cloud_integration</code> is set, the worker exports, <strong>to tofu and to platform hooks only</strong>:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a>AWS_WEB_IDENTITY_TOKEN_FILE = &lt;path to the token file, outside the checkout&gt;
-<a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a>AWS_ROLE_ARN                = &lt;plan_role_arn | apply_role_arn for this phase&gt;
-<a id="__codelineno-6-3" name="__codelineno-6-3" href="#__codelineno-6-3"></a>AWS_ROLE_SESSION_NAME       = stackd-&lt;run_id&gt;
-<a id="__codelineno-6-4" name="__codelineno-6-4" href="#__codelineno-6-4"></a>AWS_REGION                  = &lt;region, when the integration sets one&gt;
+<div class="highlight"><pre><span></span><code><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a>AWS_WEB_IDENTITY_TOKEN_FILE = &lt;path to the token file, outside the checkout&gt;
+<a id="__codelineno-7-2" name="__codelineno-7-2" href="#__codelineno-7-2"></a>AWS_ROLE_ARN                = &lt;plan_role_arn | apply_role_arn for this phase&gt;
+<a id="__codelineno-7-3" name="__codelineno-7-3" href="#__codelineno-7-3"></a>AWS_ROLE_SESSION_NAME       = stackd-&lt;run_id&gt;
+<a id="__codelineno-7-4" name="__codelineno-7-4" href="#__codelineno-7-4"></a>AWS_REGION                  = &lt;region, when the integration sets one&gt;
 </code></pre></div>
 <p>The token file is written right before each tofu command or platform hook and deleted right
 after: it is never on disk while a repo hook runs.</p>
@@ -1354,9 +1417,13 @@ not be able to assume the apply role and exfiltrate). Platform hooks always get 
 <a href="../hooks/#what-hooks-can-see">Hooks</a>.</p>
 <h2 id="fallback-and-coexistence">Fallback and coexistence<a class="headerlink" href="#fallback-and-coexistence" title="Permanent link">&para;</a></h2>
 <p>With no <code>cloud_integration</code>, Stackd falls back to classic static variables (for example an
-<code>aws-credentials</code> variable set). Don't resolve both on one environment: Stackd does not warn
-about it yet, and a static <code>AWS_ACCESS_KEY_ID</code> stays in tofu's environment, where the AWS SDK
-normally uses it before the OIDC token.</p>
+<code>aws-credentials</code> variable set).</p>
+<p>With a <code>cloud_integration</code>, the OIDC role is the job's <strong>only</strong> AWS identity: Stackd drops every
+static AWS credential resolved for the environment (<code>AWS_ACCESS_KEY_ID</code>, <code>AWS_SECRET_ACCESS_KEY</code>,
+<code>AWS_SESSION_TOKEN</code>, <code>AWS_PROFILE</code>, the credential files…) before the job starts — the AWS SDK
+would otherwise use them before the OIDC token — and the worker drops its own. The environment's
+cloud panel warns about each one it drops (by name), and the run's inputs show it as
+<code>NOT PASSED (OIDC)</code>. Settings such as <code>AWS_REGION</code> are kept.</p>
 <h2 id="see-also">See also<a class="headerlink" href="#see-also" title="Permanent link">&para;</a></h2>
 <ul>
 <li><a href="../runs-and-approvals/">Runs &amp; approvals</a></li>

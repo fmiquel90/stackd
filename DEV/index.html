@@ -1451,7 +1451,8 @@
 <hr />
 <h2 id="5-worker-in-dev">5. Worker in dev<a class="headerlink" href="#5-worker-in-dev" title="Permanent link">&para;</a></h2>
 <ul>
-<li>Launched by compose with <code>STACKD_RUNNER=local</code>: terraform commands run directly inside the worker container (image including OpenTofu + jq + git). <strong>No Docker-in-Docker</strong> — the <code>docker</code> runner is not implemented in the agent yet (SPECS §7.4), so there is nothing to exercise in dev.</li>
+<li>Launched by compose with <code>STACKD_RUNNER=local</code>: terraform commands run directly inside the worker container (image including OpenTofu + jq + git). <strong>No Docker-in-Docker</strong> in the dev stack.</li>
+<li>The <code>docker</code> runner (SPECS §7.4, required in production) is exercised by the worker's tests against the host's Docker daemon: <code>tests/test_docker_runner.py</code> (isolation: one container per command, a <code>setsid</code> daemon contained, repo hooks seeing the checkout only, read-only rootfs, timeout) and <code>tests/test_docker_job.py</code> (a real plan → apply with tofu inside the container). They need <code>alpine:3.20</code> and the test image <code>docker build -f worker/tests/docker/tofu-test.Dockerfile -t stackd-test/tofu:1.12.2 worker/tests/docker</code>, and are skipped without a daemon. To run a worker on it by hand: <code>STACKD_RUNNER=docker</code>, <code>STACKD_RUNNER_IMAGES='{"opentofu:1.12.2": "&lt;repo&gt;@sha256:&lt;digest&gt;"}'</code> (an image built from <code>deploy/images/</code> and pushed), the Docker socket reachable, <code>STACKD_WORKSPACE_ROOT</code> at the same path on the host and in the agent, and <code>STACKD_DOCKER_NETWORK</code> set to a network that reaches the API.</li>
 <li>Tool binaries: <strong>OpenTofu and Terraform</strong> pre-installed in the dev image (no download on first run). A stack's <code>tool</code> picks which one runs — no separate "terraform worker", any dev worker handles both.</li>
 <li>Agent hot reload (watchfiles): modifying <code>worker/</code> cleanly restarts the poll loop (the current job finishes).</li>
 <li>Multi-workers to test concurrency and affinity: <code>docker compose -f deploy/docker-compose.dev.yml up -d --scale worker=3</code>, or <code>STACKD_MAX_CONCURRENT_JOBS</code> for several jobs per worker.</li>
@@ -1522,7 +1523,7 @@
 </tr>
 <tr>
 <td>Docker runner (per-container isolation)</td>
-<td>not implemented yet (SPECS §7.4)</td>
+<td>not in the dev stack (<code>local</code> runner); covered by the worker's docker tests (SPECS §7.4)</td>
 </tr>
 <tr>
 <td>Real GitHub/GitLab webhooks</td>
