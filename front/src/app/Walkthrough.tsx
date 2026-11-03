@@ -14,7 +14,7 @@ interface Step {
 
 const STEPS: Step[] = [
   {
-    eyebrow: "welcome",
+    eyebrow: "overview",
     title: "A control room for your infrastructure",
     body: "Stackd runs plan → a human confirms → apply, on self-hosted workers. The API is the single source of truth; every change is an audited event.",
   },
@@ -51,7 +51,7 @@ export function Walkthrough({ onDone }: { onDone: () => void }) {
   const last = i === STEPS.length - 1;
   return (
     <Dialog open onOpenChange={(open) => !open && onDone()}>
-      <DialogContent title="Welcome to Stackd" className="max-w-[520px]">
+      <DialogContent title="Getting started with Stackd" className="max-w-[520px]">
         <div className="flex flex-col gap-3">
           <span className="eyebrow text-muted">
             {i + 1} / {STEPS.length} · {step.eyebrow}

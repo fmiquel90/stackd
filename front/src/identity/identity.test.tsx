@@ -6,6 +6,8 @@ import { runRights, whoMayConfirm } from "@/lib/permissions";
 import { RunActionBar } from "./RunActionBar";
 import { RunStateBadge } from "./StateBadge";
 import { TypeToConfirm } from "./TypeToConfirm";
+import { EnvCell } from "./EnvCell";
+import { summarizeEnv } from "@/lib/envSummary";
 import { TooltipProvider } from "@/ui/overlays";
 
 const env = makeEnv();
@@ -111,5 +113,18 @@ describe("TypeToConfirm", () => {
     fireEvent.change(screen.getByLabelText(/to confirm/), { target: { value: "prod" } });
     fireEvent.click(submit);
     expect(onConfirm).toHaveBeenCalledOnce();
+  });
+});
+
+describe("EnvCell", () => {
+  it("lets a long state badge wrap under the mini rail instead of overflowing the cell", () => {
+    const run = makeRun({
+      state: "failed",
+      confirmed_at: "2026-10-10T20:01:00Z",
+      finished_at: "2026-10-10T20:02:00Z",
+    });
+    render(<EnvCell summary={summarizeEnv(env, [run])} />);
+    const row = screen.getByText(/failed during apply/i).closest("span.flex");
+    expect(row?.className).toContain("flex-wrap");
   });
 });

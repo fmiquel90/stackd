@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { TriangleAlert } from "lucide-react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ApiError } from "@/api/client";
 import { cloudApi } from "@/api/resources";
@@ -54,7 +55,7 @@ export function CloudPanel({ envId }: { envId: string }) {
       {configured &&
         data!.warnings.map((w) => (
           <p key={w.code} role="alert" className="font-data mb-2 text-[12px] text-st-decision">
-            <span aria-hidden="true">⚠ </span>
+            <TriangleAlert size={12} strokeWidth={1.5} aria-hidden className="mr-1 inline align-[-1px]" />
             Not passed to runs: {w.variables.join(", ")}. {w.detail}
           </p>
         ))}
