@@ -277,6 +277,12 @@ CREATE UNIQUE INDEX one_active_run_per_env ON runs (environment_id)
 WHERE state IN ('preparing','planning','checking','unconfirmed','confirmed','applying','running');
 ```
 
+Run-group members (§9.4) are looked up by group — on every cascade, group status and run page:
+
+```sql
+CREATE INDEX ix_runs_run_group_id ON runs (run_group_id) WHERE run_group_id IS NOT NULL;
+```
+
 ### 3.6 `run_events`
 
 ```

@@ -5,7 +5,7 @@ import json
 import uuid
 from dataclasses import dataclass, field
 
-from sqlalchemy import or_, select
+from sqlalchemy import select, union_all
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -179,15 +179,17 @@ async def _should_trigger(
     return False
 
 
-def _in_group(group_id: uuid.UUID):  # type: ignore[no-untyped-def]
-    """A run group = its root run (id = group id) and every run carrying the group id (§9.4)."""
-    return or_(Run.run_group_id == group_id, Run.id == group_id)
-
-
 async def group_status(session: AsyncSession, group_id: uuid.UUID) -> str:
     """Computed run-group status (§9.2): `running` while a run of the group is active (or queued),
     else `partial_failure` if one failed, was discarded or canceled, else `succeeded`."""
-    states = set((await session.execute(select(Run.state).where(_in_group(group_id)))).scalars())
+    # The group = its root (by id) + the runs carrying its id: two index lookups (§9.4).
+    rows = await session.execute(
+        union_all(
+            select(Run.state).where(Run.run_group_id == group_id),
+            select(Run.state).where(Run.id == group_id),
+        )
+    )
+    states = set(rows.scalars())
     if states & (ACTIVE_STATES | {RunState.queued}):
         return "running"
     if states & _BROKEN_STATES:
@@ -197,23 +199,34 @@ async def group_status(session: AsyncSession, group_id: uuid.UUID) -> str:
 
 async def _scope(
     session: AsyncSession, root_env: uuid.UUID
-) -> tuple[list[uuid.UUID], dict[uuid.UUID, list[EnvDependency]]]:
+) -> tuple[
+    list[uuid.UUID], dict[uuid.UUID, list[EnvDependency]], dict[uuid.UUID, list[EnvDependency]]
+]:
     """The group's scope: every environment reachable from the root's env, in topological order,
-    with each one's incoming edges from inside the scope. The graph is acyclic (§3.8)."""
-    edges = (await session.execute(select(EnvDependency))).scalars().all()
+    with each one's incoming and outgoing edges (all inside the scope). The graph is acyclic (§3.8).
+    Only the reachable edges are loaded, one query per level."""
     out: dict[uuid.UUID, list[EnvDependency]] = {}
-    for dep in edges:
-        out.setdefault(dep.upstream_env_id, []).append(dep)
     scope: set[uuid.UUID] = {root_env}
-    stack = [root_env]
-    while stack:
-        for dep in out.get(stack.pop(), []):
+    frontier = [root_env]
+    while frontier:
+        edges = (
+            (
+                await session.execute(
+                    select(EnvDependency).where(EnvDependency.upstream_env_id.in_(frontier))
+                )
+            )
+            .scalars()
+            .all()
+        )
+        frontier = []
+        for dep in edges:
+            out.setdefault(dep.upstream_env_id, []).append(dep)
             if dep.downstream_env_id not in scope:
                 scope.add(dep.downstream_env_id)
-                stack.append(dep.downstream_env_id)
+                frontier.append(dep.downstream_env_id)
     incoming: dict[uuid.UUID, list[EnvDependency]] = {e: [] for e in scope}
-    for dep in edges:
-        if dep.upstream_env_id in scope and dep.downstream_env_id in scope:
+    for deps in out.values():
+        for dep in deps:
             incoming[dep.downstream_env_id].append(dep)
     indegree = {e: len(incoming[e]) for e in scope}
     order: list[uuid.UUID] = []
@@ -222,11 +235,10 @@ async def _scope(
         node = ready.pop()
         order.append(node)
         for dep in out.get(node, []):
-            if dep.downstream_env_id in indegree:
-                indegree[dep.downstream_env_id] -= 1
-                if indegree[dep.downstream_env_id] == 0:
-                    ready.append(dep.downstream_env_id)
-    return order, incoming
+            indegree[dep.downstream_env_id] -= 1
+            if indegree[dep.downstream_env_id] == 0:
+                ready.append(dep.downstream_env_id)
+    return order, incoming, out
 
 
 async def cascade(session: AsyncSession, run: Run) -> list[Run]:
@@ -258,21 +270,24 @@ async def cascade(session: AsyncSession, run: Run) -> list[Run]:
     ).scalar_one_or_none()
     if root is None:
         return []
-    order, incoming = await _scope(session, root.environment_id)
+    order, incoming, _ = await _scope(session, root.environment_id)
 
-    group_runs = (
+    members = (
         (
             await session.execute(
                 select(Run)
-                .where(_in_group(group_id), Run.type == RunType.tracked)
+                .where(Run.run_group_id == group_id, Run.type == RunType.tracked)
                 .execution_options(populate_existing=True)
             )
         )
         .scalars()
         .all()
     )
+    group_runs = {r.id: r for r in members}
+    if root.type == RunType.tracked:
+        group_runs[root.id] = root
     by_env: dict[uuid.UUID, Run] = {}
-    for r in sorted(group_runs, key=lambda r: r.created_at):
+    for r in sorted(group_runs.values(), key=lambda r: r.created_at):
         by_env[r.environment_id] = r  # the latest run of an env in the group
 
     status: dict[uuid.UUID, str] = {}
