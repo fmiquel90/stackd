@@ -569,6 +569,8 @@ export interface Rollout {
   members: RolloutMember[];
   edges: { upstream_env_id: string; downstream_env_id: string }[];
   can_approve: { allowed: boolean; reason: string | null };
+  /** How long an approval lasts (SPECS §21.6, operator setting). */
+  approval_ttl_seconds: number;
 }
 
 export interface RolloutSummary {

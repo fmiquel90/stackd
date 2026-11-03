@@ -286,3 +286,109 @@ async def test_a_member_no_worker_can_take_says_so(client: httpx.AsyncClient) ->
     await client.post(f"/api/v1/rollouts/{ro['id']}/approve", headers=alice)
     ro = await _get(client, admin, ro["id"])
     assert "no online worker can take it" in _member(ro, net)["waiting_reason"]
+
+
+# --- review fixes ---
+
+
+async def test_a_member_never_falls_back_to_autodeploy(client: httpx.AsyncClient) -> None:
+    """An autodeploy env cloned into a rollout: a changing plan still stops for a human (§21.4)."""
+    admin, alice = await login(client, "admin"), await login(client, "alice")
+    wh = await register_worker(client, admin, "pool-ro-auto")
+    g = await _graph(client, admin, "ro-auto", tier="dev", autodeploy=True)
+    ro = await _rollout(client, admin, "ro-auto")
+    await client.post(f"/api/v1/rollouts/{ro['id']}/approve", headers=alice)
+    await _plan(client, wh, CHANGES)
+    assert _member(await _get(client, admin, ro["id"]), g["net"])["run_state"] == "unconfirmed"
+
+
+async def test_a_summary_without_imports_fails_the_gate(client: httpx.AsyncClient) -> None:
+    """An agent that does not report imports can't prove there are none: fail closed (§21.5)."""
+    admin, alice = await login(client, "admin"), await login(client, "alice")
+    wh = await register_worker(client, admin, "pool-ro-imp")
+    g = await _graph(client, admin, "ro-imp")
+    ro = await _rollout(client, admin, "ro-imp")
+    await client.post(f"/api/v1/rollouts/{ro['id']}/approve", headers=alice)
+    await _plan(client, wh, {"has_changes": True, "summary": {"add": 1, "change": 0, "destroy": 0}})
+    member = _member(await _get(client, admin, ro["id"]), g["net"])
+    assert member["run_state"] == "unconfirmed" and "imports" in member["waiting_reason"]
+
+
+async def test_cancel_also_stops_a_confirmed_unclaimed_run(client: httpx.AsyncClient) -> None:
+    admin, alice = await login(client, "admin"), await login(client, "alice")
+    wh = await register_worker(client, admin, "pool-ro-cc")
+    g = await _graph(client, admin, "ro-cc")
+    ro = await _rollout(client, admin, "ro-cc")
+    await client.post(f"/api/v1/rollouts/{ro['id']}/approve", headers=alice)
+    await _plan(client, wh, CREATES)
+    assert _member(await _get(client, admin, ro["id"]), g["net"])["run_state"] == "confirmed"
+    ro = (await client.post(f"/api/v1/rollouts/{ro['id']}/cancel", headers=admin)).json()
+    assert _member(ro, g["net"])["run_state"] == "canceled"
+    assert (await client.post("/worker/v1/jobs/claim", headers=wh)).status_code == 204
+
+
+async def test_an_approver_removed_from_the_space_loses_the_gate(client: httpx.AsyncClient) -> None:
+    """No fallback to the instance defaults once the approver's membership is gone (§21.5)."""
+    admin, alice = await login(client, "admin"), await login(client, "alice")
+    wh = await register_worker(client, admin, "pool-ro-gone")
+    space = (await client.post("/api/v1/spaces", headers=admin, json={"name": "ro-gone"})).json()
+    users = (await client.get("/api/v1/users", headers=admin)).json()
+    alice_id = next(u["id"] for u in users if u["email"] == "alice@dev.local")
+    member = {"user_id": alice_id, "role": "approver", "allowed_tiers": ["prod"]}
+    assert (
+        await client.put(f"/api/v1/spaces/{space['id']}/members", headers=admin, json=member)
+    ).status_code in (200, 201)
+    stack = await client.post(
+        "/api/v1/stacks",
+        headers=admin,
+        json={
+            "space_id": space["id"],
+            "name": "ro-gone-net",
+            "repo_url": "file:///r",
+            "tool_version": "1.12",
+        },
+    )
+    net = await _env(client, admin, stack.json()["id"], "ro-gone", "prod")
+    ro = (
+        await client.post(
+            "/api/v1/rollouts", headers=admin, json={"space_id": space["id"], "env_name": "ro-gone"}
+        )
+    ).json()
+    assert (
+        await client.post(f"/api/v1/rollouts/{ro['id']}/approve", headers=alice)
+    ).status_code == 200
+    r = await client.delete(f"/api/v1/spaces/{space['id']}/members/{alice_id}", headers=admin)
+    assert r.status_code in (200, 204), r.text
+
+    await _plan(client, wh, CREATES)
+    ro = await _get(client, admin, ro["id"])
+    assert _member(ro, net)["run_state"] == "unconfirmed"
+    assert ro["state"] == "paused" and ro["pause_reason"] == "approver_lost_rights"
+
+
+async def test_a_reapproval_is_audited_as_a_resume(client: httpx.AsyncClient) -> None:
+    admin, alice = await login(client, "admin"), await login(client, "alice")
+    wh = await register_worker(client, admin, "pool-ro-res")
+    await _graph(client, admin, "ro-res")
+    ro = await _rollout(client, admin, "ro-res")
+    await client.post(f"/api/v1/rollouts/{ro['id']}/approve", headers=alice)
+    async with SessionLocal() as s:
+        await s.execute(
+            update(EnvRollout)
+            .where(EnvRollout.id == ro["id"])
+            .values(approval_expires_at=datetime.now(UTC) - timedelta(seconds=1))
+        )
+        await s.commit()
+    await _plan(client, wh, CREATES)
+    await client.post(f"/api/v1/rollouts/{ro['id']}/approve", headers=alice)
+    async with SessionLocal() as s:
+        actions = list(
+            (
+                await s.execute(
+                    select(AuditEvent.action)
+                    .where(AuditEvent.target_id == ro["id"])
+                    .order_by(AuditEvent.created_at)
+                )
+            ).scalars()
+        )
+    assert "rollout.paused" in actions and "rollout.resumed" in actions

@@ -23,6 +23,7 @@ from app.audit import record_audit
 from app.config import get_settings
 from app.enums import (
     AuditActorKind,
+    Role,
     RolloutMemberStatus,
     RolloutState,
     RunEventActor,
@@ -37,7 +38,6 @@ from app.models.environment import Environment
 from app.models.rollout import EnvRollout, EnvRolloutMember
 from app.models.run import Run
 from app.models.stack import Stack
-from app.models.tier import Tier
 from app.models.user import User
 from app.permissions import can_apply
 from app.spaces.service import get_membership
@@ -55,13 +55,30 @@ def _now() -> datetime:
     return datetime.now(UTC)
 
 
+async def lock_rollout(session: AsyncSession, rollout_id: uuid.UUID) -> EnvRollout | None:
+    """The rollout, its row locked until the transaction ends (§21.3): every change to a rollout
+    and its members runs under this lock, so two member events finishing at once (two parents of
+    the same member, a cancel and an apply) are serialized and the second sees the first's work."""
+    return (
+        await session.execute(
+            select(EnvRollout)
+            .where(EnvRollout.id == rollout_id)
+            .with_for_update()
+            .execution_options(populate_existing=True)
+        )
+    ).scalar_one_or_none()
+
+
 async def members_of(session: AsyncSession, rollout_id: uuid.UUID) -> list[EnvRolloutMember]:
+    # Fresh rows (populate_existing): read after the rollout lock, they include what a concurrent
+    # transaction committed while this one waited for it.
     return list(
         (
             await session.execute(
                 select(EnvRolloutMember)
                 .where(EnvRolloutMember.rollout_id == rollout_id)
                 .order_by(EnvRolloutMember.level)
+                .execution_options(populate_existing=True)
             )
         )
         .scalars()
@@ -160,6 +177,8 @@ def plan_passes_gate(
     s = summary or {}
     return (
         run_type == RunType.tracked
+        # Fail closed: an agent that does not report imports can't prove there are none.
+        and "import" in s
         and int(s.get("add") or 0) > 0
         and int(s.get("change") or 0) == 0
         and int(s.get("destroy") or 0) == 0
@@ -183,6 +202,9 @@ async def approver_may_apply(session: AsyncSession, rollout: EnvRollout, env: En
     if approver is None or approver.disabled:
         return False
     membership = await get_membership(session, approver.id, rollout.space_id)
+    if membership is None and approver.role != Role.admin:
+        # Removed from the space: no fallback to the instance defaults (§2.4, §21.5).
+        return False
     return can_apply(approver, env, membership).allowed
 
 
@@ -359,12 +381,16 @@ def _reachable(start: uuid.UUID, edges: list[tuple[uuid.UUID, uuid.UUID]]) -> se
 async def on_run_transition(session: AsyncSession, run: Run, to_state: RunState) -> None:
     """Called by `transition()` for a member run (same transaction): the member follows its run,
     and the rollout advances. A run of a canceled rollout only updates its member."""
-    rollout = await session.get(EnvRollout, run.rollout_id)
+    assert run.rollout_id is not None
+    rollout = await lock_rollout(session, run.rollout_id)
     if rollout is None:
         return
-    member = await session.get(EnvRolloutMember, (rollout.id, run.environment_id))
+    member = await session.get(
+        EnvRolloutMember, (rollout.id, run.environment_id), populate_existing=True
+    )
     if member is None or member.run_id != run.id:
         return
+    before = member.status
     if to_state in (RunState.preparing, RunState.planning, RunState.checking):
         member.status = M.planning
     elif to_state == RunState.unconfirmed:
@@ -384,7 +410,7 @@ async def on_run_transition(session: AsyncSession, run: Run, to_state: RunState)
             for env_id in _reachable(run.environment_id, await member_edges(session, set(by_env))):
                 if by_env[env_id].status == M.pending:
                     by_env[env_id].status = M.skipped
-    if rollout.state != RolloutState.canceled:
+    if rollout.state != RolloutState.canceled and member.status != before:
         await advance_rollout(session, rollout)
     else:
         await _signal(session, rollout)
@@ -453,19 +479,13 @@ async def approval_refusal(session: AsyncSession, user: User, rollout: EnvRollou
     refused = sorted({e.name for e in envs if not can_apply(user, e, membership).allowed})
     if refused:
         return f"You may not apply on: {', '.join(refused)}"
-    tiers = {
-        t.name: t
-        for t in (
-            await session.execute(select(Tier).where(Tier.name.in_({e.tier for e in envs})))
-        ).scalars()
-    }
-    four_eyes = any(
-        # Fail closed: a missing tier row requires four-eyes (§2.4).
-        (tiers[e.tier].requires_four_eyes if e.tier in tiers else True)
-        or e.protected
-        or e.require_second_pair_of_eyes
-        for e in envs
-    )
+    from app.runs.service import needs_four_eyes
+
+    four_eyes = False
+    for e in envs:
+        if await needs_four_eyes(session, e):
+            four_eyes = True
+            break
     if four_eyes and user.id == rollout.created_by_user_id:
         return "You created this rollout (four-eyes required)."
     return None
@@ -492,8 +512,7 @@ async def approve_rollout(session: AsyncSession, user: User, rollout: EnvRollout
     rollout.approval_expires_at = now + timedelta(
         seconds=get_settings().stackd_rollout_approval_ttl_seconds
     )
-    rollout.state = RolloutState.running
-    rollout.pause_reason = None
+    await _set_state(session, rollout, RolloutState.running)
     await _audit(
         session,
         rollout,
@@ -525,7 +544,12 @@ async def cancel_rollout(session: AsyncSession, user: User, rollout: EnvRollout)
             m.status = M.canceled
             continue
         run = await session.get(Run, m.run_id) if m.run_id else None
-        if run is not None and run.state in (RunState.queued, RunState.unconfirmed):
+        # Not yet executing: queued, awaiting a confirmation, or confirmed and not claimed yet.
+        if run is not None and run.state in (
+            RunState.queued,
+            RunState.unconfirmed,
+            RunState.confirmed,
+        ):
             await transition(
                 session,
                 run,
@@ -549,8 +573,7 @@ async def retry_rollout(session: AsyncSession, user: User, rollout: EnvRollout) 
             m.run_id = None
         m.active = True
     rollout.finished_at = None
-    rollout.state = RolloutState.running
-    rollout.pause_reason = None
+    await _set_state(session, rollout, RolloutState.running)
     try:
         await session.flush()
     except IntegrityError as exc:

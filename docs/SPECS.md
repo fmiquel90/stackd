@@ -1917,8 +1917,11 @@ CREATE UNIQUE INDEX one_active_rollout_per_env ON env_rollout_members (environme
 meaning on every member run.
 
 Like a run's, a rollout's state changes through **one function**, `advance_rollout(session, rollout,
-…)`, called in the same transaction as the event that moves it (the approval, a member run's
-`transition()`); never an `UPDATE env_rollouts SET state = …` anywhere else.
+…)` (and its `_set_state`), called in the same transaction as the event that moves it (the approval,
+a member run's `transition()`); never an `UPDATE env_rollouts SET state = …` anywhere else. Every such
+transaction first **locks the rollout's row** (`SELECT … FOR UPDATE`) and re-reads its members: two
+member events at once (two parents of the same member finishing, an apply and a cancel) are
+serialized, and the second sees what the first committed.
 
 ### 21.4 Lifecycle
 
@@ -1958,7 +1961,8 @@ create ──▶ awaiting_approval ──approve──▶ running ⇄ paused ─
    go back to `pending` and their skipped descendants too; it runs again only under a valid approval
    (§21.6), otherwise it waits in `paused` (`approval_expired`). Audited `rollout.retried`.
 8. **Cancel** — `POST /api/v1/rollouts/{id}/cancel` (`writer`): no new member run starts; the
-   members' `queued`/`unconfirmed` runs are canceled through `transition()`; a run a worker is
+   members' `queued`, `unconfirmed` and `confirmed`-but-unclaimed runs are canceled through
+   `transition()`; a run a worker is
    executing finishes on its own (§4.1) but triggers nothing in the rollout. Audited `rollout.canceled`.
 
 A rollout run is never also triggered by the generic cascade: `cascade()` (§9.2) skips an edge whose
@@ -1972,12 +1976,17 @@ pauses for a human:
 - the rollout is `running` and its approval valid: `now < approval_expires_at`;
 - the plan **only creates**: `plan_summary.add > 0`, `change = 0`, `destroy = 0` (a replacement
   counts as a destroy), and **no import** (`plan_summary.import = 0`; the agent reports it from
-  tofu's `change_summary`) — adopting existing resources is a human decision;
+  tofu's `change_summary`; a summary **without** the `import` key — an older agent — fails the
+  gate) — adopting existing resources is a human decision;
 - the run is `tracked` (never `destroy`), `used_mocks = false` (§9.3), `used_secret_fallback =
   false` (§15.5), and has **no `warn` or `fail` check** (§8.3);
 - the approver **still** passes `can_apply(approver, env)` at that moment (§2.4: role and tier; a
-  revoked right or a removed membership is not inherited by the rollout) — otherwise the rollout
-  pauses with `approver_lost_rights`.
+  revoked right or a removed membership is not inherited by the rollout — a non-admin approver
+  without a membership in the space fails, never falling back to their instance defaults) —
+  otherwise the rollout pauses with `approver_lost_rights`.
+
+A member plan that fails the gate is **never** confirmed by the environment's own `autodeploy`
+either: it stops at `unconfirmed`.
 
 **`protected` environments.** The approval **counts as the confirmation** of a protected member's
 creates-only plan: `protected` forbids *autodeploy*, i.e. applying with nobody having decided; here a
@@ -2026,8 +2035,9 @@ stack/env names, tier, `protected`, level, status, run id and state, plan summar
 (its run was confirmed by the system), `waiting_reason` (why a `needs_confirmation` member's plan
 stopped: changes, destroys, imports, a mock, a fallback, a check; or, for a queued run, that no online
 worker can take it — labels or tool version, §7.2/§7.4), `expected_mocks` (outputs an
-upstream outside the rollout has not published, a mock standing in) — plus the edges between members
-and `can_approve {allowed, reason}` for the viewer. Creating needs `writer` in the space; approving,
+upstream outside the rollout has not published, a mock standing in) — plus the edges between members,
+`can_approve {allowed, reason}` for the viewer and `approval_ttl_seconds` (the approval dialog states
+the real duration). Creating needs `writer` in the space; approving,
 `can_apply` on every member; retry and cancel, `writer`.
 
 WS events invalidate the rollout's queries (DESIGN §6), like run events. Notifications (§17):

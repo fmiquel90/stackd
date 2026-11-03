@@ -344,7 +344,15 @@ async def _decide_after_plan(session: AsyncSession, worker: Worker, run: Run, re
 
     env = await session.get(Environment, run.environment_id)
     assert env is not None
-    autoconfirm = env.autodeploy and not env.protected and not run.used_mocks and not warn
+    # A rollout member that did not pass the rollout gate stops for a human (§21.4 step 4) — the
+    # env's own autodeploy never confirms it (a changing or destroying plan, a canceled rollout).
+    autoconfirm = (
+        run.rollout_id is None
+        and env.autodeploy
+        and not env.protected
+        and not run.used_mocks
+        and not warn
+    )
     if autoconfirm:
         await transition(
             session,

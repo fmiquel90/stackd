@@ -11,6 +11,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.deps import CurrentUser
+from app.config import get_settings
 from app.db import get_session
 from app.enums import Role, RolloutMemberStatus, RolloutState, RunEventActor, RunState
 from app.errors import ProblemException
@@ -25,6 +26,7 @@ from app.rollouts.service import (
     approve_rollout,
     cancel_rollout,
     create_rollout,
+    lock_rollout,
     member_edges,
     members_of,
     resolve_members,
@@ -43,8 +45,9 @@ class RolloutCreate(BaseModel):
     environment_ids: list[uuid.UUID] | None = None
 
 
-def _waiting_reason(run: Run | None) -> str | None:
-    """Why a member's plan stopped for a human (DESIGN §5.11), from the run itself."""
+def _waiting_reason(run: Run | None, rollout: EnvRollout) -> str | None:
+    """Why a member's plan stopped for a human (DESIGN §5.11): what in the plan fails the gate
+    (§21.5), else why the rollout could not confirm it (its approval, its approver)."""
     if run is None or run.state != RunState.unconfirmed:
         return None
     s = run.plan_summary or {}
@@ -61,7 +64,18 @@ def _waiting_reason(run: Run | None) -> str | None:
             reasons.append(f"{label} {s[key]} resource{'s' if int(s[key]) > 1 else ''}")
     if run.type.value != "tracked":
         reasons.append(f"a {run.type.value} run")
-    return "; ".join(reasons) or None
+    if not int(s.get("add") or 0) and not reasons:
+        reasons.append("creates nothing (only changes outside resources, e.g. outputs)")
+    if "import" not in s:
+        reasons.append("its worker does not report imports (update the agent)")
+    if not reasons:
+        reasons.append(
+            {
+                "approval_expired": "the approval expired",
+                "approver_lost_rights": "the approver may no longer apply here",
+            }.get(rollout.pause_reason or "", "it was planned while the rollout could not confirm")
+        )
+    return "; ".join(reasons)
 
 
 async def _expected_mocks(
@@ -140,7 +154,9 @@ async def _detail(session: AsyncSession, rollout: EnvRollout, viewer: User) -> d
         env, stack = rows[m.environment_id]
         run = runs.get(m.run_id) if m.run_id else None
         reason = (
-            _waiting_reason(run) if m.status == RolloutMemberStatus.needs_confirmation else None
+            _waiting_reason(run, rollout)
+            if m.status == RolloutMemberStatus.needs_confirmation
+            else None
         )
         if run is not None and run.state == RunState.queued and not compatible(env, stack, online):
             reason = (
@@ -185,13 +201,24 @@ async def _detail(session: AsyncSession, rollout: EnvRollout, viewer: User) -> d
         ],
         # For the viewer: may they approve (the UI hides or explains the action, DESIGN §5.11)?
         "can_approve": {"allowed": refusal is None, "reason": refusal},
+        # How long an approval lasts (§21.6): the approval dialog states it.
+        "approval_ttl_seconds": get_settings().stackd_rollout_approval_ttl_seconds,
     }
 
 
 async def _load(
-    session: AsyncSession, user: User, rollout_id: uuid.UUID, min_role: Role = Role.reader
+    session: AsyncSession,
+    user: User,
+    rollout_id: uuid.UUID,
+    min_role: Role = Role.reader,
+    *,
+    lock: bool = False,
 ) -> EnvRollout:
-    rollout = await session.get(EnvRollout, rollout_id)
+    rollout = (
+        await lock_rollout(session, rollout_id)
+        if lock
+        else await session.get(EnvRollout, rollout_id)
+    )
     if rollout is None:
         raise ProblemException(404, "Rollout not found", None)
     await require_space_access(session, user, rollout.space_id, min_role=min_role)
@@ -257,7 +284,7 @@ async def get_rollout(rollout_id: uuid.UUID, user: CurrentUser, session: DbSessi
 
 @router.post("/{rollout_id}/approve")
 async def approve(rollout_id: uuid.UUID, user: CurrentUser, session: DbSession) -> dict:
-    rollout = await _load(session, user, rollout_id)
+    rollout = await _load(session, user, rollout_id, lock=True)
     await approve_rollout(session, user, rollout)
     await session.commit()
     return await _detail(session, rollout, user)
@@ -265,7 +292,7 @@ async def approve(rollout_id: uuid.UUID, user: CurrentUser, session: DbSession) 
 
 @router.post("/{rollout_id}/retry")
 async def retry(rollout_id: uuid.UUID, user: CurrentUser, session: DbSession) -> dict:
-    rollout = await _load(session, user, rollout_id, Role.writer)
+    rollout = await _load(session, user, rollout_id, Role.writer, lock=True)
     await retry_rollout(session, user, rollout)
     await session.commit()
     return await _detail(session, rollout, user)
@@ -273,7 +300,7 @@ async def retry(rollout_id: uuid.UUID, user: CurrentUser, session: DbSession) ->
 
 @router.post("/{rollout_id}/cancel")
 async def cancel(rollout_id: uuid.UUID, user: CurrentUser, session: DbSession) -> dict:
-    rollout = await _load(session, user, rollout_id, Role.writer)
+    rollout = await _load(session, user, rollout_id, Role.writer, lock=True)
     await cancel_rollout(session, user, rollout)
     await session.commit()
     return await _detail(session, rollout, user)

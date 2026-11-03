@@ -17,6 +17,13 @@ function errorText(e: unknown): string {
   return e instanceof ApiError ? (e.detail ?? e.title) : String(e);
 }
 
+/** "24 hours", "7 days", "90 minutes". */
+export function ttlText(seconds: number): string {
+  if (seconds % 86400 === 0 && seconds >= 86400 * 2) return `${seconds / 86400} days`;
+  if (seconds % 3600 === 0) return seconds === 3600 ? "1 hour" : `${seconds / 3600} hours`;
+  return `${Math.round(seconds / 60)} minutes`;
+}
+
 function ApproveDialog({ r, onDone }: { r: Rollout; onDone: () => void }) {
   const tiers = [...new Set(r.members.map((m) => m.tier))].join(", ");
   return (
@@ -26,9 +33,9 @@ function ApproveDialog({ r, onDone }: { r: Rollout; onDone: () => void }) {
       consequence={
         <div className="flex flex-col gap-2">
           <p>
-            For 24 hours, every plan of these environments that <strong>only creates</strong> resources is
-            applied without asking again. Any plan that changes, destroys or imports something, consumes a
-            mock or raises a warning stops for a human confirmation.
+            For {ttlText(r.approval_ttl_seconds)}, every plan of these environments that{" "}
+            <strong>only creates</strong> resources is applied without asking again. Any plan that changes,
+            destroys or imports something, consumes a mock or raises a warning stops for a human confirmation.
           </p>
           <ul className="font-data text-[12px]">
             {r.members.map((m) => (

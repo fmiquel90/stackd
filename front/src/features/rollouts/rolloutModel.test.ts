@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { RolloutMember } from "@/api/resources";
+import { ttlText } from "./RolloutPage";
 import { MEMBER_STATUS, ROLLOUT_STATE, byLevel, memberLook, progress, summaryText } from "./rolloutModel";
 
 const member = (over: Partial<RolloutMember>): RolloutMember => ({
@@ -39,6 +40,12 @@ describe("rollout model", () => {
     expect(memberLook(member({ level: 1 }), "awaiting_approval").label).toBe("not started");
     expect(memberLook(member({ level: 0 }), "running").label).toBe("not started");
     expect(memberLook(member({ level: 1 }), "running").label).toBe("waiting for its upstreams");
+  });
+
+  it("states the approval lifetime the API reports", () => {
+    expect(ttlText(86400)).toBe("24 hours");
+    expect(ttlText(7 * 86400)).toBe("7 days");
+    expect(ttlText(5400)).toBe("90 minutes");
   });
 
   it("counts progress", () => {

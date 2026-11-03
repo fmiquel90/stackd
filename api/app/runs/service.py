@@ -219,6 +219,22 @@ async def trigger_command_run(
     return run
 
 
+async def needs_four_eyes(session: AsyncSession, env: Environment) -> bool:
+    """THE four-eyes rule (§2.4): the env's tier requires it, or the env is `protected`, or it sets
+    `require_second_pair_of_eyes`. Fail closed: an env pointing at a missing tier row (should be
+    impossible via the API, but never silently weaken a security control) requires it. Shared by
+    a run's confirmation and a rollout's approval (§21.6)."""
+    from sqlalchemy import select
+
+    from app.models.tier import Tier
+
+    tier_def = (
+        await session.execute(select(Tier).where(Tier.name == env.tier))
+    ).scalar_one_or_none()
+    tier_four_eyes = tier_def.requires_four_eyes if tier_def else True
+    return tier_four_eyes or env.protected or env.require_second_pair_of_eyes
+
+
 async def confirm_run(session: AsyncSession, run: Run, user: User) -> Run:
     """unconfirmed → confirmed, gated by can_apply + 4-eyes + mock block (§2.4, §9.3)."""
     if run.state != RunState.unconfirmed:
@@ -248,19 +264,9 @@ async def confirm_run(session: AsyncSession, run: Run, user: User) -> Run:
     # 4-eyes (§2.4): triggerer ≠ confirmer when the env's tier requires it (was hardcoded to prod;
     # now a per-tier flag), when the env is `protected` (CLAUDE.md §4: it forces confirmation +
     # 4-eyes, never who may apply), or when the env opts in. Human triggers only.
-    from sqlalchemy import select
 
-    from app.models.tier import Tier
-
-    tier_def = (
-        await session.execute(select(Tier).where(Tier.name == env.tier))
-    ).scalar_one_or_none()
-    # Fail closed: a four-eyes requirement is a security control, so an env pointing at a missing
-    # tier row (should be impossible via the API, but never silently weaken) forces four-eyes.
-    tier_four_eyes = tier_def.requires_four_eyes if tier_def else True
-    needs_four_eyes = tier_four_eyes or env.protected or env.require_second_pair_of_eyes
     if (
-        needs_four_eyes
+        await needs_four_eyes(session, env)
         # A rollout's member runs carry its creator as triggerer (§21.3).
         and run.triggered_by in (TriggeredBy.manual, TriggeredBy.rollout)
         and run.trigger_user_id is not None
