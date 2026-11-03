@@ -15,7 +15,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.audit import record_audit
-from app.auth.deps import CurrentUser
+from app.auth.deps import CurrentUser, require_role
 from app.db import get_session
 from app.dependencies.router import _create_edge
 from app.enums import AttachmentTarget, AuditActorKind, Role, SecretFallback
@@ -30,7 +30,7 @@ from app.models.tier import Tier
 from app.models.user import User
 from app.models.variable import Variable
 from app.models.variable_set import VariableSetAttachment
-from app.spaces import require_space_access
+from app.spaces import guard_env_id, require_space_access
 
 router = APIRouter(prefix="/api/v1", tags=["environment-clones"])
 DbSession = Annotated[AsyncSession, Depends(get_session)]
@@ -140,17 +140,21 @@ async def _targets(
     return [(s, reference[s.id]) for s in stacks]
 
 
-@router.post("/spaces/{space_id}/environment-clones", status_code=201)
+@router.post(
+    "/spaces/{space_id}/environment-clones",
+    status_code=201,
+    # Global role, like every route that creates environments, hooks or edges.
+    dependencies=[Depends(require_role(Role.writer))],
+)
 async def clone_environments(
     space_id: uuid.UUID, body: CloneIn, user: CurrentUser, session: DbSession
 ) -> dict[str, Any]:
-    membership = await require_space_access(session, user, space_id, min_role=Role.writer)
-    if (
-        body.copy_cloud_integration
-        and user.role != Role.admin
-        and (membership is None or membership.role != Role.admin)
-    ):
-        raise ProblemException(403, "Forbidden", "Copying cloud integrations requires admin.")
+    await require_space_access(session, user, space_id, min_role=Role.writer)
+    if body.copy_cloud_integration and user.role != Role.admin:
+        # Attaching role ARNs is an instance admin's call, as on PUT …/cloud-integration (§10).
+        raise ProblemException(
+            403, "Forbidden", "Copying cloud integrations requires the instance admin role."
+        )
     if body.name == body.reference_name:
         raise ProblemException(422, "Same name", "The new name must differ from the reference.")
     targets = await _targets(session, space_id, body)
@@ -372,6 +376,10 @@ async def clone_environments(
         ).scalars():
             upstream = mapping.get(dep.upstream_env_id)
             upstream_id = upstream.id if upstream is not None else dep.upstream_env_id
+            if upstream is None:
+                # A shared upstream: wiring a new consumer of its outputs needs writer access to its
+                # space too, as creating the edge by hand does (§3.8).
+                await guard_env_id(session, user, upstream_id, min_role=Role.writer)
             refs = (
                 (
                     await session.execute(
