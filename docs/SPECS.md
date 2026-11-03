@@ -79,11 +79,11 @@ The "apply everywhere except prod" need depends on the targeted environment, not
 - Apply rule: `confirm` allowed iff `role ∈ {approver, admin}` **AND** `env.tier ∈ allowed_tiers` (set membership). Example: Bob `{dev, staging}` confirms in dev/staging, denied in prod; Alice `{dev, staging, prod}` confirms everywhere; a user `{dev, prod}` skips staging.
 - `users.can_destroy` — a run `type=destroy` (trigger AND confirm) requires `can_destroy=true` **in addition** to the tier rule. A destruction is more dangerous than an apply: a distinct, explicit right.
 
-**Relationship with `protected`**: we **decouple** sensitivity and access right. `environments.protected` carries only its own effects — forcing confirmation (no autodeploy) and enabling 4-eyes; *who* can confirm comes from the tier set. An env can be `tier=prod` without being `protected` and vice versa.
+**Relationship with `protected`**: we **decouple** sensitivity and access right. `environments.protected` carries only its own effects — forcing confirmation (no autodeploy) and enabling 4-eyes; *who* can confirm comes from the tier set. An env can be `tier=prod` without being `protected` and vice versa. "Forcing confirmation" means a **named human decides** to apply: an approver typing a confirm on the run, or — for an environment rollout (§21.5) — an approver who approved that rollout with this environment in it, under four-eyes against its creator. A rollout's approval only ever confirms a plan that creates resources in an environment never applied before; it is never `autodeploy`.
 
 **4-eyes / tier consistency**: a tier with `requires_four_eyes=true` (seeded on `prod`; was hardcoded to the prod tier, now a per-tier flag) forces self-confirmation off by default (the triggerer ≠ the confirmer), as do a `protected` env and the per-env `require_second_pair_of_eyes`. The check **fails closed**: if an env points at a tier that no longer exists in the catalog, four-eyes is required rather than silently dropped.
 
-**Scope of 4-eyes**: the "triggerer ≠ confirmer" rule only bites on runs with a **human** triggerer (`triggered_by=manual`, `trigger_user_id` set). A run with no human at its origin (`webhook`, `dependency`) has no `trigger_user_id`: any confirmer authorized at the tier can confirm it (there is no one to oppose). This is not a bypass — the access guard remains the tier (`can_apply`); 4-eyes only prevents *the same person* from triggering **and** confirming.
+**Scope of 4-eyes**: the "triggerer ≠ confirmer" rule only bites on runs with a **human** triggerer (`triggered_by=manual`, or `triggered_by=rollout` whose `trigger_user_id` is the rollout's creator, §21.3; `trigger_user_id` set). For a rollout, the rule also holds between its **creator and its approver** — at the approval, and again at each auto-confirmation (§21.5, §21.6). A run with no human at its origin (`webhook`, `dependency`) has no `trigger_user_id`: any confirmer authorized at the tier can confirm it (there is no one to oppose). This is not a bypass — the access guard remains the tier (`can_apply`); 4-eyes only prevents *the same person* from triggering **and** confirming.
 
 **Double-lock boundary**: when workload OIDC is active (§10), the apply restriction must **also** live in the AWS trust policy (`sub` claim filtered on `run:<tier>:*:apply`), not only in Stackd — otherwise bypassing the API bypasses the control. Both layers express the same rule; the `tier` **name** feeds the token's `sub` (§10.2). Tier names are charset-constrained (`^[a-z0-9][a-z0-9-]*$`, no `:`/whitespace) precisely so a crafted name can't alias another tier's `sub` segment.
 
@@ -147,7 +147,8 @@ created_at, updated_at
 id uuid PK, stack_id FK, name text unique(stack),       -- dev, staging, prod
 tier text references tiers.name,   -- §2.4: carries the apply/destroy permissions (catalog, not enum)
 branch text,                       -- branch tracked by THIS env
-autodeploy bool,                   -- forced false if protected
+autodeploy bool,                   -- forced false if protected (a rollout's approval is not
+                                   --   autodeploy: §2.4, §21.5)
 protected bool,                    -- §2.4: forces confirmation + 4-eyes (NOT the access control → tier)
 require_second_pair_of_eyes bool,
 managed_state bool,
@@ -254,7 +255,12 @@ triggered_by enum(manual|webhook|dependency|api|schedule|rollout), trigger_user_
 confirmed_by_user_id nullable,       -- who approved the apply (core of the audit)
 parent_run_id nullable, run_group_id nullable, worker_id nullable,
 rollout_id nullable,                 -- §21: the environment rollout this run belongs to
-plan_summary jsonb,                  -- {add, change, destroy, resources}
+plan_summary jsonb,                  -- {add, change, destroy, import, forget, …}: tofu's
+                                     --   `change_summary` counters (§7.3) — `remove` reported as
+                                     --   `destroy`; `import`; `forget` (OpenTofu's counter, or
+                                     --   counted from the plan JSON: Terraform has none); any other
+                                     --   counter a newer tool reports (Terraform's
+                                     --   `action_invocation`, `action_fail`) kept under its name
 check_results jsonb,                 -- hook check results, plan and apply jobs (§8.3):
                                      --   {results: every check (ok|warn|fail), each with its
                                      --    `stage`; checks: the warn/fail ones only (the field's
@@ -418,7 +424,7 @@ oidc_signing_keys (
       └──────────────────┘
 ```
 
-Terminal: `finished`, `failed`, `discarded`, `canceled`. `canceled`: user on `queued`/`unconfirmed`, or the system when a PR closes (its in-flight proposed runs, §18.3). Cancelling a run a worker is executing (signal via heartbeat → SIGINT) is not implemented yet: the API answers 409. Any terminal state drops the run's saved plan (§11.3).
+Terminal: `finished`, `failed`, `discarded`, `canceled`. `canceled`: user on `queued`/`unconfirmed`, the system when a PR closes (its in-flight proposed runs, §18.3), or a rollout's cancel on its member runs that are `queued`, `unconfirmed` or `confirmed` and not claimed yet (§21.4 step 8 — `confirmed → canceled` is that edge). Cancelling a run a worker is executing (signal via heartbeat → SIGINT) is not implemented yet: the API answers 409. Any terminal state drops the run's saved plan (§11.3).
 
 Command runs (§4.3) take a shorter path: `queued → preparing → running → finished | failed`.
 
@@ -429,8 +435,10 @@ Command runs (§4.3) take a shorter path: `queued → preparing → running → 
 | `queued → preparing` | worker (claim) | no active run on the env, env not locked, compatible labels |
 | `planning → checking` | worker | plan OK **and ≥ 1 after_plan hook**. Without an after_plan hook, `checking` is skipped: the transitions `planning → unconfirmed / confirmed / finished` exist, with exactly the same conditions as their equivalents from `checking` |
 | `checking → unconfirmed` | worker | checks OK or warn; non-empty diff. A warn **forces** confirmation even if autodeploy |
-| `checking → confirmed` | system | all checks OK, non-empty diff, `autodeploy=true`, env not protected, `used_mocks=false` — **or** the run belongs to a running rollout and passes its gate (§21.5) |
+| `checking → confirmed` | system | all checks OK, non-empty diff, `autodeploy=true`, env not protected, `used_mocks=false`, the run belongs to no rollout — **or** the run belongs to a started rollout whose gate is open and passes its gate (§21.5) |
 | `planning/checking → finished` | worker | empty diff (outputs captured after refresh) |
+| `queued / unconfirmed → canceled` | user, or system | a user's cancel; the system when a PR closes (its proposed runs, §18.3) or a rollout is canceled (its member runs, §21.4 step 8) |
+| `confirmed → canceled` | system | a rollout's cancel, the run not claimed yet (§21.4 step 8); a run already `applying` is never canceled |
 | `unconfirmed → confirmed` | user (or system: a rollout re-approval, §21.6) | `can_apply(user, env)` = role∈{approver,admin} AND `env.tier ∈ allowed_tiers` (§2.4); ≠ triggerer if the tier requires four-eyes, the env is `protected` or sets `require_second_pair_of_eyes`; for a `destroy` run: `can_destroy` required; **blocked if `used_mocks` and `allow_mock_apply=false`** |
 | `confirmed → applying` | worker (claim) | the plan's worker within the affinity window, then any compatible worker (§7.2); re-checks `allow_mock_apply` and the secret-fallback gate against the apply-time resolution (§9.3/§15.5). The apply job clones the pinned commit and applies the run's **saved plan** (§7.3); a missing or unreadable plan fails the run — it never re-plans |
 | `applying → finished` | worker | apply exit 0 + outputs uploaded + no failing `after_apply` check (one that fails → `failed`, the outputs still recorded, nothing cascades, §8.3) |
@@ -515,7 +523,8 @@ The exhaustive list of actions the API emits (to check it: `grep -rn 'action="' 
 auth.login / auth.logout / auth.domain_denied / auth.refresh_reuse_detected
 space.created / space.member_set / space.member_removed            # Phase F memberships (§2.4)
 stack.created / stack.updated / stack.deleted
-environment.created / environment.updated / environment.deleted
+environment.created / environment.updated / environment.deleted   # created: also by a clone
+                                  #   (context cloned_from, autodeploy, autodeploy_off_reason, §21.2)
 environment.head_refreshed        # manual head refresh (§9.6) — context: branch, old_sha, new_sha
 environment.inputs_discovered     # discover-inputs created placeholder env variables (§20.3)
 environment.drift_detected / environment.drift_cleared               # §19.4
@@ -528,8 +537,13 @@ hook.created / hook.updated / hook.deleted      # deleted: manual, or with its s
 notification_target.created / notification_target.updated / notification_target.deleted
                                                 # deleted: manual, or with its stack/env (reason, §3.2)
 run.triggered / run.destroy_triggered / run.command_triggered / run.promoted   # §4.3, §9.7
-run.confirmed ⭐                  # a human confirm, or the system on autodeploy (context autodeploy)
-run.discarded / run.canceled      # canceled: a user, or the system when a PR closes (reason pr_closed)
+                                  # run.triggered by the system: context via = cascade (§9.2) |
+                                  #   rollout (§21.4: rollout_id, environment_id, commit)
+run.confirmed ⭐                  # a human confirm, or the system: on autodeploy (context
+                                  #   autodeploy), or under a rollout's approval (context via =
+                                  #   rollout, rollout_id, approved_by, approved_by_email, §21.5)
+run.discarded / run.canceled      # canceled: a user, or the system when a PR closes (reason pr_closed);
+                                  #   a rollout's cancel: the canceller, context via = rollout (§21.8)
 run.plan_finished                 # plan-only terminal: empty diff, or a proposed/drift run
 run.applied ⭐ / run.command_executed
 run.apply_failed                  # any failed run, whatever its phase, unless a check failed it —
@@ -540,7 +554,8 @@ run.check_failed                  # a hook check with on_failure=fail failed the
 run.check_warned                  # a job (plan or apply) ended — finished or failed — with warn
                                   #   checks; context: checks (their names), stages (where they ran)
 state.force_unlocked / state.import_session_created   # §11.2, §11.4
-dependency.created / dependency.deleted / dependency.mock_consumed   # created: also via link-by-name
+dependency.created / dependency.deleted / dependency.mock_consumed   # created: also via link-by-name,
+                                  #   or a clone (via = clone, upstream_kind, §21.2)
 cloud_integration.created / cloud_integration.updated / cloud_integration.deleted
 oidc_key.rotated / oidc_key.retired            # issuer signing key (§3.11)
 worker_pool.created / worker_pool.deleted
@@ -550,7 +565,9 @@ user.role_changed / user.apply_tier_changed / user.destroy_permission_changed / 
 tier.created / tier.updated / tier.deleted     # configurable tier catalog (§2.4)
 secret_source.created / secret_source.updated / secret_source.token_rotated / secret_source.deleted
 secret.fallback_used / secret.fallback_overridden                    # §15
-environment.cloned / rollout.*                                       # §21.8
+environment.cloned                                                   # §21.2
+rollout.created / rollout.approved / rollout.paused / rollout.resumed    # §21.8
+rollout.retried / rollout.canceled / rollout.succeeded / rollout.failed  # §21.8
 ```
 
 Not audited by a dedicated action: a run failed because an external secret could not resolve is
@@ -569,6 +586,10 @@ Not audited by a dedicated action: a run failed because an external secret could
 GET /api/v1/audit?actor=&action=&target_kind=&target_id=&from_=&to=&limit=   (admin; limit ≤ 1000, default 200)
 GET /api/v1/audit/export?actor=&action=&target_kind=&target_id=&from_=&to=   (admin, CSV)
 ```
+
+CSV columns: `created_at, actor_email, action, target_kind, target_id, context` — `context` is the
+event's context as JSON (what the list endpoint returns to the same admins): the "who" of a system
+action lives there, e.g. the approver of a rollout's auto-confirmation (§21.5).
 
 Filtering by stack or environment goes through `target_kind`/`target_id`; there is no `stack=` /
 `environment=` filter.
@@ -696,9 +717,15 @@ Apply affinity: a `confirmed` run is reserved for its originating worker for **6
 POST /worker/v1/jobs/{id}/events
   { "event": "phase_started"|"phase_finished"|"job_failed",
     "phase": "...", "exit_code": 0,
-    "result": { "has_changes": true, "summary": {...},
+    "result": { "has_changes": true,
+                "summary": {"add": 2, "change": 0, "destroy": 0, "import": 0, "forget": 0, …},
                 "checks": [{"name":"infracost","status":"warn","detail":"...","stage":"after_plan"}] } }
   phase_started(planning) carries "result": {"commit_sha": "<full SHA checked out>"}
+  summary (§3.5): every counter of tofu's `change_summary` event — `remove` as `destroy`,
+      `import`, `forget`, and any other one under its own name (Terraform's `action_invocation`,
+      `action_fail`) — plus `forget` counted from the plan JSON when the tool reports none
+      (Terraform); each of add/change/destroy/import/forget always present (0 by default). A
+      rollout's gate fails closed on a missing one (§21.5)
   job_failed always carries "result": {"checks": [...]} — those of the stages that ran (§8.3)
   job_failed(after_apply) carries "result": {"checks": [...], "outputs": {...}}   # §8.3: the
       # apply went through, an after_apply hook failed → outputs recorded (§9.1), drift
@@ -849,9 +876,12 @@ The loop ticks every 10 s.
 | Git staleness polling | 15 min (`stackd_head_poll_interval`) | `git ls-remote` per (repo, branch, credentials) → update `head_sha` (§9.6); its own task, so slow git calls never delay the others |
 | Cold log archiving | end of run | `run_logs` → S3 gz, purge hot > 7 d (§5.2) — **not implemented yet**: logs stay in `run_logs` |
 | OIDC key retirement | every tick | `retiring` keys past the longest token TTL → `retired`, out of the JWKS (§3.11) |
+| Rollout approval expiry | every tick | a started rollout whose approval has expired is advanced under its lock → `paused (approval_expired)` (§21.4), without waiting for its next event |
 | Refresh token / audit purge | daily | expired families (§2.5), audit > 2 years (§6.1, audited purge) — **not implemented yet** |
 
 **Single-execution guarantee**: each task takes a dedicated **PG advisory lock** (`pg_try_advisory_lock(<task_key>)`) before running; a replica that does not obtain the lock skips its tick. The lock is session-level, so it is taken and released on a **dedicated connection** held for the task's whole run, separate from the task's own DB session — the tasks commit mid-way, which returns the session's connection to the pool, and an unlock through it could land on another connection and leak the lock. No permanently elected leader (no external dependency), no double execution. The tasks are **idempotent** anyway (re-running a staleness computation or an archive breaks nothing) — the advisory lock mainly avoids redundant work and races on the `worker_lost` transitions.
+
+**Advisory-lock keys** (one per lock, never shared — two holders of the same key would skip each other's work): 74001 `worker_lost`, 74002 notification outbox, 74003 VCS outbox, 74004 drift, 74005 head poll, 74006 OIDC key retirement, 74007 OIDC key management (the issuer's rotation lock, §3.11), 74008 rollout approval expiry. A new lock takes the next free key and is added here.
 
 ---
 
@@ -933,7 +963,10 @@ At `applying → finished`, parsing of `outputs.json`:
 3. run created: type=tracked, triggered_by=dependency, parent_run_id, run_group_id
 4. multi-parents: downstream triggered when ALL its parents of the run group are finished
 5. parent failed → branch stopped, run group = partial_failure
-6. downstream env protected → stops at unconfirmed (never bypassed)
+6. downstream env protected → stops at unconfirmed (never bypassed: the cascade confirms nothing
+   on a protected env — only a human, or a rollout's approval, §2.4/§21.5)
+7. a rollout's runs (rollout_id set) never cascade, the rollout being over or not; and no run is
+   created on a member of an active rollout (§21.4)
 ```
 
 Steps 4–5, as implemented (`cascade()`, called when a tracked run ends `finished`: after any
@@ -975,6 +1008,16 @@ parent a downstream waits for):
   instance admin.
 A cascade run is routed like any other plan (§4.2): it auto-confirms only on an `autodeploy`,
 unprotected environment, with no mock and no `warn` check.
+- *Environment rollouts* (§21). A run that belongs to a rollout never calls the cascade — even one
+  finishing after its rollout was canceled: the rollout drives its members, and a member's
+  downstreams outside the rollout are not triggered (they show as stale, §9.6; include them in the
+  rollout, or trigger them). A downstream that is a member of an **active** rollout (any non-terminal
+  state, `awaiting_approval` included) gets no cascade run either: it is settled `skipped` in the
+  group, and the rollout plans it in its turn, reading the then-current outputs at claim. If that
+  member had already planned (status other than `pending`), the rollout's creator and approver get
+  a `rollout_upstream_changed` notification (§17.1) instead of a run planned behind the rollout's
+  back, naming the run that would have been its parent (the rule above). Like any decision of the
+  group, this one is taken once. Rollout runs carry no `run_group_id`: the rollout is their group.
 
 Resolution of inputs at claim time (fresh values), snapshot frozen in `resolved_inputs`.
 
@@ -1043,7 +1086,10 @@ network/prod-eu-primary ──▶ network/prod-us-secondary
 **C. Standing up a new region or a new environment across all stacks** (§21)
 
 1. A variable set with a label **selector** (`region: eu-west-3`) carries everything the region
-   changes (§3.4).
+   changes (§3.4). ⚠ An environment's labels also **route its runs** (§7.2: a worker takes a run
+   only if it carries all of the env's labels): a `region` label on the env needs a worker pool
+   labelled `region: eu-west-3` too — often what a region wants anyway (workers in the region). If
+   not, put the region set on the env by explicit attachment instead of a label selector.
 2. `POST /spaces/{id}/environment-clones {reference_name: "prod", name: "prod-euw3", overrides:
    {labels: {region: "eu-west-3"}}}` creates `prod-euw3` in every stack that has a `prod`, with its
    governance and its dependency edges — the selector attaches the region set by itself, and a
@@ -1283,7 +1329,8 @@ POST /api/v1/environments/{id}/cloud-integration/test    # verification AssumeRo
 POST /api/v1/environments/{id}/runs      { type?, with_downstream?, commit_sha?, secret_overrides? }
 POST /api/v1/environments/{id}/commands  { command, args, commit_sha? }     # §4.3
 POST /api/v1/environments/{id}/promote   { from_environment_id }           # §9.7
-GET  /api/v1/environments/{id}/runs ; GET /api/v1/runs/{id}
+GET  /api/v1/environments/{id}/runs ; GET /api/v1/runs/{id}   # the latter adds run_group (§9.2) and
+                                    # confirmed_via: user | autodeploy | rollout (§21.5)
 POST /api/v1/runs/{id}/confirm | /discard | /cancel
 POST /api/v1/runs/{id}/vcs/resync                                          # §18.5
 GET  /api/v1/runs/{id}/logs ?phase=&after_seq=
@@ -1368,7 +1415,7 @@ Specified but **not served yet**: `GET /api/v1/runs/{id}/logs/download` (§5.2) 
 | Saved plans | the reviewed `plan.tfplan` is AES-256-GCM-encrypted by the API (AAD bound to its S3 key), served only to the run's apply job, applied as-is (never re-planned), deleted on any terminal state (§7.3, §11.3) |
 | Outbound notifications | https only; the host must resolve to public addresses only; the POST dials the vetted IP (Host/SNI/certificate stay on the hostname), ignores env proxies (`HTTPS_PROXY`…) by design, never follows redirects |
 | Apply permissions | tier per env × `allowed_tiers` set per user (§2.4, configurable catalog, non-linear); distinct `can_destroy`; double lock with the OIDC trust policy on the tier name |
-| Protected envs | autodeploy forbidden and 4-eyes (also automatic on a tier flagged `requires_four_eyes`, e.g. `prod`), never bypassed (cascade included); the *right* to apply comes from the tier, not from `protected` |
+| Protected envs | autodeploy forbidden and 4-eyes (also automatic on a tier flagged `requires_four_eyes`, e.g. `prod`), never bypassed (cascade included); the *right* to apply comes from the tier, not from `protected`. A rollout's approval (§21.5) counts as the human decision only for creates-only plans in an environment never applied, approved under four-eyes, and only while the environment's tier, `protected` and four-eyes are what the approver saw |
 | Proposed runs | plan-only, state RO, mocks allowed; **secrets not injected**: repo code runs inside tofu (§7.4), and a pull request's has not been reviewed. The claim drops every sensitive variable, of either kind, and every external secret reference (§15, not even fetched) — so nothing of them is in `sensitive_env`, the tfvars, `mask_values` or the run's `variable_provenance`. One the plan needs gets no value, never a stand-in: tofu uses the variable's default in the repo, or fails with `No value for required variable`. Kept, as a plan needs them: the **plan role**'s OIDC credentials (read-only by design, §10.3 — scope it so), the `ro` state token (the state itself is readable: it can hold secrets of its own), the repo token to clone (it reaches neither tofu nor a hook, §8.3). A drift run (§19), a proposed run of the env's last applied commit, keeps the secrets. **Decided: no opt-in.** A per-environment opt-in giving proposed runs the secrets was specified and is rejected: it would hand them to unreviewed code |
 | Webhooks | HMAC SHA-256 (secret per repo, `stacks.webhook_secret_encrypted` §3.1), anti-replay 5 min |
 | Sessions | access JWT 15 min in Bearer header; refresh httpOnly `SameSite=Strict` + CSRF double-submit, rotation with reuse detection → family revocation (§2.5) |
@@ -1380,7 +1427,7 @@ Specified but **not served yet**: `GET /api/v1/runs/{id}/logs/download` (§5.2) 
 
 ## 14. Tests — minimal strategy
 
-- **API unit tests**: transitions (`can_apply` per tier including apply-everywhere-except-prod, `can_destroy`, auto 4-eyes on a `requires_four_eyes` tier or a `protected` env **and its human-triggerer-only scope**, mock-apply blocking, warn → forced confirmation), 6-layer variable resolution + provenance (space-scoped attachments), a proposed run's claim payload carrying no secret (a tracked or drift run's still does), hook merging (platform→repo order; the exclusion of `*_apply` repo hooks on prod once decided, §8.3), check results kept with their stage across the plan and apply jobs (a job failing on no check included, its warnings audited), an `after_apply` failure recording outputs and clearing drift without cascading, cycle detection, multi-parent cascade (once built, §9.2), mock resolution (real > mock > error), signature/claims of workload tokens (tier segment in the `sub`, wildcard limited to the stack segment), Google id_token validation, **refresh rotation + reuse detection → family revocation**.
+- **API unit tests**: transitions (`can_apply` per tier including apply-everywhere-except-prod, `can_destroy`, auto 4-eyes on a `requires_four_eyes` tier or a `protected` env **and its human-triggerer-only scope**, mock-apply blocking, warn → forced confirmation), 6-layer variable resolution + provenance (space-scoped attachments), a proposed run's claim payload carrying no secret (a tracked or drift run's still does), hook merging (platform→repo order; the exclusion of `*_apply` repo hooks on prod once decided, §8.3), check results kept with their stage across the plan and apply jobs (a job failing on no check included, its warnings audited), an `after_apply` failure recording outputs and clearing drift without cascading, cycle detection, multi-parent cascade (once built, §9.2), the rollout gate (§21.5: creates-only on a never-applied env, the pinned commit, four-eyes and member changes re-checked at auto-confirmation, a cancel racing the gate, the rollout-then-run lock order), mock resolution (real > mock > error), signature/claims of workload tokens (tier segment in the `sub`, wildcard limited to the stack segment), Google id_token validation, **refresh rotation + reuse detection → family revocation**.
 - **Integration**: Postgres testcontainers; **concurrent claim → only one wins, the loser catches `23505` and re-polls**; HTTP backend with real `tofu` + Garage; log idempotency; **masking of sensitive values (`tfvars` + env) in a hook's stdout**; `after_plan` hook that reads plan.json; **WS fan-out via `LISTEN/NOTIFY`**; **single execution of a periodic task under advisory lock with 2 replicas**; AssumeRoleWithWebIdentity against a mock STS (moto).
 - **E2E**: the live compose stack + fixture repos (built-in `terraform_data`, no provider) → on a throwaway copy of the demo graph, a 2-stack cascade **with mocks** (mocked plan → upstream apply → real cascade), the role/mock gates, and the `run.confirmed` audit actor (DEV §7).
 - **Agent**: exit codes (a plan only on 0/2) and the plan JSON failing closed, secret masking and the masked `plan.json`, hooks at every stage and from both sources (`fail` stops the job, `warn` goes on, the timeout kills the process group, a background process dies with its hook), what a repo hook can read (no saved plan, tfvars, OIDC token file or repo token; an allowlisted env), the `STACKD_*`-free env of tofu and platform hooks, saved-plan upload and fail-closed apply, commit pinning, the `TF_HTTP_*` backend env (tofu only), the command time budget from `cred_phase`, token encoding in clone URLs, writing the OIDC token and exporting the env vars.
@@ -1652,7 +1699,8 @@ env flag could make confirm require all threads resolved — deliberately deferr
 
 `user_notifications` (per user): `user_id`, `kind`, `run_id?`, `comment_id?`, `context jsonb`,
 `read_at?`, `created_at`. `kind ∈ approval_request | run_finished | run_failed | comment_reply |
-mention`. Each row is created **in the same transaction** as its trigger:
+mention | rollout_paused | rollout_succeeded | rollout_failed | rollout_upstream_changed` (the
+`rollout_*` ones: §21.7, context `{rollout_id, name, …}`, no `run_id`). Each row is created **in the same transaction** as its trigger:
 
 - **`transition()`** (§4.2): `→ unconfirmed` fans out `approval_request` to every eligible approver
   — the users who pass `can_apply` on the env (§2.4), evaluated with their **effective** space
@@ -1663,6 +1711,11 @@ mention`. Each row is created **in the same transaction** as its trigger:
   user's email local-part or full email) notify the mentioned users. Never the author. The composer
   offers `@` autocomplete from `GET /users/mentionable` (a minimal directory readable by any auth),
   inserting `@<email-local-part>` so it resolves against the parser.
+- **rollouts** (§21.7): `advance_rollout()` notifies the rollout's creator and approver of a pause or
+  a change of pause reason (`rollout_paused`) and of the end (`rollout_succeeded` /
+  `rollout_failed`); the cascade (§9.2) notifies them of an upstream applied under a member that
+  already planned (`rollout_upstream_changed`). A member run is an ordinary run for the
+  `transition()` notifications above (its triggerer is the rollout's creator).
 
 ### 17.2 Live delivery — private per-user channel
 
@@ -1837,7 +1890,8 @@ by state/phase/result, never by run id).
 
 > **Status:** delivery in three lots (PLAN Phase 7): (1) the cascade gaps of §9.2 (multi-parent
 > gating, stop on failure) — **done**; (2) the multi-stack declaration (§21.2) — **done**; (3) the
-> rollout itself (§21.3–§21.8).
+> rollout itself (§21.3–§21.8) — **done**. Rollout expiry is evaluated when the rollout moves (an
+> event, an approval) and by a periodic task (§7.5) within a scheduler tick.
 
 **Need.** Standing up a new environment or a new region today means creating one environment per
 stack, re-creating its dependency edges, then planning and confirming every environment by hand, in
@@ -1868,7 +1922,8 @@ POST /api/v1/spaces/{space_id}/environment-clones
   "stack_ids": [...]?,                   # default: every stack of the space with a `reference_name` env
   "overrides": {                         # optional; applied on top of the reference's settings.
                                          # Each key may be omitted, never `null` (→ 422)
-    "tier"?, "branch"?, "labels"?,       # labels: merged onto the reference's (override wins per key)
+    "tier"?, "branch"?, "labels"?,       # labels: merged onto the reference's (override wins per key);
+                                         # they also route the env's runs to workers (§7.2, §9.5 C)
     "autodeploy"?, "protected"?, "require_second_pair_of_eyes"?, "drift_check_enabled"?
   },
   "copy_cloud_integration": false,       # true requires the instance admin role (§10)
@@ -1966,22 +2021,28 @@ reference is not selected by it), the edges (`upstream_env_id`, `downstream_env_
 
 ```sql
 env_rollouts (
-  id uuid PK, space_id FK,
+  id uuid PK, space_id FK spaces ON DELETE RESTRICT,
+  name text,                             -- display name: the env_name rolled out, the single name
+                                         --   of the explicit members, or "<n> environments"
   state enum('awaiting_approval','running','paused','succeeded','failed','canceled'),
   created_by_user_id FK users,
   approved_by_user_id FK users nullable, approved_at timestamptz nullable,
   approval_expires_at timestamptz nullable,
-  pause_reason text nullable,            -- needs_confirmation | approval_expired | approver_lost_rights
+  pause_reason text nullable,            -- needs_confirmation | approval_expired |
+                                         --   approver_lost_rights | member_changed_since_approval
   created_at, updated_at, finished_at nullable
 )
 
 env_rollout_members (
   rollout_id FK env_rollouts ON DELETE CASCADE,
-  environment_id FK environments,
+  environment_id FK environments ON DELETE CASCADE,  -- see "Deleting a member" below
   level int,                             -- topological level within the members (Kahn), 0 = roots
   status enum('pending','planning','needs_confirmation','applying','done','failed','skipped','canceled'),
-  run_id FK runs nullable,               -- the member's current run
+  run_id FK runs ON DELETE SET NULL nullable,  -- the member's current run
   active bool,                           -- true while the rollout is not terminal
+  approved_tier text nullable,           -- what the last approval saw of the environment (§21.5):
+  approved_protected bool nullable,      --   its tier, `protected`, and whether four-eyes applied
+  approved_four_eyes bool nullable,      --   to it (§2.4) — set by every approval
   PRIMARY KEY (rollout_id, environment_id)
 )
 
@@ -1989,23 +2050,60 @@ env_rollout_members (
 CREATE UNIQUE INDEX one_active_rollout_per_env ON env_rollout_members (environment_id) WHERE active;
 ```
 
-`runs` gains `rollout_id uuid FK nullable`, and `triggered_by` gains the value `rollout` (§3.5).
-`trigger_user_id` of a rollout run is the rollout's **creator**, so four-eyes (§2.4) keeps its
-meaning on every member run.
+`runs` gains `rollout_id uuid FK nullable` (`ON DELETE SET NULL`), and `triggered_by` gains the value
+`rollout` (§3.5). `trigger_user_id` of a rollout run is the rollout's **creator**, so four-eyes (§2.4)
+keeps its meaning on every member run. Rollout runs carry no `run_group_id` (§9.2).
+
+**Deleting a member.** An environment that is a member of an **active** rollout is not deleted: the
+environment (or stack) deletion answers **409 `Active rollout`** (problem+json carrying `rollout_id`)
+— the rollout would otherwise lose a member, and its downstream members an upstream, silently;
+cancel the rollout or let it end first. The check runs under the deletion's `FOR UPDATE` on the
+environment rows (§3.2): a rollout created meanwhile either commits first and is seen, or fails on
+the foreign key. A **finished** rollout's member row goes with its environment (`ON DELETE
+CASCADE`): the rollout's history then lists the remaining members.
 
 Like a run's, a rollout's state changes through **one function**, `advance_rollout(session, rollout,
-…)`, called in the same transaction as the event that moves it (the approval, a member run's
-`transition()`); never an `UPDATE env_rollouts SET state = …` anywhere else.
+…)` (and its `_set_state`), called in the same transaction as the event that moves it (the approval,
+a member run's `transition()`, a retry, a cancel, the expiry task of §7.5); never an `UPDATE
+env_rollouts SET state = …` anywhere else. Every such transaction first **locks the rollout's row**
+(`SELECT … FOR UPDATE`) and re-reads its members: two member events at once (two parents of the same
+member finishing, an apply and a cancel) are serialized, and the second sees what the first
+committed.
+
+**Lock order.** The rollout's row is always locked **before** a member run's row: `transition()` on
+a run with a `rollout_id` takes the rollout's lock first (a worker event, a human confirm or discard,
+worker-lost), as the approve, cancel and retry endpoints do (the rollout, then its runs), and the
+gate locks the rollout before it judges anything (§21.5). A worker claim — which already holds its
+environment's row (§7.2) — takes the rollout's lock with `NOWAIT`: on a rollout busy right now it
+claims nothing and the worker polls again, and a lock it cannot get, a deadlock or a serialization
+failure never surfaces as a 500 from the claim.
+
+**`running` and `paused`.** A started rollout is `running` while nothing waits; it is `paused` while
+something waits, with **one** `pause_reason` — the most severe of, in order:
+- `approval_expired`, `approver_lost_rights`, `member_changed_since_approval` — the **gate is
+  closed**: no member is started and none is confirmed under the approval; runs already planning or
+  applying finish (an apply is never cut short), a plan stopping at `unconfirmed`. Only a
+  re-approval (§21.6) reopens it — `approver_lost_rights` and `member_changed_since_approval` are
+  kept until then even once their cause is gone (a right granted back, a flag reverted);
+- `needs_confirmation` — a member's plan waits on a human; the gate stays **open**: the other
+  branches go on (members start, creates-only plans are confirmed under the approval).
+`paused → running` (nothing waits any more: the last waiting plan was confirmed or discarded, or a
+re-approval reopened the gate with nothing else waiting) is audited `rollout.resumed` by the system,
+context `{from, previous_reason}`; the human action behind it is audited on its own (`run.confirmed`,
+`run.discarded`, `rollout.approved`). A change of reason while paused is audited `rollout.paused`
+again, with the new and the previous reason, and notified (`rollout_paused`, §21.7).
 
 ### 21.4 Lifecycle
 
 ```
 create ──▶ awaiting_approval ──approve──▶ running ⇄ paused ──▶ succeeded | failed
-                 │                          │
+                 │                          │    ▲                              │
+                 │                          │    └──────────── retry ───────────┘
                  └──────── cancel ──────────┴──▶ canceled
 ```
 
-1. **Create** — `POST /api/v1/rollouts {space_id, env_name | environment_ids}` (`writer`). Members:
+1. **Create** — `POST /api/v1/rollouts {space_id?, env_name | environment_ids}` (`writer`;
+   `space_id` defaults to the bootstrap space, as for any create, §3.0). Members:
    the environments named `env_name` in the space (typically the output of a clone), or the explicit
    list (same space). Levels are computed from the edges **between members**; an upstream outside the
    members must already have outputs (or a mock) — the preview says which members will plan on mocks,
@@ -2015,16 +2113,22 @@ create ──▶ awaiting_approval ──approve──▶ running ⇄ paused ─
    changes or destroys something is only known once it is made.
 2. **Approve** — `POST /api/v1/rollouts/{id}/approve` (§21.6). The rollout moves to `running` and its
    level-0 members are planned.
-3. **Plan of a member** — a `tracked` run, `triggered_by=rollout`, `rollout_id` set, planning the head
-   of the member's branch (commit pinning as usual, §7.3). Queued like any run: one active run per
-   environment still holds (§3.5).
+3. **Plan of a member** — a `tracked` run, `triggered_by=rollout`, `rollout_id` set, audited
+   `run.triggered` by the system (context `via: rollout`, `rollout_id`, `environment_id`, `commit`).
+   It plans the head of the member's branch — or, once the rollout has **pinned** a commit for that
+   stack and branch (§21.6), exactly that commit (`commit_sha` set at trigger; a worker checking out
+   anything else fails it, `commit_mismatch`, §7.3). Queued like any run: one active run per
+   environment still holds (§3.5). A member is started only while the gate is open (§21.3): the
+   approval must still cover it (approval valid, the approver's right, the member unchanged since
+   the approval — §21.5); otherwise nothing starts and the rollout pauses with that reason.
 4. **Outcome of a member's plan** (in the run's `transition()` transaction):
    - empty diff → `finished`; the member is `done` (its existing outputs feed its downstream);
    - the plan passes the **rollout gate** (§21.5) → `planning|checking → confirmed` by the system,
      on the approval (§21.6) — the same transition as an autodeploy (§4.2), with the gate as its
      condition; the member is `applying` once claimed;
    - otherwise → the run stops at `unconfirmed` like any plan; the member is `needs_confirmation`
-     and the rollout `paused` (`pause_reason=needs_confirmation`) — the other branches go on. A human
+     and the rollout `paused` — `needs_confirmation` when the plan itself needs a human (the other
+     branches go on), or the gate-closing reason when only the approval failed to cover it. A human
      confirms (ordinary `can_apply` + four-eyes) or discards the run.
 5. **Apply finished** → the member is `done`, its outputs captured (§9.1). Each downstream member
    whose **every** upstream member is `done` is then planned — multi-parent gating.
@@ -2033,79 +2137,167 @@ create ──▶ awaiting_approval ──approve──▶ running ⇄ paused ─
    run: `succeeded` if every member is `done`, else `failed` (the members say which part failed).
 7. **Retry** — `POST /api/v1/rollouts/{id}/retry` (`writer`) on a `failed` rollout: its failed members
    go back to `pending` and their skipped descendants too; it runs again only under a valid approval
-   (§21.6), otherwise it waits in `paused` (`approval_expired`). Audited `rollout.retried`.
+   that still covers them (§21.6), otherwise it waits in `paused` (`approval_expired`, …). A retried
+   member plans the commit the rollout pinned (§21.6). Audited `rollout.retried`.
 8. **Cancel** — `POST /api/v1/rollouts/{id}/cancel` (`writer`): no new member run starts; the
-   members' `queued`/`unconfirmed` runs are canceled through `transition()`; a run a worker is
-   executing finishes on its own (§4.1) but triggers nothing in the rollout. Audited `rollout.canceled`.
+   members' `queued`, `unconfirmed` and `confirmed`-but-unclaimed runs are canceled through
+   `transition()` (§4.1); a run a worker is executing finishes on its own (§4.1) but triggers
+   nothing — neither in the rollout nor through the generic cascade; one stopping at `unconfirmed`
+   is never confirmed under the approval (a human may still confirm or discard it). Audited
+   `rollout.canceled`.
+9. **Approval expiry** — evaluated whenever the rollout moves, and by a periodic task (§7.5) that
+   advances every started rollout whose approval has expired: it pauses (`approval_expired`) within
+   a scheduler tick, not only at its next event.
 
-A rollout run is never also triggered by the generic cascade: `cascade()` (§9.2) skips an edge whose
-downstream is a member of the same active rollout. Edges to non-members behave as usual.
+**The generic cascade.** A rollout run never triggers the generic cascade (§9.2), the rollout being
+active or not — even a member run finishing after a cancel. A member of an active rollout gets no
+cascade run from an upstream outside the rollout: the rollout plans it in its turn (fresh outputs
+at claim); a member that already planned is reported (`rollout_upstream_changed`, §21.7) instead.
+A member's downstreams outside the rollout are not triggered by its apply: they show as stale
+(§9.6) — include them in the rollout, or trigger them.
 
 ### 21.5 The rollout gate (auto-confirmation)
 
 A member's plan is confirmed by the system **only if all** of the following hold; otherwise it
-pauses for a human:
+stops at `unconfirmed` for a human. The gate first **locks the rollout** (§21.3), so a cancel or a
+re-approval committed meanwhile is seen.
 
-- the rollout is `running` and its approval valid: `now < approval_expires_at`;
-- the plan **only creates**: `plan_summary.add > 0`, `change = 0`, `destroy = 0` (a replacement
-  counts as a destroy), and **no import** (`plan_summary.import = 0`; the agent reports it from
-  tofu's `change_summary`) — adopting existing resources is a human decision;
+- the rollout is started (`running` or `paused`), its gate open (no gate-closing `pause_reason`,
+  §21.3) and its approval valid: `now < approval_expires_at`; the run is the member's current run;
+- the plan **only creates**: `plan_summary.add > 0` and **every other counter is 0** — `change`,
+  `destroy` (a replacement counts as a destroy), `import` (adopting existing resources is a human
+  decision), `forget` (a resource dropped from the state), and any counter a newer tool reports
+  (Terraform's `action_invocation`: an action is no creation). Fail closed: a summary **missing**
+  one of `add`, `change`, `destroy`, `import`, `forget` (an older agent), or holding a counter that
+  is no integer, fails the gate (§3.5, §7.3);
 - the run is `tracked` (never `destroy`), `used_mocks = false` (§9.3), `used_secret_fallback =
   false` (§15.5), and has **no `warn` or `fail` check** (§8.3);
-- the approver **still** passes `can_apply(approver, env)` at that moment (§2.4: role and tier; a
-  revoked right or a removed membership is not inherited by the rollout) — otherwise the rollout
-  pauses with `approver_lost_rights`.
+- the environment **has never been applied**: no stored state version (§11), no run of it that
+  ever reached `applying` (or a command run that reached `running`, §4.3), and a managed state
+  (with `managed_state=false` nobody can tell: fail closed). A member with existing infrastructure
+  always stops for a human: the approval stands up new environments, it does not change live ones;
+- the plan is on the **commit the rollout pinned** for the member's stack and branch (§21.6): the
+  run's `commit_sha` is a full SHA, equal to that of the rollout's first member run of that stack
+  and branch that knew its commit;
+- the approval still **covers** the member at that moment (otherwise the rollout pauses with the
+  reason, closing the gate):
+  - the approver still passes `can_apply(approver, env)` (§2.4: role and tier; a revoked right or a
+    removed membership is not inherited by the rollout — a non-admin approver without a membership
+    in the space fails, never falling back to their instance defaults) → else `approver_lost_rights`;
+  - the environment's tier, `protected` and four-eyes requirement (§2.4: the tier's flag — a missing
+    tier row requiring it —, `protected`, `require_second_pair_of_eyes`) are **those the approval
+    recorded** (§21.3), and four-eyes, if it applies, holds between the approver and the creator →
+    else `member_changed_since_approval`. A writer who protects a member, or moves it to another
+    tier, after a self-approval does not get its plans applied on that approval.
 
-**`protected` environments.** The approval **counts as the confirmation** of a protected member's
-creates-only plan: `protected` forbids *autodeploy*, i.e. applying with nobody having decided; here a
-named approver decided, for that environment, with four-eyes applied (§21.6). A plan that changes or
-destroys anything, or warns, still stops for a human.
+A member plan that fails the gate is **never** confirmed by the environment's own `autodeploy`
+either: it stops at `unconfirmed`.
+
+**`protected` environments.** `protected` forbids *autodeploy* — applying with nobody having
+decided (§2.4, §3.2, §13). A rollout's approval is a named decision, for that environment, under
+four-eyes (§21.6): it **counts as the confirmation** of a protected member's plan when, and only
+when, the plan only creates, in an environment never applied, on the pinned commit, and the
+environment is still what the approver saw. Anything else — a plan that changes, destroys, imports,
+forgets or warns; an environment with infrastructure — stops for a human, as on any protected env.
 
 The auto-confirmation goes through `transition(run, confirmed, actor=system, …)` with
 `confirmed_by_user_id = approved_by_user_id`, audited `run.confirmed` with context
-`{via: "rollout", rollout_id, approved_by}` — the apply's "who" (§6.2) is the approver. The apply
-claim re-checks the mock and secret-fallback gates as for any run (§4.2).
+`{via: "rollout", rollout_id, approved_by, approved_by_email}` — the apply's "who" (§6.2) is the
+approver, who never saw this very plan: `GET /api/v1/runs/{id}` says `confirmed_via: "rollout"`,
+and the run page, the audit page and the CSV export (its `context` column, §6.4) all show the
+confirmation as **made under the rollout approval of** the approver, never as a plain confirm. The
+apply claim re-checks the mock and secret-fallback gates as for any run (§4.2).
 
 ### 21.6 Approval
 
-`POST /api/v1/rollouts/{id}/approve` on `awaiting_approval` (or on `paused` with `approval_expired` /
-`approver_lost_rights`, which re-approves):
+`POST /api/v1/rollouts/{id}/approve` on `awaiting_approval`, or — a **re-approval** — on a started
+rollout whose gate is closed (`approval_expired`, `approver_lost_rights`,
+`member_changed_since_approval`) or whose approval has expired (the response's `approvable`, §21.7);
+409 otherwise:
 
-- the caller passes `can_apply(caller, env)` for **every** member (all or nothing: 403 listing the
-  environments it may not apply);
-- **four-eyes**: if any member's tier requires it, or any member is `protected` or sets
-  `require_second_pair_of_eyes`, the approver ≠ the rollout's creator (409 otherwise) — the same
-  rule a confirm applies to a run's triggerer (§2.4);
+- the caller passes `can_apply(caller, env)` for **every** member (all or nothing: **403** listing
+  the environments it may not apply);
+- **four-eyes**: if any member's tier requires it (a missing tier row counts as requiring it), or
+  any member is `protected` or sets `require_second_pair_of_eyes`, the approver ≠ the rollout's
+  creator — **403** otherwise, whatever the state (a re-approval included) — the same rule a confirm
+  applies to a run's triggerer (§2.4), which also applies to a member run's human confirmation
+  (`triggered_by=rollout`, triggerer = the creator), and which the gate re-checks at each
+  auto-confirmation (§21.5);
+- records, per member, what it saw: `approved_tier`, `approved_protected`, `approved_four_eyes`
+  (§21.3);
 - sets `approved_by_user_id`, `approved_at`, `approval_expires_at = now +
   stackd_rollout_approval_ttl_seconds` (default 24 h): an approval does not hang around for days;
-- on a re-approval, a member whose run waits at `unconfirmed` and whose plan passes the gate
-  (§21.5) — it paused only for the expired approval or the approver's lost right — is confirmed by
-  the system (`unconfirmed → confirmed`, the one system-actor path of that transition, §4.2);
-- audited `rollout.approved` with the member environments and their tiers.
+- on a re-approval, the gate runs again on every member whose run waits at `unconfirmed`: one
+  whose plan passes it (§21.5) — it paused only on the approval — is confirmed by the system
+  (`unconfirmed → confirmed`, the one system-actor path of that transition, §4.2);
+- audited `rollout.approved` with, per member environment, its tier, `protected` and four-eyes, the
+  expiry and whether it is a re-approval.
 
-An approval binds **this** rollout's members and the gate of §21.5 — not a commit: each member plans
-its branch head when its turn comes, and the gate judges that plan.
+**What an approval binds.** This rollout's members, as the approval saw them (tier, protection,
+four-eyes), the gate of §21.5 — creates-only plans in never-applied environments — and, per stack
+(and branch), **one commit**: the first member run of a stack in the rollout plans the branch head
+and its commit becomes the rollout's **pin** for that stack and branch; every later member run
+there — another member of that stack, a retry — is triggered on that commit (§21.4 step 3), and
+the gate refuses a plan on any other one (a member run started before the pin was known). A
+commit pushed after the approval therefore reaches a stack only if that stack's first member run
+had not started yet; the gate still judges that plan, and the approval never confirms a change to
+existing infrastructure.
 
 ### 21.7 API, live updates, notifications
 
 ```
 POST /api/v1/spaces/{space_id}/environment-clones                      # §21.2
-POST /api/v1/rollouts            { space_id, env_name | environment_ids }   # → preview
-GET  /api/v1/rollouts ?space_id=&state= ; GET /api/v1/rollouts/{id}    # members, levels, runs, gates
-POST /api/v1/rollouts/{id}/approve | /retry | /cancel
-WS   sub: rollout:{id}                                                 # membership-gated (§2.4)
+POST /api/v1/rollouts            { space_id?, env_name | environment_ids }  # → the detail (preview)
+GET  /api/v1/rollouts ?space_id=&state=        # summaries: state, members, done
+GET  /api/v1/rollouts/{id}                     # detail
+POST /api/v1/rollouts/{id}/approve | /retry | /cancel   # → the detail
+WS   sub: rollout:{id}                         # membership-gated; signal {kind: rollout_event, rollout_id}
 ```
 
-WS events invalidate the rollout's queries (DESIGN §6), like run events. Notifications (§17):
-`rollout_paused` (to the creator and the approver, with the member waiting), `rollout_succeeded`,
-`rollout_failed`.
+The detail: the rollout (state, `pause_reason`, creator, approver, approval expiry) and per member:
+stack/env names, tier, `protected`, level, status, run id and state, plan summary, `auto_confirmed`
+(its run was confirmed by the system), `waiting_reason` (why a `needs_confirmation` member's plan
+stopped: changes, destroys, imports, forgets, another kind of action, a mock, a fallback, a check,
+existing infrastructure, a commit other than the pin; else the approval no longer covering it —
+expired, the approver's right, a member changed since the approval; or, for a queued run, that no
+online worker can take it — labels or tool version, §7.2/§7.4), `expected_mocks` (outputs an
+upstream outside the rollout has not published, a mock standing in) — plus the edges between members,
+`can_approve {allowed, reason}` for the viewer, `approvable` (an approval is what the rollout waits
+for: its first, or a re-approval, §21.6) and `approval_ttl_seconds` (the approval dialog states
+the real duration). Creating needs `writer` in the space; approving, `can_apply` on every member;
+retry and cancel, `writer`.
+
+WS events invalidate the rollout's queries (DESIGN §6), like run events. Notifications (§17.1), to
+the rollout's creator and approver, context `{rollout_id, name, …}` (no `run_id`); the inbox links
+them to the rollout page:
+- `rollout_paused` — on every pause and change of pause reason (context `reason`);
+- `rollout_succeeded`, `rollout_failed`;
+- `rollout_upstream_changed` — an upstream outside the rollout applied while a member that already
+  planned waits or applies on the previous outputs (context `environment_id`, `upstream_env_id`,
+  `upstream_run_id`, §21.4).
 
 ### 21.8 Audit taxonomy additions (extends §6.2)
 
+The exhaustive list (each a `target_kind=rollout` event, except `environment.cloned` — the space —
+and the run ones — the run); a clone's per-item events are the existing actions (§21.2, §6.2):
+
 ```
-environment.cloned                       # §21.2 summary
-rollout.created / rollout.approved / rollout.paused / rollout.resumed
-rollout.retried / rollout.canceled / rollout.succeeded / rollout.failed
+environment.cloned          # §21.2 summary (target: the space)
+rollout.created             # user; context: name, environments
+rollout.approved            # user; context: environments {id: {tier, protected, four_eyes}},
+                            #   expires_at, re_approval
+rollout.paused              # system; context: reason, previous_reason, from — on every pause and
+                            #   change of reason
+rollout.resumed             # system; paused → running; context: from, previous_reason
+rollout.retried             # user
+rollout.canceled            # user
+rollout.succeeded / rollout.failed                    # system
+run.triggered               # system, target the member run; context via=rollout, rollout_id,
+                            #   environment_id, commit
+run.confirmed               # system, target the member run; context via=rollout, rollout_id,
+                            #   approved_by, approved_by_email (§21.5)
+run.canceled                # user (the canceller), target each member run a cancel stops;
+                            #   context via=rollout, rollout_id
 ```
 
 ### 21.9 Invariants preserved
@@ -2115,7 +2307,11 @@ rollout.retried / rollout.canceled / rollout.succeeded / rollout.failed
 - **Same-transaction audit** (§6.3) for every clone item, rollout state change and auto-confirmation.
 - **Secrets**: a clone never copies a literal sensitive value; nothing is returned in clear.
 - **`can_apply`**: checked for every member at approval and again at each auto-confirmation; a
-  destroy is never auto-confirmed; four-eyes holds between creator and approver.
+  destroy is never auto-confirmed; four-eyes holds between creator and approver, at the approval
+  and at each auto-confirmation; a member whose tier, protection or four-eyes changed since the
+  approval is not auto-confirmed.
+- **No change to live infrastructure without a human on the plan**: the approval only ever confirms
+  creates-only plans in environments never applied, on the rollout's pinned commit per stack.
 - **One active run per environment** (§3.5) and **one active rollout per environment**.
 - **Mocks** (§9.3): a member that consumed one never auto-confirms; its apply stays gated by
   `allow_mock_apply`, which a clone never turns on.
