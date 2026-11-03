@@ -58,3 +58,30 @@ async def test_seed_demo_is_idempotent(client) -> None:
             await s.execute(delete(VariableSet).where(VariableSet.space_id == demo.id))
             await s.execute(delete(WorkerPool).where(WorkerPool.name == "local"))
             await s.commit()
+
+
+async def test_base_seed_creates_default_space_and_tiers_only(client) -> None:
+    # Production bootstrap (`python -m app.seed --base`): idempotent, never creates the demo space.
+    # The suite's demo space is renamed aside (not deleted: other tests hang rows off it).
+    from sqlalchemy import update
+
+    from app.models.tier import Tier
+    from app.seed import seed
+
+    aside = "demo-aside-for-base-seed"
+    async with SessionLocal() as s:
+        await s.execute(update(Space).where(Space.name == "demo").values(name=aside))
+        await s.commit()
+    try:
+        await seed(include_demo_space=False)
+        await seed(include_demo_space=False)
+        async with SessionLocal() as s:
+            names = set((await s.execute(select(Space.name))).scalars().all())
+            assert "default" in names
+            assert "demo" not in names
+            tiers = set((await s.execute(select(Tier.name))).scalars().all())
+            assert {"dev", "staging", "prod"} <= tiers
+    finally:
+        async with SessionLocal() as s:
+            await s.execute(update(Space).where(Space.name == aside).values(name="demo"))
+            await s.commit()
