@@ -1024,8 +1024,10 @@ network/prod-eu-primary ──▶ network/prod-us-secondary
    changes (§3.4).
 2. `POST /spaces/{id}/environment-clones {reference_name: "prod", name: "prod-euw3", overrides:
    {labels: {region: "eu-west-3"}}}` creates `prod-euw3` in every stack that has a `prod`, with its
-   governance and its dependency edges — the selector attaches the region set by itself. Fill in the
-   reported `missing_secrets` (and the cloud integrations, if not copied).
+   governance and its dependency edges — the selector attaches the region set by itself, and a
+   model's env variable or explicit attachment that would shadow one of its keys is left out
+   (`not_copied`, §21.2). Fill in the reported `missing_secrets` (and the cloud integrations, if not
+   copied); until then the new envs have `autodeploy` off.
 3. `POST /rollouts {env_name: "prod-euw3"}`, approved once by an approver: the graph is planned and
    applied level by level, every creates-only plan confirmed under the approval; anything else stops
    for a human (§21.5).
@@ -1842,13 +1844,15 @@ POST /api/v1/spaces/{space_id}/environment-clones
   "reference_name": "prod",              # the env each target stack already has
   "name": "prod-euw3",                   # the new env, same name in every stack
   "stack_ids": [...]?,                   # default: every stack of the space with a `reference_name` env
-  "overrides": {                         # optional; applied on top of the reference's settings
+  "overrides": {                         # optional; applied on top of the reference's settings.
+                                         # Each key may be omitted, never `null` (→ 422)
     "tier"?, "branch"?, "labels"?,       # labels: merged onto the reference's (override wins per key)
     "autodeploy"?, "protected"?, "require_second_pair_of_eyes"?, "drift_check_enabled"?
   },
   "copy_cloud_integration": false,       # true requires the instance admin role (§10)
   "dry_run": false                       # true: validate and compute everything, then roll back —
-                                         # the response is the preview (DESIGN §5.11)
+                                         # the response is the preview (DESIGN §5.11); no row and
+                                         # no audit event persists
 }
 ```
 
@@ -1857,7 +1861,11 @@ space (what creating environments takes), plus the **instance** `admin` role whe
 `copy_cloud_integration` is true (as `PUT …/cloud-integration`), and `writer` on the space of every
 shared upstream an edge is re-created from (as creating that edge by hand, §3.8) — else 403. Validation first: a target stack
 without a `reference_name` env, or already holding a `name` env → **422** listing the stacks; the tier
-must exist (§2.4); `name` follows the environment naming rules.
+must exist (§2.4); `name` follows the environment naming rules; an override sent as `null` → **422**
+(every overridable setting is required on an environment). Integrity conflicts at write time are
+named for what they are: `name` created concurrently in a target stack → **409**; the override tier
+deleted between the check and the insert → **422** `Unknown tier`; any other concurrent change → **409**
+`Conflicting change`. In every case nothing is created.
 
 What each new environment gets from its stack's reference environment:
 
@@ -1866,12 +1874,32 @@ What each new environment gets from its stack's reference environment:
 | tier, branch, `protected`, `require_second_pair_of_eyes`, `autodeploy`, `managed_state`, `drift_check_enabled`, labels, position | yes (then `overrides`) |
 | `allow_mock_apply`, `allow_fallback_apply` | **no** — always `false` on a new env (§9.3, §15.5) |
 | unmanaged-state backend settings (`backend_config_file`, `backend_config`) | **never**: they would point the new env at the reference's state. A reference with `managed_state=false` → **422** (clone a managed-state env, or create that env by hand) |
-| env-level variables | non-sensitive ones: yes, same value; external secret references (§15): yes, the **reference** (not a value); literal **sensitive** values: **no** — listed in the response as `missing_secrets` (the region's secrets usually differ; a secret is never duplicated silently) |
-| explicit variable-set attachments to the env | yes, same priority. Tier attachments and label selectors (§3.4) apply by themselves — the recommended place for region values, e.g. a set selecting `region=eu-west-3` |
+| env-level variables | non-sensitive ones: yes, same value; external secret references (§15): yes, the **reference** (not a value) — its static fallback is a literal secret: not copied, the mode reset to `error`, listed in `to_configure`; literal **sensitive** values: **no** — listed in the response as `missing_secrets` (the region's secrets usually differ; a secret is never duplicated silently). Except when it **shadows a label set** (below) |
+| explicit variable-set attachments to the env | yes, same priority — except when it **shadows a label set** (below). Tier attachments and label selectors (§3.4) apply by themselves — the recommended place for region values, e.g. a set selecting `region=eu-west-3` |
 | **platform hooks** scoped to the env (§8.1) | **yes, always** — a new env never starts with less governance than its model |
 | notification targets scoped to the env (§17) | yes |
 | cloud integration (§10) | only with `copy_cloud_integration` (admin); otherwise listed as `to_configure`. Role ARNs often differ per region or account |
 | dependency edges (§3.8) | see below |
+
+**Label sets win over the model's region (shadowing).** A set attached by selector sits at the
+weakest resolution layer (§3.4 layer 1), below explicit env attachments (layer 4) and env variables
+(layer 6). A clone whose labels select a set the reference is not selected by (recipe C, §9.5:
+`region=eu-west-3` → `region-euw3`) would otherwise keep the model's value for every key that set
+provides — the new env would plan creates in the old region. So an env-level variable whose
+(kind, name) a **newly selected** label set provides, or an explicit attachment of a set providing
+any such key, is **not copied**; each is listed in `not_copied`
+(`{stack, environment, item: "variable" | "variable_set", name, reason: "shadows_label_set", keys,
+label_sets}`). A set selected by both the reference's and the clone's labels is not "new": an env
+value overriding it in the model keeps doing so in the clone. The shadowing that tier attachments,
+stack attachments and stack variables already exert is not changed (they are not copied).
+
+**Autodeploy is never on while something is left to fill.** A secret not copied leaves the env-level
+input unset, and resolution then falls back to a lower layer holding the same name (a stack variable,
+a set) — e.g. the dev `db_password`. A new env with `missing_secrets` or `to_configure` entries is
+therefore created with `autodeploy=false` whatever the reference or the overrides say
+(`autodeploy_off_reason: "left_to_fill"`; `"protected"` when §3.2 forced it); it is turned on by hand
+once filled. Each `missing_secrets` entry carries `falls_back_to`: the provenance (`stack`, `set:<name>`)
+of the value the input would resolve to meanwhile, or `null` when nothing provides it.
 
 **Dependency edges.** Let *C* be the set of reference environments being cloned. For each edge of the
 reference graph, with its `trigger_policy` and its `output_references` (mocks included):
@@ -1883,11 +1911,14 @@ reference graph, with its `trigger_policy` and its `output_references` (mocks in
 The resulting edges mirror an acyclic subgraph plus edges from existing envs: no cycle can appear (the
 §3.8 DFS still runs).
 
-Audit, same transaction: `environment.created` per environment (context `cloned_from`), the existing
+Audit, same transaction: `environment.created` per environment (context `cloned_from`, `autodeploy`,
+`autodeploy_off_reason`), the existing
 actions for each copied item (`dependency.created`, `variable_set.attached`, `hook.created`,
 `notification_target.created`, `cloud_integration.created`), and one `environment.cloned` summary
-(context: reference name, new name, stacks, `missing_secrets`). Response: the created environments
-and edges, `missing_secrets`, `to_configure`.
+(context: reference name, new name, stacks, `missing_secrets`, `not_copied`). Response: the created
+environments (`id`, `stack_id`, `stack_name`, `name`, `tier`, `autodeploy`, `autodeploy_off_reason`,
+`label_sets`: the sets its labels select, `{name, new}` — `new` when the reference is not selected by
+it), the edges, `missing_secrets`, `to_configure`, `not_copied`.
 
 ### 21.3 Model
 
