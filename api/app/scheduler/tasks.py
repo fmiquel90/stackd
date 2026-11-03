@@ -19,6 +19,7 @@ from app.models.stack import Stack
 from app.models.worker import Worker
 from app.notifications.dispatcher import dispatch_pending
 from app.oidc.issuer import retire_keys
+from app.rollouts.service import expire_approvals
 from app.runs.transition import transition
 from app.stacks.git import ls_remote_sha
 from app.vcs.dispatcher import dispatch_vcs
@@ -31,6 +32,7 @@ _LOCK_VCS = 74003
 _LOCK_DRIFT = 74004
 _LOCK_HEAD_POLL = 74005
 _LOCK_OIDC_KEYS = 74006
+_LOCK_ROLLOUTS = 74007
 _TICK_SECONDS = 10  # the scheduler loop's period
 _HEAD_POLL_CONCURRENCY = 8  # `git ls-remote` calls a head poll runs at once (§9.6)
 _log = get_logger("stackd.scheduler")
@@ -264,6 +266,8 @@ async def scheduler_loop() -> None:
                     await _with_lock(session, _LOCK_DRIFT, detect_drift)
                 async with SessionLocal() as session:
                     await _with_lock(session, _LOCK_OIDC_KEYS, retire_keys)
+                async with SessionLocal() as session:
+                    await _with_lock(session, _LOCK_ROLLOUTS, expire_approvals)
                 now = datetime.now(UTC)
                 if next_head_poll is None or now >= next_head_poll:
                     # Scheduled before it runs, so a failing poll also waits a full interval.

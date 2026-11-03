@@ -52,7 +52,7 @@ def upgrade() -> None:
             sa.ForeignKey("spaces.id", ondelete="RESTRICT"),
             nullable=False,
         ),
-        sa.Column("name", sa.String(), nullable=False),  # the environment name rolled out
+        sa.Column("name", sa.String(), nullable=False),  # display name: the env name rolled out
         sa.Column("state", state, nullable=False, server_default="awaiting_approval"),
         sa.Column(
             "created_by_user_id",
@@ -96,6 +96,11 @@ def upgrade() -> None:
             nullable=True,
         ),
         sa.Column("active", sa.Boolean(), nullable=False, server_default=sa.true()),
+        # What the approval saw of the member's environment (§21.5): a change since refuses the
+        # auto-confirmation until a re-approval.
+        sa.Column("approved_tier", sa.String(), nullable=True),
+        sa.Column("approved_protected", sa.Boolean(), nullable=True),
+        sa.Column("approved_four_eyes", sa.Boolean(), nullable=True),
     )
     # One active rollout per environment (§21.3).
     op.create_index(

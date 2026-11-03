@@ -22,13 +22,16 @@ from app.models.run import Run, RunEvent
 from app.models.stack import Stack
 from app.models.user import User
 from app.rollouts.service import (
+    approval_blocker,
     approval_refusal,
     approve_rollout,
     cancel_rollout,
     create_rollout,
     lock_rollout,
     member_edges,
+    member_refusals,
     members_of,
+    reapproval_due,
     resolve_members,
     retry_rollout,
 )
@@ -45,35 +48,33 @@ class RolloutCreate(BaseModel):
     environment_ids: list[uuid.UUID] | None = None
 
 
-def _waiting_reason(run: Run | None, rollout: EnvRollout) -> str | None:
-    """Why a member's plan stopped for a human (DESIGN §5.11): what in the plan fails the gate
-    (§21.5), else why the rollout could not confirm it (its approval, its approver)."""
+_GATE_CLOSED_TEXT = {
+    "approval_expired": "the approval expired",
+    "approver_lost_rights": "the approver may no longer apply here",
+    "member_changed_since_approval": "its tier, protection or four-eyes changed since the approval",
+}
+
+
+async def _waiting_reason(
+    session: AsyncSession,
+    rollout: EnvRollout,
+    m: EnvRolloutMember,
+    run: Run | None,
+    env: Environment,
+) -> str | None:
+    """Why a member's plan stopped for a human (DESIGN §5.11): what keeps the gate from taking
+    it (§21.5), else why the rollout's approval does not cover it."""
     if run is None or run.state != RunState.unconfirmed:
         return None
-    s = run.plan_summary or {}
-    reasons = []
-    if run.used_mocks:
-        reasons.append("consumed a mock")
-    if run.used_secret_fallback:
-        reasons.append("used a secret fallback")
     checks = (run.check_results or {}).get("checks") or []
-    if checks:
-        reasons.append("check " + ", ".join(f"{c.get('status')}: {c.get('name')}" for c in checks))
-    for key, label in (("change", "changes"), ("destroy", "destroys"), ("import", "imports")):
-        if int(s.get(key) or 0):
-            reasons.append(f"{label} {s[key]} resource{'s' if int(s[key]) > 1 else ''}")
-    if run.type.value != "tracked":
-        reasons.append(f"a {run.type.value} run")
-    if not int(s.get("add") or 0) and not reasons:
-        reasons.append("creates nothing (only changes outside resources, e.g. outputs)")
-    if "import" not in s:
-        reasons.append("its worker does not report imports (update the agent)")
+    reasons = await member_refusals(session, rollout, run, env, run.plan_summary, checks)
     if not reasons:
+        blocker = await approval_blocker(session, rollout, m, env)
         reasons.append(
-            {
-                "approval_expired": "the approval expired",
-                "approver_lost_rights": "the approver may no longer apply here",
-            }.get(rollout.pause_reason or "", "it was planned while the rollout could not confirm")
+            _GATE_CLOSED_TEXT.get(
+                blocker or rollout.pause_reason or "",
+                "it was planned while the rollout could not confirm",
+            )
         )
     return "; ".join(reasons)
 
@@ -154,7 +155,7 @@ async def _detail(session: AsyncSession, rollout: EnvRollout, viewer: User) -> d
         env, stack = rows[m.environment_id]
         run = runs.get(m.run_id) if m.run_id else None
         reason = (
-            _waiting_reason(run, rollout)
+            await _waiting_reason(session, rollout, m, run, env)
             if m.status == RolloutMemberStatus.needs_confirmation
             else None
         )
@@ -201,6 +202,9 @@ async def _detail(session: AsyncSession, rollout: EnvRollout, viewer: User) -> d
         ],
         # For the viewer: may they approve (the UI hides or explains the action, DESIGN §5.11)?
         "can_approve": {"allowed": refusal is None, "reason": refusal},
+        # Whether an approval is what the rollout waits for: its first, or a re-approval that
+        # reopens a closed gate (§21.6).
+        "approvable": rollout.state == RolloutState.awaiting_approval or reapproval_due(rollout),
         # How long an approval lasts (§21.6): the approval dialog states it.
         "approval_ttl_seconds": get_settings().stackd_rollout_approval_ttl_seconds,
     }

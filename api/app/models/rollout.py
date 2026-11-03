@@ -57,3 +57,8 @@ class EnvRolloutMember(Base):
         PGUUID(as_uuid=True), ForeignKey("runs.id", ondelete="SET NULL"), default=None
     )
     active: Mapped[bool] = mapped_column(Boolean, default=True)
+    # What the approval saw (§21.5): the env's tier, `protected`, and whether four-eyes applied to
+    # it. The gate refuses an auto-confirmation once one of them changed, until a re-approval.
+    approved_tier: Mapped[str | None] = mapped_column(String, default=None)
+    approved_protected: Mapped[bool | None] = mapped_column(Boolean, default=None)
+    approved_four_eyes: Mapped[bool | None] = mapped_column(Boolean, default=None)
