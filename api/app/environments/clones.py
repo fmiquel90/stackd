@@ -491,7 +491,12 @@ async def _clone(
                 **actor,
                 target_kind="hook",
                 target_id=new_hook.id,
-                context={"stage": hook.stage.value, "name": hook.name, "on": "environment"},
+                context={
+                    "stage": hook.stage.value,
+                    "name": hook.name,
+                    "on": "environment",
+                    "cloned_from": str(hook.id),
+                },
             )
         for target in (
             await session.execute(
@@ -518,7 +523,12 @@ async def _clone(
                 **actor,
                 target_kind="notification_target",
                 target_id=new_target.id,
-                context={"on": "environment", "kind": target.kind.value, "name": target.name},
+                context={
+                    "on": "environment",
+                    "kind": target.kind.value,
+                    "name": target.name,
+                    "cloned_from": str(target.id),
+                },
             )
         ci = t.cloud
         if ci is not None and body.copy_cloud_integration:
@@ -544,6 +554,8 @@ async def _clone(
     # Dependency edges (§21.2): an incoming edge of a reference env is re-created on its clone,
     # from the clone of its upstream when that one is cloned too, else from the same (shared)
     # upstream. Outgoing edges to non-cloned envs are not copied.
+    by_ref = {t.ref.id: t for t in targets}
+    warnings: list[dict[str, Any]] = []
     edges: list[dict[str, str]] = []
     for ref_id, env in mapping.items():
         for dep in (
@@ -553,10 +565,33 @@ async def _clone(
         ).scalars():
             upstream = mapping.get(dep.upstream_env_id)
             upstream_id = upstream.id if upstream is not None else dep.upstream_env_id
+            upstream_kind = "cloned"
             if upstream is None:
                 # A shared upstream: wiring a new consumer of its outputs needs writer access to its
                 # space too, as creating the edge by hand does (§3.8).
                 await guard_env_id(session, user, upstream_id, min_role=Role.writer)
+                up_env, up_stack = (
+                    await session.execute(
+                        select(Environment, Stack)
+                        .join(Stack, Stack.id == Environment.stack_id)
+                        .where(Environment.id == upstream_id)
+                    )
+                ).one()
+                upstream_kind = "shared"
+                if up_stack.space_id == space_id and up_env.name == body.reference_name:
+                    # Not a genuinely shared env: the model of a stack left out of `stack_ids` —
+                    # e.g. the new region's app wired to the old region's network (§21.2).
+                    upstream_kind = "reference_of_uncloned_stack"
+                    t = by_ref[ref_id]
+                    warnings.append(
+                        {
+                            "stack": t.stack.name,
+                            "environment": env.name,
+                            "kind": "reference_upstream",
+                            "upstream": f"{up_stack.name}/{up_env.name}",
+                            "upstream_env_id": str(upstream_id),
+                        }
+                    )
             refs = (
                 (
                     await session.execute(
@@ -577,13 +612,14 @@ async def _clone(
                     "upstream_env_id": str(upstream_id),
                     "references": len(refs),
                     "via": "clone",
+                    "upstream_kind": upstream_kind,
                 },
             )
             edges.append(
                 {
                     "upstream_env_id": str(upstream_id),
                     "downstream_env_id": str(env.id),
-                    "shared_upstream": str(upstream is None).lower(),
+                    "upstream_kind": upstream_kind,
                 }
             )
 
@@ -607,6 +643,33 @@ async def _clone(
             )
         to_configure.extend({**where, "item": item} for item in t.to_configure)
         not_copied.extend({**where, **item} for item in t.not_copied)
+        if env.tier != t.ref.tier:
+            # A tier override keeps what was set up for the model's tier — its secret references
+            # (e.g. prod's vault paths), its explicit set attachments, its cloud integration —
+            # under a tier with other gates and other users allowed to apply (§2.4, §21.2).
+            set_names = {
+                vs.id: vs.name
+                for vs in (
+                    await session.execute(
+                        select(VariableSet).where(
+                            VariableSet.id.in_([a.variable_set_id for a in t.attachments])
+                        )
+                    )
+                ).scalars()
+            }
+            warnings.append(
+                {
+                    **where,
+                    "kind": "tier_changed",
+                    "reference_tier": t.ref.tier,
+                    "tier": env.tier,
+                    "secret_references": [
+                        v.name for v in t.variables if v.secret_source_id is not None
+                    ],
+                    "variable_sets": [set_names[a.variable_set_id] for a in t.attachments],
+                    "cloud_integration": t.cloud is not None and body.copy_cloud_integration,
+                }
+            )
 
     await record_audit(
         session,
@@ -620,6 +683,7 @@ async def _clone(
             "stacks": [t.stack.name for t in targets],
             "missing_secrets": missing_secrets,
             "not_copied": not_copied,
+            "warnings": warnings,
         },
     )
     return {
@@ -642,4 +706,5 @@ async def _clone(
         "missing_secrets": missing_secrets,
         "to_configure": to_configure,
         "not_copied": not_copied,
+        "warnings": warnings,
     }

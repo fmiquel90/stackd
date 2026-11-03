@@ -1909,16 +1909,36 @@ reference graph, with its `trigger_policy` and its `output_references` (mocks in
 - the downstream outside *C* → **not** copied: an existing environment never starts depending on the
   new one by side effect.
 The resulting edges mirror an acyclic subgraph plus edges from existing envs: no cycle can appear (the
-§3.8 DFS still runs).
+§3.8 DFS still runs). Each edge of the response carries `upstream_kind`: `cloned` (both ends new),
+`shared` (a genuinely shared env: its stack has no `reference_name` env, or it lives in another
+space), or `reference_of_uncloned_stack` — the upstream **is** a `reference_name` env of a stack of
+the space left out of an explicit `stack_ids`. The latter is wired like a shared upstream (nothing else
+exists to wire it to) but usually is not what was meant: the new region's `app` would read the **old**
+region's `network` outputs. It is therefore also listed in `warnings`.
+
+**Warnings** (preview and response, `warnings: [{stack, environment, kind, …}]`; they never block —
+the user decides in the review step, DESIGN §5.11):
+- `reference_upstream` (`upstream`: `stack/env`, `upstream_env_id`): an edge of kind
+  `reference_of_uncloned_stack` (above). Clone that stack too, or re-wire the edge afterwards.
+- `tier_changed` (`reference_tier`, `tier`, `secret_references`, `variable_sets`, `cloud_integration`):
+  a `tier` override moves the clone to another tier than its reference's (e.g. `prod` → `dev`). The
+  clone still carries what was set up for the reference's tier — its external secret references
+  (e.g. prod's vault paths), its explicit set attachments, its platform hooks and, when copied, its
+  cloud integration — now under a tier with other gates and other users allowed to apply (§2.4).
+  Each is named so the user checks it belongs in the new tier. Tier attachments re-select by
+  themselves (§3.4) and are not listed.
 
 Audit, same transaction: `environment.created` per environment (context `cloned_from`, `autodeploy`,
-`autodeploy_off_reason`), the existing
-actions for each copied item (`dependency.created`, `variable_set.attached`, `hook.created`,
-`notification_target.created`, `cloud_integration.created`), and one `environment.cloned` summary
-(context: reference name, new name, stacks, `missing_secrets`, `not_copied`). Response: the created
-environments (`id`, `stack_id`, `stack_name`, `name`, `tier`, `autodeploy`, `autodeploy_off_reason`,
-`label_sets`: the sets its labels select, `{name, new}` — `new` when the reference is not selected by
-it), the edges, `missing_secrets`, `to_configure`, `not_copied`.
+`autodeploy_off_reason`), the existing actions for each copied item, each with `cloned_from` (the id
+of the item copied, or of the reference env for an attachment or a cloud integration):
+`variable.created` (every copied env-level variable, secret references included — `scope: "env"`),
+`variable_set.attached`, `hook.created`, `notification_target.created`, `cloud_integration.created`,
+`dependency.created` (`via: "clone"`, `upstream_kind`); and one `environment.cloned` summary
+(context: reference name, new name, stacks, `missing_secrets`, `not_copied`, `warnings`). Response: the
+created environments (`id`, `stack_id`, `stack_name`, `name`, `tier`, `autodeploy`,
+`autodeploy_off_reason`, `label_sets`: the sets its labels select, `{name, new}` — `new` when the
+reference is not selected by it), the edges (`upstream_env_id`, `downstream_env_id`, `upstream_kind`),
+`missing_secrets`, `to_configure`, `not_copied`, `warnings`.
 
 ### 21.3 Model
 

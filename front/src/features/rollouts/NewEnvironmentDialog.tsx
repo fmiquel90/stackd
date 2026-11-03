@@ -3,7 +3,14 @@ import { keepPreviousData, useMutation, useQueries, useQuery, useQueryClient } f
 import { Link } from "react-router-dom";
 import { Copy } from "lucide-react";
 import { ApiError } from "@/api/client";
-import { environmentClones, stacks, type CloneRequest, type CloneResult } from "@/api/resources";
+import {
+  environmentClones,
+  stacks,
+  type CloneRequest,
+  type CloneResult,
+  type CloneUpstreamKind,
+  type CloneWarning,
+} from "@/api/resources";
 import type { TierDef } from "@/api/types";
 import { Button } from "@/ui/Button";
 import { Dialog, DialogContent, DialogTrigger } from "@/ui/overlays";
@@ -144,6 +151,56 @@ export function CloneNotes({ result }: { result: CloneResult }) {
         </ul>
       )}
     </div>
+  );
+}
+
+const UPSTREAM_KIND: Record<CloneUpstreamKind, string | null> = {
+  cloned: null,
+  shared: "shared upstream",
+  reference_of_uncloned_stack: "model of a stack not cloned",
+};
+
+function kept(w: Extract<CloneWarning, { kind: "tier_changed" }>): string[] {
+  const out: string[] = [];
+  if (w.secret_references.length) out.push(`secret references ${w.secret_references.join(", ")}`);
+  if (w.variable_sets.length) out.push(`set attachments ${w.variable_sets.join(", ")}`);
+  if (w.cloud_integration) out.push("cloud integration");
+  return out;
+}
+
+/** What to check before creating (SPECS §21.2 `warnings`), in words — the review step's banner. */
+export function CloneWarnings({ warnings }: { warnings: CloneWarning[] }) {
+  if (warnings.length === 0) return null;
+  return (
+    <Banner tone="info" title="Check before creating">
+      <ul className="flex flex-col gap-1 text-[12px]">
+        {warnings.map((w) => (
+          <li key={`${w.kind}-${w.stack}`}>
+            <span className="font-semibold">Warning: </span>
+            {w.kind === "reference_upstream" ? (
+              <>
+                {where(w)} will depend on <span className="font-data">{w.upstream}</span> — the model itself,
+                in a stack not cloned, not a shared environment (e.g. the old region&apos;s network). Clone
+                that stack too, or re-wire the edge afterwards.
+              </>
+            ) : (
+              <>
+                {where(w)} moves from tier <span className="font-data">{w.reference_tier}</span> to{" "}
+                <span className="font-data">{w.tier}</span> but keeps the model&apos;s hooks
+                {kept(w).length > 0 && (
+                  <>
+                    {" "}
+                    and <span className="font-data">{kept(w).join("; ")}</span>
+                  </>
+                )}{" "}
+                — set up for <span className="font-data">{w.reference_tier}</span>; check they belong in{" "}
+                <span className="font-data">{w.tier}</span>.
+              </>
+            )}
+          </li>
+        ))}
+      </ul>
+    </Banner>
   );
 }
 
@@ -453,6 +510,7 @@ export function NewEnvironmentDialog({
                 secret values, mock or fallback apply permissions.
               </p>
             </section>
+            <CloneWarnings warnings={shown.warnings} />
             <CloneNotes result={shown} />
             {shown.edges.length > 0 && (
               <section aria-label="Dependencies">
@@ -461,7 +519,9 @@ export function NewEnvironmentDialog({
                   {shown.edges.map((d) => (
                     <li key={`${d.upstream_env_id}-${d.downstream_env_id}`}>
                       {envName(d.upstream_env_id)} → {envName(d.downstream_env_id)}
-                      {d.shared_upstream === "true" && <span className="text-muted"> · shared upstream</span>}
+                      {UPSTREAM_KIND[d.upstream_kind] && (
+                        <span className="text-muted"> · {UPSTREAM_KIND[d.upstream_kind]}</span>
+                      )}
                     </li>
                   ))}
                 </ul>

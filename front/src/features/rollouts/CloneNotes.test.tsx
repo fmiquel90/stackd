@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { render, screen } from "@testing-library/react";
 import type { CloneResult } from "@/api/resources";
-import { CloneNotes } from "./NewEnvironmentDialog";
+import { CloneNotes, CloneWarnings } from "./NewEnvironmentDialog";
 
 const env = (stack: string, extra: Partial<CloneResult["environments"][number]> = {}) => ({
   id: `id-${stack}`,
@@ -31,6 +31,7 @@ const RESULT: CloneResult = {
   edges: [],
   missing_secrets: [],
   to_configure: [],
+  warnings: [],
   not_copied: [
     {
       stack: "net",
@@ -59,6 +60,46 @@ describe("CloneNotes", () => {
     );
     expect(screen.getByText(/Autodeploy off in/)).toHaveTextContent(
       "net/prod-euw3: secrets or settings left to fill",
+    );
+  });
+});
+
+describe("CloneWarnings", () => {
+  it("renders nothing without warnings", () => {
+    const { container } = render(<CloneWarnings warnings={[]} />);
+    expect(container).toBeEmptyDOMElement();
+  });
+
+  it("flags an edge from an uncloned stack's model and a tier change, in words", () => {
+    render(
+      <CloneWarnings
+        warnings={[
+          {
+            stack: "app",
+            environment: "prod-euw3",
+            kind: "reference_upstream",
+            upstream: "network/prod",
+            upstream_env_id: "e1",
+          },
+          {
+            stack: "app",
+            environment: "prod-euw3",
+            kind: "tier_changed",
+            reference_tier: "prod",
+            tier: "dev",
+            secret_references: ["db_password"],
+            variable_sets: [],
+            cloud_integration: false,
+          },
+        ]}
+      />,
+    );
+    const items = screen.getAllByRole("listitem");
+    expect(items[0]).toHaveTextContent(
+      "Warning: app/prod-euw3 will depend on network/prod — the model itself, in a stack not cloned",
+    );
+    expect(items[1]).toHaveTextContent(
+      "Warning: app/prod-euw3 moves from tier prod to dev but keeps the model's hooks and secret references db_password",
     );
   });
 });

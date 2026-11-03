@@ -591,6 +591,17 @@ async def test_per_item_copies_and_their_audit(client: httpx.AsyncClient) -> Non
     )
     new_hooks = (await client.get(f"/api/v1/environments/{new['app']}/hooks", headers=admin)).json()
     assert any(e.target_id == uuid.UUID(new_hooks[0]["id"]) for e in by_action["hook.created"])
+    # Every copied item names what it was copied from, as the copied variable does.
+    copied_var = next(
+        e for e in by_action["variable.created"] if e.target_id == uuid.UUID(copied["id"])
+    )
+    assert copied_var.context["cloned_from"] == ref.json()["id"]
+    assert copied_var.context["scope"] == "env"
+    for action in ("hook.created", "notification_target.created"):
+        new_ids = {uuid.UUID(new_hooks[0]["id"]), uuid.UUID(targets[0]["id"])}
+        assert all(
+            e.context.get("cloned_from") for e in by_action[action] if e.target_id in new_ids
+        )
 
 
 async def test_dry_run_writes_no_rows_and_no_audit(client: httpx.AsyncClient) -> None:
@@ -613,3 +624,103 @@ async def test_dry_run_writes_no_rows_and_no_audit(client: httpx.AsyncClient) ->
     r = await _clone(client, admin, ids["space"], dry_run=True)
     assert r.status_code == 201 and r.json()["dry_run"] is True
     assert await counts() == before
+
+
+async def test_an_edge_from_an_uncloned_stack_is_flagged(client: httpx.AsyncClient) -> None:
+    """With an explicit `stack_ids` subset, an edge whose upstream is the *reference* env of a stack
+    left out is re-created from that very env — e.g. the new region's app reading the old region's
+    network. That is not a genuinely shared env: it is labelled apart and warned about."""
+    admin = await login(client, "admin")
+    ids = await _world(client, admin, "clone-subset")
+
+    full = await _clone(client, admin, ids["space"], dry_run=True)
+    assert full.status_code == 201, full.text
+    kinds = {e["upstream_env_id"]: e["upstream_kind"] for e in full.json()["edges"]}
+    assert kinds[ids["dns_global"]] == "shared"  # dns has no `prod`: genuinely shared
+    assert sorted(kinds.values()) == ["cloned", "shared"]
+    assert full.json()["warnings"] == []
+
+    r = await _clone(client, admin, ids["space"], stack_ids=[ids["app"]])
+    assert r.status_code == 201, r.text
+    out = r.json()
+    (edge,) = out["edges"]
+    assert edge["upstream_env_id"] == ids["net_prod"]
+    assert edge["upstream_kind"] == "reference_of_uncloned_stack"
+    assert out["warnings"] == [
+        {
+            "stack": "clone-subset-app",
+            "environment": "prod-euw3",
+            "kind": "reference_upstream",
+            "upstream": "clone-subset-network/prod",
+            "upstream_env_id": ids["net_prod"],
+        }
+    ]
+    (dep,) = await _audits(
+        action="dependency.created", target_id=uuid.UUID(edge["downstream_env_id"])
+    )
+    assert dep.context["upstream_kind"] == "reference_of_uncloned_stack"
+    (summary,) = [
+        e
+        for e in await _audits(action="environment.cloned")
+        if e.context["stacks"] == ["clone-subset-app"]
+    ]
+    assert summary.context["warnings"] == out["warnings"]
+
+
+async def test_a_tier_override_away_from_the_reference_is_flagged(
+    client: httpx.AsyncClient,
+) -> None:
+    """prod → dev keeps prod's secret references, explicit set attachments and (if copied) cloud
+    integration under a tier with other gates: the preview and the response say so."""
+    admin = await login(client, "admin")
+    ids = await _world(client, admin, "clone-tier")
+    app_prod = ids["app_prod"]
+    src = await client.post(
+        f"/api/v1/spaces/{ids['space']}/secret-sources",
+        headers=admin,
+        json={"name": "vault", "provider": "proton_pass", "bootstrap_secret": "pat_xyz"},
+    )
+    assert src.status_code == 201, src.text
+    r = await client.post(
+        f"/api/v1/environments/{app_prod}/variables",
+        headers=admin,
+        json={
+            "kind": "terraform",
+            "name": "db_password",
+            "secret_source_id": src.json()["id"],
+            "secret_ref": "pass://prod/db/password",
+        },
+    )
+    assert r.status_code == 201, r.text
+    await _var(client, admin, app_prod, "LOG_LEVEL", "info")
+    vset = await _set(client, admin, ids["space"], "tier-prod-extra", {"x": "1"})
+    assert (
+        await client.post(
+            f"/api/v1/variable-sets/{vset}/attachments",
+            headers=admin,
+            json={"target_kind": "environment", "target_id": app_prod},
+        )
+    ).status_code == 201
+
+    same = await _clone(client, admin, ids["space"], overrides={"tier": "prod"}, dry_run=True)
+    assert same.status_code == 201 and same.json()["warnings"] == []  # not a change
+
+    preview = await _clone(client, admin, ids["space"], overrides={"tier": "dev"}, dry_run=True)
+    assert preview.status_code == 201, preview.text
+    warnings = {w["stack"]: w for w in preview.json()["warnings"]}
+    assert warnings["clone-tier-app"] == {
+        "stack": "clone-tier-app",
+        "environment": "prod-euw3",
+        "kind": "tier_changed",
+        "reference_tier": "prod",
+        "tier": "dev",
+        "secret_references": ["db_password"],
+        "variable_sets": ["tier-prod-extra"],
+        "cloud_integration": False,
+    }
+    assert warnings["clone-tier-network"]["secret_references"] == []
+    assert set(warnings) == {"clone-tier-app", "clone-tier-network"}
+
+    created = await _clone(client, admin, ids["space"], overrides={"tier": "dev"})
+    assert created.status_code == 201, created.text
+    assert created.json()["warnings"] == preview.json()["warnings"]

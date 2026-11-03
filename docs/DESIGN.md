@@ -649,9 +649,15 @@ preselected as the model — the same label in both places; writer+): a dialog, 
   named when not all), the model's items **not copied** because they would shadow a key of such a set
   (variable or set attachment, the key and the set named), and the envs whose **autodeploy is forced
   off** (with the reason: protected, or secrets/settings left to fill). Text only — no colour carries it.
-- **Preview before create** (a `dry_run` of the same request): per stack, what is copied and what is
+- **Preview before create** (a `dry_run` of the same request): first, the response's `warnings` as
+  an `info` banner "Check before creating", one line each starting with "Warning:" — an edge from the
+  model of a stack left out of the checklist ("app/prod-euw3 will depend on network/prod — the model
+  itself, in a stack not cloned, not a shared environment"), a tier override away from the model's
+  tier (from → to, and the secret references, set attachments and cloud integration it keeps). Then per
+  stack, what is copied and what is
   not (§21.2 table, as text, plus the hint above), the dependency edges that will be created
-  (upstream → downstream, "shared upstream" marked), and what the user will still have to fill
+  (upstream → downstream, marked "shared upstream" or "model of a stack not cloned" in words — never
+  the same label for both), and what the user will still have to fill
   (sensitive variables — each with the lower-scope value it resolves to meanwhile, when there is one
   — static fallbacks of secret references, cloud integration). Create = one request.
 - After create: a summary with the `missing_secrets` as a checklist linking to each env's Inputs tab,
