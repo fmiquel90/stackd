@@ -1387,6 +1387,13 @@ ALTER TABLE variables ADD CONSTRAINT variables_one_value_source CHECK (
 
 A variable with `secret_source_id` is treated as `sensitive=true` regardless of the flag.
 
+**A reference stays in its space.** `secret_source_id` must name a source of the variable's own
+space — the stack's for a stack or environment variable, the set's for a variable-set variable — on
+create and on every update that re-points it; otherwise **404** `Secret source not found` (another
+space's source is answered like a missing one, its existence not confirmed). At claim, a reference
+whose source is not in the environment's space (a row predating the check) fails the run closed,
+`secret_unavailable:{var}`, with no fallback.
+
 ### 15.2 Resolution order (real > fallback > error)
 
 At claim build (`build_job_payload`, §7.2), reference variables resolve **after** the existing

@@ -8,9 +8,35 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.crypto import encrypt
 from app.errors import ProblemException
+from app.models.secret_source import SecretSource
+from app.models.stack import Stack
 from app.models.variable import Variable
+from app.models.variable_set import VariableSet
 from app.variables.schemas import VariableCreate, VariableUpdate
 from app.variables.values import set_reference, store_value
+
+
+async def _require_source_in_space(
+    session: AsyncSession,
+    source_id: uuid.UUID,
+    *,
+    stack_id: uuid.UUID | None,
+    variable_set_id: uuid.UUID | None,
+) -> None:
+    """A variable references a secret source of its own space only (§15.1): the stack's, or the
+    variable set's. Another space's source is answered like a missing one — 404, its existence
+    not confirmed."""
+    if variable_set_id is not None:
+        vset = await session.get(VariableSet, variable_set_id)
+        space_id = vset.space_id if vset is not None else None
+    else:
+        stack = await session.get(Stack, stack_id) if stack_id is not None else None
+        space_id = stack.space_id if stack is not None else None
+    source = await session.get(SecretSource, source_id)
+    if source is None or space_id is None or source.space_id != space_id:
+        raise ProblemException(
+            404, "Secret source not found", "No such secret source in this variable's space."
+        )
 
 
 async def create_variable(
@@ -30,6 +56,9 @@ async def create_variable(
         hcl=body.hcl,
     )
     if body.secret_source_id is not None:
+        await _require_source_in_space(
+            session, body.secret_source_id, stack_id=stack_id, variable_set_id=variable_set_id
+        )
         set_reference(
             var,
             source_id=body.secret_source_id,
@@ -59,12 +88,18 @@ async def get_variable(session: AsyncSession, var_id: uuid.UUID) -> Variable:
     return var
 
 
-def update_variable(var: Variable, body: VariableUpdate) -> None:
+async def update_variable(session: AsyncSession, var: Variable, body: VariableUpdate) -> None:
     if body.hcl is not None:
         var.hcl = body.hcl
 
     # Re-point at (or onto) an external secret reference (§15).
     if body.secret_source_id is not None:
+        await _require_source_in_space(
+            session,
+            body.secret_source_id,
+            stack_id=var.stack_id,
+            variable_set_id=var.variable_set_id,
+        )
         set_reference(
             var,
             source_id=body.secret_source_id,

@@ -245,3 +245,123 @@ async def test_fallback_appearing_at_apply_is_gated(
     assert apply_claim.status_code == 204
     failed = (await client.get(f"/api/v1/runs/{run['id']}", headers=admin)).json()
     assert failed["state"] == "failed"
+
+
+async def _in_space(client: httpx.AsyncClient, admin: dict, space: str, name: str) -> str:
+    r = await client.post(
+        "/api/v1/stacks",
+        headers=admin,
+        json={
+            "space_id": space,
+            "name": name,
+            "repo_url": "file:///repos/x",
+            "tool_version": "1.12.0",
+        },
+    )
+    assert r.status_code == 201, r.text
+    return str(r.json()["id"])
+
+
+async def test_a_variable_cannot_reference_another_spaces_source(
+    client: httpx.AsyncClient,
+) -> None:
+    """§15.1: a reference names a source of the variable's own space — on the stack, environment
+    and variable-set paths, at create and at re-point; another space's source reads as missing."""
+    admin = await login(client, "admin")
+    space_a = (await client.post("/api/v1/spaces", headers=admin, json={"name": "src-a"})).json()
+    space_b = (await client.post("/api/v1/spaces", headers=admin, json={"name": "src-b"})).json()
+    own = await _make_source(client, admin, space_a["id"], "proton-own")
+    foreign = await _make_source(client, admin, space_b["id"], "proton-foreign")
+    stack = await _in_space(client, admin, space_a["id"], "src-a-stack")
+    env_id = await make_env(client, admin, stack, "dev", "dev")
+    vset = await client.post(
+        "/api/v1/variable-sets",
+        headers=admin,
+        json={"name": "src-a-set", "space_id": space_a["id"]},
+    )
+    assert vset.status_code == 201, vset.text
+    set_id = vset.json()["id"]
+
+    def ref(name: str, source: str) -> dict:
+        return {
+            "kind": "environment",
+            "name": name,
+            "secret_source_id": source,
+            "secret_ref": f"pass://vault/{name}/value",
+        }
+
+    collections = (
+        f"/api/v1/stacks/{stack}/variables",
+        f"/api/v1/environments/{env_id}/variables",
+        f"/api/v1/variable-sets/{set_id}/variables",
+    )
+    for i, path in enumerate(collections):
+        for source in (foreign, "01a1a000-0000-7000-8000-000000000000"):  # another space, none
+            r = await client.post(path, headers=admin, json=ref(f"TOKEN_{i}", source))
+            assert r.status_code == 404, (path, r.text)
+            assert r.json()["title"] == "Secret source not found"
+        created = await client.post(path, headers=admin, json=ref(f"TOKEN_{i}", own))
+        assert created.status_code == 201, (path, created.text)
+        plain = await client.post(
+            path, headers=admin, json={"kind": "environment", "name": f"PLAIN_{i}", "value": "v"}
+        )
+        assert plain.status_code == 201, plain.text
+
+        # Re-pointing a reference, or turning a plain variable into one: the same rule.
+        for var in (created.json(), plain.json()):
+            r = await client.patch(
+                f"{path}/{var['id']}", headers=admin, json={"secret_source_id": foreign}
+            )
+            assert r.status_code == 404, (path, r.text)
+        r = await client.patch(
+            f"{path}/{plain.json()['id']}",
+            headers=admin,
+            json={"secret_source_id": own, "secret_ref": "pass://vault/x/value"},
+        )
+        assert r.status_code == 200, (path, r.text)
+        assert r.json()["secret_source_id"] == own
+
+
+async def test_a_cross_space_reference_fails_the_run_closed(
+    client: httpx.AsyncClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Defense in depth: a cross-space reference written before the API checked it is never
+    resolved at claim — the run fails closed, the other space's secret is never fetched."""
+    import uuid
+
+    from app.db import SessionLocal
+    from app.models.variable import Variable
+
+    admin = await login(client, "admin")
+    wh = await register_worker(client, admin, "pool-xspace")
+    other = (await client.post("/api/v1/spaces", headers=admin, json={"name": "src-x"})).json()
+    foreign = await _make_source(client, admin, other["id"], "proton-x")
+    stack = await make_stack(client, admin, "xspace-stack")
+    env_id = await make_env(client, admin, stack, "dev", "dev")
+    var = await _make_ref_var(
+        client,
+        admin,
+        env_id,
+        await _make_source(client, admin, await _space_id(client, admin, stack), "proton-y"),
+        name="dbpass",
+        fallback_mode="static",
+        fallback="fb",
+    )
+    async with SessionLocal() as session:  # as a row from before the check would be
+        row = await session.get(Variable, uuid.UUID(var["id"]))
+        assert row is not None
+        row.secret_source_id = uuid.UUID(foreign)
+        await session.commit()
+
+    fetched: list[str] = []
+
+    async def fetch(src, ref):  # type: ignore[no-untyped-def]
+        fetched.append(src.name)
+        return "other-space-secret"
+
+    monkeypatch.setattr(providers, "fetch_secret", fetch)
+    run = (await client.post(f"/api/v1/environments/{env_id}/runs", headers=admin, json={})).json()
+    assert (await client.post("/worker/v1/jobs/claim", headers=wh)).status_code == 204
+    got = (await client.get(f"/api/v1/runs/{run['id']}", headers=admin)).json()
+    assert got["state"] == "failed" and got["error"] == "secret_unavailable:dbpass"
+    assert fetched == []
