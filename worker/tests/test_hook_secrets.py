@@ -218,6 +218,7 @@ def _job(phase: str, url: str, sha: str | None, tofu: Path, **extra: Any) -> dic
     return {
         "job_id": "run-1",
         "phase": phase,
+        "repo_hooks_at_apply": True,  # a tier allowing repo hooks at the apply stages (§8.3)
         "environment": {
             "tool": "opentofu",
             "repo_url": url,
@@ -240,7 +241,8 @@ def _plan_and_apply(
     client = _Client()
     api = cast(ApiClient, client)
     settings = cast(
-        Settings, SimpleNamespace(workspace_root=str(tmp_path / "ws"), leak_action="warn")
+        Settings,
+        SimpleNamespace(runner="local", workspace_root=str(tmp_path / "ws"), leak_action="warn"),
     )
     both = both or {}
     main.handle_plan(api, _job("plan", url, None, tofu, save_plan=True, **both, **plan), settings)
@@ -364,7 +366,9 @@ def test_command_run_reads_the_tfvars(tmp_path: Path, tofu: Path) -> None:
     job = _job("command", url, sha, tofu, cred_phase="apply", command={"name": "refresh"})
     job["cloud_credentials"] = CLOUD
     main.handle_command_run(
-        cast(ApiClient, client), job, cast(Settings, SimpleNamespace(workspace_root=str(tmp_path)))
+        cast(ApiClient, client),
+        job,
+        cast(Settings, SimpleNamespace(runner="local", workspace_root=str(tmp_path))),
     )
     assert client.events[-1][0] == "phase_finished", client.events
     assert _calls(tofu) == ["init tfvars=yes token=yes", "refresh tfvars=yes token=yes"]
@@ -420,7 +424,7 @@ def test_real_tofu_plans_applies_and_runs_commands(tmp_path: Path) -> None:
         main.handle_command_run(
             cast(ApiClient, client),
             job,
-            cast(Settings, SimpleNamespace(workspace_root=str(tmp_path / "ws"))),
+            cast(Settings, SimpleNamespace(runner="local", workspace_root=str(tmp_path / "ws"))),
         )
         assert client.events[-1] == ("phase_finished", {"result": {"command": name}}), name
 

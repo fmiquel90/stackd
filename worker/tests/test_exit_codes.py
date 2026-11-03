@@ -104,7 +104,7 @@ def _run(
         "command": main.handle_command_run,
     }
     client = _Client()
-    settings = SimpleNamespace(workspace_root=str(tmp_path), leak_action="warn")
+    settings = SimpleNamespace(runner="local", workspace_root=str(tmp_path), leak_action="warn")
     handler[phase](cast(ApiClient, client), job, cast(Settings, settings))
     return client, tofu
 

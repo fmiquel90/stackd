@@ -24,6 +24,7 @@ from app.models.environment import Environment
 from app.models.oidc import CloudIntegration
 from app.models.run import Run
 from app.models.stack import Stack
+from app.models.tier import Tier
 from app.models.worker import Worker
 from app.oidc.precedence import split_shadowed
 from app.runs.artifacts import SAVED_PLAN_TYPES
@@ -32,6 +33,7 @@ from app.runs.transition import transition
 from app.statebackend.tokens import StateScope, mint_state_token
 from app.variables.resolution import ResolvedVariable, provenance_snapshot, resolve_variables
 from app.workers.hooks import platform_hooks
+from app.workers.tools import SQL_WORKER_CAN_RUN
 
 # Derived from ACTIVE_STATES so the claim guard can never drift from the one_active_run_per_env
 # index / the enum (a past bug: `running` was added to both but not here).
@@ -44,11 +46,13 @@ _SELECT_CANDIDATE = text(
     SELECT r.id AS run_id, r.state AS run_state
     FROM runs r
     JOIN environments e ON e.id = r.environment_id
+    JOIN stacks s ON s.id = e.stack_id
     WHERE r.state IN ('queued', 'confirmed')
       AND e.locked = false
       -- NULLIF guards against JSONB 'null' (SQLAlchemy writes Python None as JSON null by default).
       AND COALESCE(NULLIF(e.labels, 'null'::jsonb), '{{}}'::jsonb) <@ CAST(:labels AS jsonb)
-      AND (
+      -- Only a run whose stack's tool version this worker can run (§7.4).
+      {SQL_WORKER_CAN_RUN}      AND (
         r.state = 'queued'
         OR r.worker_id = :wid
         OR r.confirmed_at < now() - make_interval(secs => :affinity)
@@ -71,7 +75,10 @@ async def claim_one(session: AsyncSession, worker: Worker, affinity_seconds: int
     row = (
         await session.execute(
             _SELECT_CANDIDATE.bindparams(
-                wid=worker.id, labels=json.dumps(worker.labels or {}), affinity=affinity_seconds
+                wid=worker.id,
+                labels=json.dumps(worker.labels or {}),
+                tools=json.dumps(worker.tools) if worker.tools is not None else None,
+                affinity=affinity_seconds,
             )
         )
     ).first()
@@ -129,7 +136,7 @@ def withholds_secrets(run: Run) -> bool:
     code is a pull request's, which nobody has reviewed, and repo code runs inside tofu (`data
     "external"`, provisioners) with everything tofu gets. A drift run is a proposed run too, but it
     plans the environment's last applied commit (§19.2) — code that already ran with those secrets
-    — so it keeps them. The per-environment opt-in of §13 is not implemented: always withheld."""
+    — so it keeps them. No per-environment opt-in: always withheld (§13, decided)."""
     return run.type == RunType.proposed and not run.is_drift
 
 
@@ -328,6 +335,9 @@ async def build_job_payload(session: AsyncSession, run: Run) -> dict:
         "hcl_tfvars": hcl_tfvars,  # §3.4 — verbatim HCL values, written to a separate .auto.tfvars
         "mask_values": mask_values,
         "hooks": await platform_hooks(session, stack_id=stack.id, env_id=env.id),
+        # §8.3: may the repo's own hooks run at before_apply/after_apply on this env's tier? Off
+        # unless the tier says so (a missing tier row: off).
+        "repo_hooks_at_apply": await _repo_hooks_at_apply(session, env),
         "backend": backend,  # §11 — the managed HTTP backend (None when unmanaged)
         # Unmanaged state only: a repo-relative `-backend-config=<file>` and/or inline key=value
         # `-backend-config` settings passed at init.
@@ -337,6 +347,13 @@ async def build_job_payload(session: AsyncSession, run: Run) -> dict:
         "resolved_inputs": {f"TF_VAR_{k}": v for k, v in dep.resolved_inputs.items()},
         "mock_inputs": {f"TF_VAR_{k}": v for k, v in dep.mock_inputs.items()},
     }
+
+
+async def _repo_hooks_at_apply(session: AsyncSession, env: Environment) -> bool:
+    allowed = (
+        await session.execute(select(Tier.repo_hooks_at_apply).where(Tier.name == env.tier))
+    ).scalar_one_or_none()
+    return bool(allowed)
 
 
 async def _cloud_integration(session: AsyncSession, env: Environment) -> CloudIntegration | None:

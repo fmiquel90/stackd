@@ -79,6 +79,11 @@ jobs:
         run: uv run ruff check .
       - name: Format check (ruff)
         run: uv run ruff format --check .
+      # The docker runner's tests (SPECS §7.4) run real containers on the runner's Docker daemon.
+      - name: Test images for the docker runner
+        run: |
+          docker pull alpine:3.20
+          docker build -f tests/docker/tofu-test.Dockerfile -t stackd-test/tofu:1.12.2 tests/docker
       - name: Tests (pytest)
         run: uv run pytest -q
 

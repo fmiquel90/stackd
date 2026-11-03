@@ -19,7 +19,7 @@ export function NewStackDialog({ spaceId, spaceName }: { spaceId: string; spaceN
     name: "",
     repo_url: "",
     tool: "opentofu",
-    tool_version: "1.12.0",
+    tool_version: "1.12",
     project_root: "",
   });
   const [created, setCreated] = useState<Stack | null>(null);
@@ -49,7 +49,7 @@ export function NewStackDialog({ spaceId, spaceName }: { spaceId: string; spaceN
       setCreated(null);
       setCheck(null);
       create.reset();
-      setForm({ name: "", repo_url: "", tool: "opentofu", tool_version: "1.12.0", project_root: "" });
+      setForm({ name: "", repo_url: "", tool: "opentofu", tool_version: "1.12", project_root: "" });
     }
   };
 

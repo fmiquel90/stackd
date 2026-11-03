@@ -16,7 +16,12 @@ from agent.client import ApiClient
 from agent.config import Settings
 from agent.logging import get_logger, setup as setup_logging
 from agent.masking import Masker, mask_plan_json
+from agent.docker_engine import DockerEngine
+from agent.docker_runner import DockerRunner
+from agent.tools import pick
 from agent.runner import (
+    LOCAL,
+    Runner,
     _DEFAULT_TIMEOUT_SECONDS,
     LogStreamer,
     run_command,
@@ -60,17 +65,55 @@ _REPO_ENV_ALLOWLIST = frozenset(
 _WORKER_ENV_PREFIX = "STACKD_"
 
 
-def _job_environ() -> dict[str, str]:
-    """Base process env for tofu and platform hooks: the worker's, minus the agent's own settings
-    (§7.4, §8.3). The rest stays — PATH and locale, proxies and CA, TF_* (plugin cache, …),
-    provider settings — so no provider or check tool loses what it needs."""
+# What a `docker` runner container gets of the worker's own environment (§7.4): the egress proxy
+# settings and the locale — nothing else. Host paths (PATH, HOME, a CA bundle, TF_* caches) mean
+# nothing in the image, and every other host variable stays on the host.
+_DOCKER_ENV_ALLOWLIST = frozenset(
+    {
+        *("HTTP_PROXY", "HTTPS_PROXY", "NO_PROXY", "ALL_PROXY"),
+        *("http_proxy", "https_proxy", "no_proxy", "all_proxy"),
+        *("LANG", "LANGUAGE", "TZ"),
+    }
+)
+
+
+def _docker_environ() -> dict[str, str]:
+    return {
+        k: v for k, v in os.environ.items() if k in _DOCKER_ENV_ALLOWLIST or k.startswith("LC_")
+    }
+
+
+def _job_environ(runner: str = "local") -> dict[str, str]:
+    """Base process env for tofu and platform hooks. `local`: the worker's, minus the agent's own
+    settings (§7.4, §8.3) — the rest stays (PATH and locale, proxies and CA, TF_* plugin cache,
+    provider settings) so no provider or check tool loses what it needs. `docker`: the proxies and
+    the locale only — the container is not the worker's host."""
+    if runner == "docker":
+        return _docker_environ()
     return {k: v for k, v in os.environ.items() if not k.startswith(_WORKER_ENV_PREFIX)}
 
 
-def _repo_environ() -> dict[str, str]:
+def _repo_environ(runner: str = "local") -> dict[str, str]:
     """Base process env for repo hooks: the allowlisted variables of the worker's own environment
-    only (§8.3). The run's non-sensitive `env` is layered on top by the caller."""
+    only (§8.3) — on the docker runner, the container's allowlist. The run's non-sensitive `env`
+    is layered on top by the caller."""
+    if runner == "docker":
+        return _docker_environ()
     return {k: v for k, v in os.environ.items() if k in _REPO_ENV_ALLOWLIST or k.startswith("LC_")}
+
+
+def _make_runner(settings: Settings, job: dict[str, Any], ws: Workspace) -> Runner:
+    """The job's runner (§7.4): `local`, or a `docker` runner on the image pinned for the stack's
+    tool version (pulled by digest when the daemon does not have it yet)."""
+    if settings.runner != "docker":
+        return LOCAL
+    env_info = job["environment"]
+    version = pick(settings.available_tools(), env_info["tool"], env_info["tool_version"])
+    image = settings.runner_images[f"{env_info['tool']}:{version}"]
+    engine = DockerEngine(settings.docker_host)
+    if not engine.image_exists(image):
+        engine.pull(image)
+    return DockerRunner(engine, image, ws.path, job["job_id"], settings.docker_limits)
 
 
 def _secret_leak_in_outputs(doc: str, masker: Masker) -> str | None:
@@ -111,6 +154,39 @@ def _merge_hooks(platform: dict, repo: dict) -> dict[str, list[dict]]:
     for stage in set(platform) | set(repo):
         merged[stage] = list(platform.get(stage, [])) + list(repo.get(stage, []))
     return merged
+
+
+_APPLY_STAGES = ("before_apply", "after_apply")
+
+
+def _apply_repo_hook_policy(
+    hooks: dict[str, list[dict]],
+    job: dict[str, Any],
+    checks: list[dict[str, Any]],
+    streamer: LogStreamer,
+) -> dict[str, list[dict]]:
+    """Repo hooks at the apply stages run only on a tier that allows them (`repo_hooks_at_apply`,
+    §8.3): they would run next to the apply role's credentials. Otherwise each is skipped with a
+    visible warning — a `warn` check result and a log line — and the platform hooks still run.
+    An absent flag (an older API) counts as not allowed: fail closed."""
+    if job.get("repo_hooks_at_apply") is True:
+        return hooks
+    out = dict(hooks)
+    for stage in _APPLY_STAGES:
+        kept = [h for h in hooks.get(stage, []) if h.get("source") != "repo"]
+        for h in hooks.get(stage, []):
+            if h.get("source") == "repo":
+                detail = "skipped: this tier does not allow repo hooks at the apply stages"
+                checks.append(
+                    {"name": h["name"], "status": "warn", "detail": detail, "stage": stage}
+                )
+                streamer.emit(
+                    "applying",
+                    [f"[stackd] repo hook {h['name']} {detail}"],
+                    section=f"hook:{h['name']}",
+                )
+        out[stage] = kept
+    return out
 
 
 def _summary_from_events(events: list[dict]) -> dict:
@@ -206,13 +282,13 @@ _STATIC_AWS_CREDENTIAL_VARS = frozenset(
 )
 
 
-def _run_env(ws: Workspace, job: dict[str, Any]) -> dict[str, str]:
+def _run_env(ws: Workspace, job: dict[str, Any], runner: str = "local") -> dict[str, str]:
     """`_job_environ`, then the run's env, its sensitive env and the OIDC workload env (§10.4):
     what platform hooks run with, and tofu with the state backend's settings on top. With OIDC
     credentials, the worker host's own AWS credentials (a mounted ~/.aws on the trusted-dev `local`
     runner) are dropped: the role the integration names is the job's only identity (§10.5). The
     API drops the run's static AWS credentials at claim for the same reason."""
-    base = _job_environ()
+    base = _job_environ(runner)
     if job.get("cloud_credentials"):
         base = {k: v for k, v in base.items() if k not in _STATIC_AWS_CREDENTIAL_VARS}
     return {
@@ -332,6 +408,7 @@ def handle_plan(
     tool = _tool_bin(env_info["tool"])
 
     try:
+        runner = _make_runner(settings, job, ws)
         cwd = ws.git_clone(
             env_info["repo_url"],
             env_info.get("commit_sha"),
@@ -344,9 +421,9 @@ def handle_plan(
             ws.write_backend_override(cwd)
         hooks = _merge_hooks(job.get("hooks", {}), ws.load_stackd_yml(cwd))
 
-        platform_env = _run_env(ws, job)
+        platform_env = _run_env(ws, job, runner.name)
         repo_env = {
-            **_repo_environ(),
+            **_repo_environ(runner.name),
             **job.get("env", {}),
         }  # no secrets / cloud creds to repo hooks (§8.3)
         tf_env = _tofu_env(platform_env, backend)  # + state-backend creds, for tofu only
@@ -369,6 +446,7 @@ def handle_plan(
                 phase="planning",
                 streamer=streamer,
                 platform_files=lambda: _cloud_token(ws, job),
+                runner=runner,
             )
             checks.extend({**r, "stage": name} for r in results)
             return aborted
@@ -383,6 +461,7 @@ def handle_plan(
                 phase="planning",
                 section=None,
                 streamer=streamer,
+                runner=runner,
             )
         if init_rc != 0:
             return _job_failed(client, job_id, "init", checks, error="init failed")
@@ -416,6 +495,7 @@ def handle_plan(
                 phase="planning",
                 section=None,
                 streamer=streamer,
+                runner=runner,
             )
         if code not in (0, 2):
             # Only 0 and 2 are a plan: anything else — an error, the watchdog's kill (124), a
@@ -438,14 +518,9 @@ def handle_plan(
                 phase="planning",
                 section="plan",
                 streamer=streamer,
+                runner=runner,
             )
-            show = subprocess.run(
-                [tool, "show", "-json", "-no-color", str(plan_file)],
-                cwd=cwd,
-                env=tf_env,
-                capture_output=True,
-                text=True,
-            )
+            show = runner.capture([tool, "show", "-json", "-no-color", str(plan_file)], cwd, tf_env)
         # The after_plan checks and the reviewers read this document: without it, fail closed — a
         # stand-in `{}` would let every policy pass on an empty plan.
         unusable = _plan_json_unusable(show)
@@ -500,6 +575,7 @@ def handle_plan(
                 phase="checking",
                 streamer=streamer,
                 platform_files=lambda: _cloud_token(ws, job),
+                runner=runner,
             )
             checks.extend({**r, "stage": "after_plan"} for r in results)
         if aborted:
@@ -531,6 +607,7 @@ def handle_apply(
     tool = _tool_bin(env_info["tool"])
 
     try:
+        runner = _make_runner(settings, job, ws)
         # The apply runs on exactly the commit the plan was made on — pinned by the API from the
         # plan job's report (§7.2) — never on wherever the branch head has moved since.
         commit_sha = env_info.get("commit_sha")
@@ -548,8 +625,9 @@ def handle_apply(
         if backend:
             ws.write_backend_override(cwd)
         hooks = _merge_hooks(job.get("hooks", {}), ws.load_stackd_yml(cwd))
-        platform_env = _run_env(ws, job)
-        repo_env = {**_repo_environ(), **job.get("env", {})}
+        hooks = _apply_repo_hook_policy(hooks, job, checks, streamer)
+        platform_env = _run_env(ws, job, runner.name)
+        repo_env = {**_repo_environ(runner.name), **job.get("env", {})}
         tf_env = _tofu_env(platform_env, backend)  # + state-backend creds, for tofu only
 
         def stage(name: str) -> bool:
@@ -564,6 +642,7 @@ def handle_apply(
                 phase="applying",
                 streamer=streamer,
                 platform_files=lambda: _cloud_token(ws, job),
+                runner=runner,
             )
             checks.extend({**r, "stage": name} for r in results)
             return aborted
@@ -576,6 +655,7 @@ def handle_apply(
                 phase="applying",
                 section=None,
                 streamer=streamer,
+                runner=runner,
             )
         if init_rc != 0:
             return _job_failed(client, job_id, "init", checks, error="init failed")
@@ -608,6 +688,7 @@ def handle_apply(
                     phase="applying",
                     section=None,
                     streamer=streamer,
+                    runner=runner,
                     timeout=apply_timeout,
                 )
         finally:
@@ -622,9 +703,7 @@ def handle_apply(
             # Mask: a tofu diagnostic can echo a sensitive variable value verbatim (§5.1).
             return _job_failed(client, job_id, "apply", checks, error=masker.mask(error))
         with _tofu_files(ws, cwd, job, tfvars=False):
-            out = subprocess.run(
-                [tool, "output", "-json"], cwd=cwd, env=tf_env, capture_output=True, text=True
-            )
+            out = runner.capture([tool, "output", "-json"], cwd, tf_env)
         ok_output = out.returncode == 0
         if ok_output:
             client.upload_artifact(job_id, "outputs.json", masker.mask(out.stdout).encode())
@@ -668,6 +747,7 @@ def handle_command_run(client: ApiClient, job: dict, settings: Settings) -> None
     tool = _tool_bin(env_info["tool"])
 
     try:
+        runner = _make_runner(settings, job, ws)
         cwd = ws.git_clone(
             env_info["repo_url"],
             env_info.get("commit_sha"),
@@ -678,7 +758,7 @@ def handle_command_run(client: ApiClient, job: dict, settings: Settings) -> None
         backend = job.get("backend")
         if backend:
             ws.write_backend_override(cwd)
-        tf_env = _tofu_env(_run_env(ws, job), backend)  # + state-backend creds, for tofu only
+        tf_env = _tofu_env(_run_env(ws, job, runner.name), backend)  # + state backend, tofu only
 
         client.event(job_id, "phase_started", phase="running")
         with _tofu_files(ws, cwd, job):
@@ -689,6 +769,7 @@ def handle_command_run(client: ApiClient, job: dict, settings: Settings) -> None
                 phase="running",
                 section=None,
                 streamer=streamer,
+                runner=runner,
             )
         if init_rc != 0:
             return client.event(job_id, "job_failed", phase="init", result={"error": "init failed"})
@@ -703,6 +784,7 @@ def handle_command_run(client: ApiClient, job: dict, settings: Settings) -> None
                 phase="running",
                 section=None,
                 streamer=streamer,
+                runner=runner,
                 timeout=timeout,
             )
         if code != 0:
@@ -781,6 +863,10 @@ def _run_job(client: ApiClient, job: dict, settings: Settings) -> None:
     )
     checks: list[dict[str, Any]] = []  # the job's check results so far (§8.3)
     try:
+        # §7.4: the stack's tool version, on this worker, before anything runs — else the job fails
+        # (ToolUnavailable, reported below) instead of running another version.
+        env_info = job["environment"]
+        pick(settings.available_tools(), env_info["tool"], env_info["tool_version"])
         if job["phase"] == "plan":
             handle_plan(client, job, settings, checks)
         elif job["phase"] == "apply":
@@ -821,7 +907,12 @@ def run() -> None:
     # the first 5xx and never comes back without a restart.
     while True:
         try:
-            client.register(settings.pool_token, settings.worker_name, runner=settings.runner)
+            client.register(
+                settings.pool_token,
+                settings.worker_name,
+                runner=settings.runner,
+                tools=settings.available_tools(),
+            )
             break
         except Exception as exc:  # noqa: BLE001
             log.warning(
