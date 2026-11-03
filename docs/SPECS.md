@@ -615,7 +615,9 @@ Heartbeat = downstream command channel. No incoming connection. Today it carries
 
 ```
 POST /worker/v1/jobs/claim?wait=25
-→ 204 if nothing
+→ 204 if nothing (or the claimed run just failed closed at claim: §9.3, §10, §15.2)
+→ 503 problem+json, retryable: true — a transient failure to build the job (workload token not
+       signable right now, §3.11): the claim is undone, the run keeps its state; poll again
 → 200 {
     "job_id": "...",                       # = the run id
     "phase": "plan" | "apply" | "command", # JOB type (what the agent executes) — do not confuse

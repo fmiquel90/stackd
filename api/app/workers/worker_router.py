@@ -32,7 +32,7 @@ from app.models.run import Run
 from app.models.run_log import RunLog
 from app.models.worker import Worker
 from app.models.worker_command import WorkerCommand
-from app.oidc.issuer import WorkloadSigningError
+from app.oidc.issuer import WorkloadSigningError, WorkloadSigningUnavailable
 from app.runs.artifacts import (
     MAX_PLAN_BYTES,
     PLAN_FILE,
@@ -94,8 +94,8 @@ async def register(body: RegisterIn, request: Request, session: DbSession) -> Re
     pool = await pool_from_token(request, session)
     if get_settings().is_production and body.runner != PRODUCTION_RUNNER:
         # Audited and committed before refusing: an operator sees which worker tried. Once per
-        # (pool, worker name, runner) and hour — the agent keeps retrying, the audit must not grow
-        # by one row per attempt.
+        # (pool, worker name) and hour — whatever runner it declares — the agent keeps retrying,
+        # the audit must not grow by one row per attempt.
         context = {"name": body.name, "runner": body.runner, "reason": "runner_not_allowed"}
         since = datetime.now(UTC) - timedelta(hours=1)
         recent = (
@@ -219,10 +219,28 @@ async def claim(worker: CurrentWorker, session: DbSession, wait: int = 0) -> dic
         if run is not None:
             worker.status = WorkerStatus.busy
             try:
-                payload = await build_job_payload(session, run)
+                # In a savepoint: what the payload build stages on the run (used_mocks, inputs,
+                # provenance, used_secret_fallback) and its audit events
+                # (`dependency.mock_consumed`, `secret.fallback_used`) only stand for a job
+                # actually handed out.
+                async with session.begin_nested():
+                    payload = await build_job_payload(session, run)
+            except WorkloadSigningUnavailable as exc:
+                # Transient (KMS throttled/unreachable, no DB connection, §3.11): undo the claim —
+                # the run stays queued/confirmed, an approved apply keeps its approval — and tell
+                # the worker to come back.
+                await session.rollback()
+                raise ProblemException(
+                    503,
+                    "Signing unavailable",
+                    "The workload token cannot be signed right now; retry later.",
+                    code=exc.code,
+                    retryable=True,
+                ) from exc
             except (DependencyError, SecretUnavailable, WorkloadSigningError) as exc:
                 # Unresolvable dependency (§9.3), external secret (§15.2) or workload token (§10)
                 # → fail the run closed, hand the worker nothing.
+                await session.refresh(run)  # the savepoint's rollback expired the staged fields
                 reason = (
                     "secret"
                     if isinstance(exc, SecretUnavailable)
