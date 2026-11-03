@@ -10,6 +10,7 @@ from collections.abc import Callable
 from contextlib import AbstractContextManager, nullcontext
 from pathlib import Path
 
+from agent import shutdown
 from agent.client import ApiClient
 from agent.docker_runner import DockerRunner
 from agent.masking import Masker
@@ -99,6 +100,12 @@ class LocalRunner:
             killed["v"] = True
             _kill_group()
 
+        def _abort() -> None:
+            # A shutdown abort (agent.shutdown): not a timeout, so `killed` stays False and the
+            # command fails on its signal. Never once the command is reaped (its pid is free).
+            if proc.returncode is None:
+                _kill_group()
+
         def _end_group() -> None:
             # Wait for the command to exit WITHOUT reaping it (WNOWAIT), then kill what it left
             # behind. This also closes the output pipe a background child still holds.
@@ -113,11 +120,12 @@ class LocalRunner:
         timer = threading.Timer(timeout, _kill)
         timer.start()
         try:
-            if proc.stdout is None:
-                raise RuntimeError("subprocess stdout pipe missing")
-            for line in proc.stdout:
-                on_line(line.rstrip("\n"))
-            ender.join()  # the command has exited, its group is killed; nothing has reaped it yet
+            with shutdown.SHUTDOWN.command(_abort):
+                if proc.stdout is None:
+                    raise RuntimeError("subprocess stdout pipe missing")
+                for line in proc.stdout:
+                    on_line(line.rstrip("\n"))
+                ender.join()  # the command has exited, its group is killed; not reaped yet
         finally:
             if ender.is_alive():
                 _kill_group()  # streaming failed (e.g. the API is unreachable): leave nothing

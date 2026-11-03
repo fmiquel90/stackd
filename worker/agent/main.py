@@ -12,6 +12,7 @@ from contextlib import AbstractContextManager, ExitStack, contextmanager, nullco
 from pathlib import Path
 from typing import Any
 
+from agent import shutdown
 from agent.client import ApiClient
 from agent.config import Settings
 from agent.logging import get_logger, setup as setup_logging
@@ -855,13 +856,20 @@ def _heartbeat_loop(client: ApiClient, settings: Settings, inflight: _InFlight) 
         time.sleep(settings.heartbeat_interval)
 
 
-def _run_job(client: ApiClient, job: dict, settings: Settings) -> None:
-    """Execute one claimed job to completion, reporting a job_failed on any uncaught error."""
+def _run_job(
+    client: ApiClient,
+    job: dict,
+    settings: Settings,
+    checks: list[dict[str, Any]] | None = None,
+) -> None:
+    """Execute one claimed job to completion, reporting a job_failed on any uncaught error.
+    `checks` collects the job's check results so far (§8.3), for a shutdown abort to report too."""
     log.info(
         "claimed job",
         extra={"event": "agent.claimed", "run_id": job["job_id"], "phase": job["phase"]},
     )
-    checks: list[dict[str, Any]] = []  # the job's check results so far (§8.3)
+    if checks is None:
+        checks = []
     try:
         # §7.4: the stack's tool version, on this worker, before anything runs — else the job fails
         # (ToolUnavailable, reported below) instead of running another version.
@@ -891,14 +899,130 @@ def _run_job(client: ApiClient, job: dict, settings: Settings) -> None:
                 )
 
 
+class _Jobs:
+    """The jobs this agent is running, by id, with their check results: what a shutdown abort
+    reports failed."""
+
+    def __init__(self) -> None:
+        self._jobs: dict[str, tuple[dict, list[dict[str, Any]]]] = {}
+        self._lock = threading.Lock()
+
+    def add(self, job: dict) -> list[dict[str, Any]]:
+        checks: list[dict[str, Any]] = []
+        with self._lock:
+            self._jobs[str(job["job_id"])] = (job, checks)
+        return checks
+
+    def remove(self, job: dict) -> None:
+        with self._lock:
+            self._jobs.pop(str(job["job_id"]), None)
+
+    def snapshot(self) -> list[tuple[dict, list[dict[str, Any]]]]:
+        with self._lock:
+            return list(self._jobs.values())
+
+
+# After an abort, how long the agent waits for its job threads to notice their killed commands.
+_ABORT_GRACE_SECONDS = 30
+
+
+def _drain(client: ApiClient, settings: Settings, inflight: _InFlight, jobs: _Jobs) -> None:
+    """Graceful shutdown (agent.shutdown): let the running jobs finish within the shutdown budget;
+    past it (or on a second signal), report each one failed — with the reason, before anything is
+    killed, so that is what the run shows — then kill their commands."""
+    stop = shutdown.SHUTDOWN
+    budget = settings.shutdown_timeout
+    if inflight.count():
+        log.info(
+            "draining running jobs",
+            extra={"event": "agent.draining", "in_flight": inflight.count(), "timeout": budget},
+        )
+    deadline = time.monotonic() + budget
+    while inflight.count() and not stop.forced:
+        left = deadline - time.monotonic()
+        if left <= 0:
+            break
+        stop.wait_forced(min(1.0, left))
+    if inflight.count():
+        reason = (
+            "worker stopped before the job finished: forced stop"
+            if stop.forced
+            else f"worker stopped before the job finished: drain budget of {budget}s exceeded"
+        )
+        for job, checks in jobs.snapshot():
+            log.error("aborting job", extra={"event": "agent.aborted", "run_id": job.get("job_id")})
+            try:
+                _job_failed(client, job["job_id"], job.get("phase"), checks, error=reason)
+            except Exception as exc:  # noqa: BLE001 — e.g. the run already ended
+                log.warning(
+                    "job_failed not accepted",
+                    extra={
+                        "event": "agent.report_error",
+                        "run_id": job.get("job_id"),
+                        "error": str(exc),
+                    },
+                )
+        stop.abort()
+        deadline = time.monotonic() + _ABORT_GRACE_SECONDS
+        while inflight.count() and time.monotonic() < deadline:
+            time.sleep(0.2)
+    log.info("worker stopped", extra={"event": "agent.stopped", "in_flight": inflight.count()})
+
+
+def _serve(client: ApiClient, settings: Settings, inflight: _InFlight) -> None:
+    """Claim and run jobs until shutdown is requested, then drain (agent.shutdown)."""
+    stop = shutdown.SHUTDOWN
+    jobs = _Jobs()
+    # Up to max_concurrent_jobs run at once, each on its own thread (§7, Phase E). The semaphore
+    # caps in-flight jobs; the API's SELECT … FOR UPDATE SKIP LOCKED + one-active-run-per-env index
+    # keep concurrent claims safe — concurrency is across *different* environments.
+    pool = ThreadPoolExecutor(max_workers=settings.max_concurrent_jobs)
+    slots = threading.Semaphore(settings.max_concurrent_jobs)
+
+    def _execute(job: dict, checks: list[dict[str, Any]]) -> None:
+        try:
+            _run_job(client, job, settings, checks)
+        finally:
+            jobs.remove(job)
+            inflight.dec()
+            slots.release()
+
+    while not stop.requested:
+        # Block until a slot frees up (serial when max_concurrent_jobs=1), re-checking for a stop.
+        if not slots.acquire(timeout=1):
+            continue
+        if stop.requested:
+            slots.release()
+            break
+        try:
+            job = client.claim(wait=settings.poll_wait)
+        except Exception as exc:  # noqa: BLE001 — a transient claim error must not kill the worker
+            log.warning("claim failed", extra={"event": "agent.claim_error", "error": str(exc)})
+            slots.release()
+            stop.wait(settings.heartbeat_interval)
+            continue
+        if job is None:
+            slots.release()
+            continue
+        # A job handed out by a claim already in flight when the stop came is this worker's: it
+        # runs, within the drain budget, rather than being left for the worker-lost reaper.
+        inflight.inc()
+        pool.submit(_execute, job, jobs.add(job))
+    _drain(client, settings, inflight, jobs)
+    pool.shutdown(wait=False)
+
+
 def run() -> None:
     setup_logging()
+    stop = shutdown.SHUTDOWN
+    stop.install()  # SIGTERM/SIGINT: stop claiming, drain the running jobs, then exit
     settings = Settings.from_env()
     # Token may be delivered via a file the platform seed writes after the worker boots; re-read
     # until it appears rather than idling forever (handles boot order + token rotation).
     while not settings.pool_token:
         log.warning("waiting for STACKD_POOL_TOKEN", extra={"event": "agent.idle"})
-        time.sleep(settings.heartbeat_interval)
+        if stop.wait(settings.heartbeat_interval):
+            return
         settings = Settings.from_env()
 
     client = ApiClient(settings.api_url)
@@ -919,7 +1043,8 @@ def run() -> None:
                 "register failed, retrying",
                 extra={"event": "agent.register_error", "error": str(exc)},
             )
-            time.sleep(settings.heartbeat_interval)
+            if stop.wait(settings.heartbeat_interval):
+                return
             # Re-read the token: the seed rotates the pool token on a reset (DB wiped → fresh token
             # written to the shared file), so a token read at boot can be stale → 401.
             settings = Settings.from_env()
@@ -935,35 +1060,9 @@ def run() -> None:
     inflight = _InFlight()
     # Heartbeat runs on its own daemon thread so neither the claim long-poll nor a long-running job
     # can starve it (fixes the worker flickering offline between claims / during plan & apply).
+    # It keeps beating while the agent drains, so a draining worker is never taken for lost.
     threading.Thread(target=_heartbeat_loop, args=(client, settings, inflight), daemon=True).start()
-
-    # Up to max_concurrent_jobs run at once, each on its own thread (§7, Phase E). The semaphore
-    # caps in-flight jobs; the API's SELECT … FOR UPDATE SKIP LOCKED + one-active-run-per-env index
-    # keep concurrent claims safe — concurrency is across *different* environments.
-    pool = ThreadPoolExecutor(max_workers=settings.max_concurrent_jobs)
-    slots = threading.Semaphore(settings.max_concurrent_jobs)
-
-    def _execute(job: dict) -> None:
-        try:
-            _run_job(client, job, settings)
-        finally:
-            inflight.dec()
-            slots.release()
-
-    while True:
-        slots.acquire()  # block until a slot frees up (serial when max_concurrent_jobs=1)
-        try:
-            job = client.claim(wait=settings.poll_wait)
-        except Exception as exc:  # noqa: BLE001 — a transient claim error must not kill the worker
-            log.warning("claim failed", extra={"event": "agent.claim_error", "error": str(exc)})
-            slots.release()
-            time.sleep(settings.heartbeat_interval)
-            continue
-        if job is None:
-            slots.release()
-            continue
-        inflight.inc()
-        pool.submit(_execute, job)
+    _serve(client, settings, inflight)
 
 
 if __name__ == "__main__":

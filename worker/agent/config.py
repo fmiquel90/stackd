@@ -48,6 +48,11 @@ class Settings:
     runner_images: dict[str, str] = field(default_factory=dict)
     docker_host: str | None = None  # STACKD_DOCKER_HOST: unix socket of the Docker Engine
     docker_limits: DockerLimits = field(default_factory=DockerLimits)
+    # On SIGTERM the agent stops claiming and lets its running jobs finish for up to this long,
+    # then reports them failed and kills them (agent.shutdown). Keep it above the API's apply
+    # budget (STACKD_APPLY_TIMEOUT_SECONDS) so a drain never cuts an apply, and below the time the
+    # orchestrator waits before its SIGKILL.
+    shutdown_timeout: int = 1800
 
     def __post_init__(self) -> None:
         # A typo must not fall back to `local` silently: that runner has no isolation (§7.4).
@@ -78,6 +83,7 @@ class Settings:
             runner_images=parse_runner_images(os.environ.get("STACKD_RUNNER_IMAGES", "")),
             docker_host=os.environ.get("STACKD_DOCKER_HOST") or None,
             docker_limits=_docker_limits(),
+            shutdown_timeout=max(0, int(os.environ.get("STACKD_SHUTDOWN_TIMEOUT_SECONDS", "1800"))),
         )
 
     def available_tools(self) -> dict[str, list[str]]:
