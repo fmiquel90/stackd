@@ -3,10 +3,11 @@ from __future__ import annotations
 import uuid
 from datetime import datetime
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, field_validator
 
 from app.enums import RepoAuthKind, Tool
 from app.models.stack import Stack
+from app.workers.tools import valid_tool_version
 
 
 class StackCreate(BaseModel):
@@ -21,6 +22,18 @@ class StackCreate(BaseModel):
     tool_version: str
     labels: dict | None = None
 
+    @field_validator("tool_version")
+    @classmethod
+    def _tool_version(cls, v: str | None) -> str | None:
+        return _check_tool_version(v)
+
+
+def _check_tool_version(value: str | None) -> str | None:
+    """`MAJOR.MINOR` (any patch of that series) or an exact `MAJOR.MINOR.PATCH[-pre]` (§7.4)."""
+    if value is not None and not valid_tool_version(value):
+        raise ValueError("tool_version must be MAJOR.MINOR (a series) or MAJOR.MINOR.PATCH")
+    return value
+
 
 class StackUpdate(BaseModel):
     name: str | None = None
@@ -33,6 +46,11 @@ class StackUpdate(BaseModel):
     tool: Tool | None = None
     tool_version: str | None = None
     labels: dict | None = None
+
+    @field_validator("tool_version")
+    @classmethod
+    def _tool_version(cls, v: str | None) -> str | None:
+        return _check_tool_version(v)
 
 
 class StackOut(BaseModel):

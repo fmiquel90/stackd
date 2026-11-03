@@ -120,6 +120,7 @@ export function WorkersPage() {
                           <Th>Status</Th>
                           <Th>Last heartbeat</Th>
                           <Th>Labels</Th>
+                          <Th>Runner</Th>
                           <Th>Agent</Th>
                           {isAdmin && <Th>Debug</Th>}
                         </tr>
@@ -142,6 +143,16 @@ export function WorkersPage() {
                             </Td>
                             <Td>
                               <Labels labels={w.labels} />
+                            </Td>
+                            <Td
+                              className="font-data text-[12px] text-muted"
+                              title={
+                                w.runner === "local"
+                                  ? "Commands run as the agent's own user: trusted dev only"
+                                  : undefined
+                              }
+                            >
+                              {w.runner ?? "—"}
                             </Td>
                             <Td className="font-data text-[12px] text-muted">{w.version ?? "—"}</Td>
                             {isAdmin && (

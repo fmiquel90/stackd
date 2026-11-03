@@ -21,13 +21,15 @@ class OidcSigningKey(Base):
     kid: Mapped[str] = mapped_column(String, unique=True)
     algorithm: Mapped[str] = mapped_column(String, default="RS256")
     public_jwk: Mapped[dict] = mapped_column(JSONB)
-    private_key_encrypted: Mapped[bytes] = mapped_column(
-        LargeBinary
-    )  # AES-GCM (or KMS ref in prod)
+    # Exactly one of the two (§3.11): a local key, AES-GCM encrypted; or a KMS key, by ARN — its
+    # private key never leaves KMS.
+    private_key_encrypted: Mapped[bytes | None] = mapped_column(LargeBinary, default=None)
+    kms_key_arn: Mapped[str | None] = mapped_column(String, default=None)
     status: Mapped[OidcKeyStatus] = mapped_column(
         Enum(OidcKeyStatus, name="oidc_key_status"), default=OidcKeyStatus.active
     )
     created_at: Mapped[datetime] = created_at_col()
+    retiring_at: Mapped[datetime | None] = mapped_column(default=None)
     retired_at: Mapped[datetime | None] = mapped_column(default=None)
 
 

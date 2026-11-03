@@ -89,6 +89,7 @@ async def health(_: CurrentUser, session: DbSession) -> dict:
                 if w.last_heartbeat_at
                 else None,
                 "seconds_since_heartbeat": round(secs, 1) if secs is not None else None,
+                "runner": w.runner,
                 "version": w.version,
             }
         )
