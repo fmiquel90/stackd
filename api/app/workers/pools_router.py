@@ -157,7 +157,22 @@ def _blocking_reason(
     return None
 
 
-def _compatible(env: Environment, stack: Stack, workers: list[Worker]) -> bool:
+async def online_workers(session: AsyncSession) -> list[Worker]:
+    since = datetime.now(UTC) - timedelta(seconds=get_settings().stackd_worker_offline_seconds)
+    return list(
+        (
+            await session.execute(
+                select(Worker).where(
+                    Worker.status != WorkerStatus.offline, Worker.last_heartbeat_at >= since
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+
+
+def compatible(env: Environment, stack: Stack, workers: list[Worker]) -> bool:
     """True when an online worker could claim a run of `env` (§7.2/§7.4): its labels cover the env's
     and it can run the stack's tool version — the claim's own filters, evaluated in Python."""
     wanted = env.labels or {}
@@ -188,18 +203,7 @@ async def queue(user: CurrentUser, session: DbSession) -> list[QueueEntry]:
             active_by_env[r.environment_id] = active_by_env.get(r.environment_id, 0) + 1
 
     # Online workers, and each waiting run's env + stack, for `no_compatible_worker`.
-    since = datetime.now(UTC) - timedelta(seconds=get_settings().stackd_worker_offline_seconds)
-    online = list(
-        (
-            await session.execute(
-                select(Worker).where(
-                    Worker.status != WorkerStatus.offline, Worker.last_heartbeat_at >= since
-                )
-            )
-        )
-        .scalars()
-        .all()
-    )
+    online = await online_workers(session)
     waiting_envs = {r.environment_id for r in runs if r.state == RunState.queued}
     env_stack = {
         env.id: (env, stack)
@@ -215,7 +219,7 @@ async def queue(user: CurrentUser, session: DbSession) -> list[QueueEntry]:
     out: list[QueueEntry] = []
     for r in runs:
         pair = env_stack.get(r.environment_id)
-        compatible = pair is None or _compatible(pair[0], pair[1], online)
+        can_take = pair is None or compatible(pair[0], pair[1], online)
         out.append(
             QueueEntry(
                 run_id=r.id,
@@ -223,7 +227,7 @@ async def queue(user: CurrentUser, session: DbSession) -> list[QueueEntry]:
                 state=r.state.value,
                 worker_id=r.worker_id,
                 blocking_reason=_blocking_reason(
-                    r, active_by_env, env_locked=False, compatible=compatible
+                    r, active_by_env, env_locked=False, compatible=can_take
                 ),
             )
         )

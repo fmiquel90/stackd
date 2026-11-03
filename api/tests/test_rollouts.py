@@ -267,3 +267,22 @@ async def test_preview_names_members_that_will_plan_on_a_mock(client: httpx.Asyn
     assert r.status_code == 201, r.text
     ro = await _rollout(client, admin, "ro-mock")
     assert _member(ro, app)["expected_mocks"] == ["zone_id"]
+
+
+async def test_a_member_no_worker_can_take_says_so(client: httpx.AsyncClient) -> None:
+    """The env's labels route its runs (§7.2): a label no worker carries leaves the member's run
+    queued — the rollout page says why instead of reading `running` forever."""
+    admin, alice = await login(client, "admin"), await login(client, "alice")
+    await register_worker(client, admin, "pool-ro-route")
+    net = await _env(
+        client,
+        admin,
+        await make_stack(client, admin, "ro-route-net"),
+        "ro-route",
+        "dev",
+        labels={"region": "nowhere-1"},
+    )
+    ro = await _rollout(client, admin, "ro-route")
+    await client.post(f"/api/v1/rollouts/{ro['id']}/approve", headers=alice)
+    ro = await _get(client, admin, ro["id"])
+    assert "no online worker can take it" in _member(ro, net)["waiting_reason"]

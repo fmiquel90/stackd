@@ -31,6 +31,7 @@ from app.rollouts.service import (
     retry_rollout,
 )
 from app.spaces import accessible_space_ids, require_space_access, resolve_target_space
+from app.workers.pools_router import compatible, online_workers
 
 router = APIRouter(prefix="/api/v1/rollouts", tags=["rollouts"])
 DbSession = Annotated[AsyncSession, Depends(get_session)]
@@ -126,11 +127,26 @@ async def _detail(session: AsyncSession, rollout: EnvRollout, viewer: User) -> d
         ).scalars()
     )
     mocks = await _expected_mocks(session, env_ids)
+    # A queued member run no online worker can take (labels, tool version: §7.2/§7.4) would wait
+    # forever while the rollout reads `running` — say so on the member.
+    online = (
+        await online_workers(session)
+        if any(r.state == RunState.queued for r in runs.values())
+        else []
+    )
     refusal = await approval_refusal(session, viewer, rollout)
     out_members = []
     for m in members:
         env, stack = rows[m.environment_id]
         run = runs.get(m.run_id) if m.run_id else None
+        reason = (
+            _waiting_reason(run) if m.status == RolloutMemberStatus.needs_confirmation else None
+        )
+        if run is not None and run.state == RunState.queued and not compatible(env, stack, online):
+            reason = (
+                "no online worker can take it (check the worker labels — the environment's "
+                "labels route its runs — and the tool version)"
+            )
         out_members.append(
             {
                 "environment_id": str(env.id),
@@ -144,9 +160,7 @@ async def _detail(session: AsyncSession, rollout: EnvRollout, viewer: User) -> d
                 "run_state": run.state.value if run else None,
                 "plan_summary": run.plan_summary if run else None,
                 "auto_confirmed": run is not None and run.id in auto,
-                "waiting_reason": _waiting_reason(run)
-                if m.status == RolloutMemberStatus.needs_confirmation
-                else None,
+                "waiting_reason": reason,
                 "expected_mocks": mocks.get(env.id, []),
             }
         )

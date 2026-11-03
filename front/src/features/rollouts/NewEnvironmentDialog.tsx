@@ -181,7 +181,7 @@ export function NewEnvironmentDialog({
             </div>
             <Field
               label="Labels"
-              help="key=value, comma-separated; merged onto the model's. A variable set selecting them attaches by itself (e.g. region=eu-west-3)."
+              help="key=value, comma-separated; merged onto the model's. A variable set selecting them attaches by itself (e.g. region=eu-west-3). They also route runs: only workers carrying every label take them."
             >
               <Input
                 className="font-data"

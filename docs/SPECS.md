@@ -1013,7 +1013,10 @@ network/prod-eu-primary ──▶ network/prod-us-secondary
 **C. Standing up a new region or a new environment across all stacks** (§21)
 
 1. A variable set with a label **selector** (`region: eu-west-3`) carries everything the region
-   changes (§3.4).
+   changes (§3.4). ⚠ An environment's labels also **route its runs** (§7.2: a worker takes a run
+   only if it carries all of the env's labels): a `region` label on the env needs a worker pool
+   labelled `region: eu-west-3` too — often what a region wants anyway (workers in the region). If
+   not, put the region set on the env by explicit attachment instead of a label selector.
 2. `POST /spaces/{id}/environment-clones {reference_name: "prod", name: "prod-euw3", overrides:
    {labels: {region: "eu-west-3"}}}` creates `prod-euw3` in every stack that has a `prod`, with its
    governance and its dependency edges — the selector attaches the region set by itself. Fill in the
@@ -1837,7 +1840,8 @@ POST /api/v1/spaces/{space_id}/environment-clones
   "name": "prod-euw3",                   # the new env, same name in every stack
   "stack_ids": [...]?,                   # default: every stack of the space with a `reference_name` env
   "overrides": {                         # optional; applied on top of the reference's settings
-    "tier"?, "branch"?, "labels"?,       # labels: merged onto the reference's (override wins per key)
+    "tier"?, "branch"?, "labels"?,       # labels: merged onto the reference's (override wins per key);
+                                         # they also route the env's runs to workers (§7.2, §9.5 C)
     "autodeploy"?, "protected"?, "require_second_pair_of_eyes"?, "drift_check_enabled"?
   },
   "copy_cloud_integration": false,       # true requires the admin role (§10)
@@ -2020,7 +2024,8 @@ WS   sub: rollout:{id}                         # membership-gated; signal {kind:
 The detail: the rollout (state, `pause_reason`, creator, approver, approval expiry) and per member:
 stack/env names, tier, `protected`, level, status, run id and state, plan summary, `auto_confirmed`
 (its run was confirmed by the system), `waiting_reason` (why a `needs_confirmation` member's plan
-stopped: changes, destroys, imports, a mock, a fallback, a check), `expected_mocks` (outputs an
+stopped: changes, destroys, imports, a mock, a fallback, a check; or, for a queued run, that no online
+worker can take it — labels or tool version, §7.2/§7.4), `expected_mocks` (outputs an
 upstream outside the rollout has not published, a mock standing in) — plus the edges between members
 and `can_approve {allowed, reason}` for the viewer. Creating needs `writer` in the space; approving,
 `can_apply` on every member; retry and cancel, `writer`.
