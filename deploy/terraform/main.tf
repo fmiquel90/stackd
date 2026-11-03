@@ -75,6 +75,7 @@ module "certificates" {
   create_public        = local.create_public_certificate
   create_internal      = local.create_internal_certificate
   route53_zone_id      = var.route53_zone_id
+  manage_records       = local.route53_validation
 }
 
 resource "aws_acm_certificate_validation" "public" {
@@ -182,7 +183,7 @@ resource "aws_vpc_security_group_ingress_rule" "alb_https" {
 # internal_domain_name → internal ALB (private addresses in a public zone: resolvable by CloudFront
 # and the workers, reachable from the VPC only).
 resource "aws_route53_record" "internal" {
-  count = var.route53_zone_id == null ? 0 : 1
+  count = local.route53_validation ? 1 : 0
 
   zone_id = var.route53_zone_id
   name    = local.internal_domain_name
@@ -205,6 +206,7 @@ module "cdn" {
   internal_domain_name            = local.internal_domain_name
   certificate_arn                 = local.public_certificate_arn
   route53_zone_id                 = var.route53_zone_id
+  manage_records                  = local.route53_validation
   alb_arn                         = module.api.alb_arn
   spa_bucket_regional_domain_name = module.storage.spa_bucket_regional_domain_name
   spa_oac_id                      = module.storage.spa_oac_id

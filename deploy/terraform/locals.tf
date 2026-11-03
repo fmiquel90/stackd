@@ -20,7 +20,7 @@ locals {
   # Certificates: bring your own, or created (and validated through Route 53 when a zone is given).
   create_public_certificate   = var.certificate_arn == null
   create_internal_certificate = var.internal_certificate_arn == null
-  route53_validation          = var.route53_zone_id != null
+  route53_validation          = var.manage_dns_records != null ? var.manage_dns_records : var.route53_zone_id != null
 
   public_certificate_arn = (
     local.create_public_certificate ? one(aws_acm_certificate_validation.public[*].certificate_arn) : var.certificate_arn

@@ -44,7 +44,7 @@ locals {
 }
 
 resource "aws_route53_record" "validation" {
-  for_each = var.route53_zone_id == null ? toset([]) : local.validation_domains
+  for_each = var.manage_records ? local.validation_domains : toset([])
 
   zone_id         = var.route53_zone_id
   name            = local.validation_options[each.key].resource_record_name

@@ -62,6 +62,21 @@ variable "route53_zone_id" {
   default     = null
 }
 
+variable "manage_dns_records" {
+  description = <<-EOT
+    Create the certificate validation records and the aliases in route53_zone_id. Null (default):
+    true when route53_zone_id is set. Set it explicitly when the zone is created in the same
+    configuration: its id is then unknown at plan time and cannot decide what to create.
+  EOT
+  type        = bool
+  default     = null
+
+  validation {
+    condition     = var.manage_dns_records != true || var.route53_zone_id != null
+    error_message = "manage_dns_records = true needs route53_zone_id."
+  }
+}
+
 variable "certificate_arn" {
   description = "Existing validated ACM certificate for domain_name, in us-east-1 (CloudFront). Null = one is created."
   type        = string

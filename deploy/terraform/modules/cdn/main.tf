@@ -133,7 +133,7 @@ resource "aws_cloudfront_function" "spa_rewrite" {
 }
 
 resource "aws_route53_record" "public" {
-  for_each = var.route53_zone_id == null ? toset([]) : toset(["A", "AAAA"])
+  for_each = var.manage_records ? toset(["A", "AAAA"]) : toset([])
 
   zone_id = var.route53_zone_id
   name    = var.domain_name
