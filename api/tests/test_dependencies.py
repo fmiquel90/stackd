@@ -491,43 +491,68 @@ async def test_a_failure_stops_everything_reachable(client: httpx.AsyncClient) -
 
 
 async def test_parents_finishing_together_trigger_once(client: httpx.AsyncClient) -> None:
-    """Both parents of c report their apply at the same moment: c is triggered exactly once."""
+    """Both parents of c finish in two transactions that overlap in the DB: each one's transition
+    is made (uncommitted) before either cascades. The lock on the group's root serializes the two
+    cascades, so the second sees the first's outcome: c is triggered exactly once (without the
+    lock, each sees the other parent still applying and c never runs)."""
     import asyncio
 
-    admin = await login(client, "admin")
-    wh_a = await register_worker(client, admin, "pool-conc-a", "wa")
-    wh_b = await register_worker(client, admin, "pool-conc-b", "wb")
-    envs = await _diamond(client, admin, "conc")
-    root = (
-        await client.post(
-            f"/api/v1/environments/{envs['root']}/runs",
-            headers=admin,
-            json={"with_downstream": True},
-        )
-    ).json()
-    await _plan(client, wh_a, admin, await _claim(client, wh_a))
-    await _apply(client, wh_a, admin, root["id"])
+    from sqlalchemy import text
 
-    jobs = {}
-    for wh in (wh_a, wh_b):
-        job = await _claim(client, wh)
+    from app.db import SessionLocal
+    from app.dependencies.service import cascade
+    from app.enums import RunEventActor, RunState
+    from app.models.run import Run
+    from app.runs.transition import transition
+
+    admin = await login(client, "admin")
+    wh = await register_worker(client, admin, "pool-conc")
+    envs = await _diamond(client, admin, "conc")
+    _, jobs = await _start_diamond(client, admin, wh, envs)
+    for job in jobs.values():
         await _plan(client, wh, admin, job)
-        name = "a" if job["environment"]["id"] == envs["a"] else "b"
-        jobs[name] = (wh, job["job_id"])
-    for wh, run_id in jobs.values():
+        run_id = job["job_id"]
         assert (
             await client.post(f"/api/v1/runs/{run_id}/confirm", headers=admin)
         ).status_code == 200
-        apply_job = await _claim(client, wh)
-        assert apply_job["job_id"] == run_id
+        assert (await _claim(client, wh))["job_id"] == run_id  # applying
 
-    outputs = {"network_name": {"value": "n", "sensitive": False}}
-    await asyncio.gather(
-        *(
-            event(client, wh, run_id, "phase_finished", result={"outputs": outputs})
-            for wh, run_id in jobs.values()
-        )
-    )
+    both_finished = asyncio.Barrier(2)
+    cascaded: list[str] = []
+
+    async def hold_commit() -> None:
+        """Keep this transaction open until the other cascade has read the group too (it would,
+        without the lock) or waits on the lock — so the two cascades really overlap."""
+        while len(cascaded) < 2:
+            async with SessionLocal() as probe:  # a fresh pg_stat_activity snapshot each time
+                blocked = await probe.scalar(
+                    text(
+                        "SELECT count(*) FROM pg_stat_activity "
+                        "WHERE wait_event_type = 'Lock' AND datname = current_database()"
+                    )
+                )
+            if blocked:
+                return
+            await asyncio.sleep(0.02)
+
+    async def finish(run_id: str) -> None:
+        async with SessionLocal() as session:
+            run = await session.get(Run, uuid.UUID(run_id))
+            assert run is not None
+            await transition(
+                session,
+                run,
+                RunState.finished,
+                actor=RunEventActor.worker,
+                audit_action="run.applied",
+            )
+            await both_finished.wait()  # both transitions made, neither committed
+            await cascade(session, run)
+            cascaded.append(run_id)
+            await hold_commit()
+            await session.commit()
+
+    await asyncio.wait_for(asyncio.gather(*(finish(j["job_id"]) for j in jobs.values())), 30)
     assert len(await _env_runs(client, admin, envs["c"])) == 1
 
 
@@ -564,6 +589,41 @@ async def _root_applied(client, admin, wh, root_env: str) -> tuple[str, dict[str
 
 async def _group(client, admin, run_id: str) -> dict:
     return (await client.get(f"/api/v1/runs/{run_id}", headers=admin)).json()["run_group"]
+
+
+async def test_a_discarded_parent_stops_its_branch(client: httpx.AsyncClient) -> None:
+    admin = await login(client, "admin")
+    wh = await register_worker(client, admin, "pool-discard")
+    envs = await _diamond(client, admin, "discard")
+    root_id, jobs = await _start_diamond(client, admin, wh, envs)
+
+    await _plan(client, wh, admin, jobs["b"])  # unconfirmed
+    discard = await client.post(f"/api/v1/runs/{jobs['b']['job_id']}/discard", headers=admin)
+    assert discard.status_code == 200, discard.text
+    await _plan(client, wh, admin, jobs["a"])
+    await _apply(client, wh, admin, jobs["a"]["job_id"])  # its cascade sees b discarded
+
+    assert await _env_runs(client, admin, envs["c"]) == []
+    assert (await _group(client, admin, root_id))["status"] == "partial_failure"
+
+
+async def test_a_canceled_parent_stops_its_branch(client: httpx.AsyncClient) -> None:
+    admin = await login(client, "admin")
+    wh = await register_worker(client, admin, "pool-cancel")
+    envs = await _diamond(client, admin, "cancel")
+    root_id = await _drive_root(client, admin, wh, envs["root"])
+
+    b_run = (await _env_runs(client, admin, envs["b"]))[0]
+    assert b_run["state"] == "queued"
+    cancel = await client.post(f"/api/v1/runs/{b_run['id']}/cancel", headers=admin)
+    assert cancel.status_code == 200, cancel.text
+    job = await _claim(client, wh)
+    assert job["environment"]["id"] == envs["a"]
+    await _plan(client, wh, admin, job)
+    await _apply(client, wh, admin, job["job_id"])  # its cascade sees b canceled
+
+    assert await _env_runs(client, admin, envs["c"]) == []
+    assert (await _group(client, admin, root_id))["status"] == "partial_failure"
 
 
 async def test_never_edges_in_a_multi_parent_graph(client: httpx.AsyncClient) -> None:
@@ -669,6 +729,32 @@ async def test_a_skipped_downstream_stays_skipped(client: httpx.AsyncClient) -> 
 
     assert len(await _env_runs(client, admin, envs["c"])) == 1  # no second run in the group
     assert (await _group(client, admin, root_id))["status"] == "succeeded"
+
+
+async def test_a_protected_downstream_stops_at_unconfirmed(client: httpx.AsyncClient) -> None:
+    """c is `autodeploy` but `protected`: its cascade run stops at unconfirmed for a human."""
+    admin = await login(client, "admin")
+    wh = await register_worker(client, admin, "pool-protected")
+    envs = await _envs(client, admin, "prot", ("root", "a", "b"))
+    c_stack = await make_stack(client, admin, "prot-c")
+    envs["c"] = await make_env(
+        client, admin, c_stack, "dev", "dev", autodeploy=True, protected=True
+    )
+    await _link(client, admin, envs, (("a", "root"), ("b", "root"), ("c", "a"), ("c", "b")))
+    root_id, jobs = await _start_diamond(client, admin, wh, envs)
+    for name in ("a", "b"):
+        await _plan(client, wh, admin, jobs[name])
+        await _apply(client, wh, admin, jobs[name]["job_id"])
+
+    job = await _claim(client, wh)
+    assert job["environment"]["id"] == envs["c"] and job["phase"] == "plan"
+    await _plan(client, wh, admin, job)  # a non-empty plan, no mock, no warn
+
+    c_run = (await client.get(f"/api/v1/runs/{job['job_id']}", headers=admin)).json()
+    assert c_run["triggered_by"] == "dependency"
+    assert c_run["state"] == "unconfirmed"  # never auto-confirmed on a protected env
+    assert c_run["confirmed_by_user_id"] is None
+    assert (await _group(client, admin, root_id))["status"] == "running"
 
 
 async def test_group_status_counts_the_runs_the_caller_can_read(client: httpx.AsyncClient) -> None:
