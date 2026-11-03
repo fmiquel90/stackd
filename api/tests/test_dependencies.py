@@ -426,3 +426,106 @@ async def test_an_empty_plan_releases_a_waiting_downstream(client: httpx.AsyncCl
     await _plan(client, wh, admin, jobs["b"], changes=False)  # b: nothing to apply, finished
 
     assert len(await _env_runs(client, admin, envs["c"])) == 1  # a's apply triggers c
+
+
+# --- review: decisions over the whole group, whatever the order; concurrent parents ---
+
+
+async def _envs(client, admin, prefix: str, names: tuple[str, ...]) -> dict[str, str]:
+    envs = {}
+    for name in names:
+        stack = await make_stack(client, admin, f"{prefix}-{name}")
+        envs[name] = await make_env(client, admin, stack, "dev", "dev")
+    return envs
+
+
+async def _link(client, admin, envs, pairs) -> None:
+    for down, up in pairs:
+        r = await _dep(client, admin, envs[down], envs[up], mock="m", policy="always")
+        assert r.status_code == 201, r.text
+
+
+async def _drive_root(client, admin, wh, env_id: str) -> str:
+    root = (
+        await client.post(
+            f"/api/v1/environments/{env_id}/runs", headers=admin, json={"with_downstream": True}
+        )
+    ).json()
+    await _plan(client, wh, admin, await _claim(client, wh))
+    await _apply(client, wh, admin, root["id"])
+    return root["id"]
+
+
+async def test_a_downstream_waits_for_an_indirect_parent(client: httpx.AsyncClient) -> None:
+    """r → a → d and r → d: d waits for a, whatever order r's edges are read in."""
+    admin = await login(client, "admin")
+    wh = await register_worker(client, admin, "pool-indirect")
+    envs = await _envs(client, admin, "indir", ("r", "a", "d"))
+    # r → d is created first: read first, it must still not trigger d before a has run.
+    await _link(client, admin, envs, (("d", "r"), ("a", "r"), ("d", "a")))
+    await _drive_root(client, admin, wh, envs["r"])
+
+    assert await _env_runs(client, admin, envs["d"]) == []  # a is queued: d waits
+    job = await _claim(client, wh)
+    assert job["environment"]["id"] == envs["a"]
+    await _plan(client, wh, admin, job)
+    await _apply(client, wh, admin, job["job_id"])
+    assert len(await _env_runs(client, admin, envs["d"])) == 1
+
+
+async def test_a_failure_stops_everything_reachable(client: httpx.AsyncClient) -> None:
+    """r → y → x → d and r → d: y fails, x never runs, and d — reachable from y — never runs."""
+    admin = await login(client, "admin")
+    wh = await register_worker(client, admin, "pool-reach")
+    envs = await _envs(client, admin, "reach", ("r", "y", "x", "d"))
+    await _link(client, admin, envs, (("y", "r"), ("x", "y"), ("d", "x"), ("d", "r")))
+    root_id = await _drive_root(client, admin, wh, envs["r"])
+
+    job = await _claim(client, wh)
+    assert job["environment"]["id"] == envs["y"]
+    await event(client, wh, job["job_id"], "job_failed", phase="plan", result={"error": "x"})
+    assert await _env_runs(client, admin, envs["x"]) == []
+    assert await _env_runs(client, admin, envs["d"]) == []
+    group = (await client.get(f"/api/v1/runs/{root_id}", headers=admin)).json()["run_group"]
+    assert group["status"] == "partial_failure"
+
+
+async def test_parents_finishing_together_trigger_once(client: httpx.AsyncClient) -> None:
+    """Both parents of c report their apply at the same moment: c is triggered exactly once."""
+    import asyncio
+
+    admin = await login(client, "admin")
+    wh_a = await register_worker(client, admin, "pool-conc-a", "wa")
+    wh_b = await register_worker(client, admin, "pool-conc-b", "wb")
+    envs = await _diamond(client, admin, "conc")
+    root = (
+        await client.post(
+            f"/api/v1/environments/{envs['root']}/runs",
+            headers=admin,
+            json={"with_downstream": True},
+        )
+    ).json()
+    await _plan(client, wh_a, admin, await _claim(client, wh_a))
+    await _apply(client, wh_a, admin, root["id"])
+
+    jobs = {}
+    for wh in (wh_a, wh_b):
+        job = await _claim(client, wh)
+        await _plan(client, wh, admin, job)
+        name = "a" if job["environment"]["id"] == envs["a"] else "b"
+        jobs[name] = (wh, job["job_id"])
+    for wh, run_id in jobs.values():
+        assert (
+            await client.post(f"/api/v1/runs/{run_id}/confirm", headers=admin)
+        ).status_code == 200
+        apply_job = await _claim(client, wh)
+        assert apply_job["job_id"] == run_id
+
+    outputs = {"network_name": {"value": "n", "sensitive": False}}
+    await asyncio.gather(
+        *(
+            event(client, wh, run_id, "phase_finished", result={"outputs": outputs})
+            for wh, run_id in jobs.values()
+        )
+    )
+    assert len(await _env_runs(client, admin, envs["c"])) == 1
