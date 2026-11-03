@@ -30,6 +30,7 @@ class TierOut(BaseModel):
     id: uuid.UUID
     name: str
     requires_four_eyes: bool
+    repo_hooks_at_apply: bool
     position: int
     created_at: datetime
 
@@ -40,6 +41,7 @@ _NAME_RE = re.compile(r"^[a-z0-9][a-z0-9-]*$")
 class TierCreate(BaseModel):
     name: str
     requires_four_eyes: bool = False
+    repo_hooks_at_apply: bool = False
     position: int = 0
 
     @field_validator("name")
@@ -54,6 +56,7 @@ class TierCreate(BaseModel):
 
 class TierUpdate(BaseModel):
     requires_four_eyes: bool | None = None
+    repo_hooks_at_apply: bool | None = None
     position: int | None = None
 
 
@@ -66,7 +69,12 @@ async def list_tiers(_: CurrentUser, session: DbSession) -> list[Tier]:
 
 @router.post("", response_model=TierOut, status_code=201, dependencies=[Admin])
 async def create_tier(body: TierCreate, user: CurrentUser, session: DbSession) -> Tier:
-    tier = Tier(name=body.name, requires_four_eyes=body.requires_four_eyes, position=body.position)
+    tier = Tier(
+        name=body.name,
+        requires_four_eyes=body.requires_four_eyes,
+        repo_hooks_at_apply=body.repo_hooks_at_apply,
+        position=body.position,
+    )
     session.add(tier)
     try:
         await session.flush()
@@ -80,7 +88,11 @@ async def create_tier(body: TierCreate, user: CurrentUser, session: DbSession) -
         actor_email=user.email,
         target_kind="tier",
         target_id=tier.id,
-        context={"name": tier.name, "requires_four_eyes": tier.requires_four_eyes},
+        context={
+            "name": tier.name,
+            "requires_four_eyes": tier.requires_four_eyes,
+            "repo_hooks_at_apply": tier.repo_hooks_at_apply,
+        },
     )
     await session.commit()
     await session.refresh(tier)
@@ -105,7 +117,7 @@ async def update_tier(
         actor_email=user.email,
         target_kind="tier",
         target_id=tier.id,
-        context={"name": tier.name, "fields": sorted(changes)},
+        context={"name": tier.name, "fields": sorted(changes), "values": changes},
     )
     await session.commit()
     await session.refresh(tier)

@@ -108,13 +108,17 @@ hook's copy). Give a hook what it needs as an environment variable.
 While a repo hook runs, none of these is on disk: the saved plan, the run's variable files, the
 cloud token file, the repo token. Sensitive values are masked in every hook's output.
 
-!!! warning "Not implemented yet"
-    The specification also describes ignoring repo hooks at the `*_apply` stages of `prod`
-    environments, and a per-environment opt-in giving repo hooks secrets or cloud credentials.
-    Neither exists: repo hooks run at every stage, and never get secrets. The `prod` rule is
-    pending a decision, since tiers are a configurable catalog. Until the
-    [container runner](workers-and-scaling.md#runners) exists, hooks also run as the worker's own
-    user, without isolation from other jobs on the same worker ([SPECS §8.3](../SPECS.md)).
+### Repo hooks at the apply stages
+
+`before_apply` and `after_apply` run in the job that holds the apply credentials. A repo hook at
+those stages runs only on a **tier that allows it** (Settings → Tiers → *Allow repo hooks at
+apply…*): off by default on every tier. Elsewhere it is skipped, and the run shows a `warn` check
+`skipped: this tier does not allow repo hooks at the apply stages`. Platform hooks always run.
+
+Repo hooks never get secrets or cloud credentials, on any tier: a hook that needs them belongs on
+the platform side. On the [`docker` runner](workers-and-scaling.md#runners) each hook runs in its
+own container and a repo hook sees the checkout only; on the `local` runner (dev) hooks run as the
+worker's own user ([SPECS §8.3](../SPECS.md)).
 
 ## Managing platform hooks
 
