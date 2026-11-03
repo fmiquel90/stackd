@@ -618,7 +618,7 @@ hooks, notifications, secret sources; URL `?tab=`).
 **Environment page** `/s/:space/stacks/:stack/envs/:env` (new in v2):
 
 - **Header**: `stack / env`, tier, branch, deployed commit vs head (`2af0351 → 125304e ↑`, refresh-head button), drift (`≈ drifted, checked 1h ago → drift run`), lock, protection badges.
-- **Primary actions** (writer+): **Plan** (primary button), and a "More" menu: Plan with downstream (`with_downstream`), Destroy… (shown only with `can_destroy`; opens a dialog explaining the run will need typed confirmation at apply), Promote from… (sibling env, SPECS §9.7), Run command… (allowlist, SPECS §4.3), Clone to a new environment… and Roll out… (SPECS §21, DESIGN §5.11).
+- **Primary actions** (writer+): **Plan** (primary button), and a "More" menu: Plan with downstream (`with_downstream`), Destroy… (shown only with `can_destroy`; opens a dialog explaining the run will need typed confirmation at apply), Promote from… (sibling env, SPECS §9.7), Run command… (allowlist, SPECS §4.3), Roll out… (SPECS §21, DESIGN §5.11).
 - **Tabs** (URL): **Runs** (default) — history table: run short ID, type (`tracked`, `destroy`, `PR`, `drift`, `command`), trigger (who/how), outcome badge, plan summary, commit, age, duration; filter by type; paginated client-side **[today]**. **Inputs** (Resolved with provenance / Environment overrides / Discover inputs), **Outputs**, **Dependencies**, **State** (versions; force-unlock admin-only per §5.7), **Settings** (name, tier, branch, flags with the §5.7 friction, backend config, labels, hooks, notifications, cloud integration), and a **Danger zone** at the bottom of Settings (delete environment, typed name).
 
 ### 5.9 `/workers` — workers & pools
@@ -637,13 +637,11 @@ hooks, notifications, secret sources; URL `?tab=`).
 
 ### 5.11 Environment clones and rollouts (SPECS §21)
 
-**New environment from…** (overview header action and the env page "More" menu, writer+): a dialog,
-one column (§5.7).
+**New environment from…** (overview header action, writer+): a dialog, one column (§5.7).
 - Fields: reference environment name (select of the names present in the space), new name (mono),
-  stacks (checklist, default every stack with the reference — the ones without it listed, disabled,
-  with the reason), overrides (tier, branch, labels — label rows show which variable sets their
-  selectors will attach, live from the API), "Copy cloud integration" (admin only).
-- **Preview before create**: per stack, what is copied and what is not (§21.2 table, as text), the
+  the stacks it applies to (every stack with the reference; the ones without it are named, with the
+  reason), overrides (tier, branch, labels as `key=value`), "Copy cloud integration" (admin only).
+- **Preview before create** (a `dry_run` of the same request): per stack, what is copied and what is not (§21.2 table, as text), the
   dependency edges that will be created (upstream → downstream, "shared upstream" marked), and what
   the user will still have to fill (sensitive variables, cloud integration). Create = one request.
 - After create: a summary with the `missing_secrets` as a checklist linking to each env's Inputs tab,

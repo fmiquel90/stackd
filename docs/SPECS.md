@@ -1804,8 +1804,8 @@ by state/phase/result, never by run id).
 ## 21. Environment rollouts — declare once, apply the graph (post-MVP)
 
 > **Status:** delivery in three lots (PLAN Phase 7): (1) the cascade gaps of §9.2 (multi-parent
-> gating, stop on failure) — **done**; (2) the multi-stack declaration (§21.2); (3) the rollout
-> itself (§21.3–§21.8).
+> gating, stop on failure) — **done**; (2) the multi-stack declaration (§21.2) — **done**; (3) the
+> rollout itself (§21.3–§21.8).
 
 **Need.** Standing up a new environment or a new region today means creating one environment per
 stack, re-creating its dependency edges, then planning and confirming every environment by hand, in
@@ -1838,7 +1838,9 @@ POST /api/v1/spaces/{space_id}/environment-clones
     "tier"?, "branch"?, "labels"?,       # labels: merged onto the reference's (override wins per key)
     "autodeploy"?, "protected"?, "require_second_pair_of_eyes"?, "drift_check_enabled"?
   },
-  "copy_cloud_integration": false        # true requires the admin role (§10)
+  "copy_cloud_integration": false,       # true requires the admin role (§10)
+  "dry_run": false                       # true: validate and compute everything, then roll back —
+                                         # the response is the preview (DESIGN §5.11)
 }
 ```
 

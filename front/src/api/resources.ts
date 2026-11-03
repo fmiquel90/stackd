@@ -502,3 +502,33 @@ export const secretSourcesApi = {
   remove: (spaceId: string, srcId: string) =>
     api<void>(`/spaces/${spaceId}/secret-sources/${srcId}`, { method: "DELETE" }),
 };
+
+// Environment clones (SPECS §21.2): one environment declared across a space's stacks.
+export interface CloneOverrides {
+  tier?: string;
+  branch?: string;
+  labels?: Record<string, string>;
+  protected?: boolean;
+}
+
+export interface CloneRequest {
+  reference_name: string;
+  name: string;
+  stack_ids?: string[];
+  overrides?: CloneOverrides;
+  copy_cloud_integration?: boolean;
+  dry_run?: boolean;
+}
+
+export interface CloneResult {
+  dry_run: boolean;
+  environments: { id: string; stack_id: string; stack_name: string; name: string; tier: string }[];
+  edges: { upstream_env_id: string; downstream_env_id: string; shared_upstream: "true" | "false" }[];
+  missing_secrets: { stack: string; environment: string; name: string }[];
+  to_configure: { stack: string; environment: string; item: string }[];
+}
+
+export const environmentClones = {
+  create: (spaceId: string, body: CloneRequest) =>
+    api<CloneResult>(`/spaces/${spaceId}/environment-clones`, { body }),
+};
