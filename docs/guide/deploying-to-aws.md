@@ -4,10 +4,12 @@
 region. The first apply builds the infrastructure. You then push the images, set two secrets by
 hand and apply again with the image digests.
 
-!!! warning "Not validated against AWS yet"
-    The module has not been through `tofu validate` or a real `apply`. The images, the worker
-    agent's drain and the API's TLS and proxy-header handling were tested locally. Treat a first
-    deployment as a trial run.
+!!! warning "Not applied to a real AWS account yet"
+    The module passes `tofu fmt`, `tofu validate`, and a full apply / re-plan / destroy against
+    MiniStack, a local AWS emulator ([Testing without AWS](#testing-without-aws)). The images,
+    the worker agent's drain and the API's TLS and proxy-header handling were tested locally. What
+    only real AWS shows (IAM and KMS policy evaluation, CloudFront VPC origin routing, EC2 user
+    data, RDS engine availability) has not been tried: treat a first deployment as a trial run.
 
 ## Architecture
 
@@ -279,10 +281,31 @@ Migrations must stay compatible with the API version that is still running durin
 4. Delete the encryption key secret yourself (`aws secretsmanager delete-secret`) once you no
    longer need the database snapshot.
 
+## Testing without AWS
+
+`deploy/terraform/examples/ministack` applies the whole module to
+[MiniStack](https://ministack.org), an MIT-licensed local AWS emulator, with no account and no
+cost:
+
+```bash
+task tf:check      # tofu fmt + validate: module and every example
+task tf:sim        # start MiniStack, apply, check the state, re-plan, destroy
+task tf:sim:down
+```
+
+`task tf:sim` fails on a refused resource or argument, a generated secret in the state, a
+non-empty second plan (bar a short list of attributes MiniStack does not echo back), or anything
+left after the destroy, which follows the [teardown](#tearing-down) steps above. CI runs the
+same checks. The example's README lists what this proves and what it cannot.
+
+If you create the Route 53 zone in the same configuration as the module, its id is unknown at
+plan time: set `manage_dns_records = true` alongside `route53_zone_id` (the MiniStack example
+does).
+
 ## Known limitations
 
-- **Not validated against AWS yet.** No `tofu validate` or `plan` has been run against this
-  module (see the note at the top).
+- **Not applied to a real AWS account yet**: validated statically and against MiniStack only
+  (see the note at the top).
 - **One region, one account.** Cross-region DR is not covered (RDS snapshots and S3 replication
   are up to you).
 - **No WAF** in front of CloudFront. Attach one to the distribution if you need it.
