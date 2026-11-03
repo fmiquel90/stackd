@@ -367,11 +367,37 @@ oidc_signing_keys (
 **Signer.** `STACKD_OIDC_SIGNER=local` (default) keeps an RSA-2048 key AES-GCM encrypted in the row and signs in process; `STACKD_OIDC_SIGNER=kms` + `STACKD_OIDC_KMS_KEY_ARN` signs every workload token through `kms:Sign` (`RSASSA_PKCS1_V1_5_SHA_256` = RS256; the API builds the JWS itself), the private key never entering the API — required in production unless `STACKD_ALLOW_LOCAL_SIGNER=true` acknowledges a local key (the API refuses to start otherwise; see risk §13 / PLAN §5). A KMS key is registered from `kms:GetPublicKey`: it must be `SIGN_VERIFY`, RSA ≥ 2048, support RS256 (else 422); its `kid` is derived from its public key like a local key's. The API needs `kms:Sign` + `kms:GetPublicKey` on it, nothing else.
 
 **Rotation.** A new `active` key, the old one moves to `retiring` (`retiring_at` set; still in the JWKS, no longer signs), then `retired` (out of the JWKS) once the longest token it can have signed has expired: max(plan cap 30 min, apply budget + grace) + 5 min clock skew — a scheduler task (§7.5, advisory-locked) does it. Triggers: `POST /api/v1/oidc/keys/rotate` (admin; `{"kms_key_arn"}` for a KMS key, empty for a new local key — refused 422 on a KMS issuer), and, automatically, an issuer configured for KMS whose active key is still local (or absent) rotates to the configured key on its next signature — switching the setting is the whole migration. `GET /api/v1/oidc/keys` (admin) lists them (public metadata only). Rotating to a key the issuer
-already knows (switching back to a KMS key used before) reactivates it — same kid — rather than
-refusing; only a key that already signs is refused (409). The key is provisioned in a database
-session of its own: key management never commits or rolls back the caller's transaction (a job
-claim). A token that cannot be signed (no usable key, KMS unreachable) fails the job's run closed at
-claim, `run.apply_failed` with `reason: oidc`, the worker getting nothing. Audited: `oidc_key.rotated` (actor the admin, or `system`; context kid, backend, ARN, previous kid), `oidc_key.retired` (`system`).
+already knows (switching back to a KMS key used before — `retiring` or `retired`) reactivates it —
+same kid — rather than refusing, signing from then on through the ARN just configured or requested
+(the same key material can sit behind another ARN, e.g. a multi-region replica); only a key that
+already signs is refused (409). Every rotation is serialized by a transaction-level advisory lock.
+The key is provisioned on first use in a database session of its own: key management never commits
+or rolls back the caller's transaction (a job claim). Provisioning is idempotent under concurrency:
+under the lock it re-checks the active key, and a concurrent provisioning that won anyway (unique
+violation, or "already active" from a replica that does not take the lock) is used as is — concurrent
+claims and `GET /oidc/jwks` never fail on it.
+
+**Signing failures at claim.** A token that cannot be signed is classified:
+- **transient** — KMS throttling, KMS or the network unreachable or timing out, a KMS 5xx, the
+  API's own credentials mid-refresh, no database connection for the provisioning session (pool
+  exhausted — it needs a second connection while the claim holds one — or a connection lost): the
+  claim is rolled back, the run keeps its state (`queued`, or `confirmed` — an approved apply keeps
+  its approval), and the worker gets **503** `code=<marker>`, `retryable: true`; it polls again;
+- **permanent** — access denied, key disabled / pending deletion / not found, an unusable key (not
+  RSA ≥ 2048 `SIGN_VERIFY` RS256), an invalid ARN, no AWS credentials, anything unrecognized: the
+  job's run fails closed at claim, `run.apply_failed` with `reason: oidc`, the worker getting nothing
+  (204).
+
+`run.error` and the audit `detail` carry a generic marker only — `oidc_signing:<code>`, e.g.
+`kms_access_denied`, `kms_key_disabled`, `kms_key_not_found`, `kms_key_unusable`, `kms_invalid_arn`,
+`kms_no_credentials`, `kms_rejected`, `signing_failed` (transient: `kms_throttled`, `kms_unavailable`,
+`kms_unreachable`, `db_unavailable`) — never the provider's message (role/key ARNs, account id),
+which is logged server-side (`oidc.signing_failed`, admin log view). The payload build runs in a
+savepoint: a failed claim discards what it staged on the run (`used_mocks`, inputs, provenance,
+`used_secret_fallback`) and its audit events (`dependency.mock_consumed`, `secret.fallback_used`) —
+they only stand for a job handed out. Audited: `oidc_key.rotated` (actor the admin, or `system`;
+context kid, backend, ARN, previous kid, `reactivated`, and for a reactivation `previous_status` and
+`replaced_kms_key_arn` when the ARN changed), `oidc_key.retired` (`system`).
 
 ---
 
