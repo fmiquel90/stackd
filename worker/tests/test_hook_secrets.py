@@ -407,7 +407,13 @@ def test_real_tofu_plans_applies_and_runs_commands(tmp_path: Path) -> None:
     tofu = Path(str(shutil.which("tofu"))).parent
     client = _plan_and_apply(tmp_path, url, sha, tofu)
     planned, applied = [kw["result"] for kind, kw in client.events if kind == "phase_finished"]
-    assert planned["summary"] == {"add": 1, "change": 0, "destroy": 0, "import": 0}, planned
+    assert planned["summary"] == {
+        "add": 1,
+        "change": 0,
+        "destroy": 0,
+        "import": 0,
+        "forget": 0,
+    }, planned
     assert applied["outputs"]["region"]["value"] == "eu-west-1", applied
     scans = [line for line in client.lines if line.startswith("SCAN ")]
     assert scans == [f"SCAN {stage} hits=[] files=[]" for stage in STAGES], client.lines
