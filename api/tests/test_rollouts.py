@@ -719,6 +719,15 @@ async def test_a_second_member_of_a_stack_must_plan_the_pinned_commit(
     ro = r.json()
     await _approve(client, admin, ro["id"])
     first, second = await _claim(client, wh), await _claim(client, wh)
+    # Both runs come from one approval transaction (same created_at): make the run claimed second
+    # sort first by creation, so the pin cannot follow creation order (§21.6: first to know).
+    async with SessionLocal() as s:
+        await s.execute(
+            update(Run)
+            .where(Run.id == uuid.UUID(first["job_id"]))
+            .values(created_at=datetime.now(UTC) + timedelta(seconds=1))
+        )
+        await s.commit()
     for job, sha in ((first, SHA), (second, "b" * 40)):
         await event(
             client, wh, job["job_id"], "phase_started", phase="planning", result={"commit_sha": sha}

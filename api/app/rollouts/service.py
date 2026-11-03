@@ -16,7 +16,7 @@ from collections import deque
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
-from sqlalchemy import or_, select, text
+from sqlalchemy import func, or_, select, text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -255,7 +255,18 @@ async def has_infrastructure(session: AsyncSession, env: Environment) -> bool:
 
 async def rollout_pin(session: AsyncSession, rollout_id: uuid.UUID, env: Environment) -> str | None:
     """The commit the rollout pinned for `env`'s stack and branch (§21.6): that of its first member
-    run there that knew its commit. Later member runs of that stack — retries included — plan it."""
+    run there that knew its commit. Later member runs of that stack — retries included — plan it.
+
+    "First to know" is when the commit was recorded — the run's move to `planning` — not when the
+    run was created: two member runs started by one approval share a `created_at`, and the one
+    claimed second may sort first; ordering by creation would move the pin to its commit once it
+    reported it, after a plan on the other commit had been confirmed."""
+    known_at = (
+        select(func.min(RunEvent.created_at))
+        .where(RunEvent.run_id == Run.id, RunEvent.to_state == RunState.planning)
+        .correlate(Run)
+        .scalar_subquery()
+    )
     return (
         await session.execute(
             select(Run.commit_sha)
@@ -266,7 +277,8 @@ async def rollout_pin(session: AsyncSession, rollout_id: uuid.UUID, env: Environ
                 Environment.branch.is_not_distinct_from(env.branch),
                 Run.commit_sha.is_not(None),
             )
-            .order_by(Run.created_at, Run.id)
+            # A run created on the pin (no `planning` yet) carries it already: it sorts last.
+            .order_by(known_at.asc().nulls_last(), Run.created_at, Run.id)
             .limit(1)
         )
     ).scalar_one_or_none()
