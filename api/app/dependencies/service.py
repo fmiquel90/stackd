@@ -247,6 +247,10 @@ async def cascade(session: AsyncSession, run: Run) -> list[Run]:
     """
     if run.type != RunType.tracked or run.state != RunState.finished:
         return []
+    if run.rollout_id is not None:
+        # A rollout's runs never cascade (§21.4), even once the rollout is over (a member run
+        # finishing after a cancel): the rollout drives its members, and no run group of their own.
+        return []
     group_id = run.run_group_id or run.id
     root = (
         await session.execute(
@@ -275,20 +279,19 @@ async def cascade(session: AsyncSession, run: Run) -> list[Run]:
     for r in sorted(group_runs, key=lambda r: r.created_at):
         by_env[r.environment_id] = r  # the latest run of an env in the group
 
-    # A rollout drives its own members (§21.4): never also through the generic cascade.
-    rollout_members: set[uuid.UUID] = set()
-    if run.rollout_id is not None:
-        from app.models.rollout import EnvRolloutMember
+    # The members of an active rollout get no cascade run (§21.4): the rollout plans them in its
+    # turn. The edge is settled as skipped; a member that already planned is reported instead.
+    from app.models.rollout import EnvRolloutMember
 
-        rollout_members = set(
-            (
-                await session.execute(
-                    select(EnvRolloutMember.environment_id).where(
-                        EnvRolloutMember.rollout_id == run.rollout_id
-                    )
+    in_rollout = set(
+        (
+            await session.execute(
+                select(EnvRolloutMember.environment_id).where(
+                    EnvRolloutMember.active, EnvRolloutMember.environment_id.in_(order)
                 )
-            ).scalars()
-        )
+            )
+        ).scalars()
+    )
 
     status: dict[uuid.UUID, str] = {}
     applied: set[uuid.UUID] = set()
@@ -314,13 +317,18 @@ async def cascade(session: AsyncSession, run: Run) -> list[Run]:
             continue
         downstream = await session.get(Environment, env_id)
         fire = False
-        if downstream is not None and env_id not in rollout_members:
+        if downstream is not None:
             for dep in incoming[env_id]:
                 if dep.upstream_env_id in applied and await _should_trigger(
                     session, dep, downstream
                 ):
                     fire = True
                     break
+        if fire and env_id in in_rollout:
+            from app.rollouts.service import upstream_changed
+
+            await upstream_changed(session, env_id, by_env[dep.upstream_env_id])
+            fire = False
         if not fire:
             status[env_id] = "skipped"
             continue
