@@ -486,7 +486,7 @@ absolute ISO on hover); total duration; worker. A `PR` marker for proposed runs.
    reason. **[today]** computed from `/auth/me`, labelled "based on your instance permissions" when
    the space has per-space memberships the client cannot read; **[with A2]** exact. "Who may still
    confirm" is stated as a rule (**[today]**) — names come with A3.
-4. **Cascade preview**: downstream envs from `GET /graph` (BFS): `always` → "will plan", 
+4. **Cascade preview**: downstream envs from `GET /graph` (BFS): `always` → "will plan",
    `on_output_change` → "plans if <outputs> change", `never` → omitted. Mock edges marked.
 5. **Actions**, right-aligned, in this order: Cancel run · Discard · **Confirm** (amber, the only
    amber button of the app) · next-decision arrows.
@@ -603,6 +603,7 @@ waited more than 2 minutes.
 | Force-unlock a state (admin only; hidden for others) | type the env name; the dialog shows who holds the lock and since when if known |
 | Change a user's role, allowed tiers or `can_destroy` | staged edit + "Save" with a summary of the change ("bob: + prod in allowed tiers") |
 | Delete a variable, a hook, a notification target, an attachment | confirmation popover anchored to the Delete button, button labelled "Delete variable region" |
+| Approve a rollout (SPECS §21.6) | dialog listing every member env with its tier and the gate ("creates-only plans will be applied without asking again, for 24 h"); type the rollout's environment name |
 | Turning a safety switch **on** (four-eyes on, protected on) | none (one click; reducing risk has no friction) |
 
 - Wizard (new stack): numbered steps; each step independently validatable (the repo check runs at step 1).
@@ -617,7 +618,7 @@ hooks, notifications, secret sources; URL `?tab=`).
 **Environment page** `/s/:space/stacks/:stack/envs/:env` (new in v2):
 
 - **Header**: `stack / env`, tier, branch, deployed commit vs head (`2af0351 → 125304e ↑`, refresh-head button), drift (`≈ drifted, checked 1h ago → drift run`), lock, protection badges.
-- **Primary actions** (writer+): **Plan** (primary button), and a "More" menu: Plan with downstream (`with_downstream`), Destroy… (shown only with `can_destroy`; opens a dialog explaining the run will need typed confirmation at apply), Promote from… (sibling env, SPECS §9.7), Run command… (allowlist, SPECS §4.3).
+- **Primary actions** (writer+): **Plan** (primary button), and a "More" menu: Plan with downstream (`with_downstream`), Destroy… (shown only with `can_destroy`; opens a dialog explaining the run will need typed confirmation at apply), Promote from… (sibling env, SPECS §9.7), Run command… (allowlist, SPECS §4.3), Clone to a new environment… and Roll out… (SPECS §21, DESIGN §5.11).
 - **Tabs** (URL): **Runs** (default) — history table: run short ID, type (`tracked`, `destroy`, `PR`, `drift`, `command`), trigger (who/how), outcome badge, plan summary, commit, age, duration; filter by type; paginated client-side **[today]**. **Inputs** (Resolved with provenance / Environment overrides / Discover inputs), **Outputs**, **Dependencies**, **State** (versions; force-unlock admin-only per §5.7), **Settings** (name, tier, branch, flags with the §5.7 friction, backend config, labels, hooks, notifications, cloud integration), and a **Danger zone** at the bottom of Settings (delete environment, typed name).
 
 ### 5.9 `/workers` — workers & pools
@@ -633,6 +634,37 @@ hooks, notifications, secret sources; URL `?tab=`).
 - **Settings** (`/settings`): **Preferences** for everyone (theme: system / dark / light; single-key shortcuts on/off — in memory, for the tab only, until A8). Admin only: **Tiers** (name, `requires_four_eyes` with §5.7 friction, position, envs using it, delete per §5.7), **Users & roles** (staged edits, §5.7), **Spaces** (members, per-space role and tiers), **Deployment** (version, environment).
 - **Login**: brand mark, "Sign in with Google"; in dev, the personas show email and role, and their allowed tiers once the dev endpoint returns them (needs API work A12).
 - **Notifications** (bell popover, Radix): each item names what and where ("Run failed · demo-dns/dev · 6m"), links to the run (Logs at first error for failures), mark read on open; "Mark all read" / "Clear read". The bell badge counts unread, neutral (not violet, not amber).
+
+### 5.11 Environment clones and rollouts (SPECS §21)
+
+**New environment from…** (overview header action and the env page "More" menu, writer+): a dialog,
+one column (§5.7).
+- Fields: reference environment name (select of the names present in the space), new name (mono),
+  stacks (checklist, default every stack with the reference — the ones without it listed, disabled,
+  with the reason), overrides (tier, branch, labels — label rows show which variable sets their
+  selectors will attach, live from the API), "Copy cloud integration" (admin only).
+- **Preview before create**: per stack, what is copied and what is not (§21.2 table, as text), the
+  dependency edges that will be created (upstream → downstream, "shared upstream" marked), and what
+  the user will still have to fill (sensitive variables, cloud integration). Create = one request.
+- After create: a summary with the `missing_secrets` as a checklist linking to each env's Inputs tab,
+  and the primary button **Roll out prod-euw3…**.
+
+**Rollout page** `/s/:space/rollouts/:id` (linked from the overview attention zone while it needs
+someone, and from every member run):
+- **Header**: environment name, state badge (`StateBadge` vocabulary: awaiting approval = decision
+  amber, running, paused = decision amber, succeeded, failed), creator, approver and approval expiry
+  ("approved by alice · expires in 21 h"), actions: **Approve…** (§5.7 friction; hidden for the
+  creator when four-eyes applies, with the reason), Retry (failed), Cancel.
+- **Body**: the graph (§5.4 component) restricted to the members, nodes coloured by member status,
+  levels left → right; each node shows its run's plan summary and **why it is waiting** when it
+  pauses ("changes 2 resources: needs a confirmation", "consumed a mock", "warn check: infracost").
+  A list view is the accessible equivalent (one row per member: level, env, status, run link, reason).
+- Before approval, the page *is* the preview (§21.4): members by level, tiers, and the members
+  expected to pause.
+
+**Run page**: a member run carries a line under its header — "Part of rollout prod-euw3 · level 2" —
+and, when auto-confirmed, the action bar's who/when reads "Confirmed under the rollout approval of
+alice" (never a plain "confirmed by alice": she approved the rollout, not this plan).
 
 ---
 
