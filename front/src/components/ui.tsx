@@ -1,28 +1,29 @@
 import { useState } from "react";
 import type { ButtonHTMLAttributes, InputHTMLAttributes, ReactNode, SelectHTMLAttributes } from "react";
 import { Check, type LucideIcon, Trash2 } from "lucide-react";
+import { Button as UiButton, type ButtonVariant } from "@/ui/Button";
+import { Popover, PopoverClose, PopoverContent, PopoverTrigger } from "@/ui/overlays";
+import { Input, NativeSelect } from "@/ui/primitives";
+import { cn } from "@/ui/cn";
 
-// Minimal token-based primitives. No hard-coded colors (CLAUDE §5 / DESIGN §8).
+// Form and layout primitives of the configuration panels, on the tokens (no inline colour, DESIGN §8).
+// New screens use src/ui directly; these keep the panels' API stable.
 
-// A config list item — a bordered tile on the base surface, used uniformly across the
-// Variables / Hooks / Notifications / Secret-sources panels. `dimmed` recedes an inactive item.
+/** A config list item: a bordered row with metadata badges, Edit and Delete (DESIGN §5.7). */
 export function ItemTile({ dimmed, children }: { dimmed?: boolean; children: ReactNode }) {
   return (
     <div
-      className="rounded-base p-3"
-      style={{
-        backgroundColor: "var(--color-bg-base)",
-        border: "1px solid var(--color-border)",
-        opacity: dimmed ? 0.55 : 1,
-      }}
+      className={cn(
+        "rounded-base border bg-base p-3",
+        dimmed ? "border-dashed border-line text-muted" : "border-line",
+      )}
     >
       {children}
     </div>
   );
 }
 
-// A small pill. `color` (a token) → colored pill (border+text); otherwise neutral (muted text,
-// line border). Color is paired with the label, never the only signal (DESIGN §7).
+/** Small label. `color` is a CSS token var naming a state — mapped onto its utility. */
 export function Badge({
   children,
   color,
@@ -32,12 +33,23 @@ export function Badge({
   color?: string;
   icon?: LucideIcon;
 }) {
-  const text = color ?? "var(--color-text-secondary)";
-  const border = color ?? "var(--color-border)";
+  const tone = color?.includes("failed")
+    ? "text-st-failed border-st-failed"
+    : color?.includes("finished")
+      ? "text-st-finished border-st-finished"
+      : color?.includes("unconfirmed") || color?.includes("decision")
+        ? "text-st-decision border-st-decision"
+        : color?.includes("mock")
+          ? "text-mocked border-mocked"
+          : color?.includes("running")
+            ? "text-st-running border-st-running"
+            : "text-muted border-control";
   return (
     <span
-      className="font-data inline-flex items-center gap-1 rounded-badge px-1.5 py-0.5 text-[11px]"
-      style={{ color: text, border: `1px solid ${border}` }}
+      className={cn(
+        "inline-flex items-center gap-1 rounded-badge border px-1.5 py-0.5 font-data text-[11px]",
+        tone,
+      )}
     >
       {Icon && <Icon size={11} strokeWidth={1.75} aria-hidden />}
       {children}
@@ -45,26 +57,52 @@ export function Badge({
   );
 }
 
-// The uniform delete affordance (Trash2, danger token) for config list items.
-export function DeleteButton({ label, onClick, disabled }: { label: string; onClick: () => void; disabled?: boolean }) {
+/**
+ * Delete with a confirmation anchored to the button — never one click, never an icon alone
+ * (DESIGN §5.7, §9). `label` names the target ("Delete hook tfsec").
+ */
+export function DeleteButton({
+  label,
+  onClick,
+  disabled,
+}: {
+  label: string;
+  onClick: () => void;
+  disabled?: boolean;
+}) {
   return (
-    <button
-      type="button"
-      aria-label={label}
-      className="ui-btn rounded-base px-1.5 py-1"
-      onClick={onClick}
-      disabled={disabled}
-      style={{ color: "var(--color-state-failed)" }}
-    >
-      <Trash2 size={14} strokeWidth={1.75} aria-hidden />
-    </button>
+    <Popover>
+      <PopoverTrigger asChild>
+        <UiButton
+          size="sm"
+          variant="ghost"
+          disabled={disabled}
+          icon={<Trash2 size={13} strokeWidth={1.75} aria-hidden />}
+        >
+          Delete
+          <span className="sr-only"> — {label}</span>
+        </UiButton>
+      </PopoverTrigger>
+      <PopoverContent align="end" aria-label={label} className="flex w-72 flex-col gap-2">
+        <p className="text-[12px]">{label}? This cannot be undone.</p>
+        <div className="flex justify-end gap-2">
+          <PopoverClose asChild>
+            <UiButton size="sm" variant="ghost">
+              Keep
+            </UiButton>
+          </PopoverClose>
+          <PopoverClose asChild>
+            <UiButton size="sm" variant="danger" onClick={onClick}>
+              {label}
+            </UiButton>
+          </PopoverClose>
+        </div>
+      </PopoverContent>
+    </Popover>
   );
 }
 
-// `accent` = brand violet (primary actions). `decision` = amber, reserved for the human-decision
-// moment (Confirm/apply) so it stands apart from the violet chrome (DESIGN §3.2 / invariant #4).
-// Token-driven checkbox: a real <input> (kept for a11y, visually hidden) + a styled box that fills
-// with the brand accent when checked. Label is mono, matching Field labels (DESIGN §2.1).
+/** Checkbox: a real input (a11y) with a token-styled box; mono label. */
 export function Checkbox({
   checked,
   onChange,
@@ -80,7 +118,11 @@ export function Checkbox({
 }) {
   return (
     <label
-      className={`font-data inline-flex select-none items-center gap-2 text-[13px] ${disabled ? "cursor-not-allowed opacity-50" : "cursor-pointer"} ${className}`}
+      className={cn(
+        "inline-flex items-center gap-2 font-data text-[13px] select-none",
+        disabled ? "cursor-not-allowed text-muted" : "cursor-pointer",
+        className,
+      )}
     >
       <input
         type="checkbox"
@@ -91,22 +133,20 @@ export function Checkbox({
       />
       <span
         aria-hidden
-        className="flex h-4 w-4 shrink-0 items-center justify-center transition-colors peer-focus-visible:[outline:2px_solid_var(--color-accent)] peer-focus-visible:[outline-offset:2px]"
-        style={{
-          borderRadius: 4,
-          border: `1px solid ${checked ? "var(--color-accent)" : "var(--color-border)"}`,
-          backgroundColor: checked ? "var(--color-accent)" : "transparent",
-        }}
+        className={cn(
+          "flex h-4 w-4 shrink-0 items-center justify-center rounded-base border peer-focus-visible:outline-2 peer-focus-visible:outline-offset-2 peer-focus-visible:outline-ring",
+          checked ? "border-primary bg-primary text-onfill" : "border-control bg-transparent",
+          disabled && "border-dashed",
+        )}
       >
-        {checked && <Check size={12} strokeWidth={3} style={{ color: "var(--color-bg-base)" }} aria-hidden />}
+        {checked && <Check size={12} strokeWidth={3} aria-hidden />}
       </span>
       {label}
     </label>
   );
 }
 
-// Controlled key=value map editor (stack/env labels, variable-set selector). Emits the full map on
-// every change; the parent owns persistence. Keys are set on add (re-add to rename).
+/** Controlled key=value map editor (labels, selectors). Emits the full map on every change. */
 export function LabelsEditor({
   value,
   onChange,
@@ -126,19 +166,30 @@ export function LabelsEditor({
     <div className="flex flex-col gap-2">
       {entries.map(([ek, ev]) => (
         <div key={ek} className="flex items-center gap-2">
-          <span className="font-data text-[12px]" style={{ minWidth: 120 }}>
-            {ek}
-          </span>
+          <span className="min-w-[120px] font-data text-[12px]">{ek}</span>
           <TextInput
+            aria-label={`Value of ${ek}`}
             value={ev}
             onChange={(e) => emit(entries.map((p) => (p[0] === ek ? [ek, e.target.value] : p)))}
           />
-          <DeleteButton label={`Remove ${ek}`} onClick={() => emit(entries.filter((p) => p[0] !== ek))} />
+          <UiButton size="sm" variant="ghost" onClick={() => emit(entries.filter((p) => p[0] !== ek))}>
+            Remove <span className="sr-only">{ek}</span>
+          </UiButton>
         </div>
       ))}
       <div className="flex items-end gap-2">
-        <TextInput value={k} placeholder={keyPlaceholder} onChange={(e) => setK(e.target.value)} />
-        <TextInput value={v} placeholder={valuePlaceholder} onChange={(e) => setV(e.target.value)} />
+        <TextInput
+          aria-label="New key"
+          value={k}
+          placeholder={keyPlaceholder}
+          onChange={(e) => setK(e.target.value)}
+        />
+        <TextInput
+          aria-label="New value"
+          value={v}
+          placeholder={valuePlaceholder}
+          onChange={(e) => setV(e.target.value)}
+        />
         <Button
           type="button"
           disabled={!k}
@@ -155,72 +206,45 @@ export function LabelsEditor({
   );
 }
 
+/** Legacy variants: `accent` is now the neutral primary (DESIGN §2.1); `decision` stays amber. */
 export function Button({
   variant = "default",
   ...props
 }: ButtonHTMLAttributes<HTMLButtonElement> & { variant?: "default" | "accent" | "decision" }) {
-  const filled = variant === "accent" || variant === "decision";
-  const bg =
-    variant === "accent"
-      ? "var(--color-accent)"
-      : variant === "decision"
-        ? "var(--color-decision)"
-        : "var(--color-bg-raised)";
-  return (
-    <button
-      {...props}
-      className="ui-btn rounded-base px-3 py-1.5 text-[13px] font-medium disabled:opacity-50"
-      style={{
-        border: "1px solid var(--color-border)",
-        color: filled ? "var(--color-bg-base)" : "var(--color-text-primary)",
-        backgroundColor: bg,
-      }}
-    />
-  );
+  const map: Record<string, ButtonVariant> = {
+    default: "secondary",
+    accent: "primary",
+    decision: "decision",
+  };
+  return <UiButton variant={map[variant]} {...props} />;
 }
 
 export function Field({ label, children }: { label: string; children: ReactNode }) {
   return (
     <label className="flex flex-col gap-1">
-      <span className="font-data text-[12px]" style={{ color: "var(--color-text-secondary)" }}>
-        {label}
-      </span>
+      <span className="eyebrow text-muted">{label}</span>
       {children}
     </label>
   );
 }
 
-const controlStyle = {
-  border: "1px solid var(--color-border)",
-  backgroundColor: "var(--color-bg-base)",
-  color: "var(--color-text-primary)",
-};
-
 export function TextInput(props: InputHTMLAttributes<HTMLInputElement>) {
-  return <input {...props} className="font-data rounded-base px-2 py-1.5 text-[13px]" style={controlStyle} />;
+  return <Input {...props} />;
 }
 
 export function Select(props: SelectHTMLAttributes<HTMLSelectElement>) {
-  return <select {...props} className="font-data rounded-base px-2 py-1.5 text-[13px]" style={controlStyle} />;
+  return <NativeSelect {...props} />;
 }
 
 export function Card({ children }: { children: ReactNode }) {
-  return (
-    <div
-      className="rounded-base p-4"
-      style={{ backgroundColor: "var(--color-bg-surface)", border: "1px solid var(--color-border)" }}
-    >
-      {children}
-    </div>
-  );
+  return <div className="rounded-base border border-line bg-surface p-4">{children}</div>;
 }
 
 export function PageTitle({ children }: { children: ReactNode }) {
-  return <h1 className="mb-4 text-[20px] font-semibold tracking-[-0.01em]">{children}</h1>;
+  return <h1 className="mb-4 text-title font-semibold">{children}</h1>;
 }
 
-// Horizontal tab bar (underline = active). Used for both the stack page's top-level tabs and its
-// settings sub-tabs; color is paired with the underline + aria-selected so it's not the sole signal.
+/** Horizontal tab bar (underline = active; aria-selected carries it too). */
 export function Tabs<T extends string>({
   tabs,
   active,
@@ -231,7 +255,7 @@ export function Tabs<T extends string>({
   onChange: (key: T) => void;
 }) {
   return (
-    <div className="flex gap-1" style={{ borderBottom: "1px solid var(--color-border)" }} role="tablist">
+    <div className="flex gap-1 overflow-x-auto border-b border-line" role="tablist">
       {tabs.map((t) => {
         const isActive = t.key === active;
         return (
@@ -241,13 +265,10 @@ export function Tabs<T extends string>({
             role="tab"
             aria-selected={isActive}
             onClick={() => onChange(t.key)}
-            className="ui-btn px-3 py-2 text-[13px] font-medium"
-            style={{
-              color: isActive ? "var(--color-text-primary)" : "var(--color-text-secondary)",
-              borderBottom: isActive ? "2px solid var(--color-accent)" : "2px solid transparent",
-              marginBottom: -1,
-              backgroundColor: "transparent",
-            }}
+            className={cn(
+              "-mb-px shrink-0 border-b-2 px-3 py-2 text-ui font-medium whitespace-nowrap",
+              isActive ? "border-ring text-primary" : "border-transparent text-muted hover:text-primary",
+            )}
           >
             {t.label}
           </button>

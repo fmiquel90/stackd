@@ -65,29 +65,21 @@ export function VariablesEditor({
               </div>
               <div className="flex shrink-0 items-center gap-1">
                 {update && (
-                  <button
-                    type="button"
-                    aria-label={`Edit ${v.name}`}
-                    className="ui-btn rounded-base px-1.5 py-1"
-                    onClick={() => setEditingId(v.id)}
-                    style={{ color: "var(--color-text-secondary)" }}
-                  >
-                    <Pencil size={14} strokeWidth={1.75} aria-hidden />
-                  </button>
+                  <Button onClick={() => setEditingId(v.id)}>
+                    <Pencil size={13} strokeWidth={1.75} aria-hidden /> Edit
+                  </Button>
                 )}
                 <DeleteButton label={`Delete ${v.name}`} onClick={() => removeMut.mutate(v.id)} />
               </div>
             </div>
-            <div className="font-data mt-2 truncate text-[12px]" style={{ color: "var(--color-text-secondary)" }}>
+            <div className="font-data mt-2 truncate text-[12px] text-muted">
               {v.sensitive ? "•••" : (v.value ?? "")}
             </div>
           </ItemTile>
         ),
       )}
       {data && data.length === 0 && (
-        <span className="font-data text-[12px]" style={{ color: "var(--color-text-secondary)" }}>
-          No variables yet.
-        </span>
+        <span className="font-data text-[12px] text-muted">No variables yet.</span>
       )}
 
       <form
@@ -107,7 +99,11 @@ export function VariablesEditor({
           </Select>
         </Field>
         <Field label="Name">
-          <TextInput value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} required />
+          <TextInput
+            value={form.name}
+            onChange={(e) => setForm({ ...form, name: e.target.value })}
+            required
+          />
         </Field>
         <Field label="Value">
           <TextInput
@@ -128,7 +124,7 @@ export function VariablesEditor({
         </Button>
       </form>
       {(addMut.isError || removeMut.isError || updateMut.isError) && (
-        <div className="font-data text-[12px]" style={{ color: "var(--color-state-failed)" }}>
+        <div className="font-data text-[12px] text-st-failed">
           {((addMut.error ?? removeMut.error ?? updateMut.error) as Error).message}
         </div>
       )}
@@ -194,11 +190,7 @@ function EditRow({
           Cancel
         </Button>
       </form>
-      {error && (
-        <div className="font-data mt-2 text-[12px]" style={{ color: "var(--color-state-failed)" }}>
-          {error}
-        </div>
-      )}
+      {error && <div className="font-data mt-2 text-[12px] text-st-failed">{error}</div>}
     </ItemTile>
   );
 }

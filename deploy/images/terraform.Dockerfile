@@ -1,7 +1,7 @@
 # syntax=docker/dockerfile:1
 #
-# Terraform runner image for Stackd workers (prod Docker runner). Same multi-stage, pinned,
-# checksum-verified, non-root pattern as the OpenTofu image.
+# Terraform runner image for Stackd's `docker` runner (SPECS §7.4). Same multi-stage, pinned,
+# signature- then checksum-verified, non-root pattern as the OpenTofu image.
 #
 # NOTE: Terraform ≥ 1.6 is BUSL-licensed (PLAN §5) — OpenTofu is the default; build this only if a
 # user explicitly opts into Terraform and accepts the BUSL terms.
@@ -11,21 +11,38 @@
 #     --platform linux/amd64,linux/arm64 -t stackd/terraform:1.9.8 .
 
 ARG TERRAFORM_VERSION=1.9.8
+ARG JQ_VERSION=1.7.1
+# HashiCorp's release signing key (https://www.hashicorp.com/security). The fetched key must have
+# exactly this fingerprint, so a tampered key file fails the build instead of verifying anything.
+ARG HASHICORP_KEY_FPR=C874011F0AB405110D02105534365D9472D7468F
 
-# --- stage 1: fetch + verify the binary (throwaway) ---
+# --- stage 1: fetch + verify the binaries (throwaway) ---
 FROM alpine:3.20 AS fetch
 ARG TERRAFORM_VERSION
+ARG JQ_VERSION
+ARG HASHICORP_KEY_FPR
 ARG TARGETARCH
-RUN apk add --no-cache curl unzip
+RUN apk add --no-cache curl unzip gnupg
 WORKDIR /tmp
 RUN set -eux; \
     base="https://releases.hashicorp.com/terraform/${TERRAFORM_VERSION}"; \
+    sums="terraform_${TERRAFORM_VERSION}_SHA256SUMS"; \
     asset="terraform_${TERRAFORM_VERSION}_linux_${TARGETARCH}.zip"; \
-    curl -fsSL "${base}/${asset}" -o "${asset}"; \
-    curl -fsSL "${base}/terraform_${TERRAFORM_VERSION}_SHA256SUMS" -o SHA256SUMS; \
-    grep "  ${asset}\$" SHA256SUMS | sha256sum -c -; \
+    for f in "${asset}" "${sums}" "${sums}.sig"; do curl -fsSL "${base}/${f}" -o "${f}"; done; \
+    export GNUPGHOME="$(mktemp -d)"; \
+    curl -fsSL https://www.hashicorp.com/.well-known/pgp-key.txt | gpg --batch --import; \
+    gpg --batch --list-keys --with-colons | grep -q "^fpr:::::::::${HASHICORP_KEY_FPR}:"; \
+    # The checksum file must carry HashiCorp's signature, then the zip must match it.
+    gpg --batch --verify "${sums}.sig" "${sums}"; \
+    grep "  ${asset}\$" "${sums}" | sha256sum -c -; \
     unzip "${asset}" terraform -d /out; \
-    /out/terraform version
+    /out/terraform version; \
+    jq="jq-linux-${TARGETARCH}"; \
+    jqbase="https://github.com/jqlang/jq/releases/download/jq-${JQ_VERSION}"; \
+    curl -fsSL "${jqbase}/${jq}" -o "${jq}"; \
+    curl -fsSL "${jqbase}/sha256sum.txt" -o jq.sha256; \
+    grep " ${jq}\$" jq.sha256 | sha256sum -c -; \
+    install -m 0755 "${jq}" /out/jq
 
 # --- stage 2: minimal runtime ---
 FROM debian:bookworm-slim AS runtime
@@ -42,9 +59,10 @@ RUN set -eux; \
     git config --system --add safe.directory '*'; \
     useradd --create-home --uid 10001 runner
 
-COPY --from=fetch /out/terraform /usr/local/bin/terraform
+COPY --from=fetch /out/terraform /out/jq /usr/local/bin/
 
 USER runner
 WORKDIR /workspace
-ENTRYPOINT ["terraform"]
-CMD ["version"]
+# No entrypoint: the worker names the program of each command (`terraform …`, `sh -c <hook>`).
+ENTRYPOINT []
+CMD ["terraform", "version"]

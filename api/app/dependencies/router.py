@@ -4,7 +4,7 @@ import uuid
 from typing import Annotated
 
 from fastapi import APIRouter, Depends
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -17,32 +17,31 @@ from app.errors import ProblemException
 from app.models.dependency import EnvDependency, EnvOutput, OutputReference
 from app.models.environment import Environment
 from app.models.stack import Stack
-from app.models.user import User
-from app.spaces import accessible_space_ids, guard_env, guard_stack
+from app.spaces import accessible_space_ids, guard_env_id, guard_stack_id
 
 router = APIRouter(prefix="/api/v1", tags=["dependencies"])
 DbSession = Annotated[AsyncSession, Depends(get_session)]
 Writer = Depends(require_role(Role.writer))
 
 
-async def _guard_env_id(
-    session: AsyncSession, user: User, env_id: uuid.UUID, *, min_role: Role = Role.reader
-) -> Environment:
-    env = await session.get(Environment, env_id)
-    if env is None:
-        raise ProblemException(404, "Environment not found", None)
-    await guard_env(session, user, env, min_role=min_role)
-    return env
+Adjacency = dict[uuid.UUID, set[uuid.UUID]]
 
 
-async def _creates_cycle(session: AsyncSession, upstream: uuid.UUID, downstream: uuid.UUID) -> bool:
+async def _load_adjacency(session: AsyncSession) -> Adjacency:
+    """upstream → downstreams over the whole graph (ids only): a cycle can cross any space."""
+    adj: Adjacency = {}
+    rows = await session.execute(
+        select(EnvDependency.upstream_env_id, EnvDependency.downstream_env_id)
+    )
+    for up, down in rows:
+        adj.setdefault(up, set()).add(down)
+    return adj
+
+
+def _creates_cycle(adj: Adjacency, upstream: uuid.UUID, downstream: uuid.UUID) -> bool:
     """A new upstream→downstream edge is a cycle if downstream can already reach upstream (§3.8)."""
     if upstream == downstream:
         return True
-    edges = (await session.execute(select(EnvDependency))).scalars().all()
-    adj: dict[uuid.UUID, list[uuid.UUID]] = {}
-    for e in edges:
-        adj.setdefault(e.upstream_env_id, []).append(e.downstream_env_id)
     seen: set[uuid.UUID] = set()
     stack = [downstream]
     while stack:
@@ -59,7 +58,7 @@ async def _creates_cycle(session: AsyncSession, upstream: uuid.UUID, downstream:
 async def _create_edge(
     session: AsyncSession, downstream_id: uuid.UUID, upstream_id: uuid.UUID, policy, refs
 ) -> EnvDependency:  # type: ignore[no-untyped-def]
-    if await _creates_cycle(session, upstream_id, downstream_id):
+    if _creates_cycle(await _load_adjacency(session), upstream_id, downstream_id):
         raise ProblemException(422, "Dependency cycle", "This edge would create a cycle.")
     dep = EnvDependency(
         upstream_env_id=upstream_id, downstream_env_id=downstream_id, trigger_policy=policy
@@ -86,8 +85,8 @@ async def create_dependency(
     env_id: uuid.UUID, body: DependencyCreate, user: CurrentUser, session: DbSession
 ) -> dict:
     # Both ends must be in spaces the user can write — prevents wiring a cross-space dependency.
-    await _guard_env_id(session, user, env_id, min_role=Role.writer)
-    await _guard_env_id(session, user, body.upstream_env_id, min_role=Role.writer)
+    await guard_env_id(session, user, env_id, min_role=Role.writer)
+    await guard_env_id(session, user, body.upstream_env_id, min_role=Role.writer)
     dep = await _create_edge(
         session, env_id, body.upstream_env_id, body.trigger_policy, body.references
     )
@@ -107,7 +106,7 @@ async def create_dependency(
 
 @router.get("/environments/{env_id}/dependencies")
 async def list_dependencies(env_id: uuid.UUID, user: CurrentUser, session: DbSession) -> list[dict]:
-    await _guard_env_id(session, user, env_id)
+    await guard_env_id(session, user, env_id)
     deps = (
         (
             await session.execute(
@@ -151,7 +150,7 @@ async def delete_dependency(dep_id: uuid.UUID, user: CurrentUser, session: DbSes
     dep = await session.get(EnvDependency, dep_id)
     if dep is None:
         raise ProblemException(404, "Dependency not found", None)
-    await _guard_env_id(session, user, dep.downstream_env_id, min_role=Role.writer)
+    await guard_env_id(session, user, dep.downstream_env_id, min_role=Role.writer)
     await session.delete(dep)
     await record_audit(
         session,
@@ -171,10 +170,7 @@ async def link_by_name(
 ) -> dict:
     """Create edges between homonymous environments of two stacks (SPECS §3.8)."""
     for sid in (stack_id, body.upstream_stack_id):
-        stack = await session.get(Stack, sid)
-        if stack is None:
-            raise ProblemException(404, "Stack not found", None)
-        await guard_stack(session, user, stack, min_role=Role.writer)
+        await guard_stack_id(session, user, sid, min_role=Role.writer)
     downstream_envs = {
         e.name: e
         for e in (
@@ -193,25 +189,41 @@ async def link_by_name(
         .scalars()
         .all()
     }
+    # Loaded once and kept current as edges are added, so cycle detection also sees this request's
+    # own edges without re-reading the whole table per pair.
+    adj = await _load_adjacency(session)
     created = 0
     for name, downstream in downstream_envs.items():
         upstream = upstream_envs.get(name)
-        if upstream is None:
+        if upstream is None or downstream.id in adj.get(upstream.id, ()):
+            continue  # no homonym, or already linked
+        if _creates_cycle(adj, upstream.id, downstream.id):
             continue
+        # SAVEPOINT per edge: a concurrent insert of the same pair only drops this edge (and its
+        # audit row, staged in the same savepoint), not the ones already created in the request.
         try:
-            await _create_edge(session, downstream.id, upstream.id, body.trigger_policy, [])
-        except ProblemException:
-            continue  # skip existing/cyclic pairs
-        await record_audit(
-            session,
-            action="dependency.created",
-            actor_kind=AuditActorKind.user,
-            actor_id=user.id,
-            actor_email=user.email,
-            target_kind="environment",
-            target_id=downstream.id,
-            context={"upstream_env_id": str(upstream.id), "via": "link-by-name"},
-        )
+            async with session.begin_nested():
+                session.add(
+                    EnvDependency(
+                        upstream_env_id=upstream.id,
+                        downstream_env_id=downstream.id,
+                        trigger_policy=body.trigger_policy,
+                    )
+                )
+                await record_audit(
+                    session,
+                    action="dependency.created",
+                    actor_kind=AuditActorKind.user,
+                    actor_id=user.id,
+                    actor_email=user.email,
+                    target_kind="environment",
+                    target_id=downstream.id,
+                    context={"upstream_env_id": str(upstream.id), "via": "link-by-name"},
+                )
+                await session.flush()
+        except IntegrityError:
+            continue
+        adj.setdefault(upstream.id, set()).add(downstream.id)
         created += 1
     await session.commit()
     return {"created": created}
@@ -219,7 +231,7 @@ async def link_by_name(
 
 @router.get("/environments/{env_id}/outputs")
 async def list_outputs(env_id: uuid.UUID, user: CurrentUser, session: DbSession) -> list[dict]:
-    await _guard_env_id(session, user, env_id)
+    await guard_env_id(session, user, env_id)
     rows = (
         (await session.execute(select(EnvOutput).where(EnvOutput.environment_id == env_id)))
         .scalars()
@@ -233,30 +245,35 @@ async def list_outputs(env_id: uuid.UUID, user: CurrentUser, session: DbSession)
 
 @router.get("/graph")
 async def graph(user: CurrentUser, session: DbSession) -> dict:
-    envs = list((await session.execute(select(Environment))).scalars().all())
     # Scope to the caller's spaces (None = instance admin → all). An edge survives only if both of
     # its envs are visible, so the graph never reveals a cross-space dependency the user can't see.
     ids = await accessible_space_ids(session, user)
+    q = select(Environment)
+    edge_q = select(EnvDependency)
     if ids is not None:
-        space_of = {
-            s.id: s.space_id for s in (await session.execute(select(Stack))).scalars().all()
-        }
-        visible = {e.id for e in envs if space_of.get(e.stack_id) in ids}
-        envs = [e for e in envs if e.id in visible]
-    else:
-        visible = {e.id for e in envs}
-    edges = [
-        e
-        for e in (await session.execute(select(EnvDependency))).scalars().all()
-        if e.upstream_env_id in visible and e.downstream_env_id in visible
-    ]
-    refs = (await session.execute(select(OutputReference))).scalars().all()
-    # Aggregate references per dependency so the UI can show count + dash mocked edges (§5.4).
-    by_dep: dict[uuid.UUID, dict] = {}
-    for r in refs:
-        agg = by_dep.setdefault(r.dependency_id, {"count": 0, "has_mock": False})
-        agg["count"] += 1
-        agg["has_mock"] = agg["has_mock"] or r.mock_value is not None
+        q = q.join(Stack, Stack.id == Environment.stack_id).where(Stack.space_id.in_(ids))
+        # Filtered in SQL (subquery, not an id list) so a small-space reader never pulls the
+        # instance-wide edge set.
+        visible = q.with_only_columns(Environment.id)
+        edge_q = edge_q.where(
+            EnvDependency.upstream_env_id.in_(visible),
+            EnvDependency.downstream_env_id.in_(visible),
+        )
+    envs = list((await session.execute(q)).scalars().all())
+    edges = list((await session.execute(edge_q)).scalars().all())
+    # Aggregate references per kept dependency so the UI can show count + dash mocked edges (§5.4).
+    by_dep: dict[uuid.UUID, dict] = {
+        dep_id: {"count": count, "has_mock": has_mock}
+        for dep_id, count, has_mock in await session.execute(
+            select(
+                OutputReference.dependency_id,
+                func.count(),
+                func.bool_or(OutputReference.mock_value.is_not(None)),
+            )
+            .where(OutputReference.dependency_id.in_(edge_q.with_only_columns(EnvDependency.id)))
+            .group_by(OutputReference.dependency_id)
+        )
+    }
     return {
         "nodes": [
             {"id": str(e.id), "name": e.name, "stack_id": str(e.stack_id), "tier": e.tier}

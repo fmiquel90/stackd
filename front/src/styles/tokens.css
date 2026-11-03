@@ -1,47 +1,82 @@
-/* Design tokens — the visual contract (DESIGN §3). Components MUST use these vars / the
-   Tailwind utilities derived from them; never hard-code a color (CLAUDE §5).
+/* Design tokens v2 — the visual contract (DESIGN §3). Components use these variables through the
+   Tailwind utilities mapped in index.css; never a hard-coded colour (CLAUDE §5).
 
-   Brand: violet (StackD logo) is the structural accent (--color-accent) — focus, links, nav,
-   primary CTAs. Amber is reserved for the human-decision moment (--color-decision: Confirm/apply)
-   and the `unconfirmed` state. Mock is magenta — a modifier kept outside the operational spectrum. */
+   Every chromatic token means a state (§3.2) or a diff (§3.5); the chrome is neutral (§2.1). Brand
+   violet survives only as --color-brand (logo), --color-focus (focus ring, selection mark).
+   Contrast ratios of each pair are listed in DESIGN §3.1 and re-checked by tokens.test.ts. */
 
 :root,
 [data-theme="dark"] {
-  /* Surfaces & structure (dark = reference theme, DESIGN §3.1) */
+  color-scheme: dark;
+
+  /* Surfaces */
   --color-bg-base: #0c1118;
   --color-bg-surface: #141b24;
   --color-bg-raised: #1d2733;
-  --color-border: #2a3542;
-  --color-text-primary: #e8eef4;
-  --color-text-secondary: #8a97a4;
-  --color-accent: #8b6cf0; /* brand violet — structure / focus / links / primary CTAs */
-  --color-decision: #e8a838; /* amber — the human-decision moment (Confirm/apply) only */
+  --color-bg-sunken: #090d13;
+  --color-border: #2a3542; /* decorative rule */
+  --color-border-control: #6b7a8b; /* inputs, secondary buttons: >= 3:1 */
+  --color-overlay: rgba(0, 0, 0, 0.55);
 
-  /* State language (DESIGN §3.2) — identical semantics in both themes */
-  --color-state-queued: #6e7b8b;
-  --color-state-running: #4c8dff;
-  --color-state-unconfirmed: #e8a838;
-  --color-state-finished: #3fb950;
-  --color-state-failed: #f85149;
-  --color-mock: #ec6ab4; /* magenta modifier, deliberately outside the operational spectrum */
-  --color-overlay: rgba(0, 0, 0, 0.55); /* modal scrim */
+  /* Text & structure */
+  --color-text-primary: #e8eef4;
+  --color-text-secondary: #9aa6b2;
+  --color-focus: #a28bff;
+  --color-brand: #8b6cf0;
+  --color-on-fill: #0c1118;
+
+  /* States & modifiers */
+  --color-state-queued: #9aa6b2;
+  --color-state-running: #6ea8ff;
+  --color-state-decision: #f0b445;
+  --color-state-finished: #4cc35e;
+  --color-state-failed: #ff7b72;
+  --color-mock: #f07cc0;
+
+  /* Tints (row / banner backgrounds that carry a state, always with its glyph and label) */
+  --color-decision-tint: #2a2213;
+  --color-failed-tint: #2a1517;
+  --color-mock-tint: #2a1626;
 }
 
 [data-theme="light"] {
-  --color-bg-base: #f7f9fb;
+  color-scheme: light;
+
+  --color-bg-base: #f6f8fa;
   --color-bg-surface: #ffffff;
   --color-bg-raised: #eef2f6;
+  --color-bg-sunken: #eaeef2;
   --color-border: #d3dae2;
-  --color-text-primary: #1b2733;
-  --color-text-secondary: #5a6776;
-  --color-accent: #6d3fd4; /* brand violet (the logo's "D"), AA on light */
-  --color-decision: #a87a1f; /* darkened amber for AA contrast */
-
-  --color-state-queued: #6e7b8b;
-  --color-state-running: #1f6feb;
-  --color-state-unconfirmed: #a87a1f;
-  --color-state-finished: #2da44e;
-  --color-state-failed: #cf222e;
-  --color-mock: #bc3f9e;
+  --color-border-control: #7d8a97;
   --color-overlay: rgba(27, 39, 51, 0.45);
+
+  --color-text-primary: #1b2733;
+  --color-text-secondary: #55626f;
+  --color-focus: #6d3fd4;
+  --color-brand: #6d3fd4;
+  --color-on-fill: #ffffff;
+
+  --color-state-queued: #5c6875;
+  --color-state-running: #0b5cd5;
+  --color-state-decision: #8a5300;
+  --color-state-finished: #167032;
+  --color-state-failed: #c4212c;
+  --color-mock: #a3287f;
+
+  --color-decision-tint: #fff3d6;
+  --color-failed-tint: #ffebe9;
+  --color-mock-tint: #fcebf6;
+}
+
+/* Aliases shared by both themes. Declared on every themed element, not only :root: a var() inside a
+   custom property resolves where it is declared, so a nested [data-theme] subtree (Ladle panels,
+   any themed island) would otherwise inherit the other theme's colours. */
+:root,
+[data-theme] {
+  /* Diff tokens (DESIGN §3.5): alias the state values today, separate names so they can diverge. */
+  --color-diff-create: var(--color-state-finished);
+  --color-diff-destroy: var(--color-state-failed);
+  --color-diff-replace: var(--color-state-failed);
+  --color-diff-update: var(--color-text-primary);
+  --color-diff-read: var(--color-text-secondary);
 }

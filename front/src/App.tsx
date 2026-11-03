@@ -1,14 +1,12 @@
 import { AppShell } from "@/app/AppShell";
+import { LoginPage } from "@/app/LoginPage";
+import { Walkthrough } from "@/app/Walkthrough";
 import { useCompleteOnboarding, useSession } from "@/auth/session";
-import { Walkthrough } from "@/components/Walkthrough";
-import { LoginPage } from "@/pages/LoginPage";
 
 function Splash() {
   return (
-    <div className="flex min-h-full items-center justify-center">
-      <span className="font-data text-[12px]" style={{ color: "var(--color-text-secondary)" }}>
-        Loading…
-      </span>
+    <div className="flex min-h-full items-center justify-center bg-base" role="status">
+      <span className="font-data text-[12px] text-muted">Loading…</span>
     </div>
   );
 }

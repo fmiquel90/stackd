@@ -12,6 +12,7 @@ from app.audit import record_audit
 from app.auth.deps import CurrentUser, require_role
 from app.db import get_session
 from app.enums import AttachmentTarget, AuditActorKind, Role
+from app.environments.router import lock_attach_target
 from app.errors import ProblemException
 from app.models.environment import Environment
 from app.models.stack import Stack
@@ -20,8 +21,10 @@ from app.models.user import User
 from app.models.variable_set import VariableSet, VariableSetAttachment
 from app.spaces import (
     accessible_space_ids,
-    get_default_space,
+    guard_env,
+    guard_stack,
     require_space_access,
+    resolve_target_space,
 )
 from app.variable_sets.schemas import (
     AttachmentCreate,
@@ -60,8 +63,9 @@ async def list_sets(user: CurrentUser, session: DbSession) -> list[VariableSet]:
 @router.post("", response_model=VariableSetOut, status_code=201, dependencies=[Writer])
 async def create_set(body: VariableSetCreate, user: CurrentUser, session: DbSession) -> VariableSet:
     payload = body.model_dump()
-    space_id = payload.pop("space_id", None) or (await get_default_space(session)).id
-    await require_space_access(session, user, space_id, min_role=Role.writer)
+    space_id = await resolve_target_space(
+        session, user, payload.pop("space_id", None), min_role=Role.writer
+    )
     vset = VariableSet(space_id=space_id, **payload)
     session.add(vset)
     try:
@@ -267,14 +271,36 @@ async def list_attachments(
 async def attach(
     set_id: uuid.UUID, body: AttachmentCreate, user: CurrentUser, session: DbSession
 ) -> VariableSetAttachment:
-    await _get_set(session, user, set_id, min_role=Role.writer)
+    vset = await _get_set(session, user, set_id, min_role=Role.writer)
     target_model = {
         AttachmentTarget.stack: Stack,
         AttachmentTarget.environment: Environment,
         AttachmentTarget.tier: Tier,
     }[body.target_kind]
-    if await session.get(target_model, body.target_id) is None:
+    # No orphan on a racing deletion of the stack/env (§3.4).
+    await lock_attach_target(
+        session, body.target_kind, body.target_id, not_found="Attachment target not found"
+    )
+    target = await session.get(target_model, body.target_id)
+    if target is None:
         raise ProblemException(404, "Attachment target not found", f"No {body.target_kind.value}.")
+    # A set only reaches its own space (§3.4, §6 Phase F): a stack/env target must be writable by
+    # the caller (both ends guarded, like create_dependency) AND live in the set's space — else a
+    # writer in space A could inject A's variables into space B's runs. A tier is a global catalog
+    # row with no space: the attachment is allowed, and resolution scopes it to the set's space.
+    target_space_id = vset.space_id
+    if isinstance(target, Stack):
+        await guard_stack(session, user, target, min_role=Role.writer)
+        target_space_id = target.space_id
+    elif isinstance(target, Environment):
+        await guard_env(session, user, target, min_role=Role.writer)
+        stack = await session.get(Stack, target.stack_id)
+        assert stack is not None
+        target_space_id = stack.space_id
+    if target_space_id != vset.space_id:
+        raise ProblemException(
+            400, "Cross-space attachment", "The target must belong to the variable set's space."
+        )
     attachment = VariableSetAttachment(
         variable_set_id=set_id,
         target_kind=body.target_kind,

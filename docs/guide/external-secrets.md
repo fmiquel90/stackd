@@ -110,7 +110,7 @@ This mirrors the mock apply-gate (`allow_mock_apply`). The plan is always allowe
 
 ## Audit
 
-Source management and every fallback event are audited (`secret_source.created`, `secret_source.token_rotated`, `secret.fallback_used`, `secret.fallback_overridden`, `secret.unavailable`). The secret value itself is never written to the audit context. Successful live resolutions are not audited individually — the run's `variable_provenance` records `secret:<source>` per variable.
+Source management and every fallback event are audited (`secret_source.created`, `secret_source.token_rotated`, `secret.fallback_used`, `secret.fallback_overridden`). A run failed because a reference could not resolve is audited as `run.apply_failed` with `reason: secret`. The secret value itself is never written to the audit context. Successful live resolutions are not audited individually — the run's `variable_provenance` records `secret:<source>` per variable.
 
 ## See also
 

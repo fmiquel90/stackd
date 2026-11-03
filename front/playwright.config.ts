@@ -10,6 +10,11 @@ export default defineConfig({
   forbidOnly: !!process.env.CI,
   retries: process.env.CI ? 1 : 0,
   reporter: "list",
-  use: { baseURL, trace: "on-first-retry" },
+  use: {
+    baseURL,
+    trace: "on-first-retry",
+    // Optional: a preinstalled Chromium when the bundled build is not downloadable (sandboxes).
+    launchOptions: process.env.PW_CHROMIUM_PATH ? { executablePath: process.env.PW_CHROMIUM_PATH } : {},
+  },
   projects: [{ name: "chromium", use: { ...devices["Desktop Chrome"] } }],
 });

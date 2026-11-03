@@ -1,7 +1,36 @@
 from __future__ import annotations
 
 import os
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+
+from agent.docker_runner import DockerLimits
+from agent.tools import parse_runner_images, probe_local, tools_from_images
+
+
+RUNNERS = frozenset({"local", "docker"})
+_SIZE_UNITS = {"k": 1024, "m": 1024**2, "g": 1024**3}
+
+
+def _bytes(value: str) -> int:
+    """`512m`, `2g`, `1073741824` → bytes."""
+    v = value.strip().lower()
+    if v and v[-1] in _SIZE_UNITS:
+        return int(float(v[:-1]) * _SIZE_UNITS[v[-1]])
+    return int(v)
+
+
+def _docker_limits() -> DockerLimits:
+    env = os.environ.get
+    cpus = env("STACKD_DOCKER_CPUS")
+    memory = env("STACKD_DOCKER_MEMORY")
+    return DockerLimits(
+        network=env("STACKD_DOCKER_NETWORK") or "bridge",
+        memory_bytes=_bytes(memory) if memory else None,
+        nano_cpus=int(float(cpus) * 1e9) if cpus else None,
+        pids_limit=int(env("STACKD_DOCKER_PIDS_LIMIT") or 1024),
+        runtime=env("STACKD_DOCKER_RUNTIME") or None,
+        tmp_size=env("STACKD_DOCKER_TMP_SIZE") or "1g",
+    )
 
 
 @dataclass(frozen=True)
@@ -15,6 +44,18 @@ class Settings:
     workspace_root: str
     leak_action: str  # "warn" (default) | "fail" — cleartext-tripwire policy (§5.1, Phase C)
     max_concurrent_jobs: int  # in-flight jobs across environments (§7, Phase E; default 1)
+    # docker runner (§7.4): {"opentofu:1.12.2": "<repo>@sha256:<digest>"}, from STACKD_RUNNER_IMAGES
+    runner_images: dict[str, str] = field(default_factory=dict)
+    docker_host: str | None = None  # STACKD_DOCKER_HOST: unix socket of the Docker Engine
+    docker_limits: DockerLimits = field(default_factory=DockerLimits)
+
+    def __post_init__(self) -> None:
+        # A typo must not fall back to `local` silently: that runner has no isolation (§7.4).
+        if self.runner not in RUNNERS:
+            raise ValueError(f"STACKD_RUNNER must be one of {sorted(RUNNERS)}, got {self.runner!r}")
+        if self.runner == "docker" and not self.runner_images:
+            # Without images the worker could run nothing: refuse to start rather than register.
+            raise ValueError("STACKD_RUNNER=docker needs STACKD_RUNNER_IMAGES (pinned by digest)")
 
     @classmethod
     def from_env(cls) -> "Settings":
@@ -34,4 +75,14 @@ class Settings:
             if os.environ.get("STACKD_LEAK_TRIPWIRE", "warn") == "fail"
             else "warn",
             max_concurrent_jobs=max(1, int(os.environ.get("STACKD_MAX_CONCURRENT_JOBS", "1"))),
+            runner_images=parse_runner_images(os.environ.get("STACKD_RUNNER_IMAGES", "")),
+            docker_host=os.environ.get("STACKD_DOCKER_HOST") or None,
+            docker_limits=_docker_limits(),
         )
+
+    def available_tools(self) -> dict[str, list[str]]:
+        """The tool versions this worker can run (§7.4): its runner images' on the docker runner,
+        the binaries on PATH on the local one."""
+        if self.runner == "docker":
+            return tools_from_images(self.runner_images)
+        return probe_local()

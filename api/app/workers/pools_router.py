@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import secrets
 import uuid
+from datetime import UTC, datetime, timedelta
 from typing import Annotated
 
 from fastapi import APIRouter, Depends
@@ -10,8 +11,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.audit import record_audit
 from app.auth.deps import CurrentUser, require_role
+from app.config import get_settings
 from app.db import get_session
-from app.enums import ACTIVE_STATES, AuditActorKind, Role, RunState
+from app.enums import ACTIVE_STATES, AuditActorKind, Role, RunState, WorkerStatus
 from app.errors import ProblemException
 from app.models.environment import Environment
 from app.models.run import Run
@@ -19,7 +21,7 @@ from app.models.stack import Stack
 from app.models.worker import Worker, WorkerPool
 from app.models.worker_command import WorkerCommand
 from app.security import hash_token
-from app.spaces import accessible_space_ids, get_default_space, require_space_access
+from app.spaces import accessible_space_ids, resolve_target_space
 from app.workers.schemas import (
     PoolCreate,
     PoolCreated,
@@ -27,6 +29,7 @@ from app.workers.schemas import (
     QueueEntry,
     WorkerOut,
 )
+from app.workers.tools import can_run
 
 router = APIRouter(prefix="/api/v1", tags=["worker-admin"])
 DbSession = Annotated[AsyncSession, Depends(get_session)]
@@ -35,8 +38,7 @@ Admin = Depends(require_role(Role.admin))
 
 @router.post("/worker-pools", response_model=PoolCreated, status_code=201, dependencies=[Admin])
 async def create_pool(body: PoolCreate, user: CurrentUser, session: DbSession) -> PoolCreated:
-    space_id = body.space_id or (await get_default_space(session)).id
-    await require_space_access(session, user, space_id, min_role=Role.admin)
+    space_id = await resolve_target_space(session, user, body.space_id, min_role=Role.admin)
     token = secrets.token_urlsafe(32)
     pool = WorkerPool(
         space_id=space_id, name=body.name, labels=body.labels, token_hash=hash_token(token)
@@ -136,7 +138,12 @@ async def latest_diagnostics(worker_id: uuid.UUID, session: DbSession) -> dict:
     }
 
 
-def _blocking_reason(run: Run, active_by_env: dict[uuid.UUID, int], env_locked: bool) -> str | None:
+def _blocking_reason(
+    run: Run,
+    active_by_env: dict[uuid.UUID, int],
+    env_locked: bool,
+    compatible: bool = True,
+) -> str | None:
     if run.state not in (RunState.queued, RunState.confirmed):
         return None
     if env_locked:
@@ -145,7 +152,20 @@ def _blocking_reason(run: Run, active_by_env: dict[uuid.UUID, int], env_locked: 
         return "active_run"
     if run.state == RunState.confirmed:
         return "apply_affinity_hold"
-    return None  # claimable; no compatible worker check is best-effort and omitted at MVP
+    if not compatible:
+        return "no_compatible_worker"
+    return None
+
+
+def _compatible(env: Environment, stack: Stack, workers: list[Worker]) -> bool:
+    """True when an online worker could claim a run of `env` (§7.2/§7.4): its labels cover the env's
+    and it can run the stack's tool version — the claim's own filters, evaluated in Python."""
+    wanted = env.labels or {}
+    return any(
+        all((w.labels or {}).get(k) == v for k, v in wanted.items())
+        and can_run(w.tools, stack.tool.value, stack.tool_version)
+        for w in workers
+    )
 
 
 @router.get("/queue", response_model=list[QueueEntry])
@@ -167,15 +187,44 @@ async def queue(user: CurrentUser, session: DbSession) -> list[QueueEntry]:
         if r.state in ACTIVE_STATES and r.worker_id is not None:
             active_by_env[r.environment_id] = active_by_env.get(r.environment_id, 0) + 1
 
+    # Online workers, and each waiting run's env + stack, for `no_compatible_worker`.
+    since = datetime.now(UTC) - timedelta(seconds=get_settings().stackd_worker_offline_seconds)
+    online = list(
+        (
+            await session.execute(
+                select(Worker).where(
+                    Worker.status != WorkerStatus.offline, Worker.last_heartbeat_at >= since
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+    waiting_envs = {r.environment_id for r in runs if r.state == RunState.queued}
+    env_stack = {
+        env.id: (env, stack)
+        for env, stack in (
+            await session.execute(
+                select(Environment, Stack)
+                .join(Stack, Stack.id == Environment.stack_id)
+                .where(Environment.id.in_(waiting_envs))
+            )
+        ).all()
+    }
+
     out: list[QueueEntry] = []
     for r in runs:
+        pair = env_stack.get(r.environment_id)
+        compatible = pair is None or _compatible(pair[0], pair[1], online)
         out.append(
             QueueEntry(
                 run_id=r.id,
                 environment_id=r.environment_id,
                 state=r.state.value,
                 worker_id=r.worker_id,
-                blocking_reason=_blocking_reason(r, active_by_env, env_locked=False),
+                blocking_reason=_blocking_reason(
+                    r, active_by_env, env_locked=False, compatible=compatible
+                ),
             )
         )
     return out

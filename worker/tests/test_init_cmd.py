@@ -1,11 +1,11 @@
 from agent.main import _init_cmd
 
 
-def test_init_managed_backend_uses_http_config():
+def test_init_managed_backend_passes_no_backend_config():
+    # The managed HTTP backend is configured through TF_HTTP_* (see test_backend_env): anything
+    # passed as -backend-config is persisted under .terraform/.
     cmd = _init_cmd("tofu", {"address": "https://api/state/v1/e", "lock_method": "POST"})
-    assert cmd[:3] == ["tofu", "init", "-input=false"]
-    assert "-backend-config=address=https://api/state/v1/e" in cmd
-    assert "-backend-config=lock_method=POST" in cmd
+    assert cmd == ["tofu", "init", "-input=false"]
 
 
 def test_init_unmanaged_with_backend_config_file():

@@ -78,7 +78,10 @@ async def _sets_for_env(
     )
 
     # 2. explicit attachments, weakest→strongest: tier (all envs of the tier) < stack (all envs of
-    # the stack) < this env. Each ordered by priority asc.
+    # the stack) < this env. Each ordered by priority asc. Only sets of the env's own space apply:
+    # a tier is a global catalog row, so a tier attachment reaches that tier's envs in the set's
+    # space only; and a stack/env attachment from another space (refused at attach time; could
+    # only predate that check) never injects into this run.
     tier_row = (
         await session.execute(select(Tier).where(Tier.name == env.tier))
     ).scalar_one_or_none()
@@ -97,6 +100,7 @@ async def _sets_for_env(
                 .where(
                     VariableSetAttachment.target_kind == kind,
                     VariableSetAttachment.target_id == target_id,
+                    VariableSet.space_id == stack.space_id,
                 )
                 .order_by(VariableSetAttachment.priority, VariableSet.name)
             )

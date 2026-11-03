@@ -38,6 +38,53 @@ async def test_approval_request_fans_out_to_approvers(client: httpx.AsyncClient)
     assert all(n["read"] is False for n in alice_feed if n["kind"] == "approval_request")
 
 
+async def test_approval_audience_follows_space_membership(client: httpx.AsyncClient) -> None:
+    # The fan-out uses the same effective rule as the confirm gate (space membership + can_apply),
+    # not instance role/tiers: an instance approver with no membership in the space is not told
+    # (cross-space leak), a membership-only approver (instance writer) is.
+    admin = await login(client, "admin")
+    alice = await login(client, "alice")  # instance approver {dev, staging, prod}
+    bob = await login(client, "bob")  # instance writer
+    wh = await register_worker(client, admin, "pool-inbox-6")
+    space = await client.post("/api/v1/spaces", headers=admin, json={"name": "inbox-space"})
+    assert space.status_code == 201, space.text
+    space_id = space.json()["id"]
+    users = (await client.get("/api/v1/users", headers=admin)).json()
+    ids = {u["email"]: u["id"] for u in users}
+    # Pin memberships regardless of provisioning order: alice none, bob approver for prod.
+    await client.delete(
+        f"/api/v1/spaces/{space_id}/members/{ids['alice@dev.local']}", headers=admin
+    )
+    grant = await client.put(
+        f"/api/v1/spaces/{space_id}/members",
+        headers=admin,
+        json={"user_id": ids["bob@dev.local"], "role": "approver", "allowed_tiers": ["prod"]},
+    )
+    assert grant.status_code == 200, grant.text
+    stack = await client.post(
+        "/api/v1/stacks",
+        headers=admin,
+        json={
+            "space_id": space_id,
+            "name": "inbox-space-stack",
+            "repo_url": "file:///repos/x",
+            "tool_version": "1.12.0",
+        },
+    )
+    assert stack.status_code == 201, stack.text
+    env_id = await make_env(client, admin, stack.json()["id"], "prod", "prod")
+
+    run_id = await _drive_to_unconfirmed(client, wh, env_id, admin)
+
+    assert any(
+        n["kind"] == "approval_request" and n["run_id"] == run_id for n in await _bell(client, bob)
+    )
+    assert all(n["run_id"] != run_id for n in await _bell(client, alice))
+    # The audience matches who can actually act on it.
+    assert (await client.post(f"/api/v1/runs/{run_id}/confirm", headers=alice)).status_code == 403
+    assert (await client.post(f"/api/v1/runs/{run_id}/confirm", headers=bob)).status_code == 200
+
+
 async def test_terminal_notifies_the_triggerer(client: httpx.AsyncClient) -> None:
     admin = await login(client, "admin")
     wh = await register_worker(client, admin, "pool-inbox-2")

@@ -185,7 +185,7 @@ async def seed_demo() -> None:
                 match={"space_id": demo.id, "name": sname},
                 defaults={
                     "repo_url": f"{REPO_BASE}/{sname}",
-                    "tool_version": "1.12.0",
+                    "tool_version": "1.12",
                     "project_root": ".",
                 },
             )

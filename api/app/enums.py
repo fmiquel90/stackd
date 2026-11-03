@@ -10,6 +10,11 @@ class Role(enum.StrEnum):
     admin = "admin"
 
 
+# The single role ordering — used by both the instance-level gate (auth.deps.require_role) and the
+# space-level gate (spaces.service.require_space_access); they must never rank roles differently.
+ROLE_RANK: dict[Role, int] = {Role.reader: 0, Role.writer: 1, Role.approver: 2, Role.admin: 3}
+
+
 # Tiers are no longer a fixed linear enum — they're a configurable, non-ordered catalog (the `tiers`
 # table, app.models.tier). A tier is referenced by name (str); apply permission is set membership
 # (user.allowed_tiers), not a rank ceiling. Defaults live here for the seed/migration.

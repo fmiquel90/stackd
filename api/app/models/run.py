@@ -64,6 +64,10 @@ class Run(Base):
     # Break-glass override values supplied at trigger time, AES-GCM, used only for this run (§15.4).
     secret_overrides_encrypted: Mapped[bytes | None] = mapped_column(LargeBinary, default=None)
     variable_provenance: Mapped[dict | None] = mapped_column(JSONB, default=None)
+    # S3 key of the run's saved plan (§7.4/§11.3) — AES-256-GCM, the exact plan the apply job
+    # applies. Set by the plan job's upload; cleared, and the object deleted, once the run is
+    # terminal (app.runs.artifacts, called by transition()).
+    plan_artifact_key: Mapped[str | None] = mapped_column(String, default=None)
 
     claimed_at: Mapped[datetime | None] = mapped_column(default=None)
     confirmed_at: Mapped[datetime | None] = mapped_column(default=None)

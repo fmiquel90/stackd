@@ -29,13 +29,15 @@ Over the API:
 
 ```bash
 # import an existing bucket into state
-curl -s -X POST localhost:8000/api/v1/environments/$ENV_ID/commands -H "$AUTH" -d '{
+curl -s -X POST localhost:8000/api/v1/environments/$ENV_ID/commands -H "$AUTH" \
+  -H 'content-type: application/json' -d '{
   "command": "import",
   "args": ["aws_s3_bucket.logs", "my-existing-bucket"]
 }'
 
 # remove a resource from state
-curl -s -X POST localhost:8000/api/v1/environments/$ENV_ID/commands -H "$AUTH" -d '{
+curl -s -X POST localhost:8000/api/v1/environments/$ENV_ID/commands -H "$AUTH" \
+  -H 'content-type: application/json' -d '{
   "command": "state rm", "args": ["aws_instance.old"]
 }'
 ```
@@ -46,11 +48,27 @@ logs, and uses the managed state backend.
 
 ## What it runs with
 
-- The worker clones the repo at the pinned commit, `init`s with the env's backend, then runs the
-  subcommand — so config-aware commands like `import` work.
-- **Credentials**: a mutating command gets the env's **apply** OIDC role; a read-only command gets
-  the **plan** (read-only) role. See [Cloud credentials](cloud-credentials.md).
-- **Audited**: `run.command_triggered` on trigger and `run.command_executed` on success.
+- The worker clones the repo at the request's `commit_sha` (a full SHA, a branch or a tag) or, by
+  default, the head of the environment's branch, `init`s with the env's backend, then runs the
+  subcommand — so config-aware commands like `import` work. No hooks run.
+- **Credentials follow the command.** The claim tells the worker the job's credential phase
+  (`cred_phase`):
+
+    | | Read-only command | Mutating command |
+    |---|---|---|
+    | `cred_phase` | `plan` | `apply` |
+    | OIDC role | the **plan** (read-only) role | the **apply** role |
+    | State token | **`ro`**: reads state only, never locks (its backend has no lock address) | **`rw`**: may lock and write state |
+    | Token lifetime | 6 h | the apply window (apply budget + grace, 20 min by default) |
+    | Time budget | the agent's default cap (2 h) | the **apply budget** (`STACKD_APPLY_TIMEOUT_SECONDS`, 15 min by default) |
+
+    A mutating command killed at its budget fails with an "exceeded the …s time budget" error. If
+    its worker disappears, the run is only reclaimed (`worker_lost`) after the apply window, by
+    which time its tokens have expired — two workers never write the env's state at once. See
+    [Workers & scaling](workers-and-scaling.md#worker-loss) and
+    [Cloud credentials](cloud-credentials.md).
+- **Audited**: `run.command_triggered` on trigger and `run.command_executed` on success; a failure
+  is `run.apply_failed`.
 
 !!! warning
     `import` needs to *read* the real resource, so the assumed role must have access to it. For an

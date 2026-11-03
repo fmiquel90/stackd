@@ -22,3 +22,17 @@ def decrypt(blob: bytes, *, aad: bytes | None = None) -> str:
     key = get_settings().encryption_key_bytes
     nonce, ct = blob[:NONCE_SIZE], blob[NONCE_SIZE:]
     return AESGCM(key).decrypt(nonce, ct, aad).decode()
+
+
+def encrypt_bytes(data: bytes, *, aad: bytes | None = None) -> bytes:
+    """`encrypt` for binary payloads (e.g. a saved plan file, §11.3): same key, same layout."""
+    key = get_settings().encryption_key_bytes
+    nonce = os.urandom(NONCE_SIZE)
+    return nonce + AESGCM(key).encrypt(nonce, data, aad)
+
+
+def decrypt_bytes(blob: bytes, *, aad: bytes | None = None) -> bytes:
+    """Inverse of `encrypt_bytes`; raises cryptography's InvalidTag on a wrong key, AAD or blob."""
+    key = get_settings().encryption_key_bytes
+    nonce, ct = blob[:NONCE_SIZE], blob[NONCE_SIZE:]
+    return AESGCM(key).decrypt(nonce, ct, aad)

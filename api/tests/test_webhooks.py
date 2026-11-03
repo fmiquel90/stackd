@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import hmac
 import json
+import uuid
 
 import httpx
 
@@ -16,11 +18,11 @@ def _sig(body: bytes) -> str:
     return "sha256=" + hmac.new(SECRET.encode(), body, hashlib.sha256).hexdigest()
 
 
-async def _stack_with_webhook(client, admin, name: str) -> tuple[str, str]:
+async def _stack_with_webhook(client, admin, name: str, repo: str = REPO) -> tuple[str, str]:
     r = await client.post(
         "/api/v1/stacks",
         headers=admin,
-        json={"name": name, "repo_url": REPO, "tool_version": "1.12.0"},
+        json={"name": name, "repo_url": repo, "tool_version": "1.12.0"},
     )
     stack_id = r.json()["id"]
     await client.patch(f"/api/v1/stacks/{stack_id}", headers=admin, json={"webhook_secret": SECRET})
@@ -88,3 +90,98 @@ async def test_pull_request_creates_proposed_run(client: httpx.AsyncClient) -> N
     assert resp.status_code == 200
     runs = (await client.get(f"/api/v1/environments/{env_id}/runs", headers=admin)).json()
     assert any(r["type"] == "proposed" and r["commit_sha"] == "prsha999" for r in runs)
+
+
+async def test_branch_deletion_push_clears_head_and_triggers_nothing(
+    client: httpx.AsyncClient,
+) -> None:
+    """A push deleting the tracked branch (`deleted`, all-zero `after`) triggers no run and records
+    no zero SHA: the env's head is cleared, so it isn't reported stale against a gone branch."""
+    admin = await login(client, "admin")
+    repo = "https://github.com/acme/branch-deleted"  # its own repo: only this env matches
+    _stack, env_id = await _stack_with_webhook(client, admin, "wh-branch-deleted", repo)
+
+    async def _push(payload: dict) -> httpx.Response:
+        body = json.dumps(
+            {"ref": "refs/heads/main", "repository": {"clone_url": repo}} | payload
+        ).encode()
+        return await client.post(
+            "/api/v1/webhooks/github",
+            content=body,
+            headers={"X-GitHub-Event": "push", "X-Hub-Signature-256": _sig(body)},
+        )
+
+    assert (await _push({"after": "abc1234def", "commits": [{"modified": ["main.tf"]}]})).json()[
+        "triggered"
+    ] == 1
+    runs_before = (await client.get(f"/api/v1/environments/{env_id}/runs", headers=admin)).json()
+
+    zero = "0" * 40
+    deleted = await _push({"before": "abc1234def", "after": zero, "deleted": True, "commits": []})
+    assert deleted.status_code == 200
+    assert deleted.json()["triggered"] == 0
+
+    env = (await client.get(f"/api/v1/environments/{env_id}", headers=admin)).json()
+    assert env["head_sha"] is None
+    assert env["stale"] is False
+    runs = (await client.get(f"/api/v1/environments/{env_id}/runs", headers=admin)).json()
+    assert [r["id"] for r in runs] == [r["id"] for r in runs_before]
+    assert all(r["commit_sha"] != zero for r in runs)
+
+
+async def test_push_skips_an_env_re_pointed_meanwhile(client: httpx.AsyncClient) -> None:
+    """The head is recorded on the envs still tracking the pushed branch when it is written: an env
+    re-pointed to another branch by a transaction the push has to wait for gets neither the pushed
+    head nor a run on it."""
+    from sqlalchemy import text, update
+
+    from app.db import SessionLocal
+    from app.models.environment import Environment
+
+    admin = await login(client, "admin")
+    repo = "https://github.com/acme/re-pointed"  # its own repo: only this env matches
+    _stack, env_id = await _stack_with_webhook(client, admin, "wh-re-pointed", repo)
+    payload = {
+        "ref": "refs/heads/main",
+        "after": "pushed999",
+        "repository": {"clone_url": repo},
+        "commits": [{"modified": ["main.tf"]}],
+    }
+    body = json.dumps(payload).encode()
+
+    async def _lock_waiters() -> int:
+        async with SessionLocal() as session:
+            return (
+                await session.execute(
+                    text(
+                        "SELECT count(*) FROM pg_stat_activity"
+                        " WHERE datname = current_database() AND wait_event_type = 'Lock'"
+                    )
+                )
+            ).scalar_one()
+
+    async with SessionLocal() as patch:  # a branch change in flight, as PATCH does it
+        await patch.execute(
+            update(Environment)
+            .where(Environment.id == uuid.UUID(env_id))
+            .values(branch="other", head_sha=None, head_updated_at=None)
+        )
+        push = asyncio.create_task(
+            client.post(
+                "/api/v1/webhooks/github",
+                content=body,
+                headers={"X-GitHub-Event": "push", "X-Hub-Signature-256": _sig(body)},
+            )
+        )
+        for _ in range(200):  # until the push waits on the env's row lock (or is done)
+            if push.done() or await _lock_waiters():
+                break
+            await asyncio.sleep(0.025)
+        await patch.commit()
+    resp = await push
+
+    assert resp.status_code == 200
+    assert resp.json()["triggered"] == 0
+    env = (await client.get(f"/api/v1/environments/{env_id}", headers=admin)).json()
+    assert (env["branch"], env["head_sha"]) == ("other", None)
+    assert (await client.get(f"/api/v1/environments/{env_id}/runs", headers=admin)).json() == []

@@ -63,37 +63,24 @@ export function HooksPanel({ scope, id }: { scope: HookScope; id: string }) {
                 <div className="flex min-w-0 flex-wrap items-center gap-2">
                   <Badge>{h.stage}</Badge>
                   <span className="font-data text-[13px] font-medium">{h.name}</span>
-                  <Badge
-                    color={
-                      h.on_failure === "warn"
-                        ? "var(--color-state-unconfirmed)"
-                        : "var(--color-state-failed)"
-                    }
-                  >
-                    on fail: {h.on_failure}
-                  </Badge>
+                  {/* Configuration, not an outcome: neutral (amber is reserved for decisions). */}
+                  <Badge>on fail: {h.on_failure}</Badge>
                 </div>
                 <div className="flex shrink-0 items-center gap-1">
-                  <button
-                    type="button"
-                    aria-label="Edit hook"
-                    className="ui-btn rounded-base px-1.5 py-1"
-                    onClick={() => setEditingId(h.id)}
-                    style={{ color: "var(--color-text-secondary)" }}
-                  >
-                    <Pencil size={14} strokeWidth={1.75} aria-hidden />
-                  </button>
+                  <Button onClick={() => setEditingId(h.id)}>
+                    <Pencil size={13} strokeWidth={1.75} aria-hidden /> Edit
+                  </Button>
                   <DeleteButton label="Delete hook" onClick={() => remove.mutate(h.id)} />
                 </div>
               </div>
-              <div className="font-data mt-2 truncate text-[11px]" style={{ color: "var(--color-text-secondary)" }} title={h.command}>
+              <div className="font-data mt-2 truncate text-[11px] text-muted" title={h.command}>
                 {h.command}
               </div>
             </ItemTile>
           ),
         )}
         {data && data.length === 0 && (
-          <span className="font-data text-[12px]" style={{ color: "var(--color-text-secondary)" }}>
+          <span className="font-data text-[12px] text-muted">
             No platform hooks. These are non-bypassable by a PR.
           </span>
         )}
@@ -106,7 +93,10 @@ export function HooksPanel({ scope, id }: { scope: HookScope; id: string }) {
         }}
       >
         <Field label="Stage">
-          <Select value={form.stage} onChange={(e) => setForm({ ...form, stage: e.target.value as HookStage })}>
+          <Select
+            value={form.stage}
+            onChange={(e) => setForm({ ...form, stage: e.target.value as HookStage })}
+          >
             {STAGES.map((s) => (
               <option key={s} value={s}>
                 {s}
@@ -115,13 +105,24 @@ export function HooksPanel({ scope, id }: { scope: HookScope; id: string }) {
           </Select>
         </Field>
         <Field label="Name">
-          <TextInput value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} required />
+          <TextInput
+            value={form.name}
+            onChange={(e) => setForm({ ...form, name: e.target.value })}
+            required
+          />
         </Field>
         <Field label="Command">
-          <TextInput value={form.command} onChange={(e) => setForm({ ...form, command: e.target.value })} required />
+          <TextInput
+            value={form.command}
+            onChange={(e) => setForm({ ...form, command: e.target.value })}
+            required
+          />
         </Field>
         <Field label="On failure">
-          <Select value={form.on_failure} onChange={(e) => setForm({ ...form, on_failure: e.target.value as "fail" | "warn" })}>
+          <Select
+            value={form.on_failure}
+            onChange={(e) => setForm({ ...form, on_failure: e.target.value as "fail" | "warn" })}
+          >
             <option value="fail">fail</option>
             <option value="warn">warn</option>
           </Select>

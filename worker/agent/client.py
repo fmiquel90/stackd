@@ -14,13 +14,29 @@ class ApiClient:
         self._pool_token: str | None = None
         self._name: str | None = None
         self._labels: dict | None = None
+        self._runner: str | None = None
+        self._tools: dict[str, list[str]] | None = None
 
-    def register(self, pool_token: str, name: str, labels: dict | None = None) -> str:
+    def register(
+        self,
+        pool_token: str,
+        name: str,
+        labels: dict | None = None,
+        runner: str | None = None,
+        tools: dict[str, list[str]] | None = None,
+    ) -> str:
         self._pool_token, self._name, self._labels = pool_token, name, labels
+        if runner is not None:
+            self._runner = runner
+        if tools is not None:
+            self._tools = tools
         resp = self._http.post(
             "/worker/v1/register",
             headers={"Authorization": f"Bearer {pool_token}"},
-            json={"name": name, "labels": labels},
+            # The runner is declared on every (re-)registration: a production API refuses any
+            # worker that is not on the `docker` runner (SPECS §7.4).
+            # …and the tool versions it can run: the API hands it only runs it can execute.
+            json={"name": name, "labels": labels, "runner": self._runner, "tools": self._tools},
         )
         resp.raise_for_status()
         self._worker_token = resp.json()["worker_token"]
@@ -82,3 +98,19 @@ class ApiClient:
         self._send(
             "PUT", f"/worker/v1/jobs/{job_id}/artifacts/{name}", content=data
         ).raise_for_status()
+
+    def download_artifact(self, job_id: str, name: str) -> bytes:
+        """A job's artifact (the apply job's saved plan, §7.4). Any refusal raises, carrying the
+        API's problem detail — the caller fails closed on it."""
+        resp = self._send("GET", f"/worker/v1/jobs/{job_id}/artifacts/{name}")
+        if resp.status_code != 200:
+            try:
+                body = resp.json()
+            except ValueError:
+                body = None
+            if isinstance(body, dict):
+                detail = body.get("detail") or body.get("title")
+            else:
+                detail = resp.text[:200]
+            raise RuntimeError(f"HTTP {resp.status_code}: {detail}")
+        return resp.content

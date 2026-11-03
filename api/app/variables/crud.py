@@ -89,6 +89,19 @@ def update_variable(var: Variable, body: VariableUpdate) -> None:
         return
 
     sensitive = body.sensitive if body.sensitive is not None else var.sensitive
+    if var.secret_source_id is not None and body.sensitive is False:
+        # An external reference is a secret by definition (§15): it is never shown nor masked off.
+        raise ProblemException(
+            422, "Secret reference", "A variable that references a secret source stays sensitive."
+        )
+    if var.sensitive and not sensitive and body.value is None:
+        # Write-only (CLAUDE.md invariant 3): unflagging must replace the secret, never expose it —
+        # a kept value would stop being masked in run logs and plan output.
+        raise ProblemException(
+            422,
+            "New value required",
+            "Turning a sensitive variable into a plain one requires a new value.",
+        )
     if body.value is not None:
         store_value(var, body.value, sensitive=sensitive)
     elif body.sensitive is not None and body.sensitive != var.sensitive:

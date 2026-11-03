@@ -1,17 +1,18 @@
 from __future__ import annotations
 
+import uuid
 from datetime import datetime
 
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.config import get_settings
 from app.crypto import decrypt
 from app.logging import get_logger
 from app.models.environment import Environment
 from app.models.run import Run
 from app.models.stack import Stack
 from app.models.vcs import VcsOutbox
+from app.notifications.dispatcher import run_url
 from app.vcs import github
 
 _log = get_logger("stackd.vcs")
@@ -25,12 +26,6 @@ _GH_STATE = {
     "canceled": "error",
     "discarded": "error",
 }
-
-
-def _run_url(run_id: object) -> str | None:
-    s = get_settings()
-    base = s.stackd_app_url or s.stackd_public_url
-    return f"{base.rstrip('/')}/runs/{run_id}" if base else None
 
 
 def _summary(run: Run) -> str:
@@ -51,7 +46,7 @@ def _comment_body(run: Run, stack: Stack, env: Environment) -> str:
         lines.append("Planning…")
     if run.used_mocks:
         lines.append("\n> ⚠ used mocks — apply is blocked")
-    url = _run_url(run.id)
+    url = run_url(run.id)
     if url:
         lines.append(f"\n[Open run]({url})")
     return "\n".join(lines)
@@ -82,67 +77,84 @@ async def dispatch_vcs(session: AsyncSession, now: datetime, *, limit: int = 20)
         r.attempts += 1
     await session.commit()
 
-    done: list[tuple] = []  # (row_id, run_id, comment_id|None)
-    for row_id, run_id, to_state, attempt in batch:
-        run = await session.get(Run, run_id)
-        if run is None or run.vcs_provider != "github":
-            done.append((row_id, None, None))
-            continue
-        env = await session.get(Environment, run.environment_id)
-        stack = await session.get(Stack, env.stack_id) if env else None
-        owner_repo = github.parse_owner_repo(stack.repo_url) if stack else None
-        token = (
-            decrypt(stack.repo_secret_encrypted)
-            if (stack and stack.repo_secret_encrypted)
-            else None
+    # One joined fetch for the whole batch (instead of 3 point queries per row); a run missing its
+    # env/stack simply doesn't join and is dropped below, same as before.
+    triples = (
+        await session.execute(
+            select(Run, Environment, Stack)
+            .join(Environment, Environment.id == Run.environment_id)
+            .join(Stack, Stack.id == Environment.stack_id)
+            .where(Run.id.in_([run_id for _, run_id, _, _ in batch]))
         )
-        if env is None or stack is None or owner_repo is None or token is None:
-            done.append((row_id, None, None))  # not postable (no creds / not github) — drop
-            continue
-        owner, repo = owner_repo
-        try:
-            if run.vcs_head_sha:
-                await github.set_status(
-                    token,
-                    owner,
-                    repo,
-                    run.vcs_head_sha,
-                    state=_GH_STATE.get(to_state, "pending"),
-                    target_url=_run_url(run.id),
-                    context="stackd/plan",
-                    description=_summary(run) if to_state == "finished" else to_state,
+    ).all()
+    by_run = {run.id: (run, env, stack) for run, env, stack in triples}
+    # End the read txn before any HTTP so no pooled connection idles in transaction across the
+    # batch. Commit, not rollback (which would expire the rows): with expire_on_commit=False the
+    # loaded rows stay usable — plain columns only, no relationship to lazy-load.
+    await session.commit()
+
+    done: list[uuid.UUID] = []  # outbox rows to mark sent
+    # Latest PR comment id per run, refreshed after every upsert: a batch can hold several rows for
+    # one run (a fast plan, a backlog) and each must edit that one comment, not post a new one.
+    comment_ids: dict[uuid.UUID, int] = {}
+    # One pooled client for the whole batch — every post-back reuses a single TLS connection.
+    async with github.client() as http:
+        for row_id, run_id, to_state, attempt in batch:
+            run, env, stack = by_run.get(run_id, (None, None, None))
+            if run is None or run.vcs_provider != "github":
+                done.append(row_id)
+                continue
+            try:
+                # Inside the try: one stack's undecryptable secret (key rotation, corrupt blob)
+                # fails that row only — retried / dead-lettered — never the rest of the batch.
+                owner_repo = github.parse_owner_repo(stack.repo_url)
+                token = (
+                    decrypt(stack.repo_secret_encrypted) if stack.repo_secret_encrypted else None
                 )
-            comment_id = run.vcs_comment_id
-            if run.pr_number:
-                comment_id = await github.upsert_comment(
-                    token,
-                    owner,
-                    repo,
-                    run.pr_number,
-                    _comment_body(run, stack, env),
-                    run.vcs_comment_id,
+                if owner_repo is None or token is None:
+                    done.append(row_id)  # not postable (no creds / not github) — drop
+                    continue
+                owner, repo = owner_repo
+                if run.vcs_head_sha:
+                    await github.set_status(
+                        token,
+                        owner,
+                        repo,
+                        run.vcs_head_sha,
+                        state=_GH_STATE.get(to_state, "pending"),
+                        target_url=run_url(run.id),
+                        context="stackd/plan",
+                        description=_summary(run) if to_state == "finished" else to_state,
+                        http=http,
+                    )
+                if run.pr_number:
+                    comment_ids[run_id] = await github.upsert_comment(
+                        token,
+                        owner,
+                        repo,
+                        run.pr_number,
+                        _comment_body(run, stack, env),
+                        comment_ids.get(run_id, run.vcs_comment_id),
+                        http=http,
+                    )
+                done.append(row_id)
+            except Exception as exc:  # external API — never crash the loop
+                _log.warning(
+                    "vcs post-back failed",
+                    extra={
+                        "event": "vcs.failed",
+                        "run_id": str(run_id),
+                        "state": to_state,
+                        "attempt": attempt,
+                        "error": str(exc) or type(exc).__name__,  # InvalidTag has no message
+                    },
                 )
-            done.append((row_id, run_id, comment_id))
-        except Exception as exc:  # external API — never crash the loop
-            _log.warning(
-                "vcs post-back failed",
-                extra={
-                    "event": "vcs.failed",
-                    "run_id": str(run_id),
-                    "state": to_state,
-                    "attempt": attempt,
-                    "error": str(exc),
-                },
-            )
 
     if done:
-        await session.execute(
-            update(VcsOutbox).where(VcsOutbox.id.in_([d[0] for d in done])).values(sent_at=now)
-        )
-        for _row_id, run_id, comment_id in done:
-            if run_id is not None and comment_id is not None:
-                await session.execute(
-                    update(Run).where(Run.id == run_id).values(vcs_comment_id=comment_id)
-                )
+        await session.execute(update(VcsOutbox).where(VcsOutbox.id.in_(done)).values(sent_at=now))
+        for run_id, comment_id in comment_ids.items():
+            await session.execute(
+                update(Run).where(Run.id == run_id).values(vcs_comment_id=comment_id)
+            )
         await session.commit()
     return len(batch)

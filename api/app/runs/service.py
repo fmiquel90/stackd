@@ -50,7 +50,11 @@ async def trigger_run(
     a `destroy` additionally requires can_destroy (§2.4). `group_root` starts a cascade group.
     `secret_overrides` is a break-glass map of variable→value used if the secret source is down
     (§15.4) — an apply-affecting bypass, so it requires can_apply and is sealed AES-GCM."""
-    membership = await _env_membership(session, user, env)
+    # The membership only feeds the destroy / secret-override gates — don't query it for the
+    # common plain trigger.
+    membership = None
+    if run_type == RunType.destroy or secret_overrides:
+        membership = await _env_membership(session, user, env)
     if run_type == RunType.destroy and (
         user is None or not effective_can_destroy(user, membership)
     ):
@@ -242,7 +246,8 @@ async def confirm_run(session: AsyncSession, run: Run, user: User) -> Run:
         )
 
     # 4-eyes (§2.4): triggerer ≠ confirmer when the env's tier requires it (was hardcoded to prod;
-    # now a per-tier flag), or when the env opts in. Human triggers only.
+    # now a per-tier flag), when the env is `protected` (CLAUDE.md §4: it forces confirmation +
+    # 4-eyes, never who may apply), or when the env opts in. Human triggers only.
     from sqlalchemy import select
 
     from app.models.tier import Tier
@@ -253,7 +258,7 @@ async def confirm_run(session: AsyncSession, run: Run, user: User) -> Run:
     # Fail closed: a four-eyes requirement is a security control, so an env pointing at a missing
     # tier row (should be impossible via the API, but never silently weaken) forces four-eyes.
     tier_four_eyes = tier_def.requires_four_eyes if tier_def else True
-    needs_four_eyes = tier_four_eyes or env.require_second_pair_of_eyes
+    needs_four_eyes = tier_four_eyes or env.protected or env.require_second_pair_of_eyes
     if (
         needs_four_eyes
         and run.triggered_by == TriggeredBy.manual

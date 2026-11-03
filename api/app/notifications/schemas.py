@@ -7,7 +7,7 @@ from pydantic import BaseModel, field_validator
 
 from app.enums import AttachmentTarget, NotificationKind
 from app.models.notification import NotificationTarget
-from app.notifications.dispatcher import assert_safe_url
+from app.notifications.dispatcher import check_url_syntax
 
 # The only states that ever fire (transition() enqueues exactly these — see NOTIFY_STATES).
 ALLOWED_STATES = {"unconfirmed", "finished", "failed"}
@@ -31,10 +31,12 @@ class NotificationCreate(BaseModel):
             raise ValueError("on_states must list at least one state")
         return v
 
+    # Syntactic checks only: validators run synchronously on the event loop, so the DNS-resolving
+    # half of the SSRF check (`check_url_safe`) is awaited by the routes instead.
     @field_validator("url")
     @classmethod
     def _safe_url(cls, v: str) -> str:
-        assert_safe_url(v)
+        check_url_syntax(v)
         return v
 
 
@@ -56,7 +58,7 @@ class NotificationUpdate(BaseModel):
     def _safe_url(cls, v: str | None) -> str | None:
         if v is None:
             return v
-        assert_safe_url(v)
+        check_url_syntax(v)
         return v
 
 

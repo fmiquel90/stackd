@@ -9,6 +9,7 @@ from typing import ClassVar
 from sqlalchemy import DateTime, MetaData, func
 from sqlalchemy.ext.asyncio import (
     AsyncAttrs,
+    AsyncEngine,
     AsyncSession,
     async_sessionmaker,
     create_async_engine,
@@ -53,9 +54,13 @@ def updated_at_col() -> MappedColumn[datetime]:
 # Engine/sessionmaker are built lazily on first use — importing this module must never read
 # settings (tests set DATABASE_URL after import; doing it eagerly would cache the wrong URL).
 @lru_cache
+def get_engine() -> AsyncEngine:
+    return create_async_engine(get_settings().database_url, echo=False, pool_pre_ping=True)
+
+
+@lru_cache
 def get_sessionmaker() -> async_sessionmaker[AsyncSession]:
-    engine = create_async_engine(get_settings().database_url, echo=False, pool_pre_ping=True)
-    return async_sessionmaker(engine, expire_on_commit=False, class_=AsyncSession)
+    return async_sessionmaker(get_engine(), expire_on_commit=False, class_=AsyncSession)
 
 
 def SessionLocal() -> AsyncSession:

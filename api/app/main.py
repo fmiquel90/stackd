@@ -23,7 +23,7 @@ from app.logging import bind_context, configure_logging, get_logger, reset_conte
 from app.notifications.router import router as notifications_router
 from app.observability.router import metrics_router
 from app.observability.router import router as observability_router
-from app.oidc.router import cloud_router, issuer_router
+from app.oidc.router import cloud_router, issuer_router, keys_router
 from app.runs.router import router as runs_router
 from app.secret_sources.router import router as secret_sources_router
 from app.spaces.router import router as spaces_router
@@ -162,6 +162,7 @@ def create_app() -> FastAPI:
     app.include_router(webhooks_router)
     app.include_router(issuer_router)
     app.include_router(cloud_router)
+    app.include_router(keys_router)
     app.include_router(observability_router)
     app.include_router(metrics_router)
     app.include_router(ws_router)

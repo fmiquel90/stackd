@@ -50,9 +50,7 @@ export async function api<T>(path: string, opts: RequestOptions = {}): Promise<T
   });
 
   if (resp.status === 204) return undefined as T;
-  const data = resp.headers.get("content-type")?.includes("json")
-    ? await resp.json()
-    : null;
+  const data = resp.headers.get("content-type")?.includes("json") ? await resp.json() : null;
   if (!resp.ok) {
     throw new ApiError(resp.status, data?.title ?? resp.statusText, data?.detail);
   }
