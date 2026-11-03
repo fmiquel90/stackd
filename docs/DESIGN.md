@@ -359,6 +359,8 @@ is reserved to the decision. Zero counts are rendered in `text-secondary` withou
 | `/s/:space/stacks/:stack/envs/:env` | Environment page (§5.8) |
 | `/runs/:runId` | Run page (space resolved from the run) |
 | `/s/:space/graph` | Graph |
+| `/s/:space/rollouts` | Rollouts list (§5.11) — the side nav's **Rollouts** entry (§4) |
+| `/rollouts/:rolloutId` | Rollout page (§5.11; space resolved from the rollout, like the run page) |
 | `/queue`, `/workers`, `/audit`, `/settings`, `/variable-sets` | instance or space-scoped pages (variable sets: `/s/:space/variable-sets`) |
 
 Names are used instead of UUIDs where they are unique in their parent (space names; stack per space;
@@ -585,7 +587,7 @@ waited more than 2 minutes.
 ### 5.6 `/audit`
 
 - **Admin only** (SPECS §2.4 residual): hidden from the nav for other roles; a direct visit says "The audit journal is restricted to administrators" (AUDIT A9).
-- Dense chronological table: mono ISO timestamp (local, with relative on hover), actor (email), action as a neutral badge, **target as a link** (`run 01a1276c · demo-network/prod`, resolved from `target_kind`/`target_id`), context summarised (`+4 ~0 −0`, `tier prod`, `commit 2af0351`).
+- Dense chronological table: mono ISO timestamp (local, with relative on hover), actor (email), action as a neutral badge, **target as a link** (`run 01a1276c · demo-network/prod`, resolved from `target_kind`/`target_id`), context summarised (`+4 ~0 −0`, `tier prod`, `commit 2af0351`). A system `run.confirmed` under a rollout's approval reads "auto-confirmed under the rollout approval of alice@…" (SPECS §21.5) — never as alice's confirm. The CSV export carries the context as a JSON column.
 - `run.confirmed`, `run.applied` and destroys have a slightly contrasted row (`bg-raised`).
 - `auth.login` / `auth.refresh` hidden by default ("Show sign-ins" toggle) — they are 90 % of the volume.
 - Filters (all in the URL, mapped to the API's `actor`, `action`, `target_kind`, `target_id`, `from_`, `to`): actor, action (grouped select by domain), target (picker: stack, env, run), period. CSV export on the right with the same filters.
@@ -634,7 +636,7 @@ hooks, notifications, secret sources; URL `?tab=`).
 - **Variable sets** (`/s/:space/variable-sets`): one row per set with how it reaches envs (`auto-attach`, `rule: team=payments`, `3 attachments`); the row opens a page with tabs Variables / Attachments / Settings. Delete per §5.7.
 - **Settings** (`/settings`): **Preferences** for everyone (theme: system / dark / light; single-key shortcuts on/off — in memory, for the tab only, until A8). Admin only: **Tiers** (name, `requires_four_eyes` with §5.7 friction, position, envs using it, delete per §5.7), **Users & roles** (staged edits, §5.7), **Spaces** (members, per-space role and tiers), **Deployment** (version, environment).
 - **Login**: brand mark, "Sign in with Google"; in dev, the personas show email and role, and their allowed tiers once the dev endpoint returns them (needs API work A12).
-- **Notifications** (bell popover, Radix): each item names what and where ("Run failed · demo-dns/dev · 6m"), links to the run (Logs at first error for failures), mark read on open; "Mark all read" / "Clear read". The bell badge counts unread, neutral (not violet, not amber).
+- **Notifications** (bell popover, Radix): each item names what and where ("Run failed · demo-dns/dev · 6m"), links to the run (Logs at first error for failures) — a rollout notification (`rollout_paused`, `rollout_succeeded`, `rollout_failed`, `rollout_upstream_changed` "Upstream applied under a rollout", SPECS §21.7) to the rollout page —, mark read on open; "Mark all read" / "Clear read". The bell badge counts unread, neutral (not violet, not amber).
 
 ### 5.11 Environment clones and rollouts (SPECS §21)
 
@@ -657,20 +659,31 @@ On the overview, a banner per rollout awaiting approval, paused or running, link
 list, the notifications and every member run):
 - **Header**: environment name, state badge (`StateBadge` vocabulary: awaiting approval = decision
   amber, running, paused = decision amber, succeeded, failed), creator, approver and approval expiry
-  ("approved by alice · expires in 21 h"), actions: **Approve…** (§5.7 friction; hidden for the
-  creator when four-eyes applies, with the reason), Retry (failed), Cancel.
+  ("approved by alice · expires in 21 h"), actions: **Approve…** / **Approve again…** — shown when
+  the API says an approval is what the rollout waits for (`approvable`: the first approval, or a
+  re-approval after an expiry, a lost right or a member changed since the approval); replaced, for
+  a viewer who may not approve, by the reason (four-eyes against the creator, a tier they lack) —,
+  Retry (failed), Cancel. The approval dialog (§5.7 friction) says what it lets through: plans that
+  only create, in environments never applied, on the commit the first plan of each stack fixes;
+  everything else stops for a human.
+- **Paused banner**: the pause reason in words — "a plan needs a human confirmation", "the approval
+  expired: approve again to go on", "the approver may no longer apply on a member: approve again",
+  "a member's tier, protection or four-eyes changed since the approval: approve again".
 - **Body**: the members as **columns per level** (an ordered list of levels, left → right, each a
   list of member cards — the accessible structure is the markup itself): env link, tier and
   `protected`, status badge (label + glyph, never colour alone), the plan summary (`+2 ~0 -0`, `⇣n`
-  for imports), the run link, **why it is waiting** when it stopped ("changes 1 resource", "consumed
-  a mock", "check warn: infracost"), "Confirmed under the rollout approval" for an auto-confirmed
+  for imports, any other kind by name: `forget 1`), the run link, **why it is waiting** when it
+  stopped ("changes 1 resource", "forgets 1 resource", "consumed a mock", "check warn: infracost",
+  "the environment already has infrastructure", "planned commit …, not … the rollout pinned", "its
+  tier, protection or four-eyes changed since the approval"), "Confirmed under the rollout approval" for an auto-confirmed
   member, and, before it plans, "Will plan on a mock (…)" when an outside upstream lacks an output.
   The react-flow graph of §5.4 is not reused here.
 - Before approval, the page *is* the preview (§21.4): members by level, tiers, and the members
   expected to pause.
 
 **Run page**: a member run carries, in its header line, "part of rollout prod-euw3 · level 2" (a
-link), and, when auto-confirmed, the action bar's who/when reads "confirmed by alice@… (rollout
+link), and, when auto-confirmed (`confirmed_via: rollout` on the run, SPECS §21.5 — also for an
+earlier run of a retried member), the action bar's who/when reads "confirmed by alice@… (rollout
 approval)" — never a plain "confirmed by alice": she approved the rollout, not this plan.
 
 ---

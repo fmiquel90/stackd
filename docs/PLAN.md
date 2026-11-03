@@ -256,7 +256,7 @@ The platform becomes an **OIDC issuer** (the same mechanism as GitHub Actions OI
 ### Phase 7 — Production-ready (ongoing)
 
 - [ ] RBAC per space, Google group mapping — extends per-tier permissions (§2.4) toward per-space/team scopes — *status: per-space memberships shipped (SPECS §2.4 Phase F) and tiers are now a non-linear set; Google group mapping and per-stack grants remain*
-- [x] **Environment rollouts** (SPECS §21, shipped): declare a new environment or region once across every stack (clone of a reference env: settings, governance, dependency edges) and apply the whole graph with a single approval — creates-only plans auto-confirmed under it, anything else stops for a human. Three lots:
+- [x] **Environment rollouts** (SPECS §21, shipped): declare a new environment or region once across every stack (clone of a reference env: settings, governance, dependency edges) and apply the whole graph with a single approval — creates-only plans in never-applied environments, on one commit per stack, auto-confirmed under it; anything else stops for a human. Three lots:
   - [x] (1) cascade gaps of SPECS §9.2: multi-parent gating within a run group, stop on failure, computed group status
   - [x] (2) `environment-clones` (SPECS §21.2) + "New environment from…" dialog
   - [x] (3) rollouts: model, approval, gate, `advance_rollout()`, rollout page (SPECS §21.3–§21.8, DESIGN §5.11)
