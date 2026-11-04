@@ -14,6 +14,7 @@ from app.auth.router import router as auth_router
 from app.comments.router import router as comments_router
 from app.config import get_settings
 from app.dependencies.router import router as dependencies_router
+from app.environments.clones import router as clones_router
 from app.environments.router import router as environments_router
 from app.errors import register_error_handlers
 from app.hooks.router import router as hooks_router
@@ -166,6 +167,7 @@ def create_app() -> FastAPI:
     app.include_router(observability_router)
     app.include_router(metrics_router)
     app.include_router(ws_router)
+    app.include_router(clones_router)
 
     # dev_auth is removed from the production image build (DEV §3); never mounted in prod.
     if settings.stackd_dev_auth and not settings.is_production:

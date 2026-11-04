@@ -502,3 +502,83 @@ export const secretSourcesApi = {
   remove: (spaceId: string, srcId: string) =>
     api<void>(`/spaces/${spaceId}/secret-sources/${srcId}`, { method: "DELETE" }),
 };
+
+// Environment clones (SPECS §21.2): one environment declared across a space's stacks.
+export interface CloneOverrides {
+  tier?: string;
+  branch?: string;
+  labels?: Record<string, string>;
+  protected?: boolean;
+}
+
+export interface CloneRequest {
+  reference_name: string;
+  name: string;
+  stack_ids?: string[];
+  overrides?: CloneOverrides;
+  copy_cloud_integration?: boolean;
+  dry_run?: boolean;
+}
+
+export interface CloneResult {
+  dry_run: boolean;
+  environments: {
+    id: string;
+    stack_id: string;
+    stack_name: string;
+    name: string;
+    tier: string;
+    autodeploy: boolean;
+    /** Why autodeploy was forced off although the model (or an override) had it on. */
+    autodeploy_off_reason: "protected" | "left_to_fill" | null;
+    /** Sets its labels select; `new` when the model is not selected by it. */
+    label_sets: { name: string; new: boolean }[];
+  }[];
+  /** `cloned`: both ends are new; `shared`: a genuinely shared env (no model of that name in its
+   * stack, or another space); `reference_of_uncloned_stack`: the model of a stack left out of
+   * `stack_ids` — the new env reads the old one's outputs (flagged in `warnings`). */
+  edges: { upstream_env_id: string; downstream_env_id: string; upstream_kind: CloneUpstreamKind }[];
+  /** `falls_back_to`: the provenance the unset input resolves to meanwhile (`stack`, `set:<name>`). */
+  missing_secrets: { stack: string; environment: string; name: string; falls_back_to: string | null }[];
+  to_configure: { stack: string; environment: string; item: string }[];
+  /** Items of the model left out because they would shadow a key of a set the labels attach. */
+  not_copied: {
+    stack: string;
+    environment: string;
+    item: "variable" | "variable_set";
+    name: string;
+    reason: "shadows_label_set";
+    keys: string[];
+    label_sets: string[];
+  }[];
+  /** What the user should check before creating (SPECS §21.2). */
+  warnings: CloneWarning[];
+}
+
+export type CloneUpstreamKind = "cloned" | "shared" | "reference_of_uncloned_stack";
+
+export type CloneWarning =
+  | {
+      stack: string;
+      environment: string;
+      kind: "reference_upstream";
+      /** `stack/env` of the model it will depend on. */
+      upstream: string;
+      upstream_env_id: string;
+    }
+  | {
+      stack: string;
+      environment: string;
+      kind: "tier_changed";
+      reference_tier: string;
+      tier: string;
+      /** What the model's tier set up and the clone keeps. */
+      secret_references: string[];
+      variable_sets: string[];
+      cloud_integration: boolean;
+    };
+
+export const environmentClones = {
+  create: (spaceId: string, body: CloneRequest) =>
+    api<CloneResult>(`/spaces/${spaceId}/environment-clones`, { body }),
+};

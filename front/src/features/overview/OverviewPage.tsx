@@ -15,6 +15,7 @@ import { AttentionZone } from "./AttentionZone";
 import { attentionOf, envColumns, matchesState, STATE_FILTERS, type StateFilter } from "./attention";
 import { Matrix, type Selection } from "./Matrix";
 import { NewStackDialog } from "./NewStackDialog";
+import { NewEnvironmentDialog } from "@/features/rollouts/NewEnvironmentDialog";
 
 // The overview (DESIGN §5.1): attention zone, then the stack × environment matrix. Filters, the
 // selected cell and the cascade preview live in the URL (?q, ?state, ?tier, ?sel, ?cascade).
@@ -101,6 +102,16 @@ export function OverviewPage() {
           Overview <span className="font-data text-[13px] font-normal text-muted">{space.name}</span>
         </h1>
         <div className="ml-auto flex items-center gap-2">
+          {canWrite && data.entries.length > 0 && (
+            <NewEnvironmentDialog
+              spaceId={space.id}
+              spaceName={space.name}
+              spaceBase={spaceBase}
+              entries={data.entries}
+              tiers={catalog.data ?? []}
+              isAdmin={me?.role === "admin"}
+            />
+          )}
           {canWrite && <NewStackDialog spaceId={space.id} spaceName={space.name} />}
         </div>
       </div>
