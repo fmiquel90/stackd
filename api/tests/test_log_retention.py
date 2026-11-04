@@ -65,7 +65,7 @@ async def test_logs_archived_then_hot_purged_and_served_from_s3(client: httpx.As
         hot = (await client.get(f"/api/v1/runs/{run_id}/logs", headers=admin)).json()
         assert len(hot) == 2
 
-        now = datetime.now(UTC)
+        now = datetime.now(UTC) + timedelta(minutes=2)  # past the archive grace
         async with SessionLocal() as session:
             assert await archive_run_logs(session, now) >= 1
         # Idempotent: nothing left to archive for this run.
@@ -109,13 +109,26 @@ async def test_download_hot_and_cold(client: httpx.AsyncClient) -> None:
         assert "\x1b[32mPlan: 1 to add" in hot.text  # ANSI preserved
         assert "[hook:x] ok" in hot.text
 
-        now = datetime.now(UTC)
+        now = datetime.now(UTC) + timedelta(minutes=2)  # past the archive grace
         async with SessionLocal() as session:
             await archive_run_logs(session, now)
             await purge_hot_logs(session, now + timedelta(days=8))
         cold = await client.get(url, headers=admin)
         assert cold.text == hot.text
         assert (await client.get(url, headers=admin, params={"phase": "nope"})).status_code == 404
+        bad = await client.get(url, headers=admin, params={"phase": 'x"\r\nSet-Cookie: a=b'})
+        assert bad.status_code == 400
+
+
+async def test_archive_waits_for_the_grace_window(client: httpx.AsyncClient) -> None:
+    """The agent's last buffered chunks can land just after the terminal event."""
+    from app.db import SessionLocal
+    from app.runs.logs_archive import archive_run_logs
+
+    with mock_aws():
+        await _finished_run_with_logs(client, "grace")
+        async with SessionLocal() as session:
+            assert await archive_run_logs(session, datetime.now(UTC)) == 0
 
 
 async def test_archive_failure_leaves_run_unarchived(client: httpx.AsyncClient) -> None:
@@ -135,7 +148,9 @@ async def test_archive_failure_leaves_run_unarchived(client: httpx.AsyncClient) 
         logs_archive.put_object = boom  # type: ignore[assignment]
         try:
             async with SessionLocal() as session:
-                await logs_archive.archive_run_logs(session, datetime.now(UTC))
+                await logs_archive.archive_run_logs(
+                    session, datetime.now(UTC) + timedelta(minutes=2)
+                )
         finally:
             logs_archive.put_object = original  # type: ignore[assignment]
         async with SessionLocal() as session:

@@ -10,6 +10,7 @@ from __future__ import annotations
 import asyncio
 import gzip
 import json
+import re
 import uuid
 from collections import defaultdict
 from datetime import datetime, timedelta
@@ -25,6 +26,15 @@ from app.statebackend.store import get_object, list_keys, put_object
 
 _log = get_logger("stackd.logs_archive")
 _BATCH = 20  # runs archived per tick: bounded work, the rest waits for the next one
+# The agent buffers log lines (1 s / 32 KB, §5.1), so its last chunks can land just after the run's
+# terminal event: archive only once the run has been terminal this long, or they would be missed.
+_ARCHIVE_GRACE = timedelta(seconds=60)
+_PHASE_RE = re.compile(r"^[A-Za-z0-9_.-]{1,64}$")
+
+
+def valid_phase(phase: str) -> bool:
+    """A phase name is interpolated into an S3 key: only the worker's own vocabulary is allowed."""
+    return bool(_PHASE_RE.fullmatch(phase))
 
 
 def archive_key(run_id: uuid.UUID, phase: str) -> str:
@@ -47,7 +57,11 @@ async def archive_run_logs(session: AsyncSession, now: datetime) -> int:
         (
             await session.execute(
                 select(Run)
-                .where(Run.finished_at.is_not(None), Run.logs_archived_at.is_(None))
+                .where(
+                    Run.finished_at.is_not(None),
+                    Run.finished_at <= now - _ARCHIVE_GRACE,
+                    Run.logs_archived_at.is_(None),
+                )
                 .order_by(Run.finished_at)
                 .limit(_BATCH)
             )
@@ -119,6 +133,8 @@ async def load_chunks(
             {"phase": r.phase, "section": r.section, "seq": r.seq, "lines": r.lines} for r in rows
         ]
     # Archived and no hot row left: the hot tier was purged, read the archive.
+    if phase and not valid_phase(phase):
+        return []
     keys = [archive_key(run.id, phase)] if phase else await list_keys(f"logs/{run.id}/")
     out: list[dict] = []
     for key in sorted(keys):

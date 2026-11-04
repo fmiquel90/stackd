@@ -14,7 +14,7 @@ from app.enums import Role, RunEventActor, RunState, TriggeredBy
 from app.errors import ProblemException
 from app.models.run import Run, RunEvent
 from app.models.vcs import VcsOutbox
-from app.runs.logs_archive import load_chunks, render_text
+from app.runs.logs_archive import load_chunks, render_text, valid_phase
 from app.runs.schemas import (
     CommandTriggerIn,
     LogChunkOut,
@@ -206,6 +206,8 @@ async def download_logs(
 ) -> Response:
     """The run's logs as plain text (`phase=all` or one phase), ANSI preserved (§5.2)."""
     run = await guard_run_id(session, user, run_id)
+    if phase != "all" and not valid_phase(phase):
+        raise ProblemException(400, "Bad phase", "Unknown phase name.")
     chunks = await load_chunks(session, run, phase=None if phase == "all" else phase)
     if not chunks:
         raise ProblemException(404, "No logs", "This run has no logs for that phase.")
