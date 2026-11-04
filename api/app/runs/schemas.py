@@ -41,6 +41,13 @@ class PromoteIn(BaseModel):
     from_environment_id: uuid.UUID  # promote that env's currently-applied commit to this one
 
 
+class RunGroupOut(BaseModel):
+    """A run group (§9.4) and its computed status (§9.2)."""
+
+    id: uuid.UUID
+    status: str  # running | partial_failure | succeeded
+
+
 class RunOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
@@ -56,6 +63,10 @@ class RunOut(BaseModel):
     trigger_user_id: uuid.UUID | None
     confirmed_by_user_id: uuid.UUID | None
     worker_id: uuid.UUID | None
+    parent_run_id: uuid.UUID | None = None
+    run_group_id: uuid.UUID | None = None
+    # Only on GET /runs/{id}: the group the run belongs to (root or member), with its status.
+    run_group: RunGroupOut | None = None
     plan_summary: dict | None
     check_results: dict | None
     used_mocks: bool
