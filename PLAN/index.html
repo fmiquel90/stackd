@@ -2067,7 +2067,7 @@ Goal: a self-hostable Terraform orchestration platform with multi-environment st
 <li>used when the upstream has <strong>never produced</strong> the output (bootstrapping a new cascade) or on <strong>proposed runs</strong> if the upstream is not applied</li>
 <li>a run that has consumed at least one mock is marked <code>used_mocks: true</code>: visible badge, <strong>apply forbidden</strong> (validation plan-only) unless explicit opt-in per env</li>
 <li>solves the chicken-and-egg problem: write <code>app/dev</code> and plan its config before <code>network/dev</code> has run</li>
-<li>[ ] Propagation scheduler: topological cascade, policies, multi-parents, stop on failure — <em>status: cascade and policies done; multi-parent gating and stop-on-failure are not (SPECS §9.2)</em></li>
+<li>[x] Propagation scheduler: topological cascade, policies, multi-parents, stop on failure — <em>status: done — policies, multi-parent gating within a run group, stop on failure, computed group status (SPECS §9.2)</em></li>
 <li>[ ] Run groups + graph view; the cascade never bypasses the protections</li>
 </ul>
 <p><strong>Deliverable: plan <code>app/dev</code> with <code>vpc_id = "vpc-mock00000"</code> before the first apply of <code>network/dev</code>, then a real cascade.</strong></p>
@@ -2095,7 +2095,11 @@ Goal: a self-hostable Terraform orchestration platform with multi-environment st
 <h3 id="phase-7-production-ready-ongoing">Phase 7 — Production-ready (ongoing)<a class="headerlink" href="#phase-7-production-ready-ongoing" title="Permanent link">&para;</a></h3>
 <ul>
 <li>[ ] RBAC per space, Google group mapping — extends per-tier permissions (§2.4) toward per-space/team scopes — <em>status: per-space memberships shipped (SPECS §2.4 Phase F) and tiers are now a non-linear set; Google group mapping and per-stack grants remain</em></li>
-<li>[ ] <strong>Environment matrix</strong> (track, not specified): declare <code>{eu-west-1, us-east-1} × {dev, prod}</code> on a stack and generate/synchronize the corresponding environments — multi-region is done by naming convention + variable sets in the MVP</li>
+<li>[x] <strong>Environment rollouts</strong> (SPECS §21, shipped): declare a new environment or region once across every stack (clone of a reference env: settings, governance, dependency edges) and apply the whole graph with a single approval — creates-only plans in never-applied environments, on one commit per stack, auto-confirmed under it; anything else stops for a human. Three lots:</li>
+<li>[x] (1) cascade gaps of SPECS §9.2: multi-parent gating within a run group, stop on failure, computed group status</li>
+<li>[x] (2) <code>environment-clones</code> (SPECS §21.2) + "New environment from…" dialog</li>
+<li>[x] (3) rollouts: model, approval, gate, <code>advance_rollout()</code>, rollout page (SPECS §21.3–§21.8, DESIGN §5.11)</li>
+<li>[ ] <strong>Environment matrix</strong> (track, not specified): declare <code>{eu-west-1, us-east-1} × {dev, prod}</code> on a stack and generate/synchronize the corresponding environments — multi-region is done by naming convention + variable sets in the MVP; standing one up across stacks is the job of environment rollouts above (one-shot, no synchronization)</li>
 <li>[ ] HTTP run tasks (blocking external webhooks), advanced policies (OPA) if there is a real need</li>
 <li>[ ] OIDC to GCP/Azure (the <code>CloudIntegration</code> interface is already generic)</li>
 <li>[ ] Scheduled drift detection — <em>status: shipped (SPECS §19)</em></li>

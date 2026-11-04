@@ -1315,6 +1315,17 @@
   
 </li>
         
+          <li class="md-nav__item">
+  <a href="#511-environment-clones-and-rollouts-specs-21" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        5.11 Environment clones and rollouts (SPECS §21)
+      
+    </span>
+  </a>
+  
+</li>
+        
       </ul>
     </nav>
   
@@ -1783,6 +1794,17 @@
     <span class="md-ellipsis">
       
         5.10 Variable sets, settings, login, notifications (new section in v2)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#511-environment-clones-and-rollouts-specs-21" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        5.11 Environment clones and rollouts (SPECS §21)
       
     </span>
   </a>
@@ -2759,18 +2781,19 @@ is reserved to the decision. Zero counts are rendered in <code>text-secondary</c
 <a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>│ ─────────    ├───────────────────────────────────────────────────────────┤
 <a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a>│ ▣ Overview 3 │                                                           │
 <a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a>│ ⎇ Graph      │                       content                             │
-<a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a>│ ≡ Queue   1  │        (max width 1440 px, tables and matrix full width)  │
-<a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a>│ ▥ Workers    │                                                           │
-<a id="__codelineno-0-8" name="__codelineno-0-8" href="#__codelineno-0-8"></a>│ ▤ Audit      │                                                           │
-<a id="__codelineno-0-9" name="__codelineno-0-9" href="#__codelineno-0-9"></a>│ ⚙ Var. sets  │                                                           │
-<a id="__codelineno-0-10" name="__codelineno-0-10" href="#__codelineno-0-10"></a>│ ⚙ Settings   │                                                           │
-<a id="__codelineno-0-11" name="__codelineno-0-11" href="#__codelineno-0-11"></a>│ ─────────    │                                                           │
-<a id="__codelineno-0-12" name="__codelineno-0-12" href="#__codelineno-0-12"></a>│ space: demo ▾│                                                           │
-<a id="__codelineno-0-13" name="__codelineno-0-13" href="#__codelineno-0-13"></a>│ alice · appr.│                                                           │
-<a id="__codelineno-0-14" name="__codelineno-0-14" href="#__codelineno-0-14"></a>└──────────────┴───────────────────────────────────────────────────────────┘
+<a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a>│ ⇧ Rollouts   │                                                           │
+<a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a>│ ≡ Queue   1  │        (max width 1440 px, tables and matrix full width)  │
+<a id="__codelineno-0-8" name="__codelineno-0-8" href="#__codelineno-0-8"></a>│ ▥ Workers    │                                                           │
+<a id="__codelineno-0-9" name="__codelineno-0-9" href="#__codelineno-0-9"></a>│ ▤ Audit      │                                                           │
+<a id="__codelineno-0-10" name="__codelineno-0-10" href="#__codelineno-0-10"></a>│ ⚙ Var. sets  │                                                           │
+<a id="__codelineno-0-11" name="__codelineno-0-11" href="#__codelineno-0-11"></a>│ ⚙ Settings   │                                                           │
+<a id="__codelineno-0-12" name="__codelineno-0-12" href="#__codelineno-0-12"></a>│ ─────────    │                                                           │
+<a id="__codelineno-0-13" name="__codelineno-0-13" href="#__codelineno-0-13"></a>│ space: demo ▾│                                                           │
+<a id="__codelineno-0-14" name="__codelineno-0-14" href="#__codelineno-0-14"></a>│ alice · appr.│                                                           │
+<a id="__codelineno-0-15" name="__codelineno-0-15" href="#__codelineno-0-15"></a>└──────────────┴───────────────────────────────────────────────────────────┘
 </code></pre></div>
 <ul>
-<li><strong>Side nav (208 px, labels always visible — v1 decision kept)</strong>: Overview (count badge = decisions that need <em>you</em>), Graph, Queue (count badge = runs waiting &gt; 2 min), Workers, Audit (admin only, §5.6), Variable sets, Settings. At the bottom: the <strong>space switcher</strong> (a Radix dropdown listing spaces with their stack counts) and the user block (email, role, allowed tiers, theme toggle, sign out). Active item: selection mark (§2.1).</li>
+<li><strong>Side nav (208 px, labels always visible — v1 decision kept)</strong>: Overview (count badge = decisions that need <em>you</em>), Graph, Rollouts (§5.11), Queue (count badge = runs waiting &gt; 2 min), Workers, Audit (admin only, §5.6), Variable sets, Settings. At the bottom: the <strong>space switcher</strong> (a Radix dropdown listing spaces with their stack counts) and the user block (email, role, allowed tiers, theme toggle, sign out). Active item: selection mark (§2.1).</li>
 <li><strong>Top bar</strong>: entity breadcrumb, connection indicator (<code>● live</code> / <code>◌ reconnecting…</code>), ⌘K button, notification bell.</li>
 <li><strong>Breadcrumb</strong>: built from entities, never from path segments: <code>space / stack / env / run 01a1276c</code>. Each segment is a link; the run segment copies the run URL on click.</li>
 <li><strong>Responsive</strong>: ≥ 1024 px as above. 768–1023 px: the side nav becomes a drawer opened from a menu button in the top bar. &lt; 768 px: a <strong>bottom bar</strong> with three destinations (Overview, Queue, Menu — notifications stay in the top bar at every width) and the run page's action bar docked above it.</li>
@@ -2807,6 +2830,14 @@ is reserved to the decision. Zero counts are rendered in <code>text-secondary</c
 <tr>
 <td><code>/s/:space/graph</code></td>
 <td>Graph</td>
+</tr>
+<tr>
+<td><code>/s/:space/rollouts</code></td>
+<td>Rollouts list (§5.11) — the side nav's <strong>Rollouts</strong> entry (§4)</td>
+</tr>
+<tr>
+<td><code>/rollouts/:rolloutId</code></td>
+<td>Rollout page (§5.11; space resolved from the rollout, like the run page)</td>
 </tr>
 <tr>
 <td><code>/queue</code>, <code>/workers</code>, <code>/audit</code>, <code>/settings</code>, <code>/variable-sets</code></td>
@@ -3076,7 +3107,7 @@ Cancel in an overflow); tabs scroll horizontally; the confirm popover becomes a 
 <li><strong>Edge label</strong> = the output names it carries (<code>network_name</code>, <code>+2</code> when more), from the downstream env's dependency references (fetched lazily per visible edge). Edge style: solid <code>text-secondary</code>; <strong>dashed magenta only when the downstream env's primary run consumed a mock for one of the edge's inputs</strong> (<code>variable_provenance[input] = "mock"</code>); a reference with a mock <em>defined</em> but unused shows a small neutral <code>◇ mock</code> marker. Policy shown on hover (<code>on_output_change</code>).</li>
 <li>React Flow's controls, labels and background are re-skinned onto tokens (no library default colour).</li>
 <li><strong>List view</strong> (<code>?view=list</code>): the full equivalent — an adjacency table <code>upstream → downstream · outputs · policy · mock used?</code> with the same filter, sortable, every row expandable to its references.</li>
-<li><strong>Run groups</strong>: not available — the API does not expose <code>run_group_id</code> (AUDIT A5). <strong>[today]</strong> a run page's cascade preview and the graph highlight "runs started via dependency after this apply" (downstream env runs with <code>triggered_by=dependency</code> created after the upstream's <code>finished_at</code>), labelled as such. <strong>[with A5]</strong> the real group view: same graph, nodes colouring live, a group header with progress.</li>
+<li><strong>Run groups</strong>: the API now exposes <code>run_group_id</code>, <code>parent_run_id</code> and <code>run_group {id, status}</code> on <code>GET /runs/{id}</code> (SPECS §9.2, AUDIT A5); the front does not use them yet. <strong>[today]</strong> a run page's cascade preview and the graph highlight "runs started via dependency after this apply" (downstream env runs with <code>triggered_by=dependency</code> created after the upstream's <code>finished_at</code>), labelled as such. <strong>[with A5]</strong> the real group view: same graph, nodes colouring live, a group header with progress.</li>
 <li><strong>Auto-link by name</strong> moves to a secondary "Link stacks…" action (writer+) in a dialog.</li>
 </ul>
 <h3 id="55-queue-the-execution-queue">5.5 <code>/queue</code> — the execution queue<a class="headerlink" href="#55-queue-the-execution-queue" title="Permanent link">&para;</a></h3>
@@ -3093,7 +3124,7 @@ waited more than 2 minutes.</p>
 <h3 id="56-audit">5.6 <code>/audit</code><a class="headerlink" href="#56-audit" title="Permanent link">&para;</a></h3>
 <ul>
 <li><strong>Admin only</strong> (SPECS §2.4 residual): hidden from the nav for other roles; a direct visit says "The audit journal is restricted to administrators" (AUDIT A9).</li>
-<li>Dense chronological table: mono ISO timestamp (local, with relative on hover), actor (email), action as a neutral badge, <strong>target as a link</strong> (<code>run 01a1276c · demo-network/prod</code>, resolved from <code>target_kind</code>/<code>target_id</code>), context summarised (<code>+4 ~0 −0</code>, <code>tier prod</code>, <code>commit 2af0351</code>).</li>
+<li>Dense chronological table: mono ISO timestamp (local, with relative on hover), actor (email), action as a neutral badge, <strong>target as a link</strong> (<code>run 01a1276c · demo-network/prod</code>, resolved from <code>target_kind</code>/<code>target_id</code>), context summarised (<code>+4 ~0 −0</code>, <code>tier prod</code>, <code>commit 2af0351</code>). A system <code>run.confirmed</code> under a rollout's approval reads "auto-confirmed under the rollout approval of alice@…" (SPECS §21.5) — never as alice's confirm. The CSV export carries the context as a JSON column.</li>
 <li><code>run.confirmed</code>, <code>run.applied</code> and destroys have a slightly contrasted row (<code>bg-raised</code>).</li>
 <li><code>auth.login</code> / <code>auth.refresh</code> hidden by default ("Show sign-ins" toggle) — they are 90 % of the volume.</li>
 <li>Filters (all in the URL, mapped to the API's <code>actor</code>, <code>action</code>, <code>target_kind</code>, <code>target_id</code>, <code>from_</code>, <code>to</code>): actor, action (grouped select by domain), target (picker: stack, env, run), period. CSV export on the right with the same filters.</li>
@@ -3134,6 +3165,10 @@ waited more than 2 minutes.</p>
 <td>confirmation popover anchored to the Delete button, button labelled "Delete variable region"</td>
 </tr>
 <tr>
+<td>Approve a rollout (SPECS §21.6)</td>
+<td>dialog listing every member env with its tier and the gate ("creates-only plans will be applied without asking again, for 24 h"); type the rollout's environment name</td>
+</tr>
+<tr>
 <td>Turning a safety switch <strong>on</strong> (four-eyes on, protected on)</td>
 <td>none (one click; reducing risk has no friction)</td>
 </tr>
@@ -3151,7 +3186,7 @@ hooks, notifications, secret sources; URL <code>?tab=</code>).</p>
 <p><strong>Environment page</strong> <code>/s/:space/stacks/:stack/envs/:env</code> (new in v2):</p>
 <ul>
 <li><strong>Header</strong>: <code>stack / env</code>, tier, branch, deployed commit vs head (<code>2af0351 → 125304e ↑</code>, refresh-head button), drift (<code>≈ drifted, checked 1h ago → drift run</code>), lock, protection badges.</li>
-<li><strong>Primary actions</strong> (writer+): <strong>Plan</strong> (primary button), and a "More" menu: Plan with downstream (<code>with_downstream</code>), Destroy… (shown only with <code>can_destroy</code>; opens a dialog explaining the run will need typed confirmation at apply), Promote from… (sibling env, SPECS §9.7), Run command… (allowlist, SPECS §4.3).</li>
+<li><strong>Primary actions</strong> (writer+): <strong>Plan</strong> (primary button), and a "More" menu: Plan with downstream (<code>with_downstream</code>), Destroy… (shown only with <code>can_destroy</code>; opens a dialog explaining the run will need typed confirmation at apply), Promote from… (sibling env, SPECS §9.7), Run command… (allowlist, SPECS §4.3), New environment from… (this env preselected as the model) and Roll out every “<name>” environment… (SPECS §21, DESIGN §5.11).</li>
 <li><strong>Tabs</strong> (URL): <strong>Runs</strong> (default) — history table: run short ID, type (<code>tracked</code>, <code>destroy</code>, <code>PR</code>, <code>drift</code>, <code>command</code>), trigger (who/how), outcome badge, plan summary, commit, age, duration; filter by type; paginated client-side <strong>[today]</strong>. <strong>Inputs</strong> (Resolved with provenance / Environment overrides / Discover inputs), <strong>Outputs</strong>, <strong>Dependencies</strong>, <strong>State</strong> (versions; force-unlock admin-only per §5.7), <strong>Settings</strong> (name, tier, branch, flags with the §5.7 friction, backend config, labels, hooks, notifications, cloud integration), and a <strong>Danger zone</strong> at the bottom of Settings (delete environment, typed name).</li>
 </ul>
 <h3 id="59-workers-workers-pools">5.9 <code>/workers</code> — workers &amp; pools<a class="headerlink" href="#59-workers-workers-pools" title="Permanent link">&para;</a></h3>
@@ -3166,8 +3201,67 @@ hooks, notifications, secret sources; URL <code>?tab=</code>).</p>
 <li><strong>Variable sets</strong> (<code>/s/:space/variable-sets</code>): one row per set with how it reaches envs (<code>auto-attach</code>, <code>rule: team=payments</code>, <code>3 attachments</code>); the row opens a page with tabs Variables / Attachments / Settings. Delete per §5.7.</li>
 <li><strong>Settings</strong> (<code>/settings</code>): <strong>Preferences</strong> for everyone (theme: system / dark / light; single-key shortcuts on/off — in memory, for the tab only, until A8). Admin only: <strong>Tiers</strong> (name, <code>requires_four_eyes</code> with §5.7 friction, position, envs using it, delete per §5.7), <strong>Users &amp; roles</strong> (staged edits, §5.7), <strong>Spaces</strong> (members, per-space role and tiers), <strong>Deployment</strong> (version, environment).</li>
 <li><strong>Login</strong>: brand mark, "Sign in with Google"; in dev, the personas show email and role, and their allowed tiers once the dev endpoint returns them (needs API work A12).</li>
-<li><strong>Notifications</strong> (bell popover, Radix): each item names what and where ("Run failed · demo-dns/dev · 6m"), links to the run (Logs at first error for failures), mark read on open; "Mark all read" / "Clear read". The bell badge counts unread, neutral (not violet, not amber).</li>
+<li><strong>Notifications</strong> (bell popover, Radix): each item names what and where ("Run failed · demo-dns/dev · 6m"), links to the run (Logs at first error for failures) — a rollout notification (<code>rollout_paused</code>, <code>rollout_succeeded</code>, <code>rollout_failed</code>, <code>rollout_upstream_changed</code> "Upstream applied under a rollout", SPECS §21.7) to the rollout page —, mark read on open; "Mark all read" / "Clear read". The bell badge counts unread, neutral (not violet, not amber).</li>
 </ul>
+<h3 id="511-environment-clones-and-rollouts-specs-21">5.11 Environment clones and rollouts (SPECS §21)<a class="headerlink" href="#511-environment-clones-and-rollouts-specs-21" title="Permanent link">&para;</a></h3>
+<p><strong>New environment from…</strong> (overview header action, and the env page "More" menu with that env
+preselected as the model — the same label in both places; writer+): a dialog, one column (§5.7).
+- Fields: reference environment name (select of the names present in the space), new name (mono),
+  stacks (checklist, default every stack with the reference — the ones without it listed, disabled,
+  with the reason; at least one must stay checked), overrides (tier, branch, labels as <code>key=value</code>,
+  comma-separated — the value is everything after the first <code>=</code>; a malformed pair is shown inline
+  under the field and blocks Review, never dropped silently), "Copy cloud integration" (admin only).
+- <strong>Live hint</strong> under the labels (a debounced <code>dry_run</code> of the request as typed, SPECS §21.2): which
+  variable sets the labels will attach ("new" in words when the model does not get it, the stacks
+  named when not all), the model's items <strong>not copied</strong> because they would shadow a key of such a set
+  (variable or set attachment, the key and the set named), and the envs whose <strong>autodeploy is forced
+  off</strong> (with the reason: protected, or secrets/settings left to fill). Text only — no colour carries it.
+- <strong>Preview before create</strong> (a <code>dry_run</code> of the same request): first, the response's <code>warnings</code> as
+  an <code>info</code> banner "Check before creating", one line each starting with "Warning:" — an edge from the
+  model of a stack left out of the checklist ("app/prod-euw3 will depend on network/prod — the model
+  itself, in a stack not cloned, not a shared environment"), a tier override away from the model's
+  tier (from → to, and the secret references, set attachments and cloud integration it keeps). Then per
+  stack, what is copied and what is
+  not (§21.2 table, as text, plus the hint above), the dependency edges that will be created
+  (upstream → downstream, marked "shared upstream" or "model of a stack not cloned" in words — never
+  the same label for both), and what the user will still have to fill
+  (sensitive variables — each with the lower-scope value it resolves to meanwhile, when there is one
+  — static fallbacks of secret references, cloud integration). Create = one request.
+- After create: a summary with the <code>missing_secrets</code> as a checklist linking to each env's Inputs tab,
+  and the primary button <strong>Roll out prod-euw3…</strong>, which creates the rollout (awaiting approval) and
+  opens its page. The env page's "More" menu has the same action ("Roll out every <code>&lt;name&gt;</code>
+  environment…").</p>
+<p><strong>Rollouts list</strong> <code>/s/:space/rollouts</code> (side nav): one row per rollout, state badge, <code>done / members</code>.
+On the overview, a banner per rollout awaiting approval, paused or running, linking to its page.</p>
+<p><strong>Rollout page</strong> <code>/rollouts/:id</code> (space-less, like <code>/runs/:id</code>; linked from the overview banners, the
+list, the notifications and every member run):
+- <strong>Header</strong>: environment name, state badge (<code>StateBadge</code> vocabulary: awaiting approval = decision
+  amber, running, paused = decision amber, succeeded, failed, canceled), creator, approver and approval expiry
+  ("approved by alice · expires in 21 h"), actions: <strong>Approve…</strong> / <strong>Approve again…</strong> — shown when
+  the API says an approval is what the rollout waits for (<code>approvable</code>: the first approval, or a
+  re-approval after an expiry, a lost right or a member changed since the approval); replaced, for
+  a viewer who may not approve, by the reason (four-eyes against the creator, a tier they lack) —,
+  Retry (failed), Cancel. The approval dialog (§5.7 friction) says what it lets through: plans that
+  only create, in environments never applied, on the commit the first plan of each stack fixes;
+  everything else stops for a human.
+- <strong>Paused banner</strong>: the pause reason in words — "a plan needs a human confirmation", "the approval
+  expired: approve again to go on", "the approver may no longer apply on a member: approve again",
+  "a member's tier, protection or four-eyes changed since the approval: approve again".
+- <strong>Body</strong>: the members as <strong>columns per level</strong> (an ordered list of levels, left → right, each a
+  list of member cards — the accessible structure is the markup itself): env link, tier and
+  <code>protected</code>, status badge (label + glyph, never colour alone), the plan summary (<code>+2 ~0 -0</code>, <code>⇣n</code>
+  for imports, any other kind by name: <code>forget 1</code>), the run link, <strong>why it is waiting</strong> when it
+  stopped ("changes 1 resource", "forgets 1 resource", "consumed a mock", "check warn: infracost",
+  "the environment already has infrastructure", "planned commit …, not … the rollout pinned", "its
+  tier, protection or four-eyes changed since the approval"), "Confirmed under the rollout approval" for an auto-confirmed
+  member, and, before it plans, "Will plan on a mock (…)" when an outside upstream lacks an output.
+  The react-flow graph of §5.4 is not reused here.
+- Before approval, the page <em>is</em> the preview (§21.4): members by level, tiers, and the members
+  expected to pause.</p>
+<p><strong>Run page</strong>: a member run carries, in its header line, "part of rollout prod-euw3 · level 2" (a
+link), and, when auto-confirmed (<code>confirmed_via: rollout</code> on the run, SPECS §21.5 — also for an
+earlier run of a retried member), the action bar's who/when reads "confirmed by alice@… (rollout
+approval)" — never a plain "confirmed by alice": she approved the rollout, not this plan.</p>
 <hr />
 <h2 id="6-real-time-patterns">6. Real-time patterns<a class="headerlink" href="#6-real-time-patterns" title="Permanent link">&para;</a></h2>
 <ul>
