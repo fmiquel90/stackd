@@ -478,7 +478,7 @@ async def update_env_variable(
     var = await get_variable(session, var_id)
     if var.environment_id != env_id:
         raise ProblemException(404, "Variable not found", None)
-    update_variable(var, body)
+    await update_variable(session, var, body)
     await record_audit(
         session,
         action="variable.updated",

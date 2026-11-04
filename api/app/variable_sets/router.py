@@ -207,7 +207,7 @@ async def update_set_variable(
     var = await get_variable(session, var_id)
     if var.variable_set_id != set_id:
         raise ProblemException(404, "Variable not found", None)
-    update_variable(var, body)
+    await update_variable(session, var, body)
     await record_audit(
         session,
         action="variable.updated",

@@ -20,6 +20,7 @@ from app.enums import (
     VariableKind,
 )
 from app.errors import ProblemException
+from app.logging import get_logger
 from app.models.environment import Environment
 from app.models.oidc import CloudIntegration
 from app.models.run import Run
@@ -38,6 +39,7 @@ from app.workers.tools import SQL_WORKER_CAN_RUN
 # Derived from ACTIVE_STATES so the claim guard can never drift from the one_active_run_per_env
 # index / the enum (a past bug: `running` was added to both but not here).
 _ACTIVE_SQL = ", ".join(f"'{s.value}'" for s in ACTIVE_STATES)
+_log = get_logger("stackd.worker")
 
 # Candidate selection (SPECS §7.2). FOR UPDATE OF e SKIP LOCKED serializes claims per environment;
 # the one_active_run_per_env unique index (caught as 23505 below) is the real correctness guard.
@@ -182,8 +184,10 @@ async def build_job_payload(session: AsyncSession, run: Run) -> dict:
 
     # Resolve external secret references (§15): fetch live values, or apply the configured fallback.
     # Raises SecretUnavailable (caught by the claim endpoint → run failed) when a reference can't
-    # resolve and no fallback applies. Done before any run mutation so a failure leaves nothing half
-    # written. Break-glass override values were sealed onto the run at trigger time (§15.4).
+    # resolve and no fallback applies. Break-glass override values were sealed onto the run at
+    # trigger time (§15.4). A failure anywhere below leaves nothing half written: the claim endpoint
+    # runs this function in a savepoint and discards what it staged (run fields, audit events)
+    # before failing the run.
     from app.secret_sources.service import resolve_references
 
     overrides: dict[str, str] = {}
@@ -367,12 +371,39 @@ async def _cloud_integration(session: AsyncSession, env: Environment) -> CloudIn
 async def _cloud_credentials(  # type: ignore[no-untyped-def]
     session, ci: CloudIntegration | None, env, stack, run, phase
 ) -> dict | None:
-    """OIDC workload credentials for the phase (§10): plan vs apply assume different roles."""
-    from app.oidc.issuer import sign_workload_token
+    """OIDC workload credentials for the phase (§10): plan vs apply assume different roles.
+
+    A token that cannot be signed raises WorkloadSigningUnavailable when a retry can get past it
+    (the claim endpoint rolls the claim back, the run keeps its state) and WorkloadSigningError
+    otherwise (the run fails closed) — §3.11. Either carries a generic code only; the provider's
+    message (role and key ARNs, account id) is logged server-side, never stored on the run."""
+    from app.oidc.issuer import (
+        WorkloadSigningError,
+        WorkloadSigningUnavailable,
+        classify_signing_failure,
+        sign_workload_token,
+    )
 
     if ci is None:
         return None
-    token = await sign_workload_token(session, env, stack, run, phase, ttl=ci.session_duration)
+    try:
+        token = await sign_workload_token(session, env, stack, run, phase, ttl=ci.session_duration)
+    except Exception as exc:  # classified below: KMS, the network, the DB pool, a bad key…
+        transient, code = classify_signing_failure(exc)
+        _log.warning(
+            "workload token not signed",
+            extra={
+                "event": "oidc.signing_failed",
+                "run_id": str(run.id),
+                "code": code,
+                "transient": transient,
+                "error_type": type(exc).__name__,
+                "error": str(exc)[:1000],
+            },
+        )
+        if transient:
+            raise WorkloadSigningUnavailable(code) from exc
+        raise WorkloadSigningError(code) from exc
     role_arn = ci.plan_role_arn if phase == JobPhase.plan else ci.apply_role_arn
     return {
         "provider": ci.provider.value,
