@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import json
+
+import httpx
 import os
 import signal
 import subprocess
@@ -937,11 +939,22 @@ def run() -> None:
             )
             break
         except Exception as exc:  # noqa: BLE001
-            log.warning(
-                "register failed, retrying",
-                extra={"event": "agent.register_error", "error": str(exc)},
+            refused = isinstance(exc, httpx.HTTPStatusError) and exc.response.status_code == 403
+            if refused:
+                # Refused for good (e.g. a production API and a non-docker runner, SPECS §7.4):
+                # say why, and retry slowly — the API audits a refusal once an hour, not per try.
+                log.error(
+                    "registration refused by the API",
+                    extra={"event": "agent.register_refused", "error": exc.response.text[:500]},
+                )
+            else:
+                log.warning(
+                    "register failed, retrying",
+                    extra={"event": "agent.register_error", "error": str(exc)},
+                )
+            time.sleep(
+                max(settings.heartbeat_interval, 300) if refused else settings.heartbeat_interval
             )
-            time.sleep(settings.heartbeat_interval)
             # Re-read the token: the seed rotates the pool token on a reset (DB wiped → fresh token
             # written to the shared file), so a token read at boot can be stale → 401.
             settings = Settings.from_env()

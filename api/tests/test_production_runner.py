@@ -76,6 +76,21 @@ async def test_production_refuses_a_non_docker_worker(
         )
     assert {(e.context or {}).get("runner") for e in rejected} >= {"local", None}
 
+    # The agent retries forever: one audit row per worker and hour, not one per attempt.
+    for _ in range(3):
+        assert (await _register(client, pool, "agent-local", "local")).status_code == 403
+    async with SessionLocal() as session:
+        again = (
+            (
+                await session.execute(
+                    select(AuditEvent).where(AuditEvent.action == "worker.rejected")
+                )
+            )
+            .scalars()
+            .all()
+        )
+    assert sum((e.context or {}).get("name") == "agent-local" for e in again) == 1
+
 
 async def test_production_refuses_a_claim_from_a_local_worker(
     client: httpx.AsyncClient, production: Callable[[], None]

@@ -381,7 +381,38 @@ oidc_signing_keys (
 
 **Signer.** `STACKD_OIDC_SIGNER=local` (default) keeps an RSA-2048 key AES-GCM encrypted in the row and signs in process; `STACKD_OIDC_SIGNER=kms` + `STACKD_OIDC_KMS_KEY_ARN` signs every workload token through `kms:Sign` (`RSASSA_PKCS1_V1_5_SHA_256` = RS256; the API builds the JWS itself), the private key never entering the API — required in production unless `STACKD_ALLOW_LOCAL_SIGNER=true` acknowledges a local key (the API refuses to start otherwise; see risk §13 / PLAN §5). A KMS key is registered from `kms:GetPublicKey`: it must be `SIGN_VERIFY`, RSA ≥ 2048, support RS256 (else 422); its `kid` is derived from its public key like a local key's. The API needs `kms:Sign` + `kms:GetPublicKey` on it, nothing else.
 
-**Rotation.** A new `active` key, the old one moves to `retiring` (`retiring_at` set; still in the JWKS, no longer signs), then `retired` (out of the JWKS) once the longest token it can have signed has expired: max(plan cap 30 min, apply budget + grace) + 5 min clock skew — a scheduler task (§7.5, advisory-locked) does it. Triggers: `POST /api/v1/oidc/keys/rotate` (admin; `{"kms_key_arn"}` for a KMS key, empty for a new local key — refused 422 on a KMS issuer), and, automatically, an issuer configured for KMS whose active key is still local (or absent) rotates to the configured key on its next signature — switching the setting is the whole migration. `GET /api/v1/oidc/keys` (admin) lists them (public metadata only). Audited: `oidc_key.rotated` (actor the admin, or `system`; context kid, backend, ARN, previous kid), `oidc_key.retired` (`system`).
+**Rotation.** A new `active` key, the old one moves to `retiring` (`retiring_at` set; still in the JWKS, no longer signs), then `retired` (out of the JWKS) once the longest token it can have signed has expired: max(plan cap 30 min, apply budget + grace) + 5 min clock skew — a scheduler task (§7.5, advisory-locked) does it. Triggers: `POST /api/v1/oidc/keys/rotate` (admin; `{"kms_key_arn"}` for a KMS key, empty for a new local key — refused 422 on a KMS issuer), and, automatically, an issuer configured for KMS whose active key is still local (or absent) rotates to the configured key on its next signature — switching the setting is the whole migration. `GET /api/v1/oidc/keys` (admin) lists them (public metadata only). Rotating to a key the issuer
+already knows (switching back to a KMS key used before — `retiring` or `retired`) reactivates it —
+same kid — rather than refusing, signing from then on through the ARN just configured or requested
+(the same key material can sit behind another ARN, e.g. a multi-region replica); only a key that
+already signs is refused (409). Every rotation is serialized by a transaction-level advisory lock.
+The key is provisioned on first use in a database session of its own: key management never commits
+or rolls back the caller's transaction (a job claim). Provisioning is idempotent under concurrency:
+under the lock it re-checks the active key, and a concurrent provisioning that won anyway (unique
+violation, or "already active" from a replica that does not take the lock) is used as is — concurrent
+claims and `GET /oidc/jwks` never fail on it.
+
+**Signing failures at claim.** A token that cannot be signed is classified:
+- **transient** — KMS throttling, KMS or the network unreachable or timing out, a KMS 5xx, the
+  API's own credentials mid-refresh, no database connection for the provisioning session (pool
+  exhausted — it needs a second connection while the claim holds one — or a connection lost): the
+  claim is rolled back, the run keeps its state (`queued`, or `confirmed` — an approved apply keeps
+  its approval), and the worker gets **503** `code=<marker>`, `retryable: true`; it polls again;
+- **permanent** — access denied, key disabled / pending deletion / not found, an unusable key (not
+  RSA ≥ 2048 `SIGN_VERIFY` RS256), an invalid ARN, no AWS credentials, anything unrecognized: the
+  job's run fails closed at claim, `run.apply_failed` with `reason: oidc`, the worker getting nothing
+  (204).
+
+`run.error` and the audit `detail` carry a generic marker only — `oidc_signing:<code>`, e.g.
+`kms_access_denied`, `kms_key_disabled`, `kms_key_not_found`, `kms_key_unusable`, `kms_invalid_arn`,
+`kms_no_credentials`, `kms_rejected`, `signing_failed` (transient: `kms_throttled`, `kms_unavailable`,
+`kms_unreachable`, `db_unavailable`) — never the provider's message (role/key ARNs, account id),
+which is logged server-side (`oidc.signing_failed`, admin log view). The payload build runs in a
+savepoint: a failed claim discards what it staged on the run (`used_mocks`, inputs, provenance,
+`used_secret_fallback`) and its audit events (`dependency.mock_consumed`, `secret.fallback_used`) —
+they only stand for a job handed out. Audited: `oidc_key.rotated` (actor the admin, or `system`;
+context kid, backend, ARN, previous kid, `reactivated`, and for a reactivation `previous_status` and
+`replaced_kms_key_arn` when the ARN changed), `oidc_key.retired` (`system`).
 
 ---
 
@@ -615,7 +646,9 @@ Heartbeat = downstream command channel. No incoming connection. Today it carries
 
 ```
 POST /worker/v1/jobs/claim?wait=25
-→ 204 if nothing
+→ 204 if nothing (or the claimed run just failed closed at claim: §9.3, §10, §15.2)
+→ 503 problem+json, retryable: true — a transient failure to build the job (workload token not
+       signable right now, §3.11): the claim is undone, the run keeps its state; poll again
 → 200 {
     "job_id": "...",                       # = the run id
     "phase": "plan" | "apply" | "command", # JOB type (what the agent executes) — do not confuse
@@ -859,7 +892,8 @@ explicit budget are capped at 2 h by the agent's watchdog.
 
 **Runner trust contract (Phase C).** The `docker` runner (prod) is the trust boundary: one **ephemeral** container per command (above); the image carries **no long-lived cloud creds**; an optional egress allowlist is enforced via the containers' network. What holds on every runner: the OIDC token is written to a `0600` file outside the checkout (`Workspace.secret_file`) only for the duration of each tofu command and each platform hook — never while a repo hook runs (§8.3) — exposed to them via `AWS_WEB_IDENTITY_TOKEN_FILE`, and the whole workspace is removed in the `finally` `ws.cleanup()`. Repo code also runs inside tofu (`data "external"`, provisioners), and feeds the check tools platform hooks run (their config files in the checkout): on the `local` runner, tofu and platform hooks get the worker's environment **minus the agent's own settings** — the whole `STACKD_*` namespace (the pool token, the API URL, …, and any platform setting a worker host carries) — then the run's `env` and `sensitive_env` and the OIDC workload env (§10.4); tofu also gets, for managed state, `TF_HTTP_*` (§11.2). Everything else a provider may need stays: `PATH` and locale, proxies and CA bundle, `TF_*` (plugin cache, …), provider settings. Repo hooks run untrusted: `sh -c <repo command>` with an allowlisted `repo_env` (§8.3). The `local` runner (dev) with a mounted `~/.aws` is **trusted-dev only** — never prod (`STACKD_ENV=production` requires the `docker` runner, enforced by the API, see below).
 
-**Production runner gate.** The agent declares its runner (`local` | `docker`) in `POST /worker/v1/register`, on every (re-)registration; an unknown `STACKD_RUNNER` value stops the agent at startup instead of falling back to `local`. A production API (`STACKD_ENV=production`) answers **403** `code=runner_not_allowed` to a registration whose runner is not `docker` — an absent runner (an agent predating the field) included — and audits it (`worker.rejected`, target the pool, context `{name, runner}`); a `/jobs/claim` from a worker whose recorded runner is not `docker` (registered before the API switched to production) gets the same 403. The runner is shown on the Workers page. It is *declared*: it guards against a misconfigured worker, not against a compromised one holding a pool token — the pool token's custody stays the boundary. A production API also refuses to **start** on dev-grade settings: a master key that does not decode to 32 bytes, a `STACKD_JWT_SECRET` under 32 characters, a non-https `STACKD_PUBLIC_URL` (next to the existing `STACKD_DEV_AUTH` guard).
+**Production runner gate.** The agent declares its runner (`local` | `docker`) in `POST /worker/v1/register`, on every (re-)registration; an unknown `STACKD_RUNNER` value stops the agent at startup instead of falling back to `local`. A production API (`STACKD_ENV=production`) answers **403** `code=runner_not_allowed` to a registration whose runner is not `docker` — an absent runner (an agent predating the field) included — and audits it (`worker.rejected`, target the pool, context `{name, runner}` — once per pool, worker
+name and hour: the agent keeps retrying, slowly — every 5 min — after a 403, logging the refusal); a `/jobs/claim` from a worker whose recorded runner is not `docker` (registered before the API switched to production) gets the same 403. The runner is shown on the Workers page. It is *declared*: it guards against a misconfigured worker, not against a compromised one holding a pool token — the pool token's custody stays the boundary. A production API also refuses to **start** on dev-grade settings: a master key that does not decode to 32 bytes, a `STACKD_JWT_SECRET` under 32 characters, a non-https `STACKD_PUBLIC_URL` (next to the existing `STACKD_DEV_AUTH` guard).
 
 ### 7.5 Periodic tasks (internal scheduler, multi-replica)
 
@@ -1491,6 +1525,13 @@ ALTER TABLE variables ADD CONSTRAINT variables_one_value_source CHECK (
 ```
 
 A variable with `secret_source_id` is treated as `sensitive=true` regardless of the flag.
+
+**A reference stays in its space.** `secret_source_id` must name a source of the variable's own
+space — the stack's for a stack or environment variable, the set's for a variable-set variable — on
+create and on every update that re-points it; otherwise **404** `Secret source not found` (another
+space's source is answered like a missing one, its existence not confirmed). At claim, a reference
+whose source is not in the environment's space (a row predating the check) fails the run closed,
+`secret_unavailable:{var}`, with no fallback.
 
 ### 15.2 Resolution order (real > fallback > error)
 

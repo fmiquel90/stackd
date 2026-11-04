@@ -5,10 +5,15 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.audit import record_audit
 from app.crypto import decrypt
 from app.enums import AuditActorKind, SecretFallback
+from app.logging import get_logger
+from app.models.environment import Environment
 from app.models.run import Run
 from app.models.secret_source import SecretSource
+from app.models.stack import Stack
 from app.secret_sources import providers
 from app.variables.resolution import ResolvedVariable
+
+_log = get_logger("stackd.secrets")
 
 
 async def resolve_references(
@@ -31,12 +36,28 @@ async def resolve_references(
     # build_job_payload runs at both the plan and the apply claim; the run keeps the flag once set,
     # so we only emit fallback audit on the first pass that flips it (avoids a duplicate per claim).
     first_pass = not run.used_secret_fallback
+    env = await session.get(Environment, run.environment_id)
+    stack = await session.get(Stack, env.stack_id) if env is not None else None
+    space_id = stack.space_id if stack is not None else None
 
     for rv in resolved:
         if not rv.is_reference:
             continue
         source = await session.get(SecretSource, rv.secret_source_id)
         assert source is not None  # FK ON DELETE RESTRICT guarantees the source still exists
+        if source.space_id != space_id:
+            # Defense in depth (§15.1): the API refuses such a reference, but a row written before
+            # that check (or by hand) must not read another space's secret. Fail closed, with no
+            # fallback.
+            _log.warning(
+                "cross-space secret reference refused",
+                extra={
+                    "event": "secret.cross_space_refused",
+                    "run_id": str(run.id),
+                    "variable": rv.name,
+                },
+            )
+            raise providers.SecretUnavailable(f"secret_unavailable:{rv.name}")
         try:
             rv.value = await providers.fetch_secret(source, rv.secret_ref or "")
             provenance[rv.injected_name] = f"secret:{source.name}"
