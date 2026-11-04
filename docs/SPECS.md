@@ -509,8 +509,14 @@ POST /worker/v1/jobs/{id}/logs
 
 `GET /runs/{id}/logs?phase=&after_seq=` serves one or the other transparently. `GET /runs/{id}/logs/download?phase=all`.
 
-> **Status**: only the hot tier exists today — logs stay in `run_logs` (no archiving, no purge,
-> §7.5) and `/logs/download` is not served yet.
+> **Status**: done. A periodic task (§7.5) archives each terminal run's logs — one gzip'd JSONL
+> object per phase, one `{seq, section, lines}` chunk per line — and stamps `runs.logs_archived_at`;
+> the hot rows are purged `log_hot_retention_days` (7) after that. `GET …/logs` serves the hot rows
+> and falls back to the archive once they are gone (same chunks, same order, `phase`/`after_seq`
+> honoured). `GET …/logs/download?phase=all|<phase>` returns plain text (ANSI kept, phases in start
+> order, hooks prefixed `[hook:x]`), from either tier. If S3 is down the run stays unarchived and its
+> hot rows untouched — retried next tick. The 1-year S3 expiry is a bucket lifecycle rule (ops), not
+> application code. A chunk ingested after its run was archived is not re-archived.
 
 ### 5.3 Live distribution
 
@@ -543,7 +549,7 @@ context jsonb,                      -- stack_name, env_name, run_id, commit, pla
 ip, user_agent nullable, created_at
 ```
 
-**Real immutability, not just "no API"**: the absence of an update/delete endpoint does not protect against a bug or an application compromise. The application DB role only has `INSERT` and `SELECT` on `audit_events` (`REVOKE UPDATE, DELETE`), a `BEFORE UPDATE OR DELETE` trigger raises an exception, and retention purging goes through a distinct role, separate from the application role and itself audited. 2-year retention, explicit admin purge (audited). Indexes: `(created_at)`, `(actor_id, created_at)`, `(target_kind, target_id, created_at)`, `(action, created_at)`.
+**Real immutability, not just "no API"**: the absence of an update/delete endpoint does not protect against a bug or an application compromise. The application DB role only has `INSERT` and `SELECT` on `audit_events` (`REVOKE UPDATE, DELETE`), a `BEFORE UPDATE OR DELETE` trigger raises an exception, and retention purging goes through a distinct role, separate from the application role and itself audited. 2-year retention: a daily task (§7.5) purges older events on a connection of the `stackd_audit_purge` role (created `NOLOGIN` by migration 0031 — an operator gives it a login and sets `STACKD_AUDIT_PURGE_DATABASE_URL`; without that URL no purge runs). The role holds `SELECT, INSERT, DELETE` only, and the append-only trigger lets exactly that role delete; it writes an `audit.purged` event (`deleted`, `before`, `retention_days`) in the same transaction as the delete. Indexes: `(created_at)`, `(actor_id, created_at)`, `(target_kind, target_id, created_at)`, `(action, created_at)`.
 
 ### 6.2 Taxonomy
 
@@ -556,6 +562,7 @@ space.created / space.member_set / space.member_removed            # Phase F mem
 stack.created / stack.updated / stack.deleted
 environment.created / environment.updated / environment.deleted   # created: also by a clone
                                   #   (context cloned_from, autodeploy, autodeploy_off_reason, §21.2)
+audit.purged                      # retention purge of old audit events (§6.1) — actor system
 environment.head_refreshed        # manual head refresh (§9.6) — context: branch, old_sha, new_sha
 environment.inputs_discovered     # discover-inputs created placeholder env variables (§20.3)
 environment.drift_detected / environment.drift_cleared               # §19.4
@@ -908,14 +915,14 @@ The loop ticks every 10 s.
 | VCS post-back outbox | every tick | drain `vcs_outbox` (§18.4) |
 | Drift detection | every tick, per-env gate | enqueue the due `-refresh-only` runs (§19.2) |
 | Git staleness polling | 15 min (`stackd_head_poll_interval`) | `git ls-remote` per (repo, branch, credentials) → update `head_sha` (§9.6); its own task, so slow git calls never delay the others |
-| Cold log archiving | end of run | `run_logs` → S3 gz, purge hot > 7 d (§5.2) — **not implemented yet**: logs stay in `run_logs` |
+| Cold log archiving | every tick | terminal runs with `logs_archived_at IS NULL` (20 per tick) → S3 `logs/{run_id}/{phase}.log.gz` (§5.2) |
 | OIDC key retirement | every tick | `retiring` keys past the longest token TTL → `retired`, out of the JWKS (§3.11) |
 | Rollout approval expiry | every tick | a started rollout whose approval has expired is advanced under its lock → `paused (approval_expired)` (§21.4), without waiting for its next event |
-| Refresh token / audit purge | daily | expired families (§2.5), audit > 2 years (§6.1, audited purge) — **not implemented yet** |
+| Retention purge | daily | hot `run_logs` rows 7 d after archiving (§5.2); refresh-token families whose every token has expired (§2.5); audit events older than `audit_retention_days` (730) through the distinct `stackd_audit_purge` role (§6.1), only if `STACKD_AUDIT_PURGE_DATABASE_URL` is set |
 
 **Single-execution guarantee**: each task takes a dedicated **PG advisory lock** (`pg_try_advisory_lock(<task_key>)`) before running; a replica that does not obtain the lock skips its tick. The lock is session-level, so it is taken and released on a **dedicated connection** held for the task's whole run, separate from the task's own DB session — the tasks commit mid-way, which returns the session's connection to the pool, and an unlock through it could land on another connection and leak the lock. No permanently elected leader (no external dependency), no double execution. The tasks are **idempotent** anyway (re-running a staleness computation or an archive breaks nothing) — the advisory lock mainly avoids redundant work and races on the `worker_lost` transitions.
 
-**Advisory-lock keys** (one per lock, never shared — two holders of the same key would skip each other's work): 74001 `worker_lost`, 74002 notification outbox, 74003 VCS outbox, 74004 drift, 74005 head poll, 74006 OIDC key retirement, 74007 OIDC key management (the issuer's rotation lock, §3.11), 74008 rollout approval expiry. A new lock takes the next free key and is added here.
+**Advisory-lock keys** (one per lock, never shared — two holders of the same key would skip each other's work): 74001 `worker_lost`, 74002 notification outbox, 74003 VCS outbox, 74004 drift, 74005 head poll, 74006 OIDC key retirement, 74007 OIDC key management (the issuer's rotation lock, §3.11), 74008 rollout approval expiry, 74009 log archiving, 74010 retention purge. A new lock takes the next free key and is added here.
 
 ---
 
@@ -1160,7 +1167,7 @@ Changing an environment's `branch` (`PATCH`) clears `head_sha`, `head_updated_at
 - *Level 2 — concerns you*: `affects_project_root` = at least one commit ahead modifies files under `project_root` (GitHub/GitLab compare API). If unavailable: NULL, the UI stays at level 1.
 
 **Effects**:
-- `↑N` chip on the env cell (DESIGN.md §5.1) and the env header; attenuated variant if `affects_project_root = false` ("the branch moved ahead, but not this folder"). **Not in the UI yet**, nor the banner below: today staleness is the API's `stale`/`commits_ahead` fields.
+- `↑N` chip on the env cell (DESIGN.md §5.1) and the env header; attenuated variant if `affects_project_root = false` ("the branch moved ahead, but not this folder"). Shipped: the chip (`ModifierChips`, overview matrix and env header) and the banner below (run page).
 - **Obsolete `unconfirmed` run**: if `head_sha` advances while a plan awaits confirmation, banner on the run page — "plan computed on `abc1234`, the branch advanced by N commits" — with a *Re-plan* action (discard + new run on the head). Confirmation remains **possible** (applying a specific commit is legitimate) but the obsolescence is impossible to miss.
 - No automatic action: staleness is information, never a trigger (that is the role of webhooks).
 - `GET /api/v1/environments/{id}` exposes `head_sha`, `commits_ahead`, `affects_project_root`, `stale`.

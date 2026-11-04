@@ -4,8 +4,8 @@ import asyncio
 import uuid
 from datetime import UTC, datetime, timedelta
 
-from sqlalchemy import or_, select, text, update
-from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import delete, func, or_, select, text, update
+from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 
 from app.config import get_settings
 from app.crypto import decrypt
@@ -16,10 +16,12 @@ from app.logging import get_logger
 from app.models.environment import Environment
 from app.models.run import Run
 from app.models.stack import Stack
+from app.models.user import RefreshToken
 from app.models.worker import Worker
 from app.notifications.dispatcher import dispatch_pending
 from app.oidc.issuer import retire_keys
 from app.rollouts.service import expire_approvals
+from app.runs.logs_archive import archive_run_logs, purge_hot_logs
 from app.runs.transition import transition
 from app.stacks.git import ls_remote_sha
 from app.vcs.dispatcher import dispatch_vcs
@@ -34,6 +36,9 @@ _LOCK_HEAD_POLL = 74005
 _LOCK_OIDC_KEYS = 74006
 # 74007 is the OIDC issuer's key-management lock (oidc/issuer.py, §3.11): never reuse it here.
 _LOCK_ROLLOUTS = 74008
+_LOCK_LOG_ARCHIVE = 74009
+_LOCK_RETENTION = 74010
+_RETENTION_PERIOD = timedelta(days=1)
 _TICK_SECONDS = 10  # the scheduler loop's period
 _HEAD_POLL_CONCURRENCY = 8  # `git ls-remote` calls a head poll runs at once (§9.6)
 _log = get_logger("stackd.scheduler")
@@ -217,6 +222,98 @@ async def poll_branch_heads(session: AsyncSession, now: datetime) -> int:
     return updated
 
 
+async def purge_refresh_tokens(session: AsyncSession, now: datetime) -> int:
+    """Delete the refresh-token families whose every token has expired (§2.5, §7.5). A family with
+    a live token is kept whole — its used/revoked rows are what reuse detection looks at."""
+    expired = (
+        select(RefreshToken.family_id)
+        .group_by(RefreshToken.family_id)
+        .having(func.max(RefreshToken.expires_at) < now)
+    )
+    result = await session.execute(delete(RefreshToken).where(RefreshToken.family_id.in_(expired)))
+    await session.commit()
+    return result.rowcount or 0  # type: ignore[attr-defined]
+
+
+async def purge_audit_events(now: datetime) -> int:
+    """Delete the audit events older than `audit_retention_days` (§6.1). Runs on a connection of
+    the distinct `stackd_audit_purge` role — the application role cannot delete, and the
+    append-only trigger refuses everyone else — and records an `audit.purged` event in the same
+    transaction. Returns the number deleted; 0 (and nothing recorded) when the purge role's URL is
+    not configured."""
+    settings = get_settings()
+    url = settings.stackd_audit_purge_database_url
+    if not url:
+        return 0
+    cutoff = now - timedelta(days=settings.audit_retention_days)
+    engine = create_async_engine(url)
+    try:
+        async with engine.begin() as conn:
+            deleted = (
+                await conn.execute(
+                    text(
+                        "WITH d AS (DELETE FROM audit_events WHERE created_at < :cutoff"
+                        " RETURNING 1) SELECT count(*) FROM d"
+                    ).bindparams(cutoff=cutoff)
+                )
+            ).scalar_one()
+            if deleted:
+                await conn.execute(
+                    text(
+                        "INSERT INTO audit_events (actor_kind, action, target_kind, context)"
+                        " VALUES ('system', 'audit.purged', 'audit',"
+                        " jsonb_build_object('deleted', CAST(:n AS int),"
+                        " 'before', CAST(:c AS text), 'retention_days', CAST(:d AS int)))"
+                    ).bindparams(n=deleted, c=cutoff.isoformat(), d=settings.audit_retention_days)
+                )
+    finally:
+        await engine.dispose()
+    return int(deleted)
+
+
+async def purge_retention(session: AsyncSession, now: datetime) -> None:
+    """The daily retention task (§7.5): hot log rows past their window, expired refresh-token
+    families, audit events past retention. Each step is independent and idempotent."""
+    for step in (purge_hot_logs, purge_refresh_tokens):
+        try:
+            count = await step(session, now)
+        except Exception as exc:
+            await session.rollback()
+            _log.warning(
+                "retention step failed",
+                extra={
+                    "event": "scheduler.retention_failed",
+                    "step": step.__name__,
+                    "error": str(exc),
+                },
+            )
+            continue
+        if count:
+            _log.info(
+                "retention purge",
+                extra={"event": "scheduler.retention", "step": step.__name__, "count": count},
+            )
+    try:
+        if count := await purge_audit_events(now):
+            _log.info(
+                "retention purge",
+                extra={
+                    "event": "scheduler.retention",
+                    "step": "purge_audit_events",
+                    "count": count,
+                },
+            )
+    except Exception as exc:
+        _log.warning(
+            "audit purge failed",
+            extra={
+                "event": "scheduler.retention_failed",
+                "step": "purge_audit_events",
+                "error": str(exc),
+            },
+        )
+
+
 async def _with_lock(session: AsyncSession, key: int, coro) -> None:  # type: ignore[no-untyped-def]
     """Run `coro(session, now)` only if no other replica holds `key` (§7.5). The session-level
     advisory lock lives on a dedicated connection held for the task's whole run, never on the
@@ -253,6 +350,7 @@ async def scheduler_loop() -> None:
     so its git calls never delay the other tasks' ticks; a poll still running when the next one is
     due skips that one."""
     next_head_poll: datetime | None = None
+    next_retention: datetime | None = None
     head_poll: asyncio.Task[None] | None = None
     try:
         while True:
@@ -269,7 +367,13 @@ async def scheduler_loop() -> None:
                     await _with_lock(session, _LOCK_OIDC_KEYS, retire_keys)
                 async with SessionLocal() as session:
                     await _with_lock(session, _LOCK_ROLLOUTS, expire_approvals)
+                async with SessionLocal() as session:
+                    await _with_lock(session, _LOCK_LOG_ARCHIVE, archive_run_logs)
                 now = datetime.now(UTC)
+                if next_retention is None or now >= next_retention:
+                    next_retention = now + _RETENTION_PERIOD
+                    async with SessionLocal() as session:
+                        await _with_lock(session, _LOCK_RETENTION, purge_retention)
                 if next_head_poll is None or now >= next_head_poll:
                     # Scheduled before it runs, so a failing poll also waits a full interval.
                     interval = get_settings().stackd_head_poll_interval

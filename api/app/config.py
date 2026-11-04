@@ -58,6 +58,13 @@ class Settings(BaseSettings):
     s3_secret_key: str = ""
     aws_region: str = "garage"
 
+    # Retention (§5.2, §6.1, §7.5): hot log rows are purged this long after the run's logs reach S3;
+    # the audit trail is purged past `audit_retention_days` by a distinct DB role, only when its
+    # connection URL is configured (never the application role).
+    log_hot_retention_days: int = 7
+    audit_retention_days: int = 730
+    stackd_audit_purge_database_url: str | None = None
+
     # Dev timings
     stackd_heartbeat_interval: int = 20
     stackd_worker_offline_seconds: int = 60

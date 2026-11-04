@@ -3,7 +3,7 @@ from __future__ import annotations
 import uuid
 from typing import Annotated
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Response
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -13,8 +13,8 @@ from app.dependencies.service import group_status
 from app.enums import Role, RunEventActor, RunState, TriggeredBy
 from app.errors import ProblemException
 from app.models.run import Run, RunEvent
-from app.models.run_log import RunLog
 from app.models.vcs import VcsOutbox
+from app.runs.logs_archive import load_chunks, render_text
 from app.runs.schemas import (
     CommandTriggerIn,
     LogChunkOut,
@@ -194,14 +194,27 @@ async def get_logs(
     phase: str | None = None,
     after_seq: int | None = None,
 ) -> list[LogChunkOut]:
-    await guard_run_id(session, user, run_id)
-    stmt = select(RunLog).where(RunLog.run_id == run_id)
-    if phase:
-        stmt = stmt.where(RunLog.phase == phase)
-    if after_seq is not None:
-        stmt = stmt.where(RunLog.seq > after_seq)
-    rows = (await session.execute(stmt.order_by(RunLog.phase, RunLog.seq))).scalars().all()
-    return [LogChunkOut(phase=r.phase, section=r.section, seq=r.seq, lines=r.lines) for r in rows]
+    """Hot or cold tier, transparently (§5.2)."""
+    run = await guard_run_id(session, user, run_id)
+    chunks = await load_chunks(session, run, phase=phase, after_seq=after_seq)
+    return [LogChunkOut(**c) for c in chunks]
+
+
+@router.get("/runs/{run_id}/logs/download")
+async def download_logs(
+    run_id: uuid.UUID, user: CurrentUser, session: DbSession, phase: str = "all"
+) -> Response:
+    """The run's logs as plain text (`phase=all` or one phase), ANSI preserved (§5.2)."""
+    run = await guard_run_id(session, user, run_id)
+    chunks = await load_chunks(session, run, phase=None if phase == "all" else phase)
+    if not chunks:
+        raise ProblemException(404, "No logs", "This run has no logs for that phase.")
+    suffix = "all" if phase == "all" else phase
+    return Response(
+        render_text(chunks),
+        media_type="text/plain; charset=utf-8",
+        headers={"Content-Disposition": f'attachment; filename="run-{run_id}-{suffix}.log"'},
+    )
 
 
 @router.get("/runs/{run_id}/plan")
