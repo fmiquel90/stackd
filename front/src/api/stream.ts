@@ -148,6 +148,7 @@ function concerns(sub: string, s: Signal): boolean {
   if (sub.startsWith("user:")) return s.kind === "notification";
   // environment:<id> signals carry the run, not the env: any run event may concern it.
   if (sub.startsWith("environment:")) return s.kind === "run_event";
+  if (sub.startsWith("rollout:")) return s.kind === "rollout_event" && s.rollout_id === sub.slice(8);
   return true;
 }
 

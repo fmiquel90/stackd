@@ -3,6 +3,7 @@ from __future__ import annotations
 import re
 import uuid
 from datetime import datetime
+from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, field_validator
 
@@ -65,8 +66,13 @@ class RunOut(BaseModel):
     worker_id: uuid.UUID | None
     parent_run_id: uuid.UUID | None = None
     run_group_id: uuid.UUID | None = None
+    rollout_id: uuid.UUID | None = None  # §21: the environment rollout the run belongs to
     # Only on GET /runs/{id}: the group the run belongs to (root or member), with its status.
     run_group: RunGroupOut | None = None
+    # Only on GET /runs/{id}: who confirmed it — a user on this plan, the system on the env's
+    # autodeploy, or the system under a rollout's approval (§21.5: `confirmed_by_user_id` is then
+    # the approver, who never saw this plan).
+    confirmed_via: Literal["user", "autodeploy", "rollout"] | None = None
     plan_summary: dict | None
     check_results: dict | None
     used_mocks: bool

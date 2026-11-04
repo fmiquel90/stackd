@@ -191,17 +191,38 @@ def _apply_repo_hook_policy(
     return out
 
 
+# Counters every plan summary carries (SPECS §3.5): a rollout's gate fails closed without them.
+_SUMMARY_KEYS = ("add", "change", "destroy", "import", "forget")
+
+
 def _summary_from_events(events: list[dict]) -> dict:
-    """Plan/apply counts straight from tofu's authoritative `change_summary` event (last wins)."""
+    """Plan/apply counts straight from tofu's authoritative `change_summary` event (last wins):
+    every counter it reports — `remove` as `destroy`; `import`; OpenTofu's `forget`; Terraform's
+    `action_invocation`/`action_fail`; any a newer tool adds — so a rollout's gate (SPECS §21.5)
+    sees every kind of action, not only add/change/destroy."""
+    out: dict[str, int] = dict.fromkeys(_SUMMARY_KEYS, 0)
     for evt in reversed(events):
         if evt.get("type") == "change_summary":
-            c = evt.get("changes", {}) or {}
-            return {
-                "add": c.get("add", 0),
-                "change": c.get("change", 0),
-                "destroy": c.get("remove", 0),
-            }
-    return {"add": 0, "change": 0, "destroy": 0}
+            for key, value in (evt.get("changes") or {}).items():
+                if isinstance(value, int) and not isinstance(value, bool):
+                    out["destroy" if key == "remove" else key] = value
+            break
+    return out
+
+
+def _forgets_in_plan(plan_doc: str) -> int:
+    """Resources the plan forgets (a `removed` block with `destroy = false`), counted from the plan
+    JSON: Terraform's `change_summary` has no `forget` counter, OpenTofu's does."""
+    try:
+        doc = json.loads(plan_doc)
+    except ValueError:
+        return 0
+    changes = doc.get("resource_changes") or [] if isinstance(doc, dict) else []
+    return sum(
+        1
+        for rc in changes
+        if isinstance(rc, dict) and "forget" in ((rc.get("change") or {}).get("actions") or [])
+    )
 
 
 def _first_error(events: list[dict]) -> str | None:
@@ -530,6 +551,7 @@ def handle_plan(
             error = f"plan JSON unavailable, not checked: `{tool} show -json` {unusable}"
             return _job_failed(client, job_id, "plan", checks, error=masker.mask(error))
         plan_doc = show.stdout
+        summary["forget"] = max(summary.get("forget", 0), _forgets_in_plan(plan_doc))
         # It lists the run's variable values in clear (§8.3): the artifact, and what repo hooks
         # read, is a copy with every sensitive value masked.
         masked_doc = mask_plan_json(plan_doc, masker)

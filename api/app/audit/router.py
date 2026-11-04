@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import csv
 import io
+import json
 import uuid
 from datetime import datetime
 from typing import Annotated
@@ -103,7 +104,9 @@ async def export_csv(
     )
     buf = io.StringIO()
     writer = csv.writer(buf)
-    writer.writerow(["created_at", "actor_email", "action", "target_kind", "target_id"])
+    # `context` (JSON): what the list endpoint returns to the same admins — the "who" of a system
+    # action lives there, e.g. the approver of a rollout's auto-confirmation (§21.5).
+    writer.writerow(["created_at", "actor_email", "action", "target_kind", "target_id", "context"])
     for e in rows:
         writer.writerow(
             [
@@ -112,6 +115,7 @@ async def export_csv(
                 e.action,
                 e.target_kind or "",
                 str(e.target_id or ""),
+                json.dumps(e.context, sort_keys=True, default=str) if e.context else "",
             ]
         )
     buf.seek(0)

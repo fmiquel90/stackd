@@ -15,7 +15,7 @@ class UserNotification(Base):
     """An in-app notification addressed to one user (SPECS §17) — the inbound counterpart to the
     outbound Slack/webhook outbox. A side record: created in the same txn as its trigger, never
     changes run state. `kind` ∈ approval_request | run_finished | run_failed | comment_reply |
-    mention."""
+    mention | rollout_paused | rollout_succeeded | rollout_failed | rollout_upstream_changed."""
 
     __tablename__ = "user_notifications"
 

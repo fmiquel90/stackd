@@ -140,6 +140,27 @@ async def lock_envs_for_deletion(
                 run_id=str(active.id),
                 environment_id=str(active.environment_id),
             )
+        # A member of an active rollout (§21.3) is not deleted under it: the rollout would lose a
+        # member — and its downstream members an upstream — silently. Cancel it (or let it end)
+        # first; a finished rollout's member row goes with its environment.
+        from app.models.rollout import EnvRolloutMember
+
+        member = (
+            await session.execute(
+                select(EnvRolloutMember.rollout_id, EnvRolloutMember.environment_id)
+                .where(EnvRolloutMember.environment_id.in_(env_ids), EnvRolloutMember.active)
+                .limit(1)
+            )
+        ).first()
+        if member is not None:
+            raise ProblemException(
+                409,
+                "Active rollout",
+                "This environment belongs to a rollout in progress: cancel it, or let it end, "
+                "before deleting.",
+                rollout_id=str(member.rollout_id),
+                environment_id=str(member.environment_id),
+            )
     return env_ids
 
 

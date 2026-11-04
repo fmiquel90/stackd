@@ -89,6 +89,18 @@ async def channel_for(sub: str, user: User, session: AsyncSession) -> str | None
         return f"env_{env.id}"
     if sub.startswith("user:"):
         return f"user_{user.id}" if sub[len("user:") :] == str(user.id) else None
+    if sub.startswith("rollout:"):
+        from app.models.rollout import EnvRollout
+        from app.spaces import require_space_access
+
+        rollout = await _resolve(session, EnvRollout, sub[len("rollout:") :])
+        if rollout is None:
+            return None
+        try:
+            await require_space_access(session, user, rollout.space_id)
+        except ProblemException:
+            return None
+        return f"rollout_{rollout.id}"
     return None
 
 

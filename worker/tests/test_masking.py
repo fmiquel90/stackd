@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 
-from agent.main import _first_error, _merge_hooks, _summary_from_events
+from agent.main import _first_error, _forgets_in_plan, _merge_hooks, _summary_from_events
 from agent.masking import Masker, mask_plan_json
 
 
@@ -34,10 +34,51 @@ def test_summary_from_change_summary_event() -> None:
         {
             "type": "change_summary",
             "@message": "Plan: 3 to add, 1 to change, 2 to destroy.",
-            "changes": {"add": 3, "change": 1, "remove": 2, "import": 0, "operation": "plan"},
+            "changes": {
+                "add": 3,
+                "change": 1,
+                "remove": 2,
+                "import": 1,
+                "forget": 1,
+                "operation": "plan",
+            },
         },
     ]
-    assert _summary_from_events(events) == {"add": 3, "change": 1, "destroy": 2}
+    # Every counter: a rollout never confirms a plan that adopts or forgets resources (§21.5).
+    assert _summary_from_events(events) == {
+        "add": 3,
+        "change": 1,
+        "destroy": 2,
+        "import": 1,
+        "forget": 1,
+    }
+
+
+def test_summary_keeps_counters_a_newer_tool_reports() -> None:
+    """Terraform's actions (1.14+): reported as is, so the gate can refuse what it doesn't know."""
+    events = [
+        {
+            "type": "change_summary",
+            "changes": {
+                "add": 1,
+                "change": 0,
+                "remove": 0,
+                "import": 0,
+                "action_invocation": 2,
+                "action_fail": 0,
+                "operation": "plan",
+            },
+        }
+    ]
+    assert _summary_from_events(events) == {
+        "add": 1,
+        "change": 0,
+        "destroy": 0,
+        "import": 0,
+        "forget": 0,
+        "action_invocation": 2,
+        "action_fail": 0,
+    }
 
 
 def test_summary_defaults_when_no_change_summary() -> None:
@@ -45,7 +86,22 @@ def test_summary_defaults_when_no_change_summary() -> None:
         "add": 0,
         "change": 0,
         "destroy": 0,
+        "import": 0,
+        "forget": 0,
     }
+
+
+def test_forgets_are_counted_from_the_plan_json() -> None:
+    """Terraform's `change_summary` has no `forget` counter: the plan JSON says it."""
+    doc = {
+        "resource_changes": [
+            {"address": "a.x", "change": {"actions": ["forget"]}},
+            {"address": "a.y", "change": {"actions": ["create", "forget"]}},
+            {"address": "a.z", "change": {"actions": ["create"]}},
+        ]
+    }
+    assert _forgets_in_plan(json.dumps(doc)) == 2
+    assert _forgets_in_plan("not json") == 0
 
 
 def test_first_error_picks_the_diagnostic_summary() -> None:

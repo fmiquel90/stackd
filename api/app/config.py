@@ -73,6 +73,9 @@ class Settings(BaseSettings):
     # Drift detection (§19): minimum spacing between read-only drift plans per environment.
     stackd_drift_interval_seconds: int = 21600  # 6h
 
+    # Environment rollouts (§21.6): how long an approval lets creates-only plans apply unattended.
+    stackd_rollout_approval_ttl_seconds: int = 24 * 3600
+
     # Background scheduler (§7.5) — disabled under tests so it can't fail runs mid-assertion.
     stackd_run_scheduler: bool = True
 

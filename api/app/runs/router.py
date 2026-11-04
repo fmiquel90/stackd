@@ -10,9 +10,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.auth.deps import CurrentUser, require_role
 from app.db import get_session
 from app.dependencies.service import group_status
-from app.enums import Role, TriggeredBy
+from app.enums import Role, RunEventActor, RunState, TriggeredBy
 from app.errors import ProblemException
-from app.models.run import Run
+from app.models.run import Run, RunEvent
 from app.models.run_log import RunLog
 from app.models.vcs import VcsOutbox
 from app.runs.schemas import (
@@ -131,6 +131,18 @@ async def get_run(run_id: uuid.UUID, user: CurrentUser, session: DbSession) -> R
         out.run_group = RunGroupOut(
             id=group_id, status=await group_status(session, group_id, spaces)
         )
+    if run.confirmed_at is not None:
+        actor = (
+            await session.execute(
+                select(RunEvent.actor)
+                .where(RunEvent.run_id == run.id, RunEvent.to_state == RunState.confirmed)
+                .limit(1)
+            )
+        ).scalar_one_or_none()
+        if actor == RunEventActor.user:
+            out.confirmed_via = "user"
+        elif actor is not None:
+            out.confirmed_via = "rollout" if run.rollout_id is not None else "autodeploy"
     return out
 
 

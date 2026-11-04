@@ -96,6 +96,27 @@ class TriggeredBy(enum.StrEnum):
     dependency = "dependency"
     api = "api"
     schedule = "schedule"  # a scheduler-driven run (e.g. drift detection, §19)
+    rollout = "rollout"  # a member run of an environment rollout (§21)
+
+
+class RolloutState(enum.StrEnum):
+    awaiting_approval = "awaiting_approval"
+    running = "running"
+    paused = "paused"
+    succeeded = "succeeded"
+    failed = "failed"
+    canceled = "canceled"
+
+
+class RolloutMemberStatus(enum.StrEnum):
+    pending = "pending"
+    planning = "planning"
+    needs_confirmation = "needs_confirmation"
+    applying = "applying"
+    done = "done"
+    failed = "failed"
+    skipped = "skipped"
+    canceled = "canceled"
 
 
 class DriftStatus(enum.StrEnum):

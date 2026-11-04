@@ -3,7 +3,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { ChevronDown, RefreshCw } from "lucide-react";
 import { ApiError } from "@/api/client";
-import { environments, runs, stacks, tiers, users } from "@/api/resources";
+import { environments, rollouts, runs, stacks, tiers, users } from "@/api/resources";
 import type { TierDef } from "@/api/types";
 import { useLiveSignals } from "@/api/stream";
 import { useSpaces } from "@/app/SpaceContext";
@@ -68,6 +68,12 @@ export function EnvPage() {
     refetchInterval: 60_000,
   });
   const catalog = useQuery({ queryKey: ["tiers"], queryFn: tiers.list });
+  // A rollout of every environment of this name in the space (SPECS §21): created awaiting
+  // approval; its page shows the order and the approval.
+  const rollOut = useMutation({
+    mutationFn: (name: string) => rollouts.create(space!.id, name),
+    onSuccess: (r) => navigate(`/rollouts/${r.id}`),
+  });
   const people = useQuery({ queryKey: ["mentionable"], queryFn: users.mentionable, staleTime: 5 * 60_000 });
 
   useLiveSignals(env ? [`environment:${env.id}`] : [], (s) => {
@@ -114,7 +120,7 @@ export function EnvPage() {
   const stackPath = `/s/${encodeURIComponent(space.name)}/stacks/${encodeURIComponent(stack.name)}`;
   const emailOf = (id: string | null) => (id ? (people.data?.find((u) => u.id === id)?.email ?? null) : null);
   const siblings = (envs.data ?? []).filter((e) => e.id !== env.id).map((e) => ({ id: e.id, name: e.name }));
-  const error = [plan, refresh].find((m) => m.error)?.error;
+  const error = [plan, refresh, rollOut].find((m) => m.error)?.error;
 
   return (
     <div className="flex flex-col gap-4">
@@ -153,6 +159,9 @@ export function EnvPage() {
                     <MenuItem onSelect={() => setDialog("promote")}>Promote from a sibling…</MenuItem>
                     <MenuItem onSelect={() => setDialog("command")}>Run a command…</MenuItem>
                     <MenuItem onSelect={() => setDialog("clone")}>New environment from…</MenuItem>
+                    <MenuItem onSelect={() => rollOut.mutate(env.name)}>
+                      Roll out every “{env.name}” environment…
+                    </MenuItem>
                     {me?.can_destroy && (
                       <MenuItem onSelect={() => setDialog("destroy")}>Plan a destroy…</MenuItem>
                     )}
@@ -305,6 +314,7 @@ export function EnvPage() {
           tiers={catalog.data ?? []}
           isAdmin={isAdmin}
           onClose={() => setDialog(null)}
+          onRollOut={(name) => rollOut.mutate(name)}
         />
       )}
       <Dialog open={dialog === "destroy"} onOpenChange={(v) => setDialog(v ? "destroy" : null)}>
@@ -341,6 +351,7 @@ function CloneFromHere({
   tiers: tierDefs,
   isAdmin,
   onClose,
+  onRollOut,
 }: {
   spaceId: string;
   spaceName: string;
@@ -348,6 +359,8 @@ function CloneFromHere({
   tiers: TierDef[];
   isAdmin: boolean;
   onClose: () => void;
+  /** Offered once created: start a rollout of the new environment. */
+  onRollOut: (envName: string) => void;
 }) {
   const entries = useCloneEntries(spaceId);
   return (
@@ -361,6 +374,7 @@ function CloneFromHere({
       tiers={tierDefs}
       isAdmin={isAdmin}
       defaultReference={reference}
+      onRollOut={onRollOut}
     />
   );
 }

@@ -290,8 +290,16 @@ async def cascade(session: AsyncSession, run: Run) -> list[Run]:
     upstream, among those whose edge passed, that finished last (not necessarily `run`, which may
     be an empty plan). The cascade never bypasses protections: a protected downstream still stops
     at `unconfirmed`, its confirm being gated independently.
+
+    Rollouts (§21.4): a rollout's own runs never cascade; a downstream that is a member of an
+    active rollout is decided like any other, but gets no run — it settles as `skipped` and the
+    rollout's people are told (`rollout_upstream_changed`, parented like the run would have been).
     """
     if run.type != RunType.tracked or run.state != RunState.finished:
+        return []
+    if run.rollout_id is not None:
+        # A rollout's runs never cascade (§21.4), even once the rollout is over (a member run
+        # finishing after a cancel): the rollout drives its members, and no run group of their own.
         return []
     group_id = run.run_group_id or run.id
     root = (
@@ -324,6 +332,20 @@ async def cascade(session: AsyncSession, run: Run) -> list[Run]:
     by_env: dict[uuid.UUID, Run] = {}
     for r in sorted(group_runs.values(), key=lambda r: r.created_at):
         by_env[r.environment_id] = r  # the latest run of an env in the group
+
+    # The members of an active rollout get no cascade run (§21.4): the rollout plans them in its
+    # turn. The edge is settled as skipped; a member that already planned is reported instead.
+    from app.models.rollout import EnvRolloutMember
+
+    in_rollout = set(
+        (
+            await session.execute(
+                select(EnvRolloutMember.environment_id).where(
+                    EnvRolloutMember.active, EnvRolloutMember.environment_id.in_(order)
+                )
+            )
+        ).scalars()
+    )
 
     status: dict[uuid.UUID, str] = {}
     applied: set[uuid.UUID] = set()
@@ -358,6 +380,13 @@ async def cascade(session: AsyncSession, run: Run) -> list[Run]:
                     session, dep, downstream
                 ):
                     feeding.append(by_env[dep.upstream_env_id])
+        if feeding and env_id in in_rollout:
+            # Decided once like any other downstream: no run, the edge settles as skipped, and the
+            # rollout's people hear of the applied upstream that would have been its parent.
+            from app.rollouts.service import upstream_changed
+
+            await upstream_changed(session, env_id, max(feeding, key=_finished_order))
+            feeding = []
         if not feeding:
             status[env_id] = "skipped"
             continue

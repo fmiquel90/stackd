@@ -2,7 +2,7 @@ import { useMemo } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { ApiError } from "@/api/client";
-import { graphApi, runs, tiers, users } from "@/api/resources";
+import { graphApi, rollouts, runs, tiers, users } from "@/api/resources";
 import { useSpaces } from "@/app/SpaceContext";
 import { useSession } from "@/auth/session";
 import { useSpaceEnvs, type EnvEntry } from "@/features/data/spaceEnvs";
@@ -24,6 +24,16 @@ export function OverviewPage() {
   const { current: space, list: spaces } = useSpaces();
   const me = useSession().data ?? null;
   const navigate = useNavigate();
+  // Rollouts that wait on someone (SPECS §21): listed above the matrix, like the attention zone.
+  const activeRollouts = useQuery({
+    queryKey: ["rollouts", space?.id],
+    queryFn: () => rollouts.list(space!.id),
+    enabled: !!space,
+  });
+  const startRollout = useMutation({
+    mutationFn: (name: string) => rollouts.create(space!.id, name),
+    onSuccess: (r) => navigate(`/rollouts/${r.id}`),
+  });
   const [params, setParams] = useSearchParams();
   const data = useSpaceEnvs(space?.id, me);
   const catalog = useQuery({ queryKey: ["tiers"], queryFn: tiers.list });
@@ -110,11 +120,41 @@ export function OverviewPage() {
               entries={data.entries}
               tiers={catalog.data ?? []}
               isAdmin={me?.role === "admin"}
+              onRollOut={(name) => startRollout.mutate(name)}
             />
           )}
           {canWrite && <NewStackDialog spaceId={space.id} spaceName={space.name} />}
         </div>
       </div>
+
+      {startRollout.error && (
+        <Banner tone="failed" role="alert" title="The rollout was not created">
+          {startRollout.error instanceof ApiError
+            ? (startRollout.error.detail ?? startRollout.error.title)
+            : String(startRollout.error)}
+        </Banner>
+      )}
+      {(activeRollouts.data ?? [])
+        .filter((r) => r.state === "awaiting_approval" || r.state === "paused" || r.state === "running")
+        .map((r) => (
+          <Banner
+            key={r.id}
+            tone={r.state === "running" ? "info" : "decision"}
+            title={`Rollout ${r.name}`}
+            action={
+              <Link className="link" to={`/rollouts/${r.id}`}>
+                Open
+              </Link>
+            }
+          >
+            {r.state === "awaiting_approval"
+              ? "Awaiting approval."
+              : r.state === "paused"
+                ? "Paused: waiting for someone."
+                : "Running."}{" "}
+            {r.done} / {r.members} environments done.
+          </Banner>
+        ))}
 
       {data.loading && !data.entries.length ? (
         <OverviewSkeleton />

@@ -582,3 +582,78 @@ export const environmentClones = {
   create: (spaceId: string, body: CloneRequest) =>
     api<CloneResult>(`/spaces/${spaceId}/environment-clones`, { body }),
 };
+
+// Environment rollouts (SPECS §21): one approval, the dependency graph applied level by level.
+export type RolloutState = "awaiting_approval" | "running" | "paused" | "succeeded" | "failed" | "canceled";
+export type RolloutMemberStatus =
+  "pending" | "planning" | "needs_confirmation" | "applying" | "done" | "failed" | "skipped" | "canceled";
+
+export interface RolloutMember {
+  environment_id: string;
+  stack_name: string;
+  env_name: string;
+  tier: string;
+  protected: boolean;
+  level: number;
+  status: RolloutMemberStatus;
+  run_id: string | null;
+  run_state: string | null;
+  /** add/change/destroy/import/forget, plus any counter a newer tool reports (SPECS §3.5). */
+  plan_summary: {
+    add?: number;
+    change?: number;
+    destroy?: number;
+    import?: number;
+    [k: string]: number | undefined;
+  } | null;
+  auto_confirmed: boolean;
+  waiting_reason: string | null;
+  expected_mocks: string[];
+}
+
+export interface Rollout {
+  id: string;
+  space_id: string;
+  name: string;
+  state: RolloutState;
+  pause_reason:
+    | "needs_confirmation"
+    | "approval_expired"
+    | "approver_lost_rights"
+    | "member_changed_since_approval"
+    | null;
+  created_by: { id: string; email: string };
+  approved_by: { id: string; email: string } | null;
+  approved_at: string | null;
+  approval_expires_at: string | null;
+  created_at: string;
+  finished_at: string | null;
+  members: RolloutMember[];
+  edges: { upstream_env_id: string; downstream_env_id: string }[];
+  can_approve: { allowed: boolean; reason: string | null };
+  /** An approval is what it waits for: the first one, or a re-approval reopening its gate. */
+  approvable: boolean;
+  /** How long an approval lasts (SPECS §21.6, operator setting). */
+  approval_ttl_seconds: number;
+}
+
+export interface RolloutSummary {
+  id: string;
+  space_id: string;
+  name: string;
+  state: RolloutState;
+  pause_reason: Rollout["pause_reason"];
+  members: number;
+  done: number;
+  created_at: string;
+}
+
+export const rollouts = {
+  list: (spaceId: string) => api<RolloutSummary[]>(`/rollouts?space_id=${spaceId}`),
+  get: (id: string) => api<Rollout>(`/rollouts/${id}`),
+  create: (spaceId: string, envName: string) =>
+    api<Rollout>("/rollouts", { body: { space_id: spaceId, env_name: envName } }),
+  approve: (id: string) => api<Rollout>(`/rollouts/${id}/approve`, { method: "POST" }),
+  retry: (id: string) => api<Rollout>(`/rollouts/${id}/retry`, { method: "POST" }),
+  cancel: (id: string) => api<Rollout>(`/rollouts/${id}/cancel`, { method: "POST" }),
+};

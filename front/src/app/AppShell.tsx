@@ -57,6 +57,12 @@ const OverviewPage = lazy(() =>
 const StackRoute = lazy(() => import("@/features/stacks/StackPage").then((m) => ({ default: m.StackRoute })));
 const EnvPage = lazy(() => import("@/features/environments/EnvPage").then((m) => ({ default: m.EnvPage })));
 const RunPage = lazy(() => import("@/features/runs/RunPage").then((m) => ({ default: m.RunPage })));
+const RolloutPage = lazy(() =>
+  import("@/features/rollouts/RolloutPage").then((m) => ({ default: m.RolloutPage })),
+);
+const RolloutsPage = lazy(() =>
+  import("@/features/rollouts/RolloutPage").then((m) => ({ default: m.RolloutsPage })),
+);
 const QueuePage = lazy(() => import("@/features/queue/QueuePage").then((m) => ({ default: m.QueuePage })));
 const WorkersPage = lazy(() =>
   import("@/features/workers/WorkersPage").then((m) => ({ default: m.WorkersPage })),
@@ -560,6 +566,8 @@ function AppRoutes() {
       <Route path="/s/:space/stacks/:stack" element={<StackRoute />} />
       <Route path="/s/:space/stacks/:stack/envs/:env" element={<EnvPage />} />
       <Route path="/s/:space/graph" element={<GraphPage />} />
+      <Route path="/s/:space/rollouts" element={<RolloutsPage />} />
+      <Route path="/rollouts/:rolloutId" element={<RolloutPage />} />
       <Route path="/s/:space/variable-sets" element={<VariableSetsPage />} />
       <Route path="/s/:space/variable-sets/:set" element={<VariableSetPage />} />
       <Route path="/runs/:runId" element={<RunPage />} />

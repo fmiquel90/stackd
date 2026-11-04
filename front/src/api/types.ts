@@ -162,7 +162,7 @@ export type CheckResult = {
 };
 
 export type RunType = "tracked" | "proposed" | "destroy" | "command";
-export type TriggeredBy = "manual" | "webhook" | "dependency" | "api" | "schedule";
+export type TriggeredBy = "manual" | "webhook" | "dependency" | "api" | "schedule" | "rollout";
 
 /** Mirrors the API's `RunOut` (api/app/runs/schemas.py). */
 export interface Run {
@@ -178,6 +178,15 @@ export interface Run {
   triggered_by: TriggeredBy;
   trigger_user_id: string | null;
   confirmed_by_user_id: string | null;
+  /** The cascade group the run belongs to (SPECS §9.2/§9.4). */
+  run_group_id?: string | null;
+  parent_run_id?: string | null;
+  run_group?: { id: string; status: "running" | "partial_failure" | "succeeded" } | null;
+  /** GET /runs/{id} only: who confirmed — `rollout` = the system under a rollout's approval, the
+   * confirmer being its approver, who never saw this plan (SPECS §21.5). */
+  confirmed_via?: "user" | "autodeploy" | "rollout" | null;
+  /** The environment rollout the run belongs to (SPECS §21). */
+  rollout_id?: string | null;
   worker_id: string | null;
   plan_summary: { add?: number; change?: number; destroy?: number } | null;
   // `results`: every hook check result (ok/warn/fail) with its stage; `checks`: the warn/fail ones.
@@ -201,7 +210,15 @@ export interface LogChunk {
 }
 
 export type NotificationKindInbox =
-  "approval_request" | "run_finished" | "run_failed" | "comment_reply" | "mention";
+  | "approval_request"
+  | "run_finished"
+  | "run_failed"
+  | "comment_reply"
+  | "mention"
+  | "rollout_paused"
+  | "rollout_succeeded"
+  | "rollout_failed"
+  | "rollout_upstream_changed";
 
 export interface UserNotification {
   id: string;
