@@ -1,4 +1,5 @@
 import { useState, type ReactNode } from "react";
+import { TriangleAlert } from "lucide-react";
 import { useMutation, useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
 import { observability, stacks, tiers } from "@/api/resources";
 import type { TierDef } from "@/api/types";
@@ -105,7 +106,7 @@ function TierRow({
         <span className="font-data text-[12px] text-muted">single confirmer</span>
       )}
       {tier.repo_hooks_at_apply ? (
-        <Badge glyph="⚠">repo hooks at apply</Badge>
+        <Badge glyph={<TriangleAlert size={12} strokeWidth={1.5} />}>repo hooks at apply</Badge>
       ) : (
         <span className="font-data text-[12px] text-muted">platform hooks only at apply</span>
       )}

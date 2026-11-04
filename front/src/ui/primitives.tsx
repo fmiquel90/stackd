@@ -234,7 +234,7 @@ export function Kbd({ children }: { children: ReactNode }) {
 }
 
 export function Skeleton({ className }: { className?: string }) {
-  return <span aria-hidden className={cn("block animate-pulse rounded-base bg-raised", className)} />;
+  return <span aria-hidden className={cn("block rounded-base bg-raised", className)} />;
 }
 
 export function EmptyState({

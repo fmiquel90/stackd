@@ -58,7 +58,7 @@ export const EnvCell = forwardRef<HTMLDivElement, EnvCellProps>(function EnvCell
       {title}
       {run ? (
         <>
-          <span className="flex min-w-0 items-center gap-2">
+          <span className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
             <PhaseRail variant="mini" segments={buildSegments(run)} label={label} />
             <RunStateBadge
               run={run}
