@@ -164,6 +164,7 @@ The platform becomes an **OIDC issuer** (the same mechanism as GitHub Actions OI
 - [x] States: `queued → preparing → planning → [checking] → unconfirmed → confirmed → applying → finished` (+ `failed`, `discarded`, `canceled`)
 - [x] Manual trigger, confirm/discard (guarded by `can_apply`: tier + role, see §2.4; automatic 4-eyes on prod tier)
 - [x] Concurrency: 1 active run per environment
+- [x] Cancelling an executing run (SPECS §4.1): a stop request via the heartbeat, SIGINT then SIGKILL after a grace period; an interrupted apply ends `failed` (`canceled_during_apply`), never `canceled`
 
 #### 2b. Worker API (pull protocol)
 - [x] Register/heartbeat/claim (`SKIP LOCKED`), events, chunked logs, artifacts

@@ -177,6 +177,8 @@ export interface Run {
   commit_author: string | null;
   triggered_by: TriggeredBy;
   trigger_user_id: string | null;
+  /** A stop was asked of the worker executing the run (SPECS §4.1); it ends when the worker reports. */
+  cancel_requested_at?: string | null;
   confirmed_by_user_id: string | null;
   /** The cascade group the run belongs to (SPECS §9.2/§9.4). */
   run_group_id?: string | null;

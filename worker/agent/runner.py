@@ -10,6 +10,8 @@ from collections.abc import Callable
 from contextlib import AbstractContextManager, nullcontext
 from pathlib import Path
 
+from agent.cancel import JobCanceled
+from agent.cancel import current as current_cancel
 from agent.client import ApiClient
 from agent.docker_runner import DockerRunner
 from agent.masking import Masker
@@ -108,6 +110,16 @@ class LocalRunner:
                 return
             _kill_group()
 
+        def _interrupt_group() -> None:
+            # SIGINT, as ^C: tofu stops gracefully (finishes what is in flight, releases its lock).
+            try:
+                os.killpg(proc.pid, signal.SIGINT)
+            except ProcessLookupError:
+                pass
+
+        token = current_cancel()
+        if token is not None:
+            token.attach(_interrupt_group, _kill_group)
         ender = threading.Thread(target=_end_group, daemon=True)
         ender.start()
         timer = threading.Timer(timeout, _kill)
@@ -124,6 +136,8 @@ class LocalRunner:
                 ender.join()
             timer.cancel()
             timer.join()  # a watchdog kill under way ends before the reap below frees the pid
+            if token is not None:
+                token.detach()  # before the reap: a late signal must not reach a reused pid
             rc = proc.wait()
         # Only a timeout if the watchdog actually killed a still-running process (negative rc); a
         # process that exited a hair before the timer fired keeps its real exit code.
@@ -157,6 +171,9 @@ def _stream_proc(
     """Run a command on `runner`, applying `transform` to each output line before streaming it
     (return None to skip a line, or a list to expand one line into several). Past `timeout` the
     command is killed: exit 124, like coreutils `timeout`."""
+    token = current_cancel()
+    if token is not None and token.should_stop:
+        raise JobCanceled  # asked to stop between two commands: don't start the next one
     buffer: list[str] = []
 
     def on_line(line: str) -> None:
@@ -171,6 +188,9 @@ def _stream_proc(
 
     rc, timed_out = runner.stream(cmd, cwd, env, timeout=timeout, on_line=on_line)
     streamer.emit(phase, buffer, section=section)
+    if token is not None and token.interrupted:
+        streamer.emit(phase, ["[stackd] stopped on request"], section=section)
+        raise JobCanceled
     if timed_out:
         streamer.emit(
             phase, [f"[stackd] timed out after {timeout}s — process killed"], section=section

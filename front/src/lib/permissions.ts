@@ -1,3 +1,4 @@
+import { COMMANDS_MUTATING } from "@/api/resources";
 import type { Environment, Role, Run, TierDef, User } from "@/api/types";
 
 // What the viewer may do on a run, and why not (DESIGN §5.2). Mirrors the API's gates in order:
@@ -29,6 +30,13 @@ export interface RunRights {
   confirm: ActionRight;
   discard: ActionRight;
   cancel: ActionRight;
+  /**
+   * How "cancel" behaves: `cancel` ends the run at once (not claimed yet, or waiting on a human);
+   * `stop` asks the worker executing it to stop (SPECS §4.1) — the run ends when it reports;
+   * `stop_apply` is the same for a job holding apply credentials: needs the right to apply, and
+   * leaves the infrastructure possibly partly changed.
+   */
+  cancelKind: "cancel" | "stop" | "stop_apply";
   replan: ActionRight;
   fourEyes: FourEyes;
   /** Gates that block *everyone* (mocks / fallback not allowed on this env). */
@@ -83,11 +91,26 @@ export function runRights(run: Run, env: Environment, tier: TierDef | undefined,
       ? []
       : ["writer role required"];
 
+  // Stopping a job that holds apply credentials needs the right to start one (role, tier, destroy),
+  // not the confirmation-only gates (mocks, four-eyes).
+  const applyReasons = confirmReasons.filter(
+    (r) => !blockedForAll.includes(r) && !r.startsWith("you triggered this run"),
+  );
+  const executing = ["preparing", "planning", "checking", "applying", "running"].includes(run.state);
+  const holdsApply =
+    run.state === "applying" ||
+    (run.type === "command" && COMMANDS_MUTATING.includes(run.command?.name ?? ""));
+  const cancelKind = executing ? (holdsApply ? "stop_apply" : "stop") : "cancel";
+
   const confirm = { visible: unconfirmed, reasons: confirmReasons };
   return {
     confirm,
     discard: { visible: unconfirmed, reasons: writerReasons },
-    cancel: { visible: run.state === "queued" || unconfirmed, reasons: writerReasons },
+    cancel: {
+      visible: run.state === "queued" || run.state === "confirmed" || unconfirmed || executing,
+      reasons: cancelKind === "stop_apply" ? [...writerReasons, ...applyReasons] : writerReasons,
+    },
+    cancelKind,
     replan: {
       visible: unconfirmed || ["finished", "failed", "discarded", "canceled"].includes(run.state),
       reasons: writerReasons,

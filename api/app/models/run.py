@@ -76,6 +76,9 @@ class Run(Base):
     claimed_at: Mapped[datetime | None] = mapped_column(default=None)
     confirmed_at: Mapped[datetime | None] = mapped_column(default=None)
     finished_at: Mapped[datetime | None] = mapped_column(default=None)
+    # A user asked to stop the run while a worker executes it (§4.1): the worker is signalled via
+    # its heartbeat and reports `job_canceled`; the state itself only changes through transition().
+    cancel_requested_at: Mapped[datetime | None] = mapped_column(default=None)
     # Set once the run's logs are archived to S3 (app.runs.logs_archive, §5.2).
     logs_archived_at: Mapped[datetime | None] = mapped_column(default=None)
     error: Mapped[str | None] = mapped_column(String, default=None)

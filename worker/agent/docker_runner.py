@@ -25,6 +25,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from agent.cancel import current as current_cancel
 from agent.docker_engine import DockerEngine, LineSplitter
 
 # The runner images' user (deploy/images): a root agent hands the workspace to it.
@@ -150,9 +151,14 @@ class DockerRunner:
             killed["v"] = self._engine.kill(cid)
 
         timer = threading.Timer(timeout, _kill)
+        token = current_cancel()
         try:
             self._engine.start(cid)
             timer.start()
+            if token is not None:  # the init process (`Init: True`) forwards SIGINT to the command
+                token.attach(
+                    lambda: self._engine.kill(cid, "SIGINT"), lambda: self._engine.kill(cid)
+                )
             lines = LineSplitter(on_output)
             for kind, data in self._engine.logs(cid):
                 lines.feed(kind, data)
@@ -160,6 +166,8 @@ class DockerRunner:
             rc = self._engine.wait(cid)
         finally:
             timer.cancel()
+            if token is not None:
+                token.detach()
             # Whatever happened — exit, timeout, an error streaming the output — the container and
             # everything still running in it are gone before the next step.
             self._engine.remove(cid)

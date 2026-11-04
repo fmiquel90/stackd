@@ -44,7 +44,7 @@ from app.runs.artifacts import (
 from app.runs.transition import ALLOWED, transition
 from app.secret_sources.providers import SecretUnavailable
 from app.workers.auth import CurrentWorker, mint_worker_token, pool_from_token
-from app.workers.claim import build_job_payload, claim_one
+from app.workers.claim import build_job_payload, claim_one, holds_apply_credentials
 from app.workers.schemas import (
     CommandResultIn,
     EventIn,
@@ -417,6 +417,47 @@ async def _decide_after_plan(session: AsyncSession, worker: Worker, run: Run, re
         )
 
 
+async def _end_canceled(
+    session: AsyncSession,
+    worker: Worker,
+    run: Run,
+    phase: str | None,
+    checks: list[dict[str, Any]],
+) -> None:
+    """End a run whose cancel was requested (§4.1). Before any apply credentials were used it is
+    `canceled`. A job holding them (an apply, a mutating command) may have changed infrastructure
+    before it stopped, so it is `failed` — `applying` is never `canceled` (§4.2) — with the
+    `canceled_during_apply` error, which the UI words as a possibly partial change; nothing
+    cascades. The requester is in the `run.cancel_requested` audit event."""
+    fields: dict[str, Any] | None = None
+    if checks:
+        fields = {"check_results": _check_results(run, checks)}
+        await _audit_warned_checks(session, worker, run, checks)
+    context = {"phase": phase, "reason": "cancel_requested"}
+    if holds_apply_credentials(run):
+        await transition(
+            session,
+            run,
+            RunState.failed,
+            actor=RunEventActor.worker,
+            actor_id=worker.id,
+            fields={**(fields or {}), "error": "canceled_during_apply"},
+            audit_action="run.apply_failed",
+            audit_context=context,
+        )
+    else:
+        await transition(
+            session,
+            run,
+            RunState.canceled,
+            actor=RunEventActor.worker,
+            actor_id=worker.id,
+            fields=fields,
+            audit_action="run.canceled",
+            audit_context=context,
+        )
+
+
 @router.post("/jobs/{job_id}/events")
 async def post_event(
     job_id: uuid.UUID, body: EventIn, worker: CurrentWorker, session: DbSession
@@ -474,7 +515,26 @@ async def post_event(
         await session.commit()
         return {"ok": True}
 
+    if body.event == "job_canceled":
+        # The worker stopped the job on a user's request (§4.1, §7.1). Never on the worker's own
+        # say-so: a cancel must have been requested.
+        if run.cancel_requested_at is None:
+            raise ProblemException(409, "No cancel requested", "Nobody asked to stop this run.")
+        await _end_canceled(session, worker, run, body.phase, result.get("checks") or [])
+        await session.commit()
+        return {"ok": True}
+
     if body.event == "phase_finished":
+        if run.cancel_requested_at is not None and run.state in (
+            RunState.preparing,
+            RunState.planning,
+            RunState.checking,
+        ):
+            # The plan finished before the stop reached it: honour the request — never confirm
+            # (autodeploy) or hold for approval a plan the user asked to stop.
+            await _end_canceled(session, worker, run, body.phase, [])
+            await session.commit()
+            return {"ok": True}
         if run.state == RunState.running:
             # A `command` run finished (no outputs/cascade — it's a one-off subcommand).
             await transition(

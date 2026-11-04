@@ -13,8 +13,12 @@ A worker claims a `queued` run and executes its **plan job**: it clones the repo
 `plan`, and reports back. With a non-empty diff the run stops at **`unconfirmed`** and waits for a
 human. After **confirm**, a worker (not necessarily the same one) claims the **apply job** and
 drives the run to **`finished`**. An empty diff goes straight to `finished`; a
-failure to `failed`. A human can `discard` an `unconfirmed` run, or `cancel` a `queued` or
-`unconfirmed` one (stopping a run a worker is executing is not supported yet).
+failure to `failed`. A human can `discard` an `unconfirmed` run, or `cancel` a `queued`, `confirmed` or
+`unconfirmed` one. A run a worker is **executing** can be **stopped**: the worker is asked on its next
+heartbeat and interrupts the tool as a Ctrl-C would (tofu finishes the operation in flight and releases
+the state lock). A stopped plan ends `canceled`. A stopped **apply** ends `failed` with
+`canceled_during_apply` — never `canceled`, because infrastructure may be partly changed — and needs the
+right to apply, like starting it did.
 
 !!! note
     State only ever changes through one function (`transition()`), which records a `run_event` and

@@ -44,6 +44,8 @@ class Settings:
     workspace_root: str
     leak_action: str  # "warn" (default) | "fail" — cleartext-tripwire policy (§5.1, Phase C)
     max_concurrent_jobs: int  # in-flight jobs across environments (§7, Phase E; default 1)
+    # After a stop request's SIGINT, how long the tool gets to stop before SIGKILL (§4.1)
+    cancel_grace_seconds: int = 120
     # docker runner (§7.4): {"opentofu:1.12.2": "<repo>@sha256:<digest>"}, from STACKD_RUNNER_IMAGES
     runner_images: dict[str, str] = field(default_factory=dict)
     docker_host: str | None = None  # STACKD_DOCKER_HOST: unix socket of the Docker Engine
@@ -75,6 +77,7 @@ class Settings:
             if os.environ.get("STACKD_LEAK_TRIPWIRE", "warn") == "fail"
             else "warn",
             max_concurrent_jobs=max(1, int(os.environ.get("STACKD_MAX_CONCURRENT_JOBS", "1"))),
+            cancel_grace_seconds=max(1, int(os.environ.get("STACKD_CANCEL_GRACE_SECONDS", "120"))),
             runner_images=parse_runner_images(os.environ.get("STACKD_RUNNER_IMAGES", "")),
             docker_host=os.environ.get("STACKD_DOCKER_HOST") or None,
             docker_limits=_docker_limits(),

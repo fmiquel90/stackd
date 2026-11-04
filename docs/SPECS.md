@@ -455,7 +455,7 @@ context kid, backend, ARN, previous kid, `reactivated`, and for a reactivation `
       └──────────────────┘
 ```
 
-Terminal: `finished`, `failed`, `discarded`, `canceled`. `canceled`: user on `queued`/`unconfirmed`, the system when a PR closes (its in-flight proposed runs, §18.3), or a rollout's cancel on its member runs that are `queued`, `unconfirmed` or `confirmed` and not claimed yet (§21.4 step 8 — `confirmed → canceled` is that edge). Cancelling a run a worker is executing (signal via heartbeat → SIGINT) is not implemented yet: the API answers 409. Any terminal state drops the run's saved plan (§11.3).
+Terminal: `finished`, `failed`, `discarded`, `canceled`. `canceled`: user on `queued`/`unconfirmed`, the system when a PR closes (its in-flight proposed runs, §18.3), or a rollout's cancel on its member runs that are `queued`, `unconfirmed` or `confirmed` and not claimed yet (§21.4 step 8 — `confirmed → canceled` is that edge). **Cancelling a run a worker is executing** is a request, not a transition: `POST /runs/{id}/cancel` records `runs.cancel_requested_at`, audits `run.cancel_requested` and queues a `cancel_job` command for the worker's next heartbeat (§7.1) — one transaction. The worker interrupts its tool (SIGINT, a graceful stop: tofu finishes the operation in flight, releases the state lock, exits; SIGKILL only after `STACKD_CANCEL_GRACE_SECONDS`, default 120) and reports `job_canceled`; only then does `transition()` end the run. A job that holds **no apply credentials** (preparing, planning, checking, a read-only command) ends `canceled`; one that does (`applying`, a mutating command, §4.3) ends **`failed` with `error=canceled_during_apply`** — `applying` is never `canceled`, since the infrastructure may be partly changed — and nothing cascades. Stopping a job that holds apply credentials needs `can_apply` (the gate of starting it); any other needs `writer`. Idempotent: asking again re-queues the command (the first may have been lost) without a second audit. If the plan finishes before the stop reaches it, the run ends `canceled` instead of going to `unconfirmed`/`confirmed` — a stopped plan is never auto-confirmed. Once an apply has succeeded the worker ignores a later stop (what is left — recording the outputs — must finish). A worker that is offline never reports: `worker_lost` (§3.7) ends the run. Any terminal state drops the run's saved plan (§11.3).
 
 Command runs (§4.3) take a shorter path: `queued → preparing → running → finished | failed`.
 
@@ -468,8 +468,10 @@ Command runs (§4.3) take a shorter path: `queued → preparing → running → 
 | `checking → unconfirmed` | worker | checks OK or warn; non-empty diff. A warn **forces** confirmation even if autodeploy |
 | `checking → confirmed` | system | all checks OK, non-empty diff, `autodeploy=true`, env not protected, `used_mocks=false`, the run belongs to no rollout — **or** the run belongs to a started rollout whose gate is open and passes its gate (§21.5) |
 | `planning/checking → finished` | worker | empty diff (outputs captured after refresh) |
-| `queued / unconfirmed → canceled` | user, or system | a user's cancel; the system when a PR closes (its proposed runs, §18.3) or a rollout is canceled (its member runs, §21.4 step 8) |
-| `confirmed → canceled` | system | a rollout's cancel, the run not claimed yet (§21.4 step 8); a run already `applying` is never canceled |
+| `queued / confirmed / unconfirmed → canceled` | user, or system | a user's cancel (a `confirmed` run is not claimed yet); the system when a PR closes (its proposed runs, §18.3) or a rollout is canceled (its member runs, §21.4 step 8) |
+| `preparing / planning / checking / running → canceled` | worker | `job_canceled` after a user's stop request (§4.1), the job holding no apply credentials |
+| `applying → failed` (`canceled_during_apply`) | worker | `job_canceled` after a stop request on a job holding apply credentials; a run already `applying` is never `canceled` |
+| `confirmed → canceled` | user, or system | a user's cancel, or a rollout's (§21.4 step 8): the run is not claimed yet |
 | `unconfirmed → confirmed` | user (or system: a rollout re-approval, §21.6) | `can_apply(user, env)` = role∈{approver,admin} AND `env.tier ∈ allowed_tiers` (§2.4); ≠ triggerer if the tier requires four-eyes, the env is `protected` or sets `require_second_pair_of_eyes`; for a `destroy` run: `can_destroy` required; **blocked if `used_mocks` and `allow_mock_apply=false`** |
 | `confirmed → applying` | worker (claim) | the plan's worker within the affinity window, then any compatible worker (§7.2); re-checks `allow_mock_apply` and the secret-fallback gate against the apply-time resolution (§9.3/§15.5). The apply job clones the pinned commit and applies the run's **saved plan** (§7.3); a missing or unreadable plan fails the run — it never re-plans |
 | `applying → finished` | worker | apply exit 0 + outputs uploaded + no failing `after_apply` check (one that fails → `failed`, the outputs still recorded, nothing cascades, §8.3) |
@@ -513,7 +515,7 @@ POST /worker/v1/jobs/{id}/logs
 > object per phase, one `{seq, section, lines}` chunk per line — and stamps `runs.logs_archived_at`;
 > the hot rows are purged `log_hot_retention_days` (7) after that. `GET …/logs` serves the hot rows
 > and falls back to the archive once they are gone (same chunks, same order, `phase`/`after_seq`
-> honoured). `GET …/logs/download?phase=all|<phase>` returns plain text (ANSI kept, phases in start
+> honoured; a `phase` outside `[A-Za-z0-9_.-]` is refused, it ends up in an S3 key). `GET …/logs/download?phase=all|<phase>` returns plain text (ANSI kept, phases in start
 > order, hooks prefixed `[hook:x]`), from either tier. If S3 is down the run stays unarchived and its
 > hot rows untouched — retried next tick. The 1-year S3 expiry is a bucket lifecycle rule (ops), not
 > application code. A chunk ingested after its run was archived is not re-archived.
@@ -580,12 +582,13 @@ run.triggered / run.destroy_triggered / run.command_triggered / run.promoted   #
 run.confirmed ⭐                  # a human confirm, or the system: on autodeploy (context
                                   #   autodeploy), or under a rollout's approval (context via =
                                   #   rollout, rollout_id, approved_by, approved_by_email, §21.5)
-run.discarded / run.canceled      # canceled: a user, or the system when a PR closes (reason pr_closed);
+run.cancel_requested              # a user asked the worker to stop an executing run (§4.1) — once per run
+run.discarded / run.canceled      # canceled: also the worker, on `job_canceled` (context reason cancel_requested); a user, or the system when a PR closes (reason pr_closed);
                                   #   a rollout's cancel: the canceller, context via = rollout (§21.8)
 run.plan_finished                 # plan-only terminal: empty diff, or a proposed/drift run
 run.applied ⭐ / run.command_executed
 run.apply_failed                  # any failed run, whatever its phase, unless a check failed it —
-                                  #   context phase, or reason:
+                                  #   context phase, or reason: cancel_requested (a stopped apply, §4.1) |
                                   #   worker_lost | commit_mismatch | dependency | secret (§7.2/§7.3)
 run.check_failed                  # a hook check with on_failure=fail failed the run, at any stage
                                   #   (§8.3) — context phase = the failing stage
@@ -645,7 +648,7 @@ POST /worker/v1/register   (Bearer pool_token) { "name", "labels"?, "version"?, 
 POST /worker/v1/heartbeat  (20 s) { "in_flight": N, "capacity": M } → { "commands": [{"id": ..., "type": "diagnostics"}] }
 ```
 
-Heartbeat = downstream command channel. No incoming connection. Today it carries `diagnostics` only; `cancel_job` (cancelling an executing run, §4.1) is not implemented yet. **In-flight count (Phase E)**: the worker reports the number of jobs it is currently executing; the API sets `status = busy` when it is > 0, `idle` when 0 (the worker is authoritative, which also flips a finished worker back to idle). `capacity` (the worker's `STACKD_MAX_CONCURRENT_JOBS`) is advertised for the scheduler to reason about; not persisted this phase (no schema change). A heartbeat with no body is just a liveness ping.
+Heartbeat = downstream command channel. No incoming connection. It carries `diagnostics` and `cancel_job` (`{job_id}`, cancelling an executing run, §4.1): the agent keeps a registry of its running jobs, flips the job's cancel token — the job's own thread interrupts its subprocess (the `docker` runner signals the container, whose init forwards SIGINT) — and answers the command with `{running_here}`. A cancel that beats the job's registration is remembered and applied when it registers. The worker reports the end with the job event `job_canceled` (§7.1 events), refused with 409 unless a cancel was requested. **In-flight count (Phase E)**: the worker reports the number of jobs it is currently executing; the API sets `status = busy` when it is > 0, `idle` when 0 (the worker is authoritative, which also flips a finished worker back to idle). `capacity` (the worker's `STACKD_MAX_CONCURRENT_JOBS`) is advertised for the scheduler to reason about; not persisted this phase (no schema change). A heartbeat with no body is just a liveness ping.
 
 **Worker concurrency (Phase E).** `STACKD_MAX_CONCURRENT_JOBS` (default `1` = today's serial behaviour) bounds the in-flight jobs a single worker runs at once, each on its own thread (the heartbeat thread is already independent). The claim stays one-run-at-a-time on the wire; the API's `SELECT … FOR UPDATE SKIP LOCKED` (§7.2) and the one-active-run-per-env partial unique index (§3.5) keep concurrent claims safe — **concurrency is across different environments only**. Same-env races are still guarded by the state-backend lock (§11.2).
 
@@ -915,7 +918,7 @@ The loop ticks every 10 s.
 | VCS post-back outbox | every tick | drain `vcs_outbox` (§18.4) |
 | Drift detection | every tick, per-env gate | enqueue the due `-refresh-only` runs (§19.2) |
 | Git staleness polling | 15 min (`stackd_head_poll_interval`) | `git ls-remote` per (repo, branch, credentials) → update `head_sha` (§9.6); its own task, so slow git calls never delay the others |
-| Cold log archiving | every tick | terminal runs with `logs_archived_at IS NULL` (20 per tick) → S3 `logs/{run_id}/{phase}.log.gz` (§5.2) |
+| Cold log archiving | every tick | runs terminal for ≥ 60 s (the agent's last buffered chunks, §5.1) with `logs_archived_at IS NULL` (20 per tick) → S3 `logs/{run_id}/{phase}.log.gz` (§5.2) |
 | OIDC key retirement | every tick | `retiring` keys past the longest token TTL → `retired`, out of the JWKS (§3.11) |
 | Rollout approval expiry | every tick | a started rollout whose approval has expired is advanced under its lock → `paused (approval_expired)` (§21.4), without waiting for its next event |
 | Retention purge | daily | hot `run_logs` rows 7 d after archiving (§5.2); refresh-token families whose every token has expired (§2.5); audit events older than `audit_retention_days` (730) through the distinct `stackd_audit_purge` role (§6.1), only if `STACKD_AUDIT_PURGE_DATABASE_URL` is set |
