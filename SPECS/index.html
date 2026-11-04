@@ -3933,7 +3933,36 @@ migration). The WS <code>run:</code>/<code>environment:</code> subscriptions are
 <a id="__codelineno-16-11" name="__codelineno-16-11" href="#__codelineno-16-11"></a><span class="p">)</span>
 </code></pre></div>
 <p><strong>Signer.</strong> <code>STACKD_OIDC_SIGNER=local</code> (default) keeps an RSA-2048 key AES-GCM encrypted in the row and signs in process; <code>STACKD_OIDC_SIGNER=kms</code> + <code>STACKD_OIDC_KMS_KEY_ARN</code> signs every workload token through <code>kms:Sign</code> (<code>RSASSA_PKCS1_V1_5_SHA_256</code> = RS256; the API builds the JWS itself), the private key never entering the API — required in production unless <code>STACKD_ALLOW_LOCAL_SIGNER=true</code> acknowledges a local key (the API refuses to start otherwise; see risk §13 / PLAN §5). A KMS key is registered from <code>kms:GetPublicKey</code>: it must be <code>SIGN_VERIFY</code>, RSA ≥ 2048, support RS256 (else 422); its <code>kid</code> is derived from its public key like a local key's. The API needs <code>kms:Sign</code> + <code>kms:GetPublicKey</code> on it, nothing else.</p>
-<p><strong>Rotation.</strong> A new <code>active</code> key, the old one moves to <code>retiring</code> (<code>retiring_at</code> set; still in the JWKS, no longer signs), then <code>retired</code> (out of the JWKS) once the longest token it can have signed has expired: max(plan cap 30 min, apply budget + grace) + 5 min clock skew — a scheduler task (§7.5, advisory-locked) does it. Triggers: <code>POST /api/v1/oidc/keys/rotate</code> (admin; <code>{"kms_key_arn"}</code> for a KMS key, empty for a new local key — refused 422 on a KMS issuer), and, automatically, an issuer configured for KMS whose active key is still local (or absent) rotates to the configured key on its next signature — switching the setting is the whole migration. <code>GET /api/v1/oidc/keys</code> (admin) lists them (public metadata only). Audited: <code>oidc_key.rotated</code> (actor the admin, or <code>system</code>; context kid, backend, ARN, previous kid), <code>oidc_key.retired</code> (<code>system</code>).</p>
+<p><strong>Rotation.</strong> A new <code>active</code> key, the old one moves to <code>retiring</code> (<code>retiring_at</code> set; still in the JWKS, no longer signs), then <code>retired</code> (out of the JWKS) once the longest token it can have signed has expired: max(plan cap 30 min, apply budget + grace) + 5 min clock skew — a scheduler task (§7.5, advisory-locked) does it. Triggers: <code>POST /api/v1/oidc/keys/rotate</code> (admin; <code>{"kms_key_arn"}</code> for a KMS key, empty for a new local key — refused 422 on a KMS issuer), and, automatically, an issuer configured for KMS whose active key is still local (or absent) rotates to the configured key on its next signature — switching the setting is the whole migration. <code>GET /api/v1/oidc/keys</code> (admin) lists them (public metadata only). Rotating to a key the issuer
+already knows (switching back to a KMS key used before — <code>retiring</code> or <code>retired</code>) reactivates it —
+same kid — rather than refusing, signing from then on through the ARN just configured or requested
+(the same key material can sit behind another ARN, e.g. a multi-region replica); only a key that
+already signs is refused (409). Every rotation is serialized by a transaction-level advisory lock.
+The key is provisioned on first use in a database session of its own: key management never commits
+or rolls back the caller's transaction (a job claim). Provisioning is idempotent under concurrency:
+under the lock it re-checks the active key, and a concurrent provisioning that won anyway (unique
+violation, or "already active" from a replica that does not take the lock) is used as is — concurrent
+claims and <code>GET /oidc/jwks</code> never fail on it.</p>
+<p><strong>Signing failures at claim.</strong> A token that cannot be signed is classified:
+- <strong>transient</strong> — KMS throttling, KMS or the network unreachable or timing out, a KMS 5xx, the
+  API's own credentials mid-refresh, no database connection for the provisioning session (pool
+  exhausted — it needs a second connection while the claim holds one — or a connection lost): the
+  claim is rolled back, the run keeps its state (<code>queued</code>, or <code>confirmed</code> — an approved apply keeps
+  its approval), and the worker gets <strong>503</strong> <code>code=&lt;marker&gt;</code>, <code>retryable: true</code>; it polls again;
+- <strong>permanent</strong> — access denied, key disabled / pending deletion / not found, an unusable key (not
+  RSA ≥ 2048 <code>SIGN_VERIFY</code> RS256), an invalid ARN, no AWS credentials, anything unrecognized: the
+  job's run fails closed at claim, <code>run.apply_failed</code> with <code>reason: oidc</code>, the worker getting nothing
+  (204).</p>
+<p><code>run.error</code> and the audit <code>detail</code> carry a generic marker only — <code>oidc_signing:&lt;code&gt;</code>, e.g.
+<code>kms_access_denied</code>, <code>kms_key_disabled</code>, <code>kms_key_not_found</code>, <code>kms_key_unusable</code>, <code>kms_invalid_arn</code>,
+<code>kms_no_credentials</code>, <code>kms_rejected</code>, <code>signing_failed</code> (transient: <code>kms_throttled</code>, <code>kms_unavailable</code>,
+<code>kms_unreachable</code>, <code>db_unavailable</code>) — never the provider's message (role/key ARNs, account id),
+which is logged server-side (<code>oidc.signing_failed</code>, admin log view). The payload build runs in a
+savepoint: a failed claim discards what it staged on the run (<code>used_mocks</code>, inputs, provenance,
+<code>used_secret_fallback</code>) and its audit events (<code>dependency.mock_consumed</code>, <code>secret.fallback_used</code>) —
+they only stand for a job handed out. Audited: <code>oidc_key.rotated</code> (actor the admin, or <code>system</code>;
+context kid, backend, ARN, previous kid, <code>reactivated</code>, and for a reactivation <code>previous_status</code> and
+<code>replaced_kms_key_arn</code> when the ARN changed), <code>oidc_key.retired</code> (<code>system</code>).</p>
 <hr />
 <h2 id="4-run-state-machine">4. Run state machine<a class="headerlink" href="#4-run-state-machine" title="Permanent link">&para;</a></h2>
 <h3 id="41-diagram">4.1 Diagram<a class="headerlink" href="#41-diagram" title="Permanent link">&para;</a></h3>
@@ -4164,74 +4193,76 @@ migration). The WS <code>run:</code>/<code>environment:</code> subscriptions are
 <p><strong>Worker concurrency (Phase E).</strong> <code>STACKD_MAX_CONCURRENT_JOBS</code> (default <code>1</code> = today's serial behaviour) bounds the in-flight jobs a single worker runs at once, each on its own thread (the heartbeat thread is already independent). The claim stays one-run-at-a-time on the wire; the API's <code>SELECT … FOR UPDATE SKIP LOCKED</code> (§7.2) and the one-active-run-per-env partial unique index (§3.5) keep concurrent claims safe — <strong>concurrency is across different environments only</strong>. Same-env races are still guarded by the state-backend lock (§11.2).</p>
 <h3 id="72-claim-long-poll">7.2 Claim (long-poll)<a class="headerlink" href="#72-claim-long-poll" title="Permanent link">&para;</a></h3>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-23-1" name="__codelineno-23-1" href="#__codelineno-23-1"></a>POST /worker/v1/jobs/claim?wait=25
-<a id="__codelineno-23-2" name="__codelineno-23-2" href="#__codelineno-23-2"></a>→ 204 if nothing
-<a id="__codelineno-23-3" name="__codelineno-23-3" href="#__codelineno-23-3"></a>→ 200 {
-<a id="__codelineno-23-4" name="__codelineno-23-4" href="#__codelineno-23-4"></a>    &quot;job_id&quot;: &quot;...&quot;,                       # = the run id
-<a id="__codelineno-23-5" name="__codelineno-23-5" href="#__codelineno-23-5"></a>    &quot;phase&quot;: &quot;plan&quot; | &quot;apply&quot; | &quot;command&quot;, # JOB type (what the agent executes) — do not confuse
-<a id="__codelineno-23-6" name="__codelineno-23-6" href="#__codelineno-23-6"></a>                                           # with the fine-grained phases of the run (§4) or of the
-<a id="__codelineno-23-7" name="__codelineno-23-7" href="#__codelineno-23-7"></a>                                           # logs (§5): a &quot;plan&quot; job covers preparing+planning+
-<a id="__codelineno-23-8" name="__codelineno-23-8" href="#__codelineno-23-8"></a>                                           # checking, an &quot;apply&quot; job applying, a &quot;command&quot; job
-<a id="__codelineno-23-9" name="__codelineno-23-9" href="#__codelineno-23-9"></a>                                           # (§4.3) preparing+running
-<a id="__codelineno-23-10" name="__codelineno-23-10" href="#__codelineno-23-10"></a>    &quot;cred_phase&quot;: &quot;plan&quot; | &quot;apply&quot;,        # CREDENTIAL phase of the job: &quot;apply&quot; iff it holds
-<a id="__codelineno-23-11" name="__codelineno-23-11" href="#__codelineno-23-11"></a>                                           # apply credentials — an apply job or a MUTATING command
-<a id="__codelineno-23-12" name="__codelineno-23-12" href="#__codelineno-23-12"></a>                                           # (§4.3); a plan job or a read-only command → &quot;plan&quot;.
-<a id="__codelineno-23-13" name="__codelineno-23-13" href="#__codelineno-23-13"></a>                                           # Picks the OIDC role (§10.2), the state-token TTL and
-<a id="__codelineno-23-14" name="__codelineno-23-14" href="#__codelineno-23-14"></a>                                           # scope (§11.2), and the agent&#39;s time budget for a
-<a id="__codelineno-23-15" name="__codelineno-23-15" href="#__codelineno-23-15"></a>                                           # command (absent/unknown → the agent assumes &quot;apply&quot;)
-<a id="__codelineno-23-16" name="__codelineno-23-16" href="#__codelineno-23-16"></a>    &quot;apply_timeout_seconds&quot;: 900,          # hard budget (§4.2, `stackd_apply_timeout_seconds`):
-<a id="__codelineno-23-17" name="__codelineno-23-17" href="#__codelineno-23-17"></a>                                           # the agent kills `apply`, and a cred_phase=apply command,
-<a id="__codelineno-23-18" name="__codelineno-23-18" href="#__codelineno-23-18"></a>                                           # past it
-<a id="__codelineno-23-19" name="__codelineno-23-19" href="#__codelineno-23-19"></a>    &quot;refresh_only&quot;: false,                 # true for a drift run (§19): plan with -refresh-only
-<a id="__codelineno-23-20" name="__codelineno-23-20" href="#__codelineno-23-20"></a>    &quot;destroy&quot;: false,                      # true for a destroy run: plan with -destroy (the saved
-<a id="__codelineno-23-21" name="__codelineno-23-21" href="#__codelineno-23-21"></a>                                           # plan carries it to the apply)
-<a id="__codelineno-23-22" name="__codelineno-23-22" href="#__codelineno-23-22"></a>    &quot;save_plan&quot;: true,                     # plan job of a tracked/destroy run: upload plan.tfplan
-<a id="__codelineno-23-23" name="__codelineno-23-23" href="#__codelineno-23-23"></a>                                           # when the plan has changes (§7.3); false for a proposed
-<a id="__codelineno-23-24" name="__codelineno-23-24" href="#__codelineno-23-24"></a>                                           # run (never applied), an apply or a command job
-<a id="__codelineno-23-25" name="__codelineno-23-25" href="#__codelineno-23-25"></a>    &quot;command&quot;: {&quot;name&quot;: &quot;state rm&quot;, &quot;args&quot;: [&quot;aws_s3_bucket.old&quot;]},   # command jobs only, else null
-<a id="__codelineno-23-26" name="__codelineno-23-26" href="#__codelineno-23-26"></a>    &quot;environment&quot;: { &quot;id&quot;, &quot;name&quot;: &quot;prod&quot;, &quot;stack_name&quot;: &quot;core-network&quot;,
-<a id="__codelineno-23-27" name="__codelineno-23-27" href="#__codelineno-23-27"></a>      &quot;repo_url&quot;, &quot;commit_sha&quot;, &quot;branch&quot;, &quot;project_root&quot;,
-<a id="__codelineno-23-28" name="__codelineno-23-28" href="#__codelineno-23-28"></a>      &quot;tool&quot;: &quot;opentofu&quot; | &quot;terraform&quot;, &quot;tool_version&quot; },
-<a id="__codelineno-23-29" name="__codelineno-23-29" href="#__codelineno-23-29"></a>                                           # commit_sha null (plan job only): the agent clones the
-<a id="__codelineno-23-30" name="__codelineno-23-30" href="#__codelineno-23-30"></a>                                           # head of `branch`, reports the SHA (§7.3) and the API
-<a id="__codelineno-23-31" name="__codelineno-23-31" href="#__codelineno-23-31"></a>                                           # pins the run to it; an apply job always gets the pinned
-<a id="__codelineno-23-32" name="__codelineno-23-32" href="#__codelineno-23-32"></a>                                           # full SHA and clones exactly it (no SHA → refused)
-<a id="__codelineno-23-33" name="__codelineno-23-33" href="#__codelineno-23-33"></a>    &quot;repo_credentials&quot;: { &quot;kind&quot;: &quot;none&quot; | &quot;token&quot; | &quot;deploy_key&quot;,
-<a id="__codelineno-23-34" name="__codelineno-23-34" href="#__codelineno-23-34"></a>                          &quot;token&quot;: &quot;&lt;decrypted, memory TTL&gt;&quot; },   # token only if kind≠none and set
-<a id="__codelineno-23-35" name="__codelineno-23-35" href="#__codelineno-23-35"></a>    &quot;env&quot;: { ... },                        # environment-kind variables, resolution
-<a id="__codelineno-23-36" name="__codelineno-23-36" href="#__codelineno-23-36"></a>                                           # sets→stack→env (§3.4)
-<a id="__codelineno-23-37" name="__codelineno-23-37" href="#__codelineno-23-37"></a>    &quot;sensitive_env&quot;: { ... },              # sensitive environment-kind variables — never logged,
-<a id="__codelineno-23-38" name="__codelineno-23-38" href="#__codelineno-23-38"></a>                                           # never given to repo hooks (§8.3); always empty for a
-<a id="__codelineno-23-39" name="__codelineno-23-39" href="#__codelineno-23-39"></a>                                           # proposed run, which gets no secret at all (§13)
-<a id="__codelineno-23-40" name="__codelineno-23-40" href="#__codelineno-23-40"></a>    &quot;tfvars_json&quot;: { ... },                # terraform variables (JSON), with the dependency
-<a id="__codelineno-23-41" name="__codelineno-23-41" href="#__codelineno-23-41"></a>                                           # inputs / mocks (§9.3) merged in — none sensitive for
-<a id="__codelineno-23-42" name="__codelineno-23-42" href="#__codelineno-23-42"></a>                                           # a proposed run (§13)
-<a id="__codelineno-23-43" name="__codelineno-23-43" href="#__codelineno-23-43"></a>    &quot;hcl_tfvars&quot;: { &quot;tags&quot;: &quot;{ team = \&quot;core\&quot; }&quot; },  # hcl-typed variables, written verbatim (§3.4)
-<a id="__codelineno-23-44" name="__codelineno-23-44" href="#__codelineno-23-44"></a>    &quot;mask_values&quot;: [ &quot;...&quot; ],              # literal secrets the agent masks in ALL logs (§5.1):
-<a id="__codelineno-23-45" name="__codelineno-23-45" href="#__codelineno-23-45"></a>                                           # sensitive values, state/OIDC/repo tokens
-<a id="__codelineno-23-46" name="__codelineno-23-46" href="#__codelineno-23-46"></a>    &quot;hooks&quot;: {                             # §8: PLATFORM hooks by stage — the agent appends the
-<a id="__codelineno-23-47" name="__codelineno-23-47" href="#__codelineno-23-47"></a>                                           # repo&#39;s .stackd.yml hooks after them
-<a id="__codelineno-23-48" name="__codelineno-23-48" href="#__codelineno-23-48"></a>      &quot;after_plan&quot;: [ {&quot;name&quot;: &quot;infracost&quot;, &quot;command&quot;: &quot;...&quot;, &quot;on_failure&quot;: &quot;warn&quot;,
-<a id="__codelineno-23-49" name="__codelineno-23-49" href="#__codelineno-23-49"></a>                       &quot;source&quot;: &quot;platform&quot;} ]
-<a id="__codelineno-23-50" name="__codelineno-23-50" href="#__codelineno-23-50"></a>    },
-<a id="__codelineno-23-51" name="__codelineno-23-51" href="#__codelineno-23-51"></a>    &quot;backend&quot;: { &quot;type&quot;: &quot;http&quot;, &quot;address&quot;: &quot;.../state/v1/&lt;env_id&gt;&quot;,   # managed state (§11),
-<a id="__codelineno-23-52" name="__codelineno-23-52" href="#__codelineno-23-52"></a>                 &quot;lock_address&quot;, &quot;unlock_address&quot;,                     # else null; no lock_* keys
-<a id="__codelineno-23-53" name="__codelineno-23-53" href="#__codelineno-23-53"></a>                 &quot;lock_method&quot;: &quot;LOCK&quot;, &quot;unlock_method&quot;: &quot;UNLOCK&quot;,     # for a `ro` token (§11.2)
-<a id="__codelineno-23-54" name="__codelineno-23-54" href="#__codelineno-23-54"></a>                 &quot;username&quot;: &quot;env&quot;, &quot;password&quot;: &quot;&lt;state_token scoped+TTL&gt;&quot; },
-<a id="__codelineno-23-55" name="__codelineno-23-55" href="#__codelineno-23-55"></a>                                           # → handed to tofu ONLY, as TF_HTTP_ADDRESS/…/
-<a id="__codelineno-23-56" name="__codelineno-23-56" href="#__codelineno-23-56"></a>                                           # TF_HTTP_PASSWORD env vars, never -backend-config
-<a id="__codelineno-23-57" name="__codelineno-23-57" href="#__codelineno-23-57"></a>                                           # (tofu persists those in .terraform/ and in the saved
-<a id="__codelineno-23-58" name="__codelineno-23-58" href="#__codelineno-23-58"></a>                                           # plan); hooks never get them; inherited TF_HTTP_* dropped
-<a id="__codelineno-23-59" name="__codelineno-23-59" href="#__codelineno-23-59"></a>    &quot;backend_config_file&quot;: null,           # unmanaged state only (§11.3): -backend-config=&lt;file&gt;
-<a id="__codelineno-23-60" name="__codelineno-23-60" href="#__codelineno-23-60"></a>    &quot;backend_config&quot;: null,                # unmanaged state only (§11.3): -backend-config=k=v
-<a id="__codelineno-23-61" name="__codelineno-23-61" href="#__codelineno-23-61"></a>    &quot;cloud_credentials&quot;: {                 # §10, if cloud_integration configured, else null
-<a id="__codelineno-23-62" name="__codelineno-23-62" href="#__codelineno-23-62"></a>      &quot;provider&quot;: &quot;aws&quot;,
-<a id="__codelineno-23-63" name="__codelineno-23-63" href="#__codelineno-23-63"></a>      &quot;oidc_token&quot;: &quot;&lt;signed workload JWT&gt;&quot;,
-<a id="__codelineno-23-64" name="__codelineno-23-64" href="#__codelineno-23-64"></a>      &quot;role_arn&quot;: &quot;arn:aws:iam::123:role/stackd-prod-plan&quot;,   # role of the cred_phase
-<a id="__codelineno-23-65" name="__codelineno-23-65" href="#__codelineno-23-65"></a>      &quot;region&quot;: &quot;eu-west-1&quot;
-<a id="__codelineno-23-66" name="__codelineno-23-66" href="#__codelineno-23-66"></a>    },
-<a id="__codelineno-23-67" name="__codelineno-23-67" href="#__codelineno-23-67"></a>    &quot;resolved_inputs&quot;: { &quot;TF_VAR_vpc_id&quot;: &quot;vpc-0abc...&quot; },          # informational: already
-<a id="__codelineno-23-68" name="__codelineno-23-68" href="#__codelineno-23-68"></a>    &quot;mock_inputs&quot;: { &quot;TF_VAR_nlb_dns&quot;: &quot;mock.example.internal&quot; }    # in tfvars_json (§9.3)
-<a id="__codelineno-23-69" name="__codelineno-23-69" href="#__codelineno-23-69"></a>  }
+<a id="__codelineno-23-2" name="__codelineno-23-2" href="#__codelineno-23-2"></a>→ 204 if nothing (or the claimed run just failed closed at claim: §9.3, §10, §15.2)
+<a id="__codelineno-23-3" name="__codelineno-23-3" href="#__codelineno-23-3"></a>→ 503 problem+json, retryable: true — a transient failure to build the job (workload token not
+<a id="__codelineno-23-4" name="__codelineno-23-4" href="#__codelineno-23-4"></a>       signable right now, §3.11): the claim is undone, the run keeps its state; poll again
+<a id="__codelineno-23-5" name="__codelineno-23-5" href="#__codelineno-23-5"></a>→ 200 {
+<a id="__codelineno-23-6" name="__codelineno-23-6" href="#__codelineno-23-6"></a>    &quot;job_id&quot;: &quot;...&quot;,                       # = the run id
+<a id="__codelineno-23-7" name="__codelineno-23-7" href="#__codelineno-23-7"></a>    &quot;phase&quot;: &quot;plan&quot; | &quot;apply&quot; | &quot;command&quot;, # JOB type (what the agent executes) — do not confuse
+<a id="__codelineno-23-8" name="__codelineno-23-8" href="#__codelineno-23-8"></a>                                           # with the fine-grained phases of the run (§4) or of the
+<a id="__codelineno-23-9" name="__codelineno-23-9" href="#__codelineno-23-9"></a>                                           # logs (§5): a &quot;plan&quot; job covers preparing+planning+
+<a id="__codelineno-23-10" name="__codelineno-23-10" href="#__codelineno-23-10"></a>                                           # checking, an &quot;apply&quot; job applying, a &quot;command&quot; job
+<a id="__codelineno-23-11" name="__codelineno-23-11" href="#__codelineno-23-11"></a>                                           # (§4.3) preparing+running
+<a id="__codelineno-23-12" name="__codelineno-23-12" href="#__codelineno-23-12"></a>    &quot;cred_phase&quot;: &quot;plan&quot; | &quot;apply&quot;,        # CREDENTIAL phase of the job: &quot;apply&quot; iff it holds
+<a id="__codelineno-23-13" name="__codelineno-23-13" href="#__codelineno-23-13"></a>                                           # apply credentials — an apply job or a MUTATING command
+<a id="__codelineno-23-14" name="__codelineno-23-14" href="#__codelineno-23-14"></a>                                           # (§4.3); a plan job or a read-only command → &quot;plan&quot;.
+<a id="__codelineno-23-15" name="__codelineno-23-15" href="#__codelineno-23-15"></a>                                           # Picks the OIDC role (§10.2), the state-token TTL and
+<a id="__codelineno-23-16" name="__codelineno-23-16" href="#__codelineno-23-16"></a>                                           # scope (§11.2), and the agent&#39;s time budget for a
+<a id="__codelineno-23-17" name="__codelineno-23-17" href="#__codelineno-23-17"></a>                                           # command (absent/unknown → the agent assumes &quot;apply&quot;)
+<a id="__codelineno-23-18" name="__codelineno-23-18" href="#__codelineno-23-18"></a>    &quot;apply_timeout_seconds&quot;: 900,          # hard budget (§4.2, `stackd_apply_timeout_seconds`):
+<a id="__codelineno-23-19" name="__codelineno-23-19" href="#__codelineno-23-19"></a>                                           # the agent kills `apply`, and a cred_phase=apply command,
+<a id="__codelineno-23-20" name="__codelineno-23-20" href="#__codelineno-23-20"></a>                                           # past it
+<a id="__codelineno-23-21" name="__codelineno-23-21" href="#__codelineno-23-21"></a>    &quot;refresh_only&quot;: false,                 # true for a drift run (§19): plan with -refresh-only
+<a id="__codelineno-23-22" name="__codelineno-23-22" href="#__codelineno-23-22"></a>    &quot;destroy&quot;: false,                      # true for a destroy run: plan with -destroy (the saved
+<a id="__codelineno-23-23" name="__codelineno-23-23" href="#__codelineno-23-23"></a>                                           # plan carries it to the apply)
+<a id="__codelineno-23-24" name="__codelineno-23-24" href="#__codelineno-23-24"></a>    &quot;save_plan&quot;: true,                     # plan job of a tracked/destroy run: upload plan.tfplan
+<a id="__codelineno-23-25" name="__codelineno-23-25" href="#__codelineno-23-25"></a>                                           # when the plan has changes (§7.3); false for a proposed
+<a id="__codelineno-23-26" name="__codelineno-23-26" href="#__codelineno-23-26"></a>                                           # run (never applied), an apply or a command job
+<a id="__codelineno-23-27" name="__codelineno-23-27" href="#__codelineno-23-27"></a>    &quot;command&quot;: {&quot;name&quot;: &quot;state rm&quot;, &quot;args&quot;: [&quot;aws_s3_bucket.old&quot;]},   # command jobs only, else null
+<a id="__codelineno-23-28" name="__codelineno-23-28" href="#__codelineno-23-28"></a>    &quot;environment&quot;: { &quot;id&quot;, &quot;name&quot;: &quot;prod&quot;, &quot;stack_name&quot;: &quot;core-network&quot;,
+<a id="__codelineno-23-29" name="__codelineno-23-29" href="#__codelineno-23-29"></a>      &quot;repo_url&quot;, &quot;commit_sha&quot;, &quot;branch&quot;, &quot;project_root&quot;,
+<a id="__codelineno-23-30" name="__codelineno-23-30" href="#__codelineno-23-30"></a>      &quot;tool&quot;: &quot;opentofu&quot; | &quot;terraform&quot;, &quot;tool_version&quot; },
+<a id="__codelineno-23-31" name="__codelineno-23-31" href="#__codelineno-23-31"></a>                                           # commit_sha null (plan job only): the agent clones the
+<a id="__codelineno-23-32" name="__codelineno-23-32" href="#__codelineno-23-32"></a>                                           # head of `branch`, reports the SHA (§7.3) and the API
+<a id="__codelineno-23-33" name="__codelineno-23-33" href="#__codelineno-23-33"></a>                                           # pins the run to it; an apply job always gets the pinned
+<a id="__codelineno-23-34" name="__codelineno-23-34" href="#__codelineno-23-34"></a>                                           # full SHA and clones exactly it (no SHA → refused)
+<a id="__codelineno-23-35" name="__codelineno-23-35" href="#__codelineno-23-35"></a>    &quot;repo_credentials&quot;: { &quot;kind&quot;: &quot;none&quot; | &quot;token&quot; | &quot;deploy_key&quot;,
+<a id="__codelineno-23-36" name="__codelineno-23-36" href="#__codelineno-23-36"></a>                          &quot;token&quot;: &quot;&lt;decrypted, memory TTL&gt;&quot; },   # token only if kind≠none and set
+<a id="__codelineno-23-37" name="__codelineno-23-37" href="#__codelineno-23-37"></a>    &quot;env&quot;: { ... },                        # environment-kind variables, resolution
+<a id="__codelineno-23-38" name="__codelineno-23-38" href="#__codelineno-23-38"></a>                                           # sets→stack→env (§3.4)
+<a id="__codelineno-23-39" name="__codelineno-23-39" href="#__codelineno-23-39"></a>    &quot;sensitive_env&quot;: { ... },              # sensitive environment-kind variables — never logged,
+<a id="__codelineno-23-40" name="__codelineno-23-40" href="#__codelineno-23-40"></a>                                           # never given to repo hooks (§8.3); always empty for a
+<a id="__codelineno-23-41" name="__codelineno-23-41" href="#__codelineno-23-41"></a>                                           # proposed run, which gets no secret at all (§13)
+<a id="__codelineno-23-42" name="__codelineno-23-42" href="#__codelineno-23-42"></a>    &quot;tfvars_json&quot;: { ... },                # terraform variables (JSON), with the dependency
+<a id="__codelineno-23-43" name="__codelineno-23-43" href="#__codelineno-23-43"></a>                                           # inputs / mocks (§9.3) merged in — none sensitive for
+<a id="__codelineno-23-44" name="__codelineno-23-44" href="#__codelineno-23-44"></a>                                           # a proposed run (§13)
+<a id="__codelineno-23-45" name="__codelineno-23-45" href="#__codelineno-23-45"></a>    &quot;hcl_tfvars&quot;: { &quot;tags&quot;: &quot;{ team = \&quot;core\&quot; }&quot; },  # hcl-typed variables, written verbatim (§3.4)
+<a id="__codelineno-23-46" name="__codelineno-23-46" href="#__codelineno-23-46"></a>    &quot;mask_values&quot;: [ &quot;...&quot; ],              # literal secrets the agent masks in ALL logs (§5.1):
+<a id="__codelineno-23-47" name="__codelineno-23-47" href="#__codelineno-23-47"></a>                                           # sensitive values, state/OIDC/repo tokens
+<a id="__codelineno-23-48" name="__codelineno-23-48" href="#__codelineno-23-48"></a>    &quot;hooks&quot;: {                             # §8: PLATFORM hooks by stage — the agent appends the
+<a id="__codelineno-23-49" name="__codelineno-23-49" href="#__codelineno-23-49"></a>                                           # repo&#39;s .stackd.yml hooks after them
+<a id="__codelineno-23-50" name="__codelineno-23-50" href="#__codelineno-23-50"></a>      &quot;after_plan&quot;: [ {&quot;name&quot;: &quot;infracost&quot;, &quot;command&quot;: &quot;...&quot;, &quot;on_failure&quot;: &quot;warn&quot;,
+<a id="__codelineno-23-51" name="__codelineno-23-51" href="#__codelineno-23-51"></a>                       &quot;source&quot;: &quot;platform&quot;} ]
+<a id="__codelineno-23-52" name="__codelineno-23-52" href="#__codelineno-23-52"></a>    },
+<a id="__codelineno-23-53" name="__codelineno-23-53" href="#__codelineno-23-53"></a>    &quot;backend&quot;: { &quot;type&quot;: &quot;http&quot;, &quot;address&quot;: &quot;.../state/v1/&lt;env_id&gt;&quot;,   # managed state (§11),
+<a id="__codelineno-23-54" name="__codelineno-23-54" href="#__codelineno-23-54"></a>                 &quot;lock_address&quot;, &quot;unlock_address&quot;,                     # else null; no lock_* keys
+<a id="__codelineno-23-55" name="__codelineno-23-55" href="#__codelineno-23-55"></a>                 &quot;lock_method&quot;: &quot;LOCK&quot;, &quot;unlock_method&quot;: &quot;UNLOCK&quot;,     # for a `ro` token (§11.2)
+<a id="__codelineno-23-56" name="__codelineno-23-56" href="#__codelineno-23-56"></a>                 &quot;username&quot;: &quot;env&quot;, &quot;password&quot;: &quot;&lt;state_token scoped+TTL&gt;&quot; },
+<a id="__codelineno-23-57" name="__codelineno-23-57" href="#__codelineno-23-57"></a>                                           # → handed to tofu ONLY, as TF_HTTP_ADDRESS/…/
+<a id="__codelineno-23-58" name="__codelineno-23-58" href="#__codelineno-23-58"></a>                                           # TF_HTTP_PASSWORD env vars, never -backend-config
+<a id="__codelineno-23-59" name="__codelineno-23-59" href="#__codelineno-23-59"></a>                                           # (tofu persists those in .terraform/ and in the saved
+<a id="__codelineno-23-60" name="__codelineno-23-60" href="#__codelineno-23-60"></a>                                           # plan); hooks never get them; inherited TF_HTTP_* dropped
+<a id="__codelineno-23-61" name="__codelineno-23-61" href="#__codelineno-23-61"></a>    &quot;backend_config_file&quot;: null,           # unmanaged state only (§11.3): -backend-config=&lt;file&gt;
+<a id="__codelineno-23-62" name="__codelineno-23-62" href="#__codelineno-23-62"></a>    &quot;backend_config&quot;: null,                # unmanaged state only (§11.3): -backend-config=k=v
+<a id="__codelineno-23-63" name="__codelineno-23-63" href="#__codelineno-23-63"></a>    &quot;cloud_credentials&quot;: {                 # §10, if cloud_integration configured, else null
+<a id="__codelineno-23-64" name="__codelineno-23-64" href="#__codelineno-23-64"></a>      &quot;provider&quot;: &quot;aws&quot;,
+<a id="__codelineno-23-65" name="__codelineno-23-65" href="#__codelineno-23-65"></a>      &quot;oidc_token&quot;: &quot;&lt;signed workload JWT&gt;&quot;,
+<a id="__codelineno-23-66" name="__codelineno-23-66" href="#__codelineno-23-66"></a>      &quot;role_arn&quot;: &quot;arn:aws:iam::123:role/stackd-prod-plan&quot;,   # role of the cred_phase
+<a id="__codelineno-23-67" name="__codelineno-23-67" href="#__codelineno-23-67"></a>      &quot;region&quot;: &quot;eu-west-1&quot;
+<a id="__codelineno-23-68" name="__codelineno-23-68" href="#__codelineno-23-68"></a>    },
+<a id="__codelineno-23-69" name="__codelineno-23-69" href="#__codelineno-23-69"></a>    &quot;resolved_inputs&quot;: { &quot;TF_VAR_vpc_id&quot;: &quot;vpc-0abc...&quot; },          # informational: already
+<a id="__codelineno-23-70" name="__codelineno-23-70" href="#__codelineno-23-70"></a>    &quot;mock_inputs&quot;: { &quot;TF_VAR_nlb_dns&quot;: &quot;mock.example.internal&quot; }    # in tfvars_json (§9.3)
+<a id="__codelineno-23-71" name="__codelineno-23-71" href="#__codelineno-23-71"></a>  }
 </code></pre></div>
 <p>Three distinct notions, never to be conflated (CLAUDE.md §7): the <strong>job phase</strong> (<code>phase</code>, the execution type), the <strong>credential phase</strong> (<code>cred_phase</code>, which credentials the job holds — the single definition is <code>holds_apply_credentials(run)</code>, shared with the worker-lost reclaim cutoff §7.5), and the <strong>run state</strong> (§4, the fine-grained <code>preparing</code>/<code>planning</code>/… the run moves through, which the logs also use as their phase). A plan or apply job's credential phase equals its job phase; a command job's depends on the command. The agent never re-derives the credential phase from the command name: it reads <code>cred_phase</code>.</p>
 <p>Atomic claim:</p>
@@ -4385,7 +4416,8 @@ explicit budget are capped at 2 h by the agent's watchdog.</p>
 <li>A worker refuses to start on <code>STACKD_RUNNER=docker</code> without <code>STACKD_RUNNER_IMAGES</code>.</li>
 </ul>
 <p><strong>Runner trust contract (Phase C).</strong> The <code>docker</code> runner (prod) is the trust boundary: one <strong>ephemeral</strong> container per command (above); the image carries <strong>no long-lived cloud creds</strong>; an optional egress allowlist is enforced via the containers' network. What holds on every runner: the OIDC token is written to a <code>0600</code> file outside the checkout (<code>Workspace.secret_file</code>) only for the duration of each tofu command and each platform hook — never while a repo hook runs (§8.3) — exposed to them via <code>AWS_WEB_IDENTITY_TOKEN_FILE</code>, and the whole workspace is removed in the <code>finally</code> <code>ws.cleanup()</code>. Repo code also runs inside tofu (<code>data "external"</code>, provisioners), and feeds the check tools platform hooks run (their config files in the checkout): on the <code>local</code> runner, tofu and platform hooks get the worker's environment <strong>minus the agent's own settings</strong> — the whole <code>STACKD_*</code> namespace (the pool token, the API URL, …, and any platform setting a worker host carries) — then the run's <code>env</code> and <code>sensitive_env</code> and the OIDC workload env (§10.4); tofu also gets, for managed state, <code>TF_HTTP_*</code> (§11.2). Everything else a provider may need stays: <code>PATH</code> and locale, proxies and CA bundle, <code>TF_*</code> (plugin cache, …), provider settings. Repo hooks run untrusted: <code>sh -c &lt;repo command&gt;</code> with an allowlisted <code>repo_env</code> (§8.3). The <code>local</code> runner (dev) with a mounted <code>~/.aws</code> is <strong>trusted-dev only</strong> — never prod (<code>STACKD_ENV=production</code> requires the <code>docker</code> runner, enforced by the API, see below).</p>
-<p><strong>Production runner gate.</strong> The agent declares its runner (<code>local</code> | <code>docker</code>) in <code>POST /worker/v1/register</code>, on every (re-)registration; an unknown <code>STACKD_RUNNER</code> value stops the agent at startup instead of falling back to <code>local</code>. A production API (<code>STACKD_ENV=production</code>) answers <strong>403</strong> <code>code=runner_not_allowed</code> to a registration whose runner is not <code>docker</code> — an absent runner (an agent predating the field) included — and audits it (<code>worker.rejected</code>, target the pool, context <code>{name, runner}</code>); a <code>/jobs/claim</code> from a worker whose recorded runner is not <code>docker</code> (registered before the API switched to production) gets the same 403. The runner is shown on the Workers page. It is <em>declared</em>: it guards against a misconfigured worker, not against a compromised one holding a pool token — the pool token's custody stays the boundary. A production API also refuses to <strong>start</strong> on dev-grade settings: a master key that does not decode to 32 bytes, a <code>STACKD_JWT_SECRET</code> under 32 characters, a non-https <code>STACKD_PUBLIC_URL</code> (next to the existing <code>STACKD_DEV_AUTH</code> guard).</p>
+<p><strong>Production runner gate.</strong> The agent declares its runner (<code>local</code> | <code>docker</code>) in <code>POST /worker/v1/register</code>, on every (re-)registration; an unknown <code>STACKD_RUNNER</code> value stops the agent at startup instead of falling back to <code>local</code>. A production API (<code>STACKD_ENV=production</code>) answers <strong>403</strong> <code>code=runner_not_allowed</code> to a registration whose runner is not <code>docker</code> — an absent runner (an agent predating the field) included — and audits it (<code>worker.rejected</code>, target the pool, context <code>{name, runner}</code> — once per pool, worker
+name and hour: the agent keeps retrying, slowly — every 5 min — after a 403, logging the refusal); a <code>/jobs/claim</code> from a worker whose recorded runner is not <code>docker</code> (registered before the API switched to production) gets the same 403. The runner is shown on the Workers page. It is <em>declared</em>: it guards against a misconfigured worker, not against a compromised one holding a pool token — the pool token's custody stays the boundary. A production API also refuses to <strong>start</strong> on dev-grade settings: a master key that does not decode to 32 bytes, a <code>STACKD_JWT_SECRET</code> under 32 characters, a non-https <code>STACKD_PUBLIC_URL</code> (next to the existing <code>STACKD_DEV_AUTH</code> guard).</p>
 <h3 id="75-periodic-tasks-internal-scheduler-multi-replica">7.5 Periodic tasks (internal scheduler, multi-replica)<a class="headerlink" href="#75-periodic-tasks-internal-scheduler-multi-replica" title="Permanent link">&para;</a></h3>
 <p>The scheduler module (PLAN §2.1) carries background tasks that must run <strong>exactly once</strong> even with several API replicas:</p>
 <p>The loop ticks every 10 s.</p>
@@ -5009,6 +5041,12 @@ the API (write-only, like <code>stacks.webhook_secret_encrypted</code>).</p>
 <a id="__codelineno-40-11" name="__codelineno-40-11" href="#__codelineno-40-11"></a><span class="c1">-- ON DELETE RESTRICT: a source in use can&#39;t be dropped out from under live variables.</span>
 </code></pre></div>
 <p>A variable with <code>secret_source_id</code> is treated as <code>sensitive=true</code> regardless of the flag.</p>
+<p><strong>A reference stays in its space.</strong> <code>secret_source_id</code> must name a source of the variable's own
+space — the stack's for a stack or environment variable, the set's for a variable-set variable — on
+create and on every update that re-points it; otherwise <strong>404</strong> <code>Secret source not found</code> (another
+space's source is answered like a missing one, its existence not confirmed). At claim, a reference
+whose source is not in the environment's space (a row predating the check) fails the run closed,
+<code>secret_unavailable:{var}</code>, with no fallback.</p>
 <h3 id="152-resolution-order-real-fallback-error">15.2 Resolution order (real &gt; fallback &gt; error)<a class="headerlink" href="#152-resolution-order-real-fallback-error" title="Permanent link">&para;</a></h3>
 <p>At claim build (<code>build_job_payload</code>, §7.2), reference variables resolve <strong>after</strong> the existing
 layered resolution (§3.4), by calling the provider:</p>
