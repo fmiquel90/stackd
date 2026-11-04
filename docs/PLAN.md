@@ -121,13 +121,13 @@ The platform becomes an **OIDC issuer** (the same mechanism as GitHub Actions OI
 
 ### Phase 0 — Foundations + Google Auth (1.5 weeks)
 
-- [ ] Monorepo: `api/`, `worker/`, `front/`, `deploy/`, `docs/`
-- [ ] `docker-compose.yml` dev: Postgres, Garage (local S3), hot-reload API, Vite front — **full dev mode specified in DEV.md** (dev login 3 personas, `file://` fixture repos, seed + e2e scenario, shortened timings)
-- [ ] FastAPI: healthcheck, settings, modules (`auth/`, `stacks/`, `environments/`, `variable_sets/`, `runs/`, `workers/`, `audit/`, `oidc/`, ...)
-- [ ] **Google OIDC auth** (Authorization Code + PKCE): full flow, upsert on `google_sub`, `hd` restriction to the domain, JWT sessions + rotating refresh (table `refresh_tokens`, reuse detection → family revocation, SPECS §2.5), CSRF on `/auth/refresh`, first-admin bootstrap
-- [ ] Alembic migrations, `User`, `RefreshToken` models, **`Space` (`default` space created at bootstrap, SPECS §3.0)** — all `space_id` FKs depend on it starting in Phase 1
-- [ ] Front: scaffold + **setup of the DESIGN.md design system** (tokens, theme, base components) + **Storybook/Ladle** of the identity components (PhaseRail, StateBadge, ProvenanceBadge...) — the visual contract required by DESIGN.md §8, login page
-- [ ] GitHub Actions CI, root `CLAUDE.md`
+- [x] Monorepo: `api/`, `worker/`, `front/`, `deploy/`, `docs/`
+- [x] `docker-compose.yml` dev: Postgres, Garage (local S3), hot-reload API, Vite front — **full dev mode specified in DEV.md** (dev login 3 personas, `file://` fixture repos, seed + e2e scenario, shortened timings)
+- [x] FastAPI: healthcheck, settings, modules (`auth/`, `stacks/`, `environments/`, `variable_sets/`, `runs/`, `workers/`, `audit/`, `oidc/`, ...)
+- [x] **Google OIDC auth** (Authorization Code + PKCE): full flow, upsert on `google_sub`, `hd` restriction to the domain, JWT sessions + rotating refresh (table `refresh_tokens`, reuse detection → family revocation, SPECS §2.5), CSRF on `/auth/refresh`, first-admin bootstrap
+- [x] Alembic migrations, `User`, `RefreshToken` models, **`Space` (`default` space created at bootstrap, SPECS §3.0)** — all `space_id` FKs depend on it starting in Phase 1
+- [x] Front: scaffold + **setup of the DESIGN.md design system** (tokens, theme, base components) + **Storybook/Ladle** of the identity components (PhaseRail, StateBadge, ProvenanceBadge...) — the visual contract required by DESIGN.md §8, login page
+- [x] GitHub Actions CI, root `CLAUDE.md`
 
 **Deliverable: `docker compose up` → Sign in with Google → app shell with the final design.**
 
@@ -137,21 +137,21 @@ The platform becomes an **OIDC issuer** (the same mechanism as GitHub Actions OI
 
 **Goal: the complete layered configuration model.**
 
-- [ ] `Stack` model (template: repo, project_root, tool, version)
-- [ ] `Environment` model (instance: **tier dev/staging/prod**, branch, autodeploy, protected, 4-eyes, managed_state, labels, position)
-- [ ] **Per-tier apply permissions** (see SPECS §2.4): `users.allowed_tiers` (a set over a configurable tier catalog — originally a linear `max_apply_tier`) + `users.can_destroy`; `can_apply(user, env)` helper called in the `unconfirmed → confirmed` transition; `protected` refocused on its own effects (forced confirmation + 4-eyes), with access control moving to the tier; admin Users page (role, tiers, destroy) + audit of changes
-- [ ] **Variable sets** (see SPECS §3.4):
+- [x] `Stack` model (template: repo, project_root, tool, version)
+- [x] `Environment` model (instance: **tier dev/staging/prod**, branch, autodeploy, protected, 4-eyes, managed_state, labels, position)
+- [x] **Per-tier apply permissions** (see SPECS §2.4): `users.allowed_tiers` (a set over a configurable tier catalog — originally a linear `max_apply_tier`) + `users.can_destroy`; `can_apply(user, env)` helper called in the `unconfirmed → confirmed` transition; `protected` refocused on its own effects (forced confirmation + 4-eyes), with access control moving to the tier; admin Users page (role, tiers, destroy) + audit of changes
+- [x] **Variable sets** (see SPECS §3.4):
   - named sets of variables (terraform + environment), at the space level
   - attachable to stacks (→ all their envs), to specific environments or to a tier — always within the set's own space (*status: enforced at attach and at resolution*)
   - `auto_attach: true` = attached to all stacks in the space (e.g. `common-aws`)
   - attachment priority to order the sets relative to each other
   - final resolution: **variable sets (by priority) < stack < environment**
   - UI: provenance badge on each resolved variable ("inherited from `common-aws`", "overridden here")
-- [ ] Stack variables + env overrides (existing model, integrated into the resolution)
-- [ ] Git integration via token/deploy key (encrypted), check-repo endpoint
-- [ ] AES-256-GCM encryption of sensitive values (write-only)
-- [ ] Front: list of stacks × envs, creation wizard, stack page, **Variable Sets page** (CRUD + list of attachments + "where is this set used")
-- [ ] Audit: CRUD stacks/envs/variables/variable sets + attachments
+- [x] Stack variables + env overrides (existing model, integrated into the resolution)
+- [x] Git integration via token/deploy key (encrypted), check-repo endpoint
+- [x] AES-256-GCM encryption of sensitive values (write-only)
+- [x] Front: list of stacks × envs, creation wizard, stack page, **Variable Sets page** (CRUD + list of attachments + "where is this set used")
+- [x] Audit: CRUD stacks/envs/variables/variable sets + attachments
 
 **Deliverable: a `common-aws` set (region, default tags, Datadog token) attached to 3 stacks, occasionally overridden by an env.**
 
@@ -160,34 +160,34 @@ The platform becomes an **OIDC issuer** (the same mechanism as GitHub Actions OI
 ### Phase 2 — Runs + Workers + Logs + Hooks (3.5 weeks) ⭐ critical phase
 
 #### 2a. Run state machine
-- [ ] `Run` model (per environment) + `RunEvent`
-- [ ] States: `queued → preparing → planning → [checking] → unconfirmed → confirmed → applying → finished` (+ `failed`, `discarded`, `canceled`)
-- [ ] Manual trigger, confirm/discard (guarded by `can_apply`: tier + role, see §2.4; automatic 4-eyes on prod tier)
-- [ ] Concurrency: 1 active run per environment
+- [x] `Run` model (per environment) + `RunEvent`
+- [x] States: `queued → preparing → planning → [checking] → unconfirmed → confirmed → applying → finished` (+ `failed`, `discarded`, `canceled`)
+- [x] Manual trigger, confirm/discard (guarded by `can_apply`: tier + role, see §2.4; automatic 4-eyes on prod tier)
+- [x] Concurrency: 1 active run per environment
 
 #### 2b. Worker API (pull protocol)
-- [ ] Register/heartbeat/claim (`SKIP LOCKED`), events, chunked logs, artifacts
-- [ ] Dead worker detection → `worker_lost` — *status: only runs whose job is executing on the lost worker; an apply or a mutating command only after the apply window (SPECS §3.7)*
+- [x] Register/heartbeat/claim (`SKIP LOCKED`), events, chunked logs, artifacts
+- [x] Dead worker detection → `worker_lost` — *status: only runs whose job is executing on the lost worker; an apply or a mutating command only after the apply window (SPECS §3.7)*
 
 #### 2c. The worker agent
-- [ ] Loop claim → clone → tool setup → **hooks** → init → plan → upload → confirmation → **hooks** → apply → report — *status: the run is pinned to the commit its plan checked out, and the apply clones that commit and applies the uploaded saved plan, never a fresh plan (SPECS §7.3)*
-- [ ] Ephemeral workspace, Docker runner, secret masking in the logs — *status: done — workspace and masking; `tool_version` enforced (claim + agent check); runner images signature-verified, run by digest; the `docker` runner runs each command in its own hardened container (repo hooks see the checkout only), and production refuses any other runner (SPECS §7.4)*
+- [x] Loop claim → clone → tool setup → **hooks** → init → plan → upload → confirmation → **hooks** → apply → report — *status: the run is pinned to the commit its plan checked out, and the apply clones that commit and applies the uploaded saved plan, never a fresh plan (SPECS §7.3)*
+- [x] Ephemeral workspace, Docker runner, secret masking in the logs — *status: done — workspace and masking; `tool_version` enforced (claim + agent check); runner images signature-verified, run by digest; the `docker` runner runs each command in its own hardened container (repo hooks see the checkout only), and production refuses any other runner (SPECS §7.4)*
 
 #### 2d. Hooks & checks (custom flows, see SPECS §8)
-- [ ] **YAML** declaration in two places, merged: `.stackd.yml` file in the repo (versioned with the code) + hooks defined at the stack/environment level in the UI (governance imposed by the platform, not bypassable by a PR)
-- [ ] Anchor points: `before_init`, `after_init`, `before_plan`, `after_plan`, `before_apply`, `after_apply`
-- [ ] Each hook = a command executed in the workspace, with read access to `plan.json` (for post-plan checks: tfsec, checkov, infracost, in-house scripts)
-- [ ] Failure modes: `fail` (run → failed), `warn` (continue, visible warning, manual confirmation forced even if autodeploy) — *status: done at every stage, plan and apply jobs; each hook under a 10 min timeout; every check result kept on the run with its stage; repo hooks run without secrets, and at the apply stages only on a tier that allows them (`repo_hooks_at_apply`, off by default); the per-env secret opt-ins were rejected (SPECS §8.3)*
-- [ ] Hook logs integrated into the viewer (dedicated sections)
+- [x] **YAML** declaration in two places, merged: `.stackd.yml` file in the repo (versioned with the code) + hooks defined at the stack/environment level in the UI (governance imposed by the platform, not bypassable by a PR)
+- [x] Anchor points: `before_init`, `after_init`, `before_plan`, `after_plan`, `before_apply`, `after_apply`
+- [x] Each hook = a command executed in the workspace, with read access to `plan.json` (for post-plan checks: tfsec, checkov, infracost, in-house scripts)
+- [x] Failure modes: `fail` (run → failed), `warn` (continue, visible warning, manual confirmation forced even if autodeploy) — *status: done at every stage, plan and apply jobs; each hook under a 10 min timeout; every check result kept on the run with its stage; repo hooks run without secrets, and at the apply stages only on a tier that allows them (`repo_hooks_at_apply`, off by default); the per-env secret opt-ins were rejected (SPECS §8.3)*
+- [x] Hook logs integrated into the viewer (dedicated sections)
 
 #### 2e. Terraform job logs
-- [ ] Live: multiplexed WebSocket, line-by-line tracking per phase
-- [ ] Viewer: virtualized, ANSI, search, shareable anchors, follow-tail
-- [ ] Two-tier storage (hot DB 7 d → S3 gz 1 year), download, configurable retention — *status: hot tier only; no archiving or download yet (SPECS §5.2)*
+- [x] Live: multiplexed WebSocket, line-by-line tracking per phase
+- [x] Viewer: virtualized, ANSI, search, shareable anchors, follow-tail
+- [x] Two-tier storage (hot DB 7 d → S3 gz 1 year), download, configurable retention — *status: done (SPECS §5.2); the 1-year expiry is a bucket lifecycle rule*
 
 #### 2f. Runs front
-- [ ] Run page: phase timeline (hooks included), viewer, plan summary, action bar
-- [ ] **/queue** page: in-progress and pending runs with **blocking reason** computed by the API (active run on the env, locked env, no compatible worker, apply affinity reservation) — see DESIGN.md §5.5
+- [x] Run page: phase timeline (hooks included), viewer, plan summary, action bar
+- [x] **/queue** page: in-progress and pending runs with **blocking reason** computed by the API (active run on the env, locked env, no compatible worker, apply affinity reservation) — see DESIGN.md §5.5
 
 **Deliverable: a run with an `after_plan: infracost breakdown` hook in warn mode, live logs, confirmed apply.**
 
@@ -196,17 +196,17 @@ The platform becomes an **OIDC issuer** (the same mechanism as GitHub Actions OI
 ### Phase 3 — S3 states via HTTP backend + Audit trail UI (2 weeks)
 
 #### 3a. Managed state
-- [ ] Complete HTTP backend protocol (GET/POST/LOCK/UNLOCK/423), S3 SSE-KMS storage
-- [ ] Application versioning linked to runs, Postgres locking visible in UI, audited force-unlock
-- [ ] Per-job scoped tokens (`ro`/`plan`/`rw`), backend settings injected automatically — *status: done, as `TF_HTTP_*` environment variables for tofu only (not `-backend-config`, which tofu persists), SPECS §11.2*
-- [ ] Saved plans in S3: the reviewed `plan.tfplan`, encrypted by the API, kept until the run ends — *status: done (SPECS §7.3, §11.3); `plan.json`/`outputs.json` artifacts are accepted but not archived yet*
-- [ ] "Bring your own S3 backend" mode
-- [ ] Front: State tab per env (versions, lock, admin download)
+- [x] Complete HTTP backend protocol (GET/POST/LOCK/UNLOCK/423), S3 SSE-KMS storage
+- [x] Application versioning linked to runs, Postgres locking visible in UI, audited force-unlock
+- [x] Per-job scoped tokens (`ro`/`plan`/`rw`), backend settings injected automatically — *status: done, as `TF_HTTP_*` environment variables for tofu only (not `-backend-config`, which tofu persists), SPECS §11.2*
+- [x] Saved plans in S3: the reviewed `plan.tfplan`, encrypted by the API, kept until the run ends — *status: done (SPECS §7.3, §11.3); `plan.json`/`outputs.json` artifacts are accepted but not archived yet*
+- [x] "Bring your own S3 backend" mode
+- [x] Front: State tab per env (versions, lock, admin download)
 
 #### 3b. Audit: "who applied what"
-- [ ] `audit_events` completed: trigger, confirm (Google identity), discard, apply, force-unlock, rotations, roles
-- [ ] Filterable /audit page + CSV export, Activity tab per env, per-user view
-- [ ] Immutability, 2-year retention
+- [x] `audit_events` completed: trigger, confirm (Google identity), discard, apply, force-unlock, rotations, roles
+- [x] Filterable /audit page + CSV export, Activity tab per env, per-user view
+- [x] Immutability, 2-year retention
 
 **Deliverable: "who applied what to prod last week, with which plan?" in 10 seconds.**
 
@@ -214,16 +214,16 @@ The platform becomes an **OIDC issuer** (the same mechanism as GitHub Actions OI
 
 ### Phase 4 — Dependencies + outputs + mock outputs (2.5 weeks) ⭐ the differentiator
 
-- [ ] Dependencies between **environments** + "link homonyms" helper
-- [ ] `OutputReference` (upstream output → downstream variable mapping), anti-cycle
-- [ ] Output capture after apply, hash, never the sensitive ones
-- [ ] **Mock outputs** (inspired by Terragrunt, see SPECS §9.3):
+- [x] Dependencies between **environments** + "link homonyms" helper
+- [x] `OutputReference` (upstream output → downstream variable mapping), anti-cycle
+- [x] Output capture after apply, hash, never the sensitive ones
+- [x] **Mock outputs** (inspired by Terragrunt, see SPECS §9.3):
   - each `output_reference` can carry a `mock_value`
   - used when the upstream has **never produced** the output (bootstrapping a new cascade) or on **proposed runs** if the upstream is not applied
   - a run that has consumed at least one mock is marked `used_mocks: true`: visible badge, **apply forbidden** (validation plan-only) unless explicit opt-in per env
   - solves the chicken-and-egg problem: write `app/dev` and plan its config before `network/dev` has run
 - [x] Propagation scheduler: topological cascade, policies, multi-parents, stop on failure — *status: done — policies, multi-parent gating within a run group, stop on failure, computed group status (SPECS §9.2)*
-- [ ] Run groups + graph view; the cascade never bypasses the protections
+- [x] Run groups + graph view; the cascade never bypasses the protections
 
 **Deliverable: plan `app/dev` with `vpc_id = "vpc-mock00000"` before the first apply of `network/dev`, then a real cascade.**
 
@@ -231,10 +231,10 @@ The platform becomes an **OIDC issuer** (the same mechanism as GitHub Actions OI
 
 ### Phase 5 — Git webhooks + proposed runs (2 weeks)
 
-- [ ] GitHub/GitLab webhook: HMAC, branch → environments mapping, filtering by `project_root`
-- [ ] **Git staleness**: tracking of `head_sha` per env (webhook + ls-remote polling 15 min + manual refresh), `↑N` chip on lagging envs, "stale plan" banner + re-plan on stale unconfirmed runs — see SPECS §9.6 / DESIGN §5.1-5.2 — *status: done: `stale` computed on every env the API returns, background ls-remote polling, audited manual refresh, branch-deletion and re-pointed-branch handling; the `↑N` chip and the stale-plan banner are not in the UI yet*
-- [ ] Push → tracked runs; PR → **proposed runs** plan-only (RO state, secrets not injected by default, mocks allowed) — *status: done (SPECS §13): a proposed run gets no secret, keeping the read-only plan role; the per-env opt-in was rejected (SPECS §13)*
-- [ ] (Optional) PR comment: plan summary + check results (warn/fail hooks) — *status: shipped for GitHub (SPECS §18): a commit status and one comment per run, edited in place*
+- [x] GitHub/GitLab webhook: HMAC, branch → environments mapping, filtering by `project_root`
+- [x] **Git staleness**: tracking of `head_sha` per env (webhook + ls-remote polling 15 min + manual refresh), `↑N` chip on lagging envs, "stale plan" banner + re-plan on stale unconfirmed runs — see SPECS §9.6 / DESIGN §5.1-5.2 — *status: done: `stale` computed on every env the API returns, background ls-remote polling, audited manual refresh, branch-deletion and re-pointed-branch handling; `↑N` chip and stale-plan banner in the UI*
+- [x] Push → tracked runs; PR → **proposed runs** plan-only (RO state, secrets not injected by default, mocks allowed) — *status: done (SPECS §13): a proposed run gets no secret, keeping the read-only plan role; the per-env opt-in was rejected (SPECS §13)*
+- [x] (Optional) PR comment: plan summary + check results (warn/fail hooks) — *status: shipped for GitHub (SPECS §18): a commit status and one comment per run, edited in place*
 
 **Deliverable: `git push` → automatic plans + checks visible in the PR.**
 
@@ -242,12 +242,12 @@ The platform becomes an **OIDC issuer** (the same mechanism as GitHub Actions OI
 
 ### Phase 6 — Dynamic cloud credentials OIDC (1.5 weeks)
 
-- [ ] **OIDC issuer**: `/.well-known/openid-configuration`, JWKS (RS256 keys, rotation), signing of workload tokens at claim time
-- [ ] `CloudIntegration` model per environment: provider `aws`, `plan_role_arn`, `apply_role_arn` (see SPECS §10)
-- [ ] Agent: token writing, export of `AWS_WEB_IDENTITY_TOKEN_FILE`/`AWS_ROLE_ARN` (or explicit AssumeRoleWithWebIdentity + export of the 3 variables if compatibility is needed)
-- [ ] Documentation + provided Terraform module: create the AWS Identity Provider + example roles with trust policies filtered on the claims
-- [ ] UI: integration config per env, "dynamic credentials" vs "static variables" indicator, AssumeRole test
-- [ ] Audit: `cloud_integration.created/updated`, assumed role traced in the run context
+- [x] **OIDC issuer**: `/.well-known/openid-configuration`, JWKS (RS256 keys, rotation), signing of workload tokens at claim time
+- [x] `CloudIntegration` model per environment: provider `aws`, `plan_role_arn`, `apply_role_arn` (see SPECS §10)
+- [x] Agent: token writing, export of `AWS_WEB_IDENTITY_TOKEN_FILE`/`AWS_ROLE_ARN` (or explicit AssumeRoleWithWebIdentity + export of the 3 variables if compatibility is needed)
+- [x] Documentation + provided Terraform module: create the AWS Identity Provider + example roles with trust policies filtered on the claims
+- [x] UI: integration config per env, "dynamic credentials" vs "static variables" indicator, AssumeRole test
+- [x] Audit: `cloud_integration.created/updated`, assumed role traced in the run context
 
 **Deliverable: a prod env with no AWS secret stored anywhere — the plan assumes a ReadOnly role, the apply a write role, backed by a trust policy.**
 
@@ -263,8 +263,9 @@ The platform becomes an **OIDC issuer** (the same mechanism as GitHub Actions OI
 - [ ] **Environment matrix** (track, not specified): declare `{eu-west-1, us-east-1} × {dev, prod}` on a stack and generate/synchronize the corresponding environments — multi-region is done by naming convention + variable sets in the MVP; standing one up across stacks is the job of environment rollouts above (one-shot, no synchronization)
 - [ ] HTTP run tasks (blocking external webhooks), advanced policies (OPA) if there is a real need
 - [ ] OIDC to GCP/Azure (the `CloudIntegration` interface is already generic)
-- [ ] Scheduled drift detection — *status: shipped (SPECS §19)*
-- [ ] Audit export, automated retention/purge
+- [x] Scheduled drift detection — *status: shipped (SPECS §19)*
+- [x] Automated retention/purge: hot logs, expired refresh-token families, audit > 2 years via a distinct DB role (SPECS §6.1, §7.5)
+- [ ] Audit export to an external system (SIEM)
 - [ ] Platform observability (Prometheus, OTel, Datadog dashboard) — *status: `/metrics` and optional OTLP tracing shipped (SPECS §20); no dashboard yet*
 - [ ] Helm chart / Terraform deployment module (dogfooding)
 - [ ] **Go rewrite of the worker** (single binary, easier distribution) — the MVP Python agent remains the functional reference; the Go port does not change the protocol (§7)
