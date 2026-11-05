@@ -78,7 +78,8 @@ async def enqueue_for_transition(session: AsyncSession, run: Run, to_state: RunS
         return
 
     if to_state in (RunState.finished, RunState.failed) and run.trigger_user_id is not None:
-        if run.triggered_by != TriggeredBy.manual:
+        # A human triggerer: a manual run's, or a rollout member's — its rollout's creator (§17.1).
+        if run.triggered_by not in (TriggeredBy.manual, TriggeredBy.rollout):
             return
         kind = "run_finished" if to_state == RunState.finished else "run_failed"
         await notify(session, run.trigger_user_id, kind, run_id=run.id)
