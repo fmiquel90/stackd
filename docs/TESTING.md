@@ -247,6 +247,7 @@ The tier gate (an approver without `prod`) and staleness stay manual checks (DEV
 | `src/features/rollouts/clone.test.ts` (4) | `parseLabels` for the clone dialog. |
 | `src/features/rollouts/CloneNotes.test.tsx` (4) | Clone notes and warnings (label-attached sets, what is not copied, uncloned upstream, tier change), in words. |
 | `src/features/settings/userChanges.test.ts` (2) | Staged user changes: only real differences, summarised in words. |
+| `src/components/StackGeneralPanel.test.tsx` (2) | The webhook secret field follows the API's writer gate: shown to a writer, hidden from a reader. |
 
 - **Playwright** (`pnpm e2e`, `e2e/happy-path.spec.ts`): one smoke test — dev login as admin
   reaches the overview of a space (`/s/<space>`) — against a running dev stack (`PW_BASE_URL`,
