@@ -170,6 +170,53 @@ async def test_create_in_unknown_space_is_404(client: httpx.AsyncClient) -> None
     assert r.status_code == 403
 
 
+async def test_member_tiers_validated_and_audited(client: httpx.AsyncClient) -> None:
+    """§2.4: a membership's tier set names catalog tiers only; the audit carries the grant."""
+    from sqlalchemy import select
+
+    from app.db import SessionLocal
+    from app.models.audit import AuditEvent
+
+    admin = await login(client, "admin")
+    space_id = await _create_space(client, admin, "team-tiers")
+    bob_id = await _user_id(client, admin, "bob@dev.local")
+    url = f"/api/v1/spaces/{space_id}/members"
+
+    bad = await client.put(
+        url, headers=admin, json={"user_id": bob_id, "role": "approver", "allowed_tiers": ["prdo"]}
+    )
+    assert bad.status_code == 422 and bad.json()["title"] == "Unknown tier", bad.text
+
+    ok = await client.put(
+        url,
+        headers=admin,
+        json={
+            "user_id": bob_id,
+            "role": "approver",
+            "allowed_tiers": ["prod", "dev", "dev"],
+            "can_destroy": True,
+        },
+    )
+    assert ok.status_code == 200, ok.text
+    assert ok.json()["allowed_tiers"] == ["dev", "prod"]
+
+    async with SessionLocal() as session:
+        context = (
+            await session.execute(
+                select(AuditEvent.context).where(
+                    AuditEvent.action == "space.member_set",
+                    AuditEvent.target_id == uuid.UUID(space_id),
+                )
+            )
+        ).scalar_one()
+    assert context == {
+        "user_id": bob_id,
+        "role": "approver",
+        "allowed_tiers": ["dev", "prod"],
+        "can_destroy": True,
+    }
+
+
 async def test_a_space_writer_writes_there_whatever_their_instance_role(
     client: httpx.AsyncClient,
 ) -> None:

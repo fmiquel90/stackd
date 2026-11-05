@@ -123,10 +123,14 @@ async def claim_one(session: AsyncSession, worker: Worker, affinity_seconds: int
             raise
         await session.rollback()
         return None
-    # Claim latency (§H): how long the run waited in queue before a worker picked it up.
+    # Claim latency (§20.1): how long the run waited claimable before a worker picked it up —
+    # from its confirmation for an apply claim (not the plan and the human wait before it), from
+    # its creation for a plan or command claim.
     from app.observability import metrics
 
-    metrics.claim_latency.observe((datetime.now(UTC) - run.created_at).total_seconds())
+    claimable_at = run.confirmed_at if target == RunState.applying else None
+    waited = datetime.now(UTC) - (claimable_at or run.created_at)
+    metrics.claim_latency.observe(waited.total_seconds())
     return run
 
 

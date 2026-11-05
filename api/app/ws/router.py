@@ -17,20 +17,21 @@ _hub = NotifyHub()
 
 @router.websocket("/api/v1/ws")
 async def ws_endpoint(websocket: WebSocket) -> None:
-    # Out-of-band auth: tokens must not ride in the URL (they leak to proxy/LB logs, history,
-    # Referer). Accept first, then the client sends `{"type": "auth", "token": ...}` as its first
-    # message. A query-string token is still honored as a fallback for older clients.
+    # Out-of-band auth (§5.3): tokens must not ride in the URL (they leak to proxy/LB logs,
+    # history, Referer), so a query-string token is ignored. Accept first, then the client sends
+    # `{"type": "auth", "token": ...}` as its first message; anything else closes with 4401.
     await websocket.accept()
-    token = websocket.query_params.get("token", "")
-    if not token:
-        try:
-            first = await websocket.receive_json()
-        except WebSocketDisconnect:
-            return
-        if first.get("type") != "auth":
-            await websocket.close(code=4401)
-            return
-        token = first.get("token", "")
+    try:
+        first = await websocket.receive_json()
+    except WebSocketDisconnect:
+        return
+    except ValueError:  # not JSON
+        await websocket.close(code=4401)
+        return
+    if not isinstance(first, dict) or first.get("type") != "auth":
+        await websocket.close(code=4401)
+        return
+    token = first.get("token", "")
     try:
         claims = decode_access_token(token)
     except jwt.PyJWTError:

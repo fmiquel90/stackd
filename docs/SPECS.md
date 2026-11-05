@@ -84,7 +84,7 @@ The "apply everywhere except prod" need depends on the targeted environment, not
 > **Set-based, not linear** (evolved from the original MVP design): tiers are a **configurable catalog** (`tiers` table — `name` unique, `requires_four_eyes`, `repo_hooks_at_apply` (§8.3), `position`), not a fixed `dev<staging<prod` enum, and a user carries a **set** of allowed tiers, not a single ceiling. This expresses custom tiers (`qa`, `preprod`, `sandbox`) and **non-contiguous** grants (e.g. `dev`+`prod` but not `staging`) that the old linear ceiling could not.
 
 - `environments.tier` text — references `tiers.name` (validated against the catalog on env create/update). No ordering.
-- `users.allowed_tiers` text[] — the set of tiers where the user can **confirm an apply**. Empty = none (can read and plan, never apply). Each entry is validated against the catalog; deleting a tier — refused (409 `Tier in use`) while an environment still references it — strips it from every user's set and every space membership's (no FK on the array, so this is enforced in app code).
+- `users.allowed_tiers` text[] — the set of tiers where the user can **confirm an apply**. Empty = none (can read and plan, never apply). Each entry is validated against the catalog (**422** `Unknown tier`), as is a space membership's `allowed_tiers`; deleting a tier — refused (409 `Tier in use`) while an environment still references it — strips it from every user's set and every space membership's and removes the variable-set attachments to it (§3.4, audited `variable_set.detached`, reason `tier_deleted`) — no FK on the array nor on the attachment target, so this is enforced in app code.
 - Apply rule: `confirm` allowed iff `role ∈ {approver, admin}` **AND** `env.tier ∈ allowed_tiers` (set membership). Example: an approver with `{dev, staging}` confirms in dev/staging, denied in prod (the dev persona Bob holds that set but is a `writer`: he confirms nowhere, DEV §3); Alice `{dev, staging, prod}` confirms everywhere; a user `{dev, prod}` skips staging.
 - `users.can_destroy` — a run `type=destroy` (trigger AND confirm) requires `can_destroy=true` **in addition** to the tier rule. A destruction is more dangerous than an apply: a distinct, explicit right.
 
@@ -246,7 +246,7 @@ A set's **selector** (`{label: value}`) auto-attaches it to every environment wh
 
 **Attachments stay in the set's space.** Attaching to a `stack` or `environment` requires the target to belong to the variable set's space **and** the caller to be a `writer` there; otherwise it is refused with `400 Cross-space attachment` (`403` if the caller lacks write access on the target). A tier is a global catalog row (no space), so a `tier` attachment applies only to environments of that tier **inside the set's own space**. Resolution also ignores any explicit attachment whose set belongs to another space (defense in depth).
 
-**No orphan attachments.** Since there is no FK, deleting a stack or an environment removes the attachments targeting it — for a stack, also those targeting its environments — in the deletion's transaction, each audited `variable_set.detached` (context `reason`: `stack_deleted` | `environment_deleted`).
+**No orphan attachments.** Since there is no FK, deleting a stack, an environment or a tier removes the attachments targeting it — for a stack, also those targeting its environments — in the deletion's transaction, each audited `variable_set.detached` (context `reason`: `stack_deleted` | `environment_deleted` | `tier_deleted`). An attach locks its stack/env/tier row `FOR KEY SHARE` against the deletion's `FOR UPDATE`.
 
 At equal name and kind, the upper layer overrides. Two sources outside resolution are added at claim time: upstream outputs (`dependency:`) and mocks (`mock`) — see §9.
 
@@ -560,6 +560,8 @@ POST /worker/v1/jobs/{id}/logs
 
 Single multiplexed WebSocket `/api/v1/ws` (the access token goes in the first message, `{"type": "auth", "token": …}`, not in the URL): `{"sub": "run:<id>"}` → light signals `{"kind": "log", run_id, phase, max_seq}` and `{"kind": "run_event", run_id, to_state}` — never the content. On a `log` signal the front fetches the new chunks with REST `GET …/logs?phase=&after_seq=`; on a `run_event` it invalidates its queries. Reconnection → the same REST GET `after_seq` fills the gap, then the stream.
 
+**Auth in the first message, never in the URL.** The server accepts the connection, then the client's first message must be `{"type": "auth", "token": "<access token>"}` (a fresh one on every reconnect); anything else, an invalid or expired token, or a disabled user closes the socket with code **4401**. A `?token=` query parameter is ignored: a URL leaks to proxy/LB logs, browser history and `Referer`. Subscriptions are checked per channel against the caller's spaces.
+
 **Multi-replica fan-out (without a broker).** A WS client is connected to **one** API replica; the event (transition or log chunk) may be produced on **another** replica. The bridge is **Postgres `LISTEN/NOTIFY`**:
 
 - `transition()` (§4.2) and log ingestion (§5.1) emit a `NOTIFY` on a per-entity channel (`run_<id>`, `env_<id>`) **in the same transaction** as the write.
@@ -596,7 +598,8 @@ The exhaustive list of actions the API emits (to check it: `grep -rn 'action="' 
 
 ```
 auth.login / auth.logout / auth.domain_denied / auth.refresh_reuse_detected
-space.created / space.member_set / space.member_removed            # Phase F memberships (§2.4)
+space.created / space.member_set / space.member_removed            # Phase F memberships (§2.4);
+                                  #   member_set context: user_id, role, allowed_tiers, can_destroy
 stack.created / stack.updated / stack.deleted
 environment.created / environment.updated / environment.deleted   # created: also by a clone
                                   #   (context cloned_from, autodeploy, autodeploy_off_reason, §21.2)
@@ -608,7 +611,8 @@ variable.created / variable.updated / variable.deleted   # stack, env and set va
                                                           #   name, sensitive — NEVER the value
 variable_set.created / variable_set.updated / variable_set.deleted
 variable_set.attached / variable_set.detached   # detached: manual, or with its target — context
-                                                #   reason = stack_deleted | environment_deleted (§3.2)
+                                                #   reason = stack_deleted | environment_deleted
+                                                #   | tier_deleted (§3.2, §3.4)
 hook.created / hook.updated / hook.deleted      # deleted: manual, or with its stack/env (reason, §3.2)
 notification_target.created / notification_target.updated / notification_target.deleted
                                                 # deleted: manual, or with its stack/env (reason, §3.2)
@@ -1366,7 +1370,13 @@ s3://stackd-<org>/
   artifacts/{run_id}/plan.tfplan | plan.json | outputs.json
 ```
 
-The bucket is `S3_BUCKET` (default `stackd`). *Status*: the API does not request SSE-KMS on its writes yet — encryption at rest is the bucket's default encryption, and versioning the bucket's own setting (PLAN Phase 3).
+The bucket is `S3_BUCKET` (default `stackd`). A bucket provisioned beforehand is used as is (set
+its versioning and encryption there). When the API creates the bucket itself (first write, bucket
+missing), it turns **versioning ON** and sets **default SSE-S3** (`AES256`) encryption on it; an S3
+that lacks those calls (Garage, the dev S3, implements neither) keeps the bucket without them and
+the API logs a warning (`s3.bucket_setting_unsupported`) instead of failing the write. *Status*:
+the API does not request SSE-KMS on its writes yet — encryption at rest is the bucket's default
+encryption (PLAN Phase 3).
 
 `artifacts/{run_id}/plan.tfplan` is the run's **saved plan** (§7.3): it holds the run's variable values in clear, sensitive ones included, so the API encrypts it **AES-256-GCM with the application key** before it reaches S3 (layout `nonce(12) || ciphertext || tag`, AAD = `stackd:artifact:<s3 key>` so a blob moved under another run's key does not decrypt) — on top of the bucket's SSE. Its key is recorded on the run (`runs.plan_artifact_key`). **Retention**: it lives only while the run can still be applied. On any transition to a terminal state (`finished`, `failed`, `discarded`, `canceled` — whatever the path: worker event, user, scheduler), `transition()` clears `plan_artifact_key` in the same transaction and the object is deleted once that transaction commits (best effort: a failed delete is logged; the blob stays encrypted and the API serves it to nobody, since only an `applying` run's worker can download it). `plan.json`/`outputs.json` are accepted but not archived yet.
 
@@ -2033,7 +2043,9 @@ Unauthenticated scrape endpoint (restrict at the network layer — it exposes on
 result only, never a run id.
 - `stackd_runs_total{state}`, `stackd_queue_depth`, `stackd_workers_online` — gauges refreshed from
   the DB at scrape time (cheap aggregate queries).
-- `stackd_claim_latency_seconds` — histogram, observed in `claim_one` (queue wait = now − created_at).
+- `stackd_claim_latency_seconds` — histogram, observed in `claim_one`: how long the run waited
+  claimable — now − `confirmed_at` for an apply claim (the plan and the human wait before it are not
+  queue time), now − `created_at` for a plan or command claim.
 - `stackd_run_duration_seconds{phase}` — histogram, observed at the terminal `transition()` (claim →
   terminal); `phase` = `apply` if the run was confirmed, else `plan`.
 - `stackd_webhook_total{result}` — counter (`accepted`/`rejected`/`no_match`) in the webhook handler.

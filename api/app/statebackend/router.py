@@ -261,8 +261,10 @@ async def create_import_session(env_id: uuid.UUID, user: CurrentUser, session: D
 
     Mints a short-lived, run-less `rw` state token and returns a ready-to-use `http` backend config
     so an operator can migrate their current remote state with one standard command:
-    `tofu init -migrate-state -backend-config=...`. Terraform LOCKs, uploads the state through the
-    backend (stored as a `state_version` with no originating run), then UNLOCKs. Admin-only.
+    `TF_HTTP_ADDRESS=... TF_HTTP_PASSWORD=... tofu init -migrate-state` (the settings ride as
+    TF_HTTP_* env, never -backend-config, which tofu would persist into .terraform/ with the token).
+    Terraform LOCKs, uploads the state through the backend (stored as a `state_version` with no
+    originating run), then UNLOCKs. Admin-only.
     """
     env = await session.get(Environment, env_id)
     if env is None:

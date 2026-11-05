@@ -174,15 +174,15 @@ async def lock_attach_target(
     notification target to a stack or an env, lock that row FOR KEY SHARE until the attach
     commits. It conflicts only with the FOR UPDATE a deletion takes: the attach either waits for
     the deletion and then finds no target (404), or commits first and the deletion removes what it
-    attached (`drop_target_references`) — never an orphan. A tier isn't deleted with stacks/envs.
-    `not_found` overrides the 404's title."""
-    model: type[Stack] | type[Environment]
+    attached (`drop_target_references`) — never an orphan. A tier (a variable set's target only)
+    is locked the same way against `delete_tier`. `not_found` overrides the 404's title."""
+    model: type[Stack] | type[Environment] | type[Tier]
     if target_kind == AttachmentTarget.stack:
         model, title = Stack, "Stack not found"
     elif target_kind == AttachmentTarget.environment:
         model, title = Environment, "Environment not found"
     else:
-        return
+        model, title = Tier, "Tier not found"
     locked = await session.execute(
         select(model.id).where(model.id == target_id).with_for_update(read=True, key_share=True)
     )

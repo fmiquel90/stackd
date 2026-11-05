@@ -5,6 +5,8 @@ import json
 import uuid
 
 import httpx
+import pytest
+from botocore.exceptions import ClientError
 from moto import mock_aws
 
 from tests.conftest_phase2 import (
@@ -480,3 +482,47 @@ async def test_post_requires_the_holders_lock_id_while_locked(client: httpx.Asyn
         )
         assert written.status_code == 200
         assert await _serials() == [2, 1]
+
+
+def test_created_bucket_gets_versioning_and_encryption() -> None:
+    """§11.3: a bucket the API creates has versioning ON and default encryption."""
+    from app.statebackend.store import _client, _ensure_bucket
+
+    with mock_aws():
+        client = _client()
+        _ensure_bucket(client, "stackd-hardened")
+        assert client.get_bucket_versioning(Bucket="stackd-hardened")["Status"] == "Enabled"
+        config = client.get_bucket_encryption(Bucket="stackd-hardened")
+        rule = config["ServerSideEncryptionConfiguration"]["Rules"][0]
+        assert rule["ApplyServerSideEncryptionByDefault"]["SSEAlgorithm"] == "AES256"
+
+
+class _NoBucketSettings:
+    """An S3 without the versioning/encryption calls, like Garage in dev."""
+
+    def __init__(self) -> None:
+        self.created: list[str] = []
+
+    def head_bucket(self, **_: object) -> None:
+        raise ClientError({"Error": {"Code": "404"}}, "HeadBucket")
+
+    def create_bucket(self, Bucket: str) -> None:  # boto3 casing
+        self.created.append(Bucket)
+
+    def put_bucket_versioning(self, **_: object) -> None:
+        raise ClientError({"Error": {"Code": "NotImplemented"}}, "PutBucketVersioning")
+
+    def put_bucket_encryption(self, **_: object) -> None:
+        raise ClientError({"Error": {"Code": "NotImplemented"}}, "PutBucketEncryption")
+
+
+def test_unsupported_bucket_settings_only_warn(monkeypatch: pytest.MonkeyPatch) -> None:
+    from app.statebackend import store
+
+    # Record the warnings directly: Alembic's fileConfig may have disabled the existing loggers.
+    warned: list[str] = []
+    monkeypatch.setattr(store._log, "warning", lambda *_a, extra: warned.append(extra["setting"]))
+    client = _NoBucketSettings()
+    store._ensure_bucket(client, "garage-bucket")
+    assert client.created == ["garage-bucket"]
+    assert warned == ["versioning", "encryption"]

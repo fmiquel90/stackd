@@ -46,7 +46,8 @@ task logs           # aggregated colored logs (api, worker)
 task test           # API pytest + front vitest (the worker suite runs apart, TESTING.md §2)
 task e2e            # complete automated scenario (§7)
 task lint           # ruff check + ruff format --check (api)
-task front          # Vite dev server on the host (pnpm dev); task up = dev + front
+task front          # Vite on the host (pnpm dev) — task dev already serves the front on :5173
+                    #   (compose `front` service): stop that service first
 task migrate        # alembic upgrade head; task makemigration NAME=... autogenerates one
 task seed-fixtures  # (re)creates the fixture git repos in .dev/repos (§4), idempotent
 task push-change    # commits a change in demo-network (staleness test, §4)
@@ -163,7 +164,7 @@ Safeguard: the API refuses to start with `STACKD_DEV_AUTH=true` and `STACKD_ENV=
 
 - Launched by compose with `STACKD_RUNNER=local`: terraform commands run directly inside the worker container (image including OpenTofu + jq + git). **No Docker-in-Docker** in the dev stack.
 - The `docker` runner (SPECS §7.4, required in production) is exercised by the worker's tests against the host's Docker daemon: `tests/test_docker_runner.py` (isolation: one container per command, a `setsid` daemon contained, repo hooks seeing the checkout only, read-only rootfs, timeout) and `tests/test_docker_job.py` (a real plan → apply with tofu inside the container). They need `alpine:3.20` and the test image `docker build -f worker/tests/docker/tofu-test.Dockerfile -t stackd-test/tofu:1.12.2 worker/tests/docker`, and are skipped without a daemon. To run a worker on it by hand: `STACKD_RUNNER=docker`, `STACKD_RUNNER_IMAGES='{"opentofu:1.12.2": "<repo>@sha256:<digest>"}'` (an image built from `deploy/images/` and pushed), the Docker socket reachable, `STACKD_WORKSPACE_ROOT` at the same path on the host and in the agent, and `STACKD_DOCKER_NETWORK` set to a network that reaches the API.
-- Tool binaries: **OpenTofu and Terraform** pre-installed in the dev image (no download on first run). A stack's `tool` picks which one runs — no separate "terraform worker", any dev worker handles both.
+- Tool binaries: **OpenTofu and Terraform** pre-installed in the dev image (no download on first run): OpenTofu 1.12.2 and Terraform 1.14.9, the versions of the runner images (`task build-runner-images`, PLAN §6). A stack's `tool` picks which one runs — no separate "terraform worker", any dev worker handles both.
 - Agent hot reload (watchfiles): modifying `worker/` restarts the agent process — watchfiles sends SIGINT, then SIGKILL after 5 s — so a job still running is cut off, not drained.
 - Multi-workers to test concurrency and affinity: `docker compose -f deploy/docker-compose.dev.yml up -d --scale worker=3`, or `STACKD_MAX_CONCURRENT_JOBS` for several jobs per worker.
 - The dev worker registers with no labels (its `local` pool has none either), so it takes runs of unlabelled environments only. To try label routing, give the `worker` service `STACKD_WORKER_LABELS: "tier=prod"` (comma-separated `key=value`, SPECS §7.1) and the environment the same labels.

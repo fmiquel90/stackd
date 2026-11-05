@@ -318,6 +318,7 @@ Target versions (June 2026). Same technology choices as originally, current vers
 | **Vite** | (not fixed) | **7.x** (locked 7.3.5) | Node 20.19+/22.12+. Tailwind v4 via the **`@tailwindcss/vite`** plugin (not PostCSS — avoids the known conflict) |
 | **Tailwind** | v4 | **v4.1.x** (floor; locked 4.3.1) | already the right major; `@tailwindcss/vite` integration. No contract change (CSS tokens, DESIGN §8) |
 | **OpenTofu** (dev image) | (not fixed) | **1.12.x** (1.12.2 in the dev worker and runner images) | the dev image pre-installs a recent version; `tool_version` remains driven **per stack** (SPECS §3.1, user choice). 1.10 introduced **OCI distribution** of modules/providers — a track if we host private modules (otherwise out of scope) |
+| **Terraform** (user option, BUSL) | (not fixed) | **1.14.9** in the dev worker image and the `terraform` runner image | same pin in `worker/Dockerfile.dev`, `deploy/images/terraform.Dockerfile` and `task build-runner-images`; change them together |
 
 **Unchanged (already at the right major)**: FastAPI, Pydantic v2, SQLAlchemy 2 async, Alembic, uv, TanStack Query v5, react-flow + dagre, react-virtuoso, anser, pnpm.
 

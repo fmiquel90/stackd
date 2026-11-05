@@ -4,7 +4,7 @@ import { useNavigate } from "react-router-dom";
 import { type StackPatch, stacks } from "@/api/resources";
 import type { RepoAuthKind, Stack, Tool } from "@/api/types";
 import { useSpaces } from "@/app/SpaceContext";
-import { useIsAdmin } from "@/auth/session";
+import { useIsAdmin, useSession } from "@/auth/session";
 import { Button as UiButton } from "@/ui/Button";
 import { TypeNameDialog } from "@/ui/TypeNameDialog";
 import { Button, Card, Field, LabelsEditor, Select, TextInput } from "@/components/ui";
@@ -72,6 +72,9 @@ function StackGeneralForm({ stack }: { stack: Stack }) {
   const stackId = stack.id;
   const qc = useQueryClient();
   const isAdmin = useIsAdmin();
+  // Same gate as the API's PATCH /stacks/{id} (writer), which carries the webhook secret too.
+  const me = useSession().data;
+  const canWrite = !!me && !me.disabled && me.role !== "reader";
   const [form, setForm] = useState<FormState>(() => ({
     name: stack.name,
     description: stack.description ?? "",
@@ -108,7 +111,7 @@ function StackGeneralForm({ stack }: { stack: Stack }) {
       labels: form.labels,
     };
     if (form.repo_secret) body.repo_secret = form.repo_secret; // omit → keep the stored secret
-    if (isAdmin && form.webhook_secret) body.webhook_secret = form.webhook_secret;
+    if (canWrite && form.webhook_secret) body.webhook_secret = form.webhook_secret;
     save.mutate(body);
   };
 
@@ -183,8 +186,9 @@ function StackGeneralForm({ stack }: { stack: Stack }) {
             )}
           </div>
 
-          {/* Webhook HMAC secret (§5) — admin-only. Write-only: blank keeps the stored value. */}
-          {isAdmin && (
+          {/* Webhook HMAC secret (§3.1) — writer, like the rest of the stack. Write-only: blank keeps
+              the stored value. */}
+          {canWrite && (
             <Field label={`Webhook secret${stack.has_webhook_secret ? " (set — leave blank to keep)" : ""}`}>
               <TextInput
                 type="password"

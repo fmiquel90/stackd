@@ -92,7 +92,7 @@ A variable set only ever reaches its own space:
   this rule existed.
 
 !!! note
-    Detach a set before deleting it. Deleting an attached set returns **409** with the list of attachments — explicit detachment is required. Deleting a stack or an environment removes the attachments that target it for you (audited `variable_set.detached` with the reason).
+    Detach a set before deleting it. Deleting an attached set returns **409** with the list of attachments — explicit detachment is required. Deleting a stack, an environment or a tier removes the attachments that target it for you (audited `variable_set.detached` with the reason).
 
 ## Sensitive values
 

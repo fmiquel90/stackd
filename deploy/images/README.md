@@ -31,8 +31,8 @@ docker buildx build -f deploy/images/opentofu.Dockerfile \
 
 # Terraform (BUSL ≥1.6 — opt-in; see PLAN §5)
 docker buildx build -f deploy/images/terraform.Dockerfile \
-  --build-arg TERRAFORM_VERSION=1.9.8 \
-  --platform linux/amd64,linux/arm64 -t stackd/terraform:1.9.8 .
+  --build-arg TERRAFORM_VERSION=1.14.9 \
+  --platform linux/amd64,linux/arm64 -t stackd/terraform:1.14.9 .
 ```
 
 Or via the Taskfile: `task build-runner-images` (builds both for the host arch and loads them).
@@ -54,6 +54,6 @@ The worker declares the versions it holds images for; the API only hands it runs
 
 ```bash
 docker run --rm stackd/opentofu:1.12.2                    # → OpenTofu v1.12.2
-docker run --rm stackd/terraform:1.9.8                     # → Terraform v1.9.8
+docker run --rm stackd/terraform:1.14.9                     # → Terraform v1.14.9
 docker run --rm stackd/opentofu:1.12.2 git --version
 ```
