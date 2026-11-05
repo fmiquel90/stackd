@@ -1279,22 +1279,30 @@ API's HTTP state backend rather than to S3 directly.</p>
     STS["Cloud STS&lt;br/&gt;(AssumeRoleWithWebIdentity)"]
 
     Hooks["Slack · webhooks · GitHub"]
+    Secrets[("External secret source&lt;br/&gt;(Proton Pass)")]
 
     Browser &lt;--&gt;|"REST + WebSocket"| API
     API &lt;--&gt; PG
     API &lt;--&gt;|"states · encrypted saved plans"| S3
     API --&gt;|"ls-remote head poll · check-repo · input discovery"| Git
     API --&gt;|"notifications · PR status/comment"| Hooks
+    API --&gt;|"secret references, at claim"| Secrets
     Worker --&gt;|"register · heartbeat · claim · events · logs&lt;br/&gt;saved plan up/down (outbound only)"| API
     Worker --&gt;|"shallow clone @ pinned commit"| Git
     Worker --&gt;|"tofu http backend (TF_HTTP_*)"| API
     Worker --&gt;|"OIDC token"| STS</code></pre>
 <p>Only the API holds the S3 and database credentials: workers reach states and saved plans through
 it.</p>
+<p><strong>Run logs have two tiers.</strong> The worker streams masked chunks to the API, which keeps them in
+Postgres (<code>run_logs</code>) and signals them over <code>LISTEN/NOTIFY</code> for the live viewer. Once a run has been
+terminal for a minute, a scheduler task archives its logs to S3 (<code>logs/{run_id}/{phase}.log.gz</code>);
+the hot rows are purged 7 days after archiving (<code>log_hot_retention_days</code>, a daily task). Reads fall back to the archive
+transparently.</p>
 <h2 id="run-state-machine">🔄 Run state machine<a class="headerlink" href="#run-state-machine" title="Permanent link">&para;</a></h2>
 <p>Every state change goes through one function, <code>transition()</code>: it checks legality, does an atomic
 guarded update, writes a <code>run_event</code> + (for human/terminal actions) an <code>audit_event</code> in the <strong>same
-transaction</strong>, emits <code>LISTEN/NOTIFY</code>, and enqueues any notification. <code>checking</code> is skipped when
+transaction</strong>, emits <code>LISTEN/NOTIFY</code>, enqueues any notification (outbound targets, the PR
+post-back, the in-app inbox) and advances the run's rollout, if any. <code>checking</code> is skipped when
 there are no <code>after_plan</code> hooks.</p>
 <pre class="mermaid"><code>stateDiagram-v2
     [*] --&gt; queued
@@ -1308,26 +1316,40 @@ there are no <code>after_plan</code> hooks.</p>
     preparing --&gt; failed
     planning --&gt; checking: has after_plan hooks
     planning --&gt; unconfirmed: diff, no autodeploy
-    planning --&gt; confirmed: autodeploy
-    planning --&gt; finished: empty diff
+    planning --&gt; confirmed: autodeploy or rollout gate
+    planning --&gt; finished: empty diff, or a proposed (PR/drift) plan
     checking --&gt; unconfirmed
     checking --&gt; confirmed
     checking --&gt; finished
-    unconfirmed --&gt; confirmed: human confirm (can_apply + 4-eyes + mock-block)
+    unconfirmed --&gt; confirmed: human confirm (can_apply + 4-eyes + mock/fallback block)
     unconfirmed --&gt; discarded
     unconfirmed --&gt; canceled
     confirmed --&gt; applying: worker claims apply (saved plan)
+    confirmed --&gt; canceled
     applying --&gt; finished
     planning --&gt; failed
     checking --&gt; failed
-    applying --&gt; failed
+    applying --&gt; failed: incl. stopped mid-apply
+    unconfirmed --&gt; failed
+    confirmed --&gt; failed
+    preparing --&gt; canceled: stop request or PR closed
+    planning --&gt; canceled
+    checking --&gt; canceled
+    running --&gt; canceled
     finished --&gt; [*]
     failed --&gt; [*]
     discarded --&gt; [*]
     canceled --&gt; [*]</code></pre>
-<p>Not drawn: a closed pull request cancels its proposed runs from whatever in-flight state they are
-in. A user cancels only <code>queued</code> or <code>unconfirmed</code> runs: stopping a job a worker is executing is not
-implemented yet.</p>
+<p><strong>Cancel and stop.</strong> A user (or a rollout's cancel) cancels a <code>queued</code>, <code>unconfirmed</code> or
+<code>confirmed</code> run at once; a closed pull request cancels its proposed runs from whatever in-flight
+state they are in. Stopping a run a worker is <em>executing</em> is a request, not a transition: the API
+records it, audits <code>run.cancel_requested</code> and queues a <code>cancel_job</code> command for the worker's next
+heartbeat; the worker interrupts the tool (SIGINT, SIGKILL after <code>STACKD_CANCEL_GRACE_SECONDS</code>) and
+reports <code>job_canceled</code>. The run then ends <code>canceled</code> — or <code>failed</code> with <code>canceled_during_apply</code> if
+the job held apply credentials (an apply, a mutating command), since the infrastructure may be partly
+changed: <code>applying</code> is never <code>canceled</code>. Stopping such a job needs <code>can_apply</code>. The
+<code>unconfirmed</code>/<code>confirmed → failed</code> edges are legal, but only a failure report from the worker that
+planned the run takes them.</p>
 <p><strong>Worker loss</strong> fails only runs whose job is <em>executing</em> on the lost worker (<code>preparing</code>,
 <code>planning</code>, <code>checking</code>, <code>running</code>, <code>applying</code>) — after 120 s, or, for a job holding apply
 credentials (<code>applying</code>, a mutating command), after the apply budget + grace. <code>unconfirmed</code> and
@@ -1344,7 +1366,7 @@ pinned to the commit that plan checked out, and the apply job applies exactly th
     participant H as Human
     W-&gt;&gt;A: POST /worker/v1/register (pool token)
     loop every 20s
-        W-&gt;&gt;A: heartbeat → pending commands (e.g. diagnostics)
+        W-&gt;&gt;A: heartbeat → pending commands (diagnostics, cancel_job)
     end
     W-&gt;&gt;A: POST /jobs/claim?wait=25 (long-poll)
     A--&gt;&gt;W: plan job: vars + secrets, hooks, state token (plan scope), plan OIDC token
@@ -1377,14 +1399,16 @@ to tofu only, as <code>TF_HTTP_*</code> environment variables — hooks never se
 no secret (an allowlisted env, a masked <code>plan.json</code>, no tfvars or token file on disk). Every check
 result, with the stage it ran at, is kept on the run (<code>check_results</code>). A failing <code>fail</code> check stops
 the job at its stage; a failing <code>after_apply</code> check fails the run after the infrastructure changed:
-its outputs are recorded, nothing cascades.</p>
+its outputs are recorded, nothing cascades. At the apply stages, repo hooks run only on a tier with
+<code>repo_hooks_at_apply</code> (off by default); otherwise each is skipped with a <code>warn</code> check.</p>
 <p><strong>Apply affinity.</strong> A confirmed run is reserved for the worker that planned it for 60 s, then any
 compatible worker takes it. Nothing is carried over in the workspace: the apply always starts from a
 fresh clone of the pinned commit and the saved plan from the API.</p>
 <h2 id="dependencies-mocks-cascade">🧬 Dependencies, mocks &amp; cascade<a class="headerlink" href="#dependencies-mocks-cascade" title="Permanent link">&para;</a></h2>
 <p>At claim the API resolves each referenced input as <strong>real upstream output › mock › explicit
 error</strong>. A run that consumed a mock is flagged <code>used_mocks</code> and can't be applied unless the env opts
-in. When a tracked apply finishes, downstream environments cascade — protections are never bypassed.</p>
+in. When a tracked apply finishes, downstream environments cascade (as each edge's <code>trigger_policy</code>
+allows) — protections are never bypassed.</p>
 <pre class="mermaid"><code>flowchart TD
     subgraph net["network/prod (upstream)"]
       NO["output: network_name"]
@@ -1436,8 +1460,9 @@ the <code>one_active_run_per_env</code> unique index). What's worth knowing:</p>
 <ul>
 <li>🧩 <strong>The unit of parallelism is the environment, not the worker</strong> — one active run per env, but
   different envs run concurrently. Throughput ≈ <code>min(workers, envs with queued work)</code>.</li>
-<li>🏷️ <strong>Labels segment pools</strong> — a worker only claims runs whose env labels are a subset of its own,
-  so you can dedicate (and scale) a prod pool independently.</li>
+<li>🏷️ <strong>Labels segment pools</strong> — a worker only claims runs whose env labels are a subset of its own
+  (and whose stack's tool version it can run), so you can dedicate (and scale) a prod pool
+  independently.</li>
 <li>♻️ <strong>Workers are interchangeable &amp; disposable</strong> — apply affinity prefers the worker that planned
   for 60 s, but the apply never depends on it (pinned commit + saved plan from the API). Losing a
   worker only fails the runs <em>executing</em> on it (<code>worker_lost</code>); runs waiting for a human or for the
@@ -1448,8 +1473,8 @@ the <code>one_active_run_per_env</code> unique index). What's worth knowing:</p>
   dedicated connection), so a task runs once per tick across replicas. The git head poll runs as a
   separate task (at most 8 <code>ls-remote</code> at a time), so slow repos never delay worker-loss detection
   or notifications.</li>
-<li>📊 <strong>No built-in autoscaler</strong>, but <code>/api/v1/health</code> and <code>/queue</code> expose the signals an external one
-  (ECS target-tracking, KEDA) can drive; <code>/metrics</code> serves Prometheus gauges. On Fargate, mind the
+<li>📊 <strong>No built-in autoscaler</strong>, but <code>/api/v1/health</code> and <code>/api/v1/queue</code> expose the signals an
+  external one (ECS target-tracking, KEDA) can drive; <code>/metrics</code> serves Prometheus gauges. On Fargate, mind the
   runner execution model (no DinD).</li>
 </ul>
 

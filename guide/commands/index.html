@@ -1203,7 +1203,8 @@ managed backend as any other run.</p>
 <p class="admonition-title">Note</p>
 <p>This is <strong>not</strong> arbitrary shell. The worker runs <code>&lt;tool&gt; &lt;command&gt; &lt;args&gt;</code> where <code>command</code> is
 taken verbatim from an allowlist. To remove a stuck lock, use the dedicated force-unlock
-(UI <strong>State</strong> tab, or <code>DELETE /api/v1/environments/{id}/state/lock</code>) — it isn't a command.</p>
+(admin only: UI <strong>State</strong> tab → <strong>Force unlock…</strong>, or <code>DELETE /api/v1/environments/{id}/state/lock</code>)
+— it isn't a command.</p>
 </div>
 <h2 id="allowed-commands">Allowed commands<a class="headerlink" href="#allowed-commands" title="Permanent link">&para;</a></h2>
 <table>
@@ -1224,8 +1225,8 @@ taken verbatim from an allowlist. To remove a stuck lock, use the dedicated forc
 + tier check as approving an apply (see <a href="../runs-and-approvals/">Runs &amp; approvals</a>). Read-only
 commands only need <code>writer</code>.</p>
 <h2 id="run-one">Run one<a class="headerlink" href="#run-one" title="Permanent link">&para;</a></h2>
-<p>From the UI: open an environment → the <strong>Command</strong> tab → pick a command, add arguments, run. You
-land on the run page with live logs.</p>
+<p>From the UI: open an environment → <strong>More → Run a command…</strong> → pick a command, add arguments, run.
+You land on the run page with live logs.</p>
 <p>Over the API:</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="c1"># import an existing bucket into state</span>
 <a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>curl<span class="w"> </span>-s<span class="w"> </span>-X<span class="w"> </span>POST<span class="w"> </span>localhost:8000/api/v1/environments/<span class="nv">$ENV_ID</span>/commands<span class="w"> </span>-H<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$AUTH</span><span class="s2">&quot;</span><span class="w"> </span><span class="se">\</span>
@@ -1240,9 +1241,15 @@ land on the run page with live logs.</p>
 <a id="__codelineno-0-11" name="__codelineno-0-11" href="#__codelineno-0-11"></a><span class="s1">  &quot;command&quot;: &quot;state rm&quot;, &quot;args&quot;: [&quot;aws_instance.old&quot;]</span>
 <a id="__codelineno-0-12" name="__codelineno-0-12" href="#__codelineno-0-12"></a><span class="s1">}&#39;</span>
 </code></pre></div>
+<p>Arguments are passed verbatim, one list item each; an argument starting with <code>-</code> (an option such
+as <code>-chdir</code> or <code>-state</code>) is refused (<code>400 Argument not allowed</code>), as is a command outside the
+allowlist (<code>400 Command not allowed</code>).</p>
 <p>The response is a normal run (<code>type: command</code>). It flows <code>queued → preparing → running →
 finished/failed</code>, holds the <strong>one-active-run-per-env</strong> lock (no command races a plan/apply), streams
-logs, and uses the managed state backend.</p>
+logs, and uses the managed state backend. It can be stopped like any run
+(<a href="../runs-and-approvals/#the-lifecycle">Runs &amp; approvals</a>): a stopped read-only command ends
+<code>canceled</code>; a stopped mutating command ends <code>failed</code> (<code>canceled_during_apply</code>), and stopping it
+needs apply rights.</p>
 <h2 id="what-it-runs-with">What it runs with<a class="headerlink" href="#what-it-runs-with" title="Permanent link">&para;</a></h2>
 <ul>
 <li>The worker clones the repo at the request's <code>commit_sha</code> (a full SHA, a branch or a tag) or, by

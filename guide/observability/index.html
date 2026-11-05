@@ -815,6 +815,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#run-logs-hot-archived-purged" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Run logs: hot, archived, purged
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#inspecting-object-storage-dev" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -1220,6 +1231,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#run-logs-hot-archived-purged" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Run logs: hot, archived, purged
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#inspecting-object-storage-dev" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -1280,11 +1302,14 @@ without opening a shell. This page is task-oriented — pick the section that
 matches what you're trying to find out.</p>
 <h2 id="health-at-a-glance">Health at a glance<a class="headerlink" href="#health-at-a-glance" title="Permanent link">&para;</a></h2>
 <p><code>GET /api/v1/health</code> (any signed-in user) returns one snapshot: a DB
-connectivity check, workers (online / total, and each worker's pool, labels,
-status and last heartbeat), runs (active / queued), and how many warnings and
+connectivity check, workers (online / total, and each worker's pool and pool
+labels, labels, status, runner, agent version and last heartbeat), runs (active
+— <code>unconfirmed</code> and <code>confirmed</code> included — / queued), and how many warnings and
 errors the log buffer holds. The front <strong>Workers &amp; health</strong> page renders this
-snapshot alongside a live logs panel, and a green/red status dot sits in the
-topbar so you see degradation without leaving your current screen.</p>
+snapshot (refreshed every 5 s) alongside, for admins, the worker pools and a
+platform logs panel; the topbar shows workers online / total, in red when none
+is online or the API does not answer, so you see degradation without leaving
+your current screen.</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>curl<span class="w"> </span>-s<span class="w"> </span>localhost:8000/api/v1/health<span class="w"> </span>-H<span class="w"> </span><span class="s2">&quot;Authorization: Bearer </span><span class="nv">$TOKEN</span><span class="s2">&quot;</span>
 </code></pre></div>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="p">{</span>
@@ -1296,27 +1321,79 @@ topbar so you see degradation without leaving your current screen.</p>
 <a id="__codelineno-1-7" name="__codelineno-1-7" href="#__codelineno-1-7"></a><span class="w">    </span><span class="nt">&quot;total&quot;</span><span class="p">:</span><span class="w"> </span><span class="mi">1</span><span class="p">,</span>
 <a id="__codelineno-1-8" name="__codelineno-1-8" href="#__codelineno-1-8"></a><span class="w">    </span><span class="nt">&quot;online&quot;</span><span class="p">:</span><span class="w"> </span><span class="mi">1</span><span class="p">,</span>
 <a id="__codelineno-1-9" name="__codelineno-1-9" href="#__codelineno-1-9"></a><span class="w">    </span><span class="nt">&quot;items&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">[</span>
-<a id="__codelineno-1-10" name="__codelineno-1-10" href="#__codelineno-1-10"></a><span class="w">      </span><span class="p">{</span><span class="w"> </span><span class="nt">&quot;name&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;worker-1&quot;</span><span class="p">,</span><span class="w"> </span><span class="nt">&quot;pool&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;local&quot;</span><span class="p">,</span><span class="w"> </span><span class="nt">&quot;labels&quot;</span><span class="p">:</span><span class="w"> </span><span class="kc">null</span><span class="p">,</span><span class="w"> </span><span class="nt">&quot;status&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;idle&quot;</span><span class="p">,</span><span class="w"> </span><span class="nt">&quot;online&quot;</span><span class="p">:</span><span class="w"> </span><span class="kc">true</span><span class="p">,</span>
-<a id="__codelineno-1-11" name="__codelineno-1-11" href="#__codelineno-1-11"></a><span class="w">        </span><span class="nt">&quot;last_heartbeat_at&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;2026-10-10T09:31:02+00:00&quot;</span><span class="p">,</span><span class="w"> </span><span class="nt">&quot;seconds_since_heartbeat&quot;</span><span class="p">:</span><span class="w"> </span><span class="mf">3.2</span><span class="w"> </span><span class="p">}</span>
-<a id="__codelineno-1-12" name="__codelineno-1-12" href="#__codelineno-1-12"></a><span class="w">    </span><span class="p">]</span>
-<a id="__codelineno-1-13" name="__codelineno-1-13" href="#__codelineno-1-13"></a><span class="w">  </span><span class="p">},</span>
-<a id="__codelineno-1-14" name="__codelineno-1-14" href="#__codelineno-1-14"></a><span class="w">  </span><span class="nt">&quot;runs&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="nt">&quot;active&quot;</span><span class="p">:</span><span class="w"> </span><span class="mi">1</span><span class="p">,</span><span class="w"> </span><span class="nt">&quot;queued&quot;</span><span class="p">:</span><span class="w"> </span><span class="mi">4</span><span class="w"> </span><span class="p">},</span>
-<a id="__codelineno-1-15" name="__codelineno-1-15" href="#__codelineno-1-15"></a><span class="w">  </span><span class="nt">&quot;log_buffer&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="nt">&quot;size&quot;</span><span class="p">:</span><span class="w"> </span><span class="mi">812</span><span class="p">,</span><span class="w"> </span><span class="nt">&quot;recent_warn_error&quot;</span><span class="p">:</span><span class="w"> </span><span class="mi">3</span><span class="w"> </span><span class="p">}</span>
-<a id="__codelineno-1-16" name="__codelineno-1-16" href="#__codelineno-1-16"></a><span class="p">}</span>
+<a id="__codelineno-1-10" name="__codelineno-1-10" href="#__codelineno-1-10"></a><span class="w">      </span><span class="p">{</span><span class="w"> </span><span class="nt">&quot;id&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;0190e…&quot;</span><span class="p">,</span><span class="w"> </span><span class="nt">&quot;name&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;worker-1&quot;</span><span class="p">,</span><span class="w"> </span><span class="nt">&quot;pool&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;local&quot;</span><span class="p">,</span><span class="w"> </span><span class="nt">&quot;pool_labels&quot;</span><span class="p">:</span><span class="w"> </span><span class="kc">null</span><span class="p">,</span>
+<a id="__codelineno-1-11" name="__codelineno-1-11" href="#__codelineno-1-11"></a><span class="w">        </span><span class="nt">&quot;labels&quot;</span><span class="p">:</span><span class="w"> </span><span class="kc">null</span><span class="p">,</span><span class="w"> </span><span class="nt">&quot;status&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;idle&quot;</span><span class="p">,</span><span class="w"> </span><span class="nt">&quot;online&quot;</span><span class="p">:</span><span class="w"> </span><span class="kc">true</span><span class="p">,</span>
+<a id="__codelineno-1-12" name="__codelineno-1-12" href="#__codelineno-1-12"></a><span class="w">        </span><span class="nt">&quot;last_heartbeat_at&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;2026-10-10T09:31:02+00:00&quot;</span><span class="p">,</span><span class="w"> </span><span class="nt">&quot;seconds_since_heartbeat&quot;</span><span class="p">:</span><span class="w"> </span><span class="mf">3.2</span><span class="p">,</span>
+<a id="__codelineno-1-13" name="__codelineno-1-13" href="#__codelineno-1-13"></a><span class="w">        </span><span class="nt">&quot;runner&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;local&quot;</span><span class="p">,</span><span class="w"> </span><span class="nt">&quot;version&quot;</span><span class="p">:</span><span class="w"> </span><span class="kc">null</span><span class="w"> </span><span class="p">}</span>
+<a id="__codelineno-1-14" name="__codelineno-1-14" href="#__codelineno-1-14"></a><span class="w">    </span><span class="p">]</span>
+<a id="__codelineno-1-15" name="__codelineno-1-15" href="#__codelineno-1-15"></a><span class="w">  </span><span class="p">},</span>
+<a id="__codelineno-1-16" name="__codelineno-1-16" href="#__codelineno-1-16"></a><span class="w">  </span><span class="nt">&quot;runs&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="nt">&quot;active&quot;</span><span class="p">:</span><span class="w"> </span><span class="mi">1</span><span class="p">,</span><span class="w"> </span><span class="nt">&quot;queued&quot;</span><span class="p">:</span><span class="w"> </span><span class="mi">4</span><span class="w"> </span><span class="p">},</span>
+<a id="__codelineno-1-17" name="__codelineno-1-17" href="#__codelineno-1-17"></a><span class="w">  </span><span class="nt">&quot;log_buffer&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="nt">&quot;size&quot;</span><span class="p">:</span><span class="w"> </span><span class="mi">812</span><span class="p">,</span><span class="w"> </span><span class="nt">&quot;recent_warn_error&quot;</span><span class="p">:</span><span class="w"> </span><span class="mi">3</span><span class="w"> </span><span class="p">}</span>
+<a id="__codelineno-1-18" name="__codelineno-1-18" href="#__codelineno-1-18"></a><span class="p">}</span>
 </code></pre></div>
 <p><code>status</code> turns <code>degraded</code> when the database check fails. A worker whose heartbeat
 is older than 60 s shows as offline; see
 <a href="../workers-and-scaling/#worker-loss">Workers &amp; scaling</a> for the worker-lost
 lifecycle (only runs <em>executing</em> on a lost worker are failed).</p>
 <p>Two unauthenticated endpoints sit outside <code>/api/v1</code> for probes and scrapers:
-<code>GET /healthz</code> (liveness) and <code>GET /metrics</code> (Prometheus: runs by state, queue
-depth, workers online, claim latency, run duration, webhook results — counts
-only, never secrets). Restrict <code>/metrics</code> at the network layer.</p>
+<code>GET /healthz</code> (liveness, <code>{"status": "ok"}</code> without touching the database) and
+<code>GET /metrics</code> (Prometheus — counts only, never secrets). Restrict <code>/metrics</code> at
+the network layer.</p>
+<table>
+<thead>
+<tr>
+<th>Metric</th>
+<th>Type</th>
+<th>What it counts</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>stackd_runs_total{state}</code></td>
+<td>gauge</td>
+<td>runs per state, read from the database at scrape</td>
+</tr>
+<tr>
+<td><code>stackd_queue_depth</code></td>
+<td>gauge</td>
+<td>runs waiting for a claim (<code>queued</code> + <code>confirmed</code>)</td>
+</tr>
+<tr>
+<td><code>stackd_workers_online</code></td>
+<td>gauge</td>
+<td>workers that heartbeated within the offline window (60 s)</td>
+</tr>
+<tr>
+<td><code>stackd_claim_latency_seconds</code></td>
+<td>histogram</td>
+<td>from a run's creation to each claim of it (plan and apply claims)</td>
+</tr>
+<tr>
+<td><code>stackd_run_duration_seconds{phase}</code></td>
+<td>histogram</td>
+<td>from the last claim to the terminal state; <code>phase="apply"</code> if the run was confirmed, else <code>"plan"</code></td>
+</tr>
+<tr>
+<td><code>stackd_webhook_total{result}</code></td>
+<td>counter</td>
+<td>VCS webhooks received: <code>accepted</code>, <code>rejected</code>, <code>no_match</code></td>
+</tr>
+</tbody>
+</table>
+<p>The gauges are database-wide; the histograms and the counter are kept per API
+process, so sum them across replicas. Setting <code>STACKD_OTLP_ENDPOINT</code> also exports
+OpenTelemetry traces (HTTP requests and SQL queries, service <code>stackd-api</code>) over
+OTLP/HTTP; unset, tracing is off.</p>
 <h2 id="querying-logs">Querying logs<a class="headerlink" href="#querying-logs" title="Permanent link">&para;</a></h2>
-<p><code>GET /api/v1/logs</code> (admin only) serves the structured JSON ring buffer. Filter
-by <code>level</code>, <code>event</code>, <code>worker_id</code>, <code>run_id</code>, <code>request_id</code>, or free-text <code>q</code>.
-Every HTTP response carries an <code>X-Request-ID</code> header, so you can copy it from a
-failing call and correlate that request across all the log lines it produced.</p>
+<p><code>GET /api/v1/logs</code> (admin only) serves the structured JSON ring buffer: the
+last 5,000 records of the API process that answers, in memory (each replica has
+its own). Filter by <code>level</code> (that level and above), <code>logger</code>, <code>event</code>,
+<code>worker_id</code>, <code>run_id</code>, <code>request_id</code>, or free-text <code>q</code>; <code>limit</code> (default 200, at
+most 1,000) caps the newest-first answer. The <strong>Workers &amp; health</strong> page has the
+same view, filtered by level, worker or text.
+Every HTTP response carries an <code>X-Request-ID</code> header (the caller's own, if the
+request sent one), so you can copy it from a failing call and correlate that
+request across all the log lines it produced.</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="c1"># Everything that happened for one request</span>
 <a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a>curl<span class="w"> </span>-s<span class="w"> </span><span class="s2">&quot;localhost:8000/api/v1/logs?request_id=01J7Z…&quot;</span><span class="w"> </span>-H<span class="w"> </span><span class="s2">&quot;Authorization: Bearer </span><span class="nv">$TOKEN</span><span class="s2">&quot;</span>
 <a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a>
@@ -1326,17 +1403,26 @@ failing call and correlate that request across all the log lines it produced.</p
 <h3 id="log-levels-carry-signal-not-volume">Log levels carry signal, not volume<a class="headerlink" href="#log-levels-carry-signal-not-volume" title="Permanent link">&para;</a></h3>
 <p>Levels are chosen so that the default stream is the <em>interesting</em> stream:</p>
 <ul>
-<li><strong>INFO</strong> — mutations and domain events (<code>run.transition</code>, <code>worker.claim</code>, …).</li>
-<li><strong>DEBUG</strong> — reads, polls and heartbeats. Hidden by default (they're noise).</li>
-<li><strong>WARNING</strong> — all <code>4xx</code> responses.</li>
+<li><strong>INFO</strong> — mutations (non-<code>GET</code> requests) and domain events (<code>run.transition</code>,
+  <code>worker.claim</code>, …).</li>
+<li><strong>DEBUG</strong> — reads (<code>GET</code>), polls and heartbeats. Hidden by default (they're noise).</li>
+<li><strong>WARNING</strong> — all <code>4xx</code> responses, and any request slower than 1.5 s.</li>
 <li><strong>ERROR</strong> — all <code>5xx</code> responses.</li>
 </ul>
 <p>Set <code>STACKD_LOG_LEVEL=DEBUG</code> to surface the polls and heartbeats too when you're
-chasing something low-level.</p>
+chasing something low-level. <code>STACKD_LOG_FORMAT=json</code> (the default) writes one
+JSON object per line on stderr; <code>pretty</code> is for reading locally.</p>
+<p>The rate-limited routes answer <code>429</code> (problem+json) past their budget, counted
+per client IP and per API replica: the Google sign-in callback and session refresh
+(30/min), the GitHub webhook (120/min) and input discovery (10/min). Behind a reverse proxy, the client IP is
+the one the API sees.</p>
 <h2 id="worker-diagnostics">Worker diagnostics<a class="headerlink" href="#worker-diagnostics" title="Permanent link">&para;</a></h2>
-<p>From the <strong>Workers &amp; health</strong> page, a per-worker button queues a read-only debug
-bundle: tool versions, disk usage, environment variable <em>names</em>, and recent agent
-logs. There is no inbound connection to a worker — the request is delivered over
+<p>From the <strong>Workers &amp; health</strong> page, an admin's <strong>Diagnostics</strong> button (on an
+online worker) queues a read-only debug bundle: platform, runner and API URL,
+<code>tofu</code> / <code>terraform</code> / <code>git</code> versions on the agent's host, disk usage, running
+containers (<code>docker</code> runner), environment variable <em>names</em>, and the last 50 agent
+log lines. The request is audited (<code>worker.diagnostics_requested</code>). There is no
+inbound connection to a worker — the request is delivered over
 the <strong>heartbeat command channel</strong> (the worker pulls it on its next 20 s beat) and
 the result comes back via <code>POST /worker/v1/commands/{id}/result</code>.</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a>curl<span class="w"> </span>-s<span class="w"> </span>-X<span class="w"> </span>POST<span class="w"> </span>localhost:8000/api/v1/workers/<span class="nv">$WORKER_ID</span>/diagnostics<span class="w"> </span>-H<span class="w"> </span><span class="s2">&quot;Authorization: Bearer </span><span class="nv">$TOKEN</span><span class="s2">&quot;</span>
@@ -1349,12 +1435,26 @@ the result comes back via <code>POST /worker/v1/commands/{id}/result</code>.</p>
 Secrets are never logged anywhere: <code>sensitive</code> variables are masked by the
 agent and never appear in logs, health output, or a diagnostics bundle.</p>
 </div>
+<h2 id="run-logs-hot-archived-purged">Run logs: hot, archived, purged<a class="headerlink" href="#run-logs-hot-archived-purged" title="Permanent link">&para;</a></h2>
+<p>A run's log lines land in the database first. About a minute after the run ends,
+the scheduler archives them to S3 as <code>logs/&lt;run_id&gt;/&lt;phase&gt;.log.gz</code>; the
+database rows are then purged <code>LOG_HOT_RETENTION_DAYS</code> (default 7) days after
+archiving by a daily retention task. Reads don't change: the run page and
+<code>GET /api/v1/runs/{id}/logs</code> serve whichever tier holds the lines, and
+<code>GET /api/v1/runs/{id}/logs/download</code> returns them as plain text. While S3 is
+unreachable, runs stay unarchived (logged as <code>logs.archive_failed</code>) and keep
+their rows until a later tick succeeds.</p>
+<p>The same daily task deletes expired refresh-token families and — only when
+<code>STACKD_AUDIT_PURGE_DATABASE_URL</code> names the distinct purge role — audit events
+older than <code>AUDIT_RETENTION_DAYS</code> (default 730), recording an <code>audit.purged</code>
+event. Each step logs <code>scheduler.retention</code> (with a count) or
+<code>scheduler.retention_failed</code>.</p>
 <h2 id="inspecting-object-storage-dev">Inspecting object storage (dev)<a class="headerlink" href="#inspecting-object-storage-dev" title="Permanent link">&para;</a></h2>
-<p>Managed states and saved plans live in S3 (Garage in dev), reached only by the
-API. <code>task s3-ls</code> lists the dev bucket with the API's own S3 settings:
+<p>Managed states, saved plans and archived logs live in S3 (Garage in dev), reached
+only by the API. <code>task s3-ls</code> lists the dev bucket with the API's own S3 settings:
 <code>states/&lt;environment_id&gt;/…</code> for state versions, <code>artifacts/&lt;run_id&gt;/plan.tfplan</code>
 for the saved plan of a run that can still be applied (encrypted, deleted when
-the run ends). If a plan with changes fails while uploading its plan file, the
+the run ends), <code>logs/&lt;run_id&gt;/…</code> for archived run logs. If a plan with changes fails while uploading its plan file, the
 API cannot reach the bucket: run <code>task s3</code>, then <code>task dev</code>. See
 <a href="../../DEV/#2-docker-compose-stack">Dev environment §2</a>.</p>
 <h2 id="watching-a-run-live">Watching a run live<a class="headerlink" href="#watching-a-run-live" title="Permanent link">&para;</a></h2>

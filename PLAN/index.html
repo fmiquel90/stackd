@@ -1970,7 +1970,7 @@ Goal: a self-hostable Terraform orchestration platform with multi-environment st
 <h3 id="phase-0-foundations-google-auth-15-weeks">Phase 0 — Foundations + Google Auth (1.5 weeks)<a class="headerlink" href="#phase-0-foundations-google-auth-15-weeks" title="Permanent link">&para;</a></h3>
 <ul>
 <li>[x] Monorepo: <code>api/</code>, <code>worker/</code>, <code>front/</code>, <code>deploy/</code>, <code>docs/</code></li>
-<li>[x] <code>docker-compose.yml</code> dev: Postgres, Garage (local S3), hot-reload API, Vite front — <strong>full dev mode specified in DEV.md</strong> (dev login 3 personas, <code>file://</code> fixture repos, seed + e2e scenario, shortened timings)</li>
+<li>[x] <code>deploy/docker-compose.dev.yml</code>: Postgres, Garage (local S3), hot-reload API, Vite front — <strong>full dev mode specified in DEV.md</strong> (dev login 3 personas, <code>file://</code> fixture repos, seed + e2e scenario, shortened timings)</li>
 <li>[x] FastAPI: healthcheck, settings, modules (<code>auth/</code>, <code>stacks/</code>, <code>environments/</code>, <code>variable_sets/</code>, <code>runs/</code>, <code>workers/</code>, <code>audit/</code>, <code>oidc/</code>, ...)</li>
 <li>[x] <strong>Google OIDC auth</strong> (Authorization Code + PKCE): full flow, upsert on <code>google_sub</code>, <code>hd</code> restriction to the domain, JWT sessions + rotating refresh (table <code>refresh_tokens</code>, reuse detection → family revocation, SPECS §2.5), CSRF on <code>/auth/refresh</code>, first-admin bootstrap</li>
 <li>[x] Alembic migrations, <code>User</code>, <code>RefreshToken</code> models, <strong><code>Space</code> (<code>default</code> space created at bootstrap, SPECS §3.0)</strong> — all <code>space_id</code> FKs depend on it starting in Phase 1</li>
@@ -2005,7 +2005,7 @@ Goal: a self-hostable Terraform orchestration platform with multi-environment st
 <ul>
 <li>[x] <code>Run</code> model (per environment) + <code>RunEvent</code></li>
 <li>[x] States: <code>queued → preparing → planning → [checking] → unconfirmed → confirmed → applying → finished</code> (+ <code>failed</code>, <code>discarded</code>, <code>canceled</code>)</li>
-<li>[x] Manual trigger, confirm/discard (guarded by <code>can_apply</code>: tier + role, see §2.4; automatic 4-eyes on prod tier)</li>
+<li>[x] Manual trigger, confirm/discard (guarded by <code>can_apply</code>: tier + role, see SPECS §2.4; automatic 4-eyes on a tier flagged <code>requires_four_eyes</code> — <code>prod</code> in the seed — and on a <code>protected</code> env)</li>
 <li>[x] Concurrency: 1 active run per environment</li>
 <li>[x] Cancelling an executing run (SPECS §4.1): a stop request via the heartbeat, SIGINT then SIGKILL after a grace period; an interrupted apply ends <code>failed</code> (<code>canceled_during_apply</code>), never <code>canceled</code></li>
 </ul>
@@ -2231,37 +2231,37 @@ Goal: a self-hostable Terraform orchestration platform with multi-environment st
 <tr>
 <td><strong>PostgreSQL</strong></td>
 <td>16</td>
-<td><strong>18</strong> (GA 2025-09-25)</td>
+<td><strong>18</strong> (GA 2025-09-25; dev compose and testcontainers: <code>postgres:18</code>)</td>
 <td>Native <code>uuidv7()</code> → <code>DEFAULT</code> on the DB side, end of application-side ID generation (SPECS §1). Asynchronous I/O (seq scans / vacuum 2-3×) → faster audit and <code>run_logs</code> scans (set <code>io_method=worker</code>/<code>io_uring</code>). <code>RETURNING</code> old+new tuple → <code>transition()</code> emits the <code>from→to</code> <code>run_event</code> in a single query (SPECS §4.2). OAUTHBEARER and virtual generated columns: not required in the MVP</td>
 </tr>
 <tr>
 <td><strong>Python</strong></td>
 <td>3.12</td>
-<td><strong>3.13</strong> (3.14 adoptable)</td>
+<td><strong>3.13</strong> (3.14 adoptable; <code>requires-python &gt;=3.13</code>, images <code>python:3.13-slim</code>)</td>
 <td>better error messages, refined typing, REPL. Free-threading (<code>python3.14t</code>, official in 3.14) <strong>not relevant</strong> for an async I/O-bound API — to be considered only if the worker becomes CPU-bound (unlikely: it delegates to terraform)</td>
 </tr>
 <tr>
 <td><strong>React</strong></td>
 <td>18</td>
-<td><strong>19</strong> (GA early 2025)</td>
+<td><strong>19</strong> (GA early 2025; locked 19.2.7)</td>
 <td>Actions + <code>useActionState</code> → native pending/error handling of forms, directly serves the <code>loading</code> state of actions (DESIGN §7) and the wizards (DESIGN §5.7). <code>ref</code> as a prop → less <code>forwardRef</code> in the 7 identity components. Document metadata → shareable <code>title</code> per run. <strong>To avoid: <code>useOptimistic</code> on the runs state</strong> — the invariant is that WS events <em>invalidate</em> the queries, they do not patch the cache (DESIGN §6). <strong>React Compiler</strong>: opt-in to evaluate (auto-memoization useful on the heavily-refreshed rail/logs), not a prerequisite</td>
 </tr>
 <tr>
 <td><strong>Vite</strong></td>
 <td>(not fixed)</td>
-<td><strong>7.x</strong></td>
+<td><strong>7.x</strong> (locked 7.3.5)</td>
 <td>Node 20.19+/22.12+. Tailwind v4 via the <strong><code>@tailwindcss/vite</code></strong> plugin (not PostCSS — avoids the known conflict)</td>
 </tr>
 <tr>
 <td><strong>Tailwind</strong></td>
 <td>v4</td>
-<td><strong>v4.1.x</strong></td>
+<td><strong>v4.1.x</strong> (floor; locked 4.3.1)</td>
 <td>already the right major; <code>@tailwindcss/vite</code> integration. No contract change (CSS tokens, DESIGN §8)</td>
 </tr>
 <tr>
 <td><strong>OpenTofu</strong> (dev image)</td>
 <td>(not fixed)</td>
-<td><strong>1.12.x</strong></td>
+<td><strong>1.12.x</strong> (1.12.2 in the dev worker and runner images)</td>
 <td>the dev image pre-installs a recent version; <code>tool_version</code> remains driven <strong>per stack</strong> (SPECS §3.1, user choice). 1.10 introduced <strong>OCI distribution</strong> of modules/providers — a track if we host private modules (otherwise out of scope)</td>
 </tr>
 </tbody>

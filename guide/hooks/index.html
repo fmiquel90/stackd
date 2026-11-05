@@ -1409,8 +1409,8 @@ secret</strong>. A platform hook is trusted.</p>
 <tbody>
 <tr>
 <td>Process environment</td>
-<td>the worker's, minus the agent's own <code>STACKD_*</code> settings</td>
-<td>an allowlist of the worker's: <code>PATH</code>, <code>HOME</code>, locale, proxy and CA settings…</td>
+<td>the worker's, minus the agent's own <code>STACKD_*</code> settings (on the <code>docker</code> runner: its proxy and locale settings only)</td>
+<td>an allowlist of the worker's: <code>PATH</code>, <code>HOME</code>, locale, proxy and CA settings… (on the <code>docker</code> runner: proxy and locale only)</td>
 </tr>
 <tr>
 <td>Environment variables of the run</td>
@@ -1444,11 +1444,17 @@ the platform side. On the <a href="../workers-and-scaling/#runners"><code>docker
 own container and a repo hook sees the checkout only; on the <code>local</code> runner (dev) hooks run as the
 worker's own user (<a href="../../SPECS/">SPECS §8.3</a>).</p>
 <h2 id="managing-platform-hooks">Managing platform hooks<a class="headerlink" href="#managing-platform-hooks" title="Permanent link">&para;</a></h2>
-<p>Platform hooks are CRUD over the API, scoped to a stack or an environment:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>curl<span class="w"> </span>-s<span class="w"> </span>-X<span class="w"> </span>POST<span class="w"> </span>localhost:8000/api/v1/stacks/<span class="nv">$STACK_ID</span>/hooks<span class="w"> </span>-H<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$AUTH</span><span class="s2">&quot;</span><span class="w"> </span>-d<span class="w"> </span><span class="s1">&#39;{</span>
-<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="s1">  &quot;stage&quot;: &quot;after_plan&quot;, &quot;name&quot;: &quot;tfsec&quot;, &quot;command&quot;: &quot;tfsec .&quot;, &quot;on_failure&quot;: &quot;fail&quot;</span>
-<a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a><span class="s1">}&#39;</span>
+<p>Platform hooks are managed in the UI (a stack's <strong>Settings → Hooks</strong>, an environment's
+<strong>Settings</strong> tab → <strong>Hooks</strong>) or over the API, scoped to a stack or an environment (<code>writer</code>,
+audited <code>hook.created</code> / <code>hook.updated</code> / <code>hook.deleted</code>):</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>curl<span class="w"> </span>-s<span class="w"> </span>-X<span class="w"> </span>POST<span class="w"> </span>localhost:8000/api/v1/stacks/<span class="nv">$STACK_ID</span>/hooks<span class="w"> </span>-H<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$AUTH</span><span class="s2">&quot;</span><span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="w">  </span>-H<span class="w"> </span><span class="s1">&#39;content-type: application/json&#39;</span><span class="w"> </span>-d<span class="w"> </span><span class="s1">&#39;{</span>
+<a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a><span class="s1">  &quot;stage&quot;: &quot;after_plan&quot;, &quot;name&quot;: &quot;tfsec&quot;, &quot;command&quot;: &quot;tfsec .&quot;, &quot;on_failure&quot;: &quot;fail&quot;</span>
+<a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a><span class="s1">}&#39;</span>
 </code></pre></div>
+<p><code>stage</code> is one of the six stages above, <code>on_failure</code> defaults to <code>fail</code>, and <code>position</code> (default
+<code>0</code>) orders the hooks of a stage. The same routes exist under <code>/api/v1/environments/{id}/hooks</code>;
+<code>PATCH</code> and <code>DELETE</code> take <code>…/hooks/{hook_id}</code>.</p>
 <h2 id="see-also">See also<a class="headerlink" href="#see-also" title="Permanent link">&para;</a></h2>
 <ul>
 <li><a href="../runs-and-approvals/">Runs &amp; approvals</a> · <a href="../cloud-credentials/">Cloud credentials (OIDC)</a></li>

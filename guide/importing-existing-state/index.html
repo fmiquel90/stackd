@@ -1202,12 +1202,17 @@ whether you want to keep your own backend or hand state over to Stackd.</p>
 repo keeps its existing <code>backend "s3"</code> (or other) block, and Terraform keeps using your remote state
 exactly as before. Stackd still orchestrates the run (plan → approve → apply, audit, OIDC, cascade).</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="c1"># create the env with managed state off</span>
-<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>curl<span class="w"> </span>-s<span class="w"> </span>-X<span class="w"> </span>POST<span class="w"> </span>localhost:8000/api/v1/stacks/<span class="nv">$STACK_ID</span>/environments<span class="w"> </span>-H<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$AUTH</span><span class="s2">&quot;</span><span class="w"> </span>-d<span class="w"> </span><span class="s1">&#39;{</span>
-<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a><span class="s1">  &quot;name&quot;: &quot;prod&quot;, &quot;tier&quot;: &quot;prod&quot;, &quot;branch&quot;: &quot;main&quot;, &quot;managed_state&quot;: false</span>
-<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a><span class="s1">}&#39;</span>
+<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>curl<span class="w"> </span>-s<span class="w"> </span>-X<span class="w"> </span>POST<span class="w"> </span>localhost:8000/api/v1/stacks/<span class="nv">$STACK_ID</span>/environments<span class="w"> </span>-H<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$AUTH</span><span class="s2">&quot;</span><span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a><span class="w">  </span>-H<span class="w"> </span><span class="s1">&#39;content-type: application/json&#39;</span><span class="w"> </span>-d<span class="w"> </span><span class="s1">&#39;{</span>
+<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a><span class="s1">  &quot;name&quot;: &quot;prod&quot;, &quot;tier&quot;: &quot;prod&quot;, &quot;branch&quot;: &quot;main&quot;, &quot;managed_state&quot;: false</span>
+<a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a><span class="s1">}&#39;</span>
 </code></pre></div>
+<p>If your backend block is partial, give the missing settings per environment: <code>backend_config_file</code>
+(a repo-relative <code>.config</code>/<code>.tfbackend</code> file) and/or <code>backend_config</code> (a <code>{key: value}</code> map, e.g. a
+<code>key</code> of its own per environment); the worker passes each as <code>-backend-config</code> at <code>init</code>.</p>
 <p>The first <code>plan</code> reads your real state — a <strong>no-op diff confirms</strong> the import is correct before you
-apply anything.</p>
+apply anything. Once the environment has a finished run, drift detection (<code>drift_check_enabled</code>, on
+by default) re-plans it read-only (<code>-refresh-only</code>) every 6 h (<code>STACKD_DRIFT_INTERVAL_SECONDS</code>).</p>
 <div class="admonition note">
 <p class="admonition-title">Note</p>
 <p>The worker reaches your backend with the per-run <a href="../cloud-credentials/">OIDC role</a>, so that role

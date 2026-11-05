@@ -825,6 +825,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#in-app-notifications" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        In-app notifications
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#see-also" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -1274,6 +1285,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#in-app-notifications" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        In-app notifications
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#see-also" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -1334,7 +1356,7 @@
 </tr>
 </tbody>
 </table>
-<p>Default <code>on_states</code> is <code>["unconfirmed", "failed"]</code>; those three states are the only accepted values. Two kinds exist: <code>slack</code> posts <code>{"text": …}</code> to a Slack/Mattermost incoming webhook (with a deep link to the run), and <code>webhook</code> posts a structured JSON envelope (state, run id, run type, stack/env, tier, commit, url). Deep links use <code>STACKD_APP_URL</code>, the SPA base.</p>
+<p>Default <code>on_states</code> is <code>["unconfirmed", "failed"]</code>; those three states are the only accepted values. They fire for every run type: <code>finished</code> also covers plan-only runs — an empty plan, a PR plan, a drift check, a command — so a <code>finished</code> target on an environment with drift detection hears from it every 6 h. The webhook envelope's <code>run_type</code> (<code>tracked</code>, <code>proposed</code>, <code>destroy</code>, <code>command</code>) tells them apart. Two kinds exist: <code>slack</code> posts <code>{"text": …}</code> to a Slack/Mattermost incoming webhook (with a deep link to the run), and <code>webhook</code> posts a structured JSON envelope (state, run id, run type, stack/env, tier, commit, url). Deep links use <code>STACKD_APP_URL</code>, the SPA base.</p>
 <h2 id="setting-up-slack">Setting up Slack<a class="headerlink" href="#setting-up-slack" title="Permanent link">&para;</a></h2>
 <p>The <code>slack</code> kind posts to a <strong>Slack incoming webhook</strong> — a URL Slack gives you that drops a message into one channel. No bot token, no scopes.</p>
 <ol>
@@ -1346,7 +1368,7 @@
 <p><a href="https://docs.mattermost.com/developer/webhooks-incoming.html">Mattermost</a> incoming webhooks accept the same <code>{"text": …}</code> payload — use the <code>slack</code> kind with the Mattermost URL.</p>
 <div class="admonition tip">
 <p class="admonition-title">Verify before you rely on it</p>
-<p>After creating a target, hit <strong>test</strong> (UI) or <code>POST …/notifications/{id}/test</code> (API). It delivers a message <strong>explicitly flagged as a test</strong> (<code>🧪 … (test)</code> for Slack, <code>{"event":"notification.test","test":true}</code> for a webhook), so you can confirm the URL works without waiting for a real run — and no one mistakes it for a real event.</p>
+<p>After creating a target, click <strong>Send a test</strong> (UI) or <code>POST …/notifications/{id}/test</code> (API). It delivers a message <strong>explicitly flagged as a test</strong> (<code>🧪 … (test)</code> for Slack, <code>{"event":"notification.test","test":true}</code> for a webhook), so you can confirm the URL works without waiting for a real run — and no one mistakes it for a real event. A failed test answers <code>502</code> with the reason.</p>
 </div>
 <h2 id="setting-up-a-generic-webhook">Setting up a generic webhook<a class="headerlink" href="#setting-up-a-generic-webhook" title="Permanent link">&para;</a></h2>
 <p>The <code>webhook</code> kind POSTs the JSON envelope (see <a href="#a-generic-webhook-target">below</a>) to any HTTPS endpoint you control (a CI bridge, a Lambda URL, an internal service).</p>
@@ -1392,13 +1414,13 @@
 <a id="__codelineno-2-11" name="__codelineno-2-11" href="#__codelineno-2-11"></a><span class="p">}</span>
 </code></pre></div>
 <h2 id="managing-targets">Managing targets<a class="headerlink" href="#managing-targets" title="Permanent link">&para;</a></h2>
-<p>Both scopes expose the same CRUD. List or create on the scope, then patch or delete by target id:</p>
+<p>In the UI, targets live in the environment's <strong>Settings</strong> tab (<strong>Notifications</strong> section) and in the stack's <strong>Settings → Notifications</strong>. Both scopes expose the same CRUD — listing needs read access, creating, patching, deleting and testing need <code>writer</code>. List or create on the scope, then patch or delete by target id:</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a>curl<span class="w"> </span>-s<span class="w"> </span>localhost:8000/api/v1/stacks/<span class="nv">$STACK_ID</span>/notifications<span class="w"> </span>-H<span class="w"> </span><span class="s2">&quot;Authorization: Bearer </span><span class="nv">$TOKEN</span><span class="s2">&quot;</span>
 <a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a>curl<span class="w"> </span>-s<span class="w"> </span>-X<span class="w"> </span>PATCH<span class="w"> </span>localhost:8000/api/v1/environments/<span class="nv">$ENV_ID</span>/notifications/<span class="nv">$TARGET_ID</span><span class="w"> </span><span class="se">\</span>
 <a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a><span class="w">  </span>-H<span class="w"> </span><span class="s2">&quot;Authorization: Bearer </span><span class="nv">$TOKEN</span><span class="s2">&quot;</span><span class="w"> </span>-H<span class="w"> </span><span class="s1">&#39;content-type: application/json&#39;</span><span class="w"> </span>-d<span class="w"> </span><span class="s1">&#39;{&quot;enabled&quot;: false}&#39;</span>
 <a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a>curl<span class="w"> </span>-s<span class="w"> </span>-X<span class="w"> </span>DELETE<span class="w"> </span>localhost:8000/api/v1/stacks/<span class="nv">$STACK_ID</span>/notifications/<span class="nv">$TARGET_ID</span><span class="w"> </span>-H<span class="w"> </span><span class="s2">&quot;Authorization: Bearer </span><span class="nv">$TOKEN</span><span class="s2">&quot;</span>
 </code></pre></div>
-<p>For a run's env, both the env-level and the stack-level targets resolve and fire (filtered by <code>on_states</code>). Deleting a stack or an environment deletes its targets too (each audited <code>notification_target.deleted</code> with the reason).</p>
+<p>For a run's env, both the env-level and the stack-level targets resolve and fire (filtered by <code>on_states</code>), as they stand at delivery time. Creating, updating and deleting a target are audited (<code>notification_target.created</code>, <code>.updated</code>, <code>.deleted</code>). Deleting a stack or an environment deletes its targets too (each audited <code>notification_target.deleted</code> with the reason); cloning an environment copies its environment-level targets.</p>
 <h2 id="network-requirements-and-ssrf-protection">Network requirements and SSRF protection<a class="headerlink" href="#network-requirements-and-ssrf-protection" title="Permanent link">&para;</a></h2>
 <p>Targets are URLs that users enter and the API POSTs to from inside your network, so Stackd guards
 against server-side request forgery:</p>
@@ -1426,8 +1448,10 @@ help either, since private addresses are refused. Failed deliveries are retried,
 <p>Notifications are not a fire-and-forget side effect. When a run transitions to a notify-worthy state, a row is inserted into the outbox <strong>in the same DB transaction</strong> as the state change — no HTTP in the request path. A background scheduler drains the outbox under an advisory lock (one replica at a time) and POSTs to the matching targets.</p>
 <div class="admonition note">
 <p class="admonition-title">Note</p>
-<p>Delivery is <strong>at-least-once</strong>. The outbox is drained under a <code>pg_try_advisory_lock</code> with <code>SKIP LOCKED</code>, so two API replicas never double-send — but a receiver may still see a retry, so make handlers idempotent. A rolled-back transition never notifies (its outbox row rolls back too). Failed deliveries retry up to 5 times, then dead-letter and log; a flaky Slack never blocks or fails a run.</p>
+<p>Delivery is <strong>at-least-once</strong>. The outbox is drained under a <code>pg_try_advisory_lock</code> with <code>SKIP LOCKED</code>, so two API replicas never double-send — but a receiver may still see a retry, so make handlers idempotent. A rolled-back transition never notifies (its outbox row rolls back too). An event whose delivery fails for any one target is retried on the next scheduler tick (every 10 s) <strong>for all its targets</strong>, 5 attempts in total; each failure is logged (<code>notification.failed</code>, with the target and the error), and after the fifth the event is left undelivered. A flaky Slack never blocks or fails a run.</p>
 </div>
+<h2 id="in-app-notifications">In-app notifications<a class="headerlink" href="#in-app-notifications" title="Permanent link">&para;</a></h2>
+<p>Separately from these outbound targets, every user has an in-app inbox (the bell in the topbar), filled in the same transaction as its trigger: an <code>approval_request</code> to every user who may confirm a plan waiting on <code>unconfirmed</code>, <code>run_finished</code> / <code>run_failed</code> to the human who triggered a run by hand, <code>comment_reply</code> and <code>mention</code> on run comments, <code>drift_detected</code> to the users who may apply on a drifted environment, and the rollout notifications (<code>rollout_paused</code>, <code>rollout_succeeded</code>, <code>rollout_failed</code>, <code>rollout_upstream_changed</code>) to a rollout's creator and approver. It needs no setup; <code>GET /api/v1/notifications</code> lists the current user's, <code>POST /api/v1/notifications/read</code> marks them read.</p>
 <h2 id="see-also">See also<a class="headerlink" href="#see-also" title="Permanent link">&para;</a></h2>
 <ul>
 <li><a href="../runs-and-approvals/">Runs &amp; approvals</a></li>

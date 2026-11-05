@@ -1425,7 +1425,7 @@
 <h3 id="apply-affinity">Apply affinity<a class="headerlink" href="#apply-affinity" title="Permanent link">&para;</a></h3>
 <p>After a plan is confirmed, the originating worker is <strong>preferred</strong> for the apply for ~60s (<code>STACKD_APPLY_AFFINITY_SECONDS</code>). Past that delay (a dead or saturated worker), any compatible worker takes it. No workspace is reused either way: the apply worker clones the run's <strong>pinned commit</strong>, downloads the <strong>saved plan</strong> from the API and runs <code>tofu apply plan.tfplan</code>. It never re-plans: without a usable saved plan the run fails, and you trigger a new plan. See <a href="../runs-and-approvals/#what-gets-applied-is-what-was-reviewed">Runs &amp; approvals</a>.</p>
 <h3 id="worker-loss">Worker loss<a class="headerlink" href="#worker-loss" title="Permanent link">&para;</a></h3>
-<p>A worker silent for &gt; 60s is marked <code>offline</code>. The scheduler (every 10 s) then fails the runs whose job is <strong>executing</strong> on that worker — <code>preparing</code>, <code>planning</code>, <code>checking</code>, <code>running</code> (a command) or <code>applying</code> — as <code>failed (worker_lost)</code>, once the worker has been silent for &gt; 120s. No human action required.</p>
+<p>A worker silent for &gt; 60s (<code>STACKD_WORKER_OFFLINE_SECONDS</code> on the API) is marked <code>offline</code>. The scheduler (every 10 s) then fails the runs whose job is <strong>executing</strong> on an offline worker — <code>preparing</code>, <code>planning</code>, <code>checking</code>, <code>running</code> (a command) or <code>applying</code> — as <code>failed (worker_lost)</code>, once the job was claimed more than 120s ago (<code>STACKD_WORKER_LOST_SECONDS</code>). No human action required.</p>
 <p>Runs that are <strong>not executing</strong> are never reclaimed: an <code>unconfirmed</code> run waits for a human and a <code>confirmed</code> one for the apply claim, and neither depends on the plan worker. Losing the worker that planned a run doesn't fail it; another worker applies the saved plan.</p>
 <p>A job holding <strong>apply credentials</strong> — an <code>applying</code> run, or a <strong>mutating command</strong> run (<code>import</code>, <code>state rm</code>/<code>mv</code>, <code>taint</code>, <code>untaint</code>, <code>refresh</code>) — is the exception: it is reclaimed only after the <strong>apply window</strong>, the apply budget plus a grace period (<code>stackd_apply_timeout_seconds</code> + <code>stackd_apply_lost_grace_seconds</code>, default 15 min + 5 min). The worker hard-kills its own apply or mutating command at the budget, and that job's state token and apply OIDC token expire at the end of the window. So a healthy long apply is never failed mid-flight, and by the time the environment is handed to another run, the lost worker can no longer write its state. As a second safeguard, the state backend refuses a write or a lock from any token whose run has already ended.</p>
 <h3 id="time-budgets">Time budgets<a class="headerlink" href="#time-budgets" title="Permanent link">&para;</a></h3>
@@ -1487,6 +1487,11 @@
 <td>where the worker reaches the API</td>
 </tr>
 <tr>
+<td><code>STACKD_RUNNER</code></td>
+<td><code>local</code></td>
+<td><code>local</code> or <code>docker</code>, see <a href="#runners">Runners</a>; any other value refuses to start</td>
+</tr>
+<tr>
 <td><code>STACKD_POOL_TOKEN</code> / <code>STACKD_POOL_TOKEN_FILE</code></td>
 <td>—</td>
 <td>the pool token, or a file holding it</td>
@@ -1526,13 +1531,18 @@
 <td><code>20</code>, <code>25</code> (s)</td>
 <td>heartbeat period, claim long-poll</td>
 </tr>
+<tr>
+<td><code>STACKD_LOG_FORMAT</code></td>
+<td><code>json</code></td>
+<td>the agent's own log lines; any other value prints them for reading</td>
+</tr>
 </tbody>
 </table>
 <p>These <code>STACKD_*</code> settings are the agent's own: <strong>they never reach tofu or a hook</strong>, so repo code
 can't read the pool token from its environment.</p>
 <div class="admonition warning">
 <p class="admonition-title">Keep platform secrets out of the worker's environment</p>
-<p>The worker needs no database, S3 or signing credential: it reaches states and saved plans through the API. tofu and platform hooks inherit the worker's environment — minus the <code>STACKD_*</code> namespace — and repo code runs inside tofu (<code>data "external"</code>, provisioners). So never give the worker <code>DATABASE_URL</code>, <code>S3_*</code> keys or <code>GOOGLE_CLIENT_SECRET</code>, nor <code>STACKD_ENCRYPTION_KEY</code> or <code>STACKD_JWT_SECRET</code>. The dev compose file blanks them for the worker. Repo hooks get only an allowlist (<code>PATH</code>, <code>HOME</code>, locale, proxy and CA settings), see <a href="../hooks/#what-hooks-can-see">Hooks</a>.</p>
+<p>The worker needs no database, S3 or signing credential: it reaches states and saved plans through the API. On the <code>local</code> runner, tofu and platform hooks inherit the worker's environment — minus the <code>STACKD_*</code> namespace — and repo code runs inside tofu (<code>data "external"</code>, provisioners). So never give the worker <code>DATABASE_URL</code>, <code>S3_*</code> keys or <code>GOOGLE_CLIENT_SECRET</code>, nor <code>STACKD_ENCRYPTION_KEY</code> or <code>STACKD_JWT_SECRET</code>. The dev compose file blanks them for the worker. Repo hooks get only an allowlist (<code>PATH</code>, <code>HOME</code>, locale, proxy and CA settings), see <a href="../hooks/#what-hooks-can-see">Hooks</a>.</p>
 </div>
 <h3 id="runners">Runners<a class="headerlink" href="#runners" title="Permanent link">&para;</a></h3>
 <p>Every job runs in its own workspace, removed when the job ends. <code>STACKD_RUNNER</code> picks how its commands run:</p>
@@ -1575,6 +1585,11 @@ can't read the pool token from its environment.</p>
 <td>per-container process limit</td>
 </tr>
 <tr>
+<td><code>STACKD_DOCKER_TMP_SIZE</code></td>
+<td><code>1g</code></td>
+<td>size of the writable <code>/tmp</code> tmpfs (the container's <code>HOME</code>)</td>
+</tr>
+<tr>
 <td><code>STACKD_DOCKER_RUNTIME</code></td>
 <td>unset</td>
 <td>an alternative OCI runtime, e.g. <code>runsc</code> (gVisor)</td>
@@ -1590,7 +1605,11 @@ can't read the pool token from its environment.</p>
 <p>The <code>docker</code> runner launches containers; <strong>AWS Fargate does not allow this</strong>. A worker on Fargate can only use the <code>local</code> runner, which a production API refuses.</p>
 </div>
 <h2 id="dedicate-a-pool-with-labels">Dedicate a pool with labels<a class="headerlink" href="#dedicate-a-pool-with-labels" title="Permanent link">&para;</a></h2>
-<p>Labels route work to pools. A run is eligible for a worker only when <code>env.labels &lt;@ worker.labels</code> (the environment's labels are a subset of the worker's). To dedicate a pool to production, label both the prod environments and a prod-only worker pool with <code>tier: prod</code>, and give general workers no such label — they will never pick up prod runs.</p>
+<p>Labels route work to workers. A run is eligible for a worker only when <code>env.labels &lt;@ worker.labels</code> (the environment's labels are a subset of the worker's). To dedicate workers to production, label both the prod environments and the prod-only workers with <code>tier: prod</code>, and give general workers no such label — they will never pick up prod runs.</p>
+<div class="admonition warning">
+<p class="admonition-title">The bundled agent registers without labels</p>
+<p>The match uses the labels a worker sends in <code>POST /worker/v1/register</code>; a pool's own <code>labels</code> are stored and shown on the Workers &amp; health page but <strong>not</strong> matched. The bundled agent has no setting for its labels yet and always registers with none, so it only takes runs of environments with <strong>no</strong> labels: labelling an environment today leaves its runs queued as <code>no_compatible_worker</code>. An environment's labels also select variable sets (<a href="../variables/">Variables</a>).</p>
+</div>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="c1"># environment</span>
 <a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="nt">labels</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt"> tier</span><span class="p">:</span><span class="w"> </span><span class="nv">prod</span><span class="w"> </span><span class="p p-Indicator">}</span>
 <a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a><span class="c1"># prod worker pool / workers</span>
@@ -1605,7 +1624,8 @@ can't read the pool token from its environment.</p>
 <li><code>GET /api/v1/health</code> — DB, workers (online/total + last heartbeat), runs active/queued, recent errors.</li>
 <li><code>GET /api/v1/queue</code> — waiting runs and <em>why</em> they wait (<code>active_run</code> | <code>env_locked</code> | <code>no_compatible_worker</code> | <code>apply_affinity_hold</code>).</li>
 </ul>
-<p>A <code>no_compatible_worker</code> backlog means a label mismatch, not a capacity problem — adding generic workers will not help; you need workers carrying the right labels. See <a href="../observability/">Observability</a> for the Workers &amp; health page.</p>
+<p>A <code>no_compatible_worker</code> backlog means no online worker carries the environment's labels or can run the stack's <code>tool_version</code> — not a capacity problem: adding generic workers will not help; you need workers with the right labels or tool versions. See <a href="../observability/">Observability</a> for the Workers &amp; health page.</p>
+<p>Drift detection adds background load: every environment with <code>drift_check_enabled</code> gets a read-only plan every 6 h (<code>STACKD_DRIFT_INTERVAL_SECONDS</code> on the API). A claim always takes user runs before these drift plans, then the oldest first.</p>
 <h2 id="see-also">See also<a class="headerlink" href="#see-also" title="Permanent link">&para;</a></h2>
 <ul>
 <li><a href="../cloud-credentials/">Cloud credentials</a></li>

@@ -518,6 +518,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#cloning-an-environment-across-stacks" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Cloning an environment across stacks
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#see-also" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -1276,6 +1287,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#cloning-an-environment-across-stacks" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Cloning an environment across stacks
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#see-also" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -1345,7 +1367,7 @@
 </code></pre></div>
 <div class="admonition tip">
 <p class="admonition-title">One repo, several stacks</p>
-<p>A single repo can host many stacks by giving each a distinct <code>project_root</code> (e.g. <code>network</code>, <code>db</code>, <code>app</code>). The push webhook is configured <strong>per repo</strong> with one shared secret; on receipt the API resolves matching stacks and filters environments by branch and <code>project_root</code>. See <a href="../../SPECS/">SPECS §3.1</a>.</p>
+<p>A single repo can host many stacks by giving each a distinct <code>project_root</code> (e.g. <code>network</code>, <code>db</code>, <code>app</code>). One GitHub webhook per repo (<code>POST /api/v1/webhooks/github</code>) serves them all, but each stack holds <strong>its own</strong> HMAC secret (<code>webhook_secret</code>, write-only, set with <code>PATCH /api/v1/stacks/{id}</code> or in the stack's <strong>Settings → General</strong>): a delivery acts only on the stacks of that repo whose secret verifies its signature, so give the stacks fed by one webhook the same secret. On a push, the API then picks the environments tracking the pushed branch and triggers a run only when the push touches the stack's <code>project_root</code>. See <a href="../../SPECS/">SPECS §3.1</a>.</p>
 </div>
 <h3 id="validating-the-repo">Validating the repo<a class="headerlink" href="#validating-the-repo" title="Permanent link">&para;</a></h3>
 <p>Before creating environments, check that Stackd can reach the repo with the configured auth:</p>
@@ -1367,13 +1389,16 @@
 </code></pre></div>
 <h3 id="fields-that-matter">Fields that matter<a class="headerlink" href="#fields-that-matter" title="Permanent link">&para;</a></h3>
 <ul>
-<li><strong><code>tier</code></strong> (a configurable catalog, e.g. <code>dev</code>/<code>staging</code>/<code>prod</code>/<code>qa</code>) — carries apply/destroy permissions: <code>can_apply</code> requires <code>env.tier ∈ user.allowed_tiers</code>. See <a href="../runs-and-approvals/">Runs &amp; approvals</a>.</li>
+<li><strong><code>tier</code></strong> (a configurable catalog, e.g. <code>dev</code>/<code>staging</code>/<code>prod</code>/<code>qa</code>, listed by <code>GET /api/v1/tiers</code>) — carries apply/destroy permissions: <code>can_apply</code> requires <code>env.tier ∈ user.allowed_tiers</code>. The tier must exist in the catalog (<code>422 Unknown tier</code> otherwise). See <a href="../runs-and-approvals/">Runs &amp; approvals</a>.</li>
 <li><strong><code>branch</code></strong> — the branch this environment tracks for staleness and webhook-driven runs.</li>
-<li><strong><code>protected</code></strong> — forces confirmation (never autodeploys) and four-eyes; it is <strong>not</strong> the access control (that is <code>tier</code>).</li>
+<li><strong><code>autodeploy</code></strong> — confirm a clean plan without a human (default <code>false</code>). See <a href="../runs-and-approvals/#autodeploy-checks">Runs &amp; approvals</a>.</li>
+<li><strong><code>protected</code></strong> — forces confirmation (never autodeploys: <code>autodeploy</code> is forced off) and four-eyes; it is <strong>not</strong> the access control (that is <code>tier</code>).</li>
 <li><strong><code>require_second_pair_of_eyes</code></strong> — four-eyes alone: the person who triggered a run cannot confirm it, and the environment may still autodeploy (already implied on a tier flagged <code>requires_four_eyes</code>, like the seeded <code>prod</code>, and on a <code>protected</code> environment; useful on staging).</li>
-<li><strong><code>managed_state</code></strong> — when true, Terraform talks to Stackd's HTTP backend (state bytes in S3) and the repo must declare <strong>no</strong> <code>backend</code> block: the worker adds <code>backend "http" {}</code> itself. Set <code>false</code> to keep your own <code>backend "s3"</code>. See <a href="../../CONCEPTS/#8-managed-state-s3-behind-an-http-backend">Concepts §8</a>.</li>
+<li><strong><code>managed_state</code></strong> (default <code>true</code>) — when true, Terraform talks to Stackd's HTTP backend (state bytes in S3) and the repo must declare <strong>no</strong> <code>backend</code> block: the worker adds <code>backend "http" {}</code> itself. Set <code>false</code> to keep your own <code>backend "s3"</code>. See <a href="../../CONCEPTS/#8-managed-state-s3-behind-an-http-backend">Concepts §8</a>.</li>
 <li><strong><code>allow_mock_apply</code></strong> — allow applying a run that consumed mock outputs (default <code>false</code>). See <a href="../dependencies-and-mocks/">Dependencies &amp; mocks</a>.</li>
-<li><strong><code>labels</code></strong> — JSON tags used to target a worker pool.</li>
+<li><strong><code>allow_fallback_apply</code></strong> — allow applying a run whose external secret came from a fallback (default <code>false</code>). See <a href="../external-secrets/#fallback-blocks-apply-by-default">External secret sources</a>.</li>
+<li><strong><code>drift_check_enabled</code></strong> — include the environment in the periodic drift check (default <code>true</code>).</li>
+<li><strong><code>labels</code></strong> — JSON tags: a run is only claimed by a worker whose labels contain all of them (see <a href="../workers-and-scaling/#dedicate-a-pool-with-labels">Workers &amp; scaling</a> — the bundled agent registers without labels for now, so a labelled environment's runs stay queued); with the stack's labels they also select variable sets (see <a href="../variables/">Variables</a>).</li>
 </ul>
 <div class="admonition warning">
 <p class="admonition-title">Why not Terraform workspaces</p>
@@ -1389,7 +1414,9 @@
 <p><code>DELETE /api/v1/stacks/{id}</code> and <code>DELETE /api/v1/environments/{id}</code> are <strong>refused with <code>409 Active
 run</code></strong> while one of the environments involved has a run in an active state (<code>preparing</code> through
 <code>applying</code>, or a command <code>running</code>); the problem body names the <code>run_id</code>. Cancel or discard it, or
-let it finish, then retry. Queued runs are deleted with their environment.</p>
+let it finish, then retry. Queued runs are deleted with their environment. They are also refused
+with <strong><code>409 Active rollout</code></strong> (naming the <code>rollout_id</code>) while an environment involved belongs to a
+<a href="../runs-and-approvals/#rollouts">rollout</a> in progress: cancel the rollout, or let it end, first.</p>
 <p>The deletion also removes, in the same transaction and each audited with the reason
 (<code>stack_deleted</code> or <code>environment_deleted</code>), everything that points at the stack or its
 environments:</p>
@@ -1400,6 +1427,40 @@ environments:</p>
 </ul>
 <p>An attach racing the deletion either fails with <code>404</code> or is removed with the rest: no orphan is
 left behind.</p>
+<h2 id="cloning-an-environment-across-stacks">Cloning an environment across stacks<a class="headerlink" href="#cloning-an-environment-across-stacks" title="Permanent link">&para;</a></h2>
+<p>To stand up a new environment (a new region, a new stage) in several stacks of a space at once,
+declare it <strong>once</strong>, modelled on the environment each stack already has under a reference name. In
+the UI: <strong>New environment from…</strong> (on the overview, or an environment's <strong>More</strong> menu), which
+shows a review before anything is created. Over the API:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a>curl<span class="w"> </span>-s<span class="w"> </span>-X<span class="w"> </span>POST<span class="w"> </span>localhost:8000/api/v1/spaces/<span class="nv">$SPACE</span>/environment-clones<span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a><span class="w">  </span>-H<span class="w"> </span><span class="s2">&quot;Authorization: Bearer </span><span class="nv">$TOKEN</span><span class="s2">&quot;</span><span class="w"> </span>-H<span class="w"> </span><span class="s1">&#39;content-type: application/json&#39;</span><span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a><span class="w">  </span>-d<span class="w"> </span><span class="s1">&#39;{&quot;reference_name&quot;:&quot;prod&quot;,&quot;name&quot;:&quot;prod-euw3&quot;,</span>
+<a id="__codelineno-4-4" name="__codelineno-4-4" href="#__codelineno-4-4"></a><span class="s1">       &quot;overrides&quot;:{&quot;labels&quot;:{&quot;region&quot;:&quot;eu-west-3&quot;}},&quot;dry_run&quot;:true}&#39;</span>
+</code></pre></div>
+<ul>
+<li><strong>Targets</strong>: every stack of the space that has a <code>reference_name</code> environment, or only
+  <code>stack_ids</code>. A target stack without the reference, or already holding <code>name</code>, is refused (<code>422</code>).</li>
+<li><strong><code>overrides</code></strong>: <code>tier</code>, <code>branch</code>, <code>labels</code> (merged onto the reference's, yours win per key),
+  <code>autodeploy</code>, <code>protected</code>, <code>require_second_pair_of_eyes</code>, <code>drift_check_enabled</code>. Omit a key to keep
+  the reference's value; <code>null</code> is refused.</li>
+<li><strong><code>dry_run: true</code></strong> computes and validates everything, then rolls back: the response is the preview.</li>
+<li><strong>All or nothing</strong>, in one transaction, every created item audited (<code>environment.created</code> with
+  <code>cloned_from</code>, then one <code>environment.cloned</code> summary).</li>
+</ul>
+<p>What a new environment takes from its reference: its settings (tier, branch, protections,
+<code>autodeploy</code>, <code>managed_state</code>, <code>drift_check_enabled</code>, labels, position), its non-sensitive
+env-level variables, its external secret references, its variable-set attachments, its platform
+hooks, its notification targets and its dependency edges (re-wired to the new environments when both
+ends are cloned). It never takes <code>allow_mock_apply</code>/<code>allow_fallback_apply</code> (always <code>false</code>), nor
+a reference with <code>managed_state=false</code> (<code>422</code>: it would share the reference's state). <strong>Sensitive
+values are not copied</strong>: the response lists them in <code>missing_secrets</code> (and what else needs a hand —
+a static secret fallback, the cloud integration unless <code>copy_cloud_integration</code>, an admin-only
+option — in <code>to_configure</code>). While anything is left to fill, the new environment is created with
+<code>autodeploy</code> off. The response also lists <code>not_copied</code> items (an env value a newly selected label
+set should provide) and <code>warnings</code> (an edge still wired to the old region's upstream, a changed
+tier) — review them before applying. See <a href="../../SPECS/">SPECS §21.2</a>.</p>
+<p>To then plan and apply the new environments in dependency order under one approval, start a
+<a href="../runs-and-approvals/#rollouts">rollout</a>.</p>
 <h2 id="see-also">See also<a class="headerlink" href="#see-also" title="Permanent link">&para;</a></h2>
 <ul>
 <li><a href="../variables/">Variables</a> — variable sets, resolution and sensitive values</li>

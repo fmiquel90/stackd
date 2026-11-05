@@ -1486,7 +1486,8 @@ update the doc.</p>
   <code>one_active_run_per_env</code> partial unique index, <code>FOR UPDATE … SKIP LOCKED</code>, <code>LISTEN/NOTIFY</code>,
   <code>uuidv7()</code>, JSONB <code>&lt;@</code> containment, cascade FKs.</li>
 <li><strong>Real AWS surfaces are mocked with <a href="https://docs.getmoto.org/">moto</a></strong> (S3 for the state
-  backend and the saved plans, STS for <code>AssumeRoleWithWebIdentity</code>). Everything else is real.</li>
+  backend, the saved plans and the archived logs, STS for <code>AssumeRoleWithWebIdentity</code>, KMS for the
+  OIDC signing key). Everything else is real.</li>
 <li><strong>Three rings of confidence:</strong></li>
 <li><strong>Unit</strong> — pure logic with no I/O (e.g. <code>can_apply</code>, the masker, plan-summary parsing).</li>
 <li><strong>Integration</strong> — the API exercised over HTTP via an in-process ASGI client against the real
@@ -1525,15 +1526,19 @@ update the doc.</p>
 </tr>
 </tbody>
 </table>
-<p><code>task test</code> does <strong>not</strong> run the worker suite. Run it directly — it needs no DB and no stack:</p>
+<p><code>task test</code> does <strong>not</strong> run the worker suite. Run it directly — it needs no DB and no stack (the
+docker-runner tests also want a Docker daemon and their images, §3, and skip without them):</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="nb">cd</span><span class="w"> </span>worker<span class="w"> </span><span class="o">&amp;&amp;</span><span class="w"> </span>uv<span class="w"> </span>run<span class="w"> </span>pytest
 </code></pre></div>
 <p>Run an API subset inside the api container:</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>docker<span class="w"> </span>compose<span class="w"> </span>-f<span class="w"> </span>deploy/docker-compose.dev.yml<span class="w"> </span><span class="nb">exec</span><span class="w"> </span>-T<span class="w"> </span>api<span class="w"> </span>uv<span class="w"> </span>run<span class="w"> </span>pytest<span class="w"> </span>tests/test_runs.py<span class="w"> </span>-v
 <a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a>docker<span class="w"> </span>compose<span class="w"> </span>-f<span class="w"> </span>deploy/docker-compose.dev.yml<span class="w"> </span><span class="nb">exec</span><span class="w"> </span>-T<span class="w"> </span>api<span class="w"> </span>uv<span class="w"> </span>run<span class="w"> </span>pytest<span class="w"> </span>tests/test_notifications.py::test_dispatcher_delivers_to_matching_targets
 </code></pre></div>
-<p>CI (<code>.github/workflows/ci.yml</code>) runs ruff, pytest and mypy for the API, ruff and pytest for the
-worker, and typecheck + vitest + build for the front; <code>e2e.yml</code> runs the live scenario.</p>
+<p>CI (<code>.github/workflows/ci.yml</code>) runs pre-commit; ruff (check + format), pytest and mypy (allowed
+to fail for now) for the API; ruff (check + format) and pytest for the worker, after pulling
+<code>alpine:3.20</code> and building the tofu test image for the docker-runner tests; eslint, prettier, the
+invariants check (no browser storage, no hard-coded colour), typecheck, vitest and build for the
+front. <code>e2e.yml</code> runs the live scenario.</p>
 <h3 id="pytest-configuration-apipyprojecttoml">pytest configuration (<code>api/pyproject.toml</code>)<a class="headerlink" href="#pytest-configuration-apipyprojecttoml" title="Permanent link">&para;</a></h3>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="k">[tool.pytest.ini_options]</span>
 <a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a><span class="n">asyncio_mode</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">&quot;auto&quot;</span><span class="w">                          </span><span class="c1"># plain `async def test_*`, no decorator</span>
@@ -1627,11 +1632,15 @@ throwaway one). <code>task e2e</code> points pytest at <code>e2e</code> explicit
 </table>
 <h3 id="workertests-no-conftest"><code>worker/tests/</code> — no conftest<a class="headerlink" href="#workertests-no-conftest" title="Permanent link">&para;</a></h3>
 <p>Worker tests import agent modules directly (<code>agent.main</code>, <code>agent.workspace</code>, <code>agent.runner</code>,
-<code>agent.masking</code>, <code>agent.diagnostics</code>…) and fake the API client where a job is driven end to end.
-No DB and no external network: the clone tests run real <code>git</code> against local repositories (one
-dials a closed loopback port, <code>test_hook_secrets.py</code> serves one over a loopback HTTP server). Hooks
-run for real (<code>sh -c</code>); tofu is a stand-in script, except in the one test that runs the real
-OpenTofu when <code>tofu</code> is on the <code>PATH</code> (skipped otherwise).</p>
+<code>agent.masking</code>, <code>agent.diagnostics</code>, <code>agent.docker_runner</code>, <code>agent.cancel</code>, <code>agent.tools</code>…) and
+fake the API client where a job is driven end to end. No DB and no external network: the clone
+tests run real <code>git</code> against local repositories (one dials a closed loopback port,
+<code>test_hook_secrets.py</code> serves one over a loopback HTTP server). Hooks run for real (<code>sh -c</code>); tofu
+is a stand-in script, except in the one test that runs the real OpenTofu when <code>tofu</code> is on the
+<code>PATH</code> (skipped otherwise). The docker-runner tests (<code>test_docker_runner.py</code>, <code>test_docker_job.py</code>)
+run real containers on the host's Docker daemon — <code>alpine:3.20</code> and the test image built from
+<code>worker/tests/docker/tofu-test.Dockerfile</code> (<code>stackd-test/tofu:1.12.2</code>, DEV §5) — and are skipped
+without them; the spec-only ones need no daemon.</p>
 <hr />
 <h2 id="4-test-map-what-each-file-covers">4. Test map (what each file covers)<a class="headerlink" href="#4-test-map-what-each-file-covers" title="Permanent link">&para;</a></h2>
 <p>One line per file. The test names are descriptive: <code>uv run pytest --collect-only -q</code> lists them
@@ -1658,8 +1667,8 @@ all. Counts in parentheses include parametrized cases and drift as tests are add
 <td>Per-space RBAC: non-members blocked on env-scoped reads, <code>/graph</code> and space listing scoped to memberships, grant then revoke, create = instance admin, members listing = space admin, create in an unknown space → 404.</td>
 </tr>
 <tr>
-<td><code>test_tiers.py</code> (4)</td>
-<td>Tier catalog: name charset (OIDC <code>sub</code> safety), <code>allowed_tiers</code> validated, deleting a tier strips grants, a tier in use can't be deleted.</td>
+<td><code>test_tiers.py</code> (6)</td>
+<td>Tier catalog: name charset (OIDC <code>sub</code> safety), <code>allowed_tiers</code> validated, deleting a tier strips grants, a tier in use can't be deleted; <code>repo_hooks_at_apply</code> reaches the claim only from a tier that allows it, off on the default catalog.</td>
 </tr>
 <tr>
 <td><code>test_users.py</code> (3)</td>
@@ -1672,6 +1681,10 @@ all. Counts in parentheses include parametrized cases and drift as tests are add
 <tr>
 <td><code>test_runs.py</code> (10)</td>
 <td>Run lifecycle; one active run per env under concurrency (<code>23505</code>); tier gate; four-eyes on a <code>requires_four_eyes</code> tier and on a <code>protected</code> env; autodeploy and <code>warn</code> forcing <code>unconfirmed</code>; confirm only from <code>unconfirmed</code>; mock block; repo token masked in the claim; the claim carries <code>cred_phase</code>.</td>
+</tr>
+<tr>
+<td><code>test_cancel_running.py</code> (5)</td>
+<td>Stopping an executing run goes through the worker (a stop request); a worker can't cancel a run nobody asked to stop; a plan finishing after the request ends <code>canceled</code>, not confirmed; stopping an apply needs <code>can_apply</code> and ends <code>failed</code>; cancel before the claim and after the end.</td>
 </tr>
 <tr>
 <td><code>test_commit_pin.py</code> (6)</td>
@@ -1694,24 +1707,24 @@ all. Counts in parentheses include parametrized cases and drift as tests are add
 <td>Stack/env deletion refused (409) while a run is active, allowed once it is terminal; attachments, hooks and notification targets removed with their target (audited); an attach racing a deletion leaves no orphan (variable set, hook, notification target).</td>
 </tr>
 <tr>
-<td><code>test_variables_api.py</code> (12)</td>
-<td>Layered resolution and provenance; sensitive values write-only; attached set can't be deleted; selectors on stack/env labels; tier attachments; cross-space attach refused; a tier attachment stays in the set's space; input discovery; backend config file round trip; <code>protected</code> forces no autodeploy.</td>
+<td><code>test_variables_api.py</code> (13)</td>
+<td>Layered resolution and provenance; sensitive values write-only, and un-flagging a secret needs a new value; attached set can't be deleted; selectors on stack/env labels; tier attachments; cross-space attach refused; a tier attachment stays in the set's space; input discovery; backend config file round trip; <code>protected</code> forces no autodeploy.</td>
 </tr>
 <tr>
 <td><code>test_tfvars.py</code> (4)</td>
 <td><code>hcl</code> variables routed to the generated <code>.auto.tfvars</code>, everything else to JSON.</td>
 </tr>
 <tr>
-<td><code>test_secret_sources.py</code> (8)</td>
-<td>External secret references: live value masked, static fallback + apply gate, <code>error</code> mode fails closed, break-glass override (needs apply right), source CRUD hides the bootstrap secret, in-use source can't be deleted, a fallback appearing at the apply claim is gated.</td>
+<td><code>test_secret_sources.py</code> (10)</td>
+<td>External secret references: live value masked, static fallback + apply gate, <code>error</code> mode fails closed, break-glass override (needs apply right), source CRUD hides the bootstrap secret, in-use source can't be deleted, a fallback appearing at the apply claim is gated; a variable can't reference another space's source, and one written before that check fails the run closed.</td>
 </tr>
 <tr>
 <td><code>test_proposed_secrets.py</code> (3)</td>
 <td>A proposed run's claim carries no secret — no sensitive variable of either kind, no external reference (not fetched), nothing in <code>mask_values</code> or the provenance — and keeps the plan role and the repo token; a tracked run and a drift run still get every secret.</td>
 </tr>
 <tr>
-<td><code>test_dependencies.py</code> (10)</td>
-<td>Mocks (used, block apply, real value wins, missing → fail), anti-cycle, cascade; <code>link-by-name</code> idempotent, skips hand-made and racing edges and in-request cycles; <code>/graph</code> hides edges outside the caller's spaces.</td>
+<td><code>test_dependencies.py</code> (24)</td>
+<td>Mocks (used, block apply, real value wins, missing → fail), anti-cycle, cascade; <code>link-by-name</code> idempotent, skips hand-made and racing edges and in-request cycles; <code>/graph</code> hides edges outside the caller's spaces; multi-parent cascade (SPECS §9.2): a downstream waits for all its parents, direct or indirect, and is triggered once; a failed, discarded or canceled parent stops its branch and everything reachable; an empty plan releases a waiting downstream and is never the parent; <code>never</code> / <code>on_output_change</code> policies in a multi-parent graph; a skipped downstream stays skipped; a protected downstream stops at <code>unconfirmed</code>; the group status counts only the runs the caller can read.</td>
 </tr>
 <tr>
 <td><code>test_hooks.py</code> (2)</td>
@@ -1730,8 +1743,24 @@ all. Counts in parentheses include parametrized cases and drift as tests are add
 <td>HTTP state backend (moto S3): LOCK/POST/GET/UNLOCK and serial regression; <code>ro</code> tokens can't write or unlock, <code>plan</code> tokens lock but can't write, proposed runs never lock; env scoping; TTL follows the credential phase; a terminal run's token can't write; UNLOCK and a locked POST need the holder's lock ID; import session (adopt, admin-only, managed state only).</td>
 </tr>
 <tr>
-<td><code>test_oidc.py</code> (4)</td>
-<td>Issuer metadata + JWKS; the plan token's <code>sub</code>; apply uses the apply role; AssumeRole against moto STS.</td>
+<td><code>test_oidc.py</code> (6)</td>
+<td>Issuer metadata + JWKS; the plan token's <code>sub</code>; apply uses the apply role; AssumeRole against moto STS; with a cloud integration a static AWS credential never reaches the job, without one it is passed as before.</td>
+</tr>
+<tr>
+<td><code>test_oidc_kms.py</code> (16)</td>
+<td>The issuer's signing key in KMS (moto): signs through <code>kms:Sign</code>, a key that can't sign is refused; rotation keeps the old key published until its tokens expired, a known key can be reactivated; a token that can't be signed fails the job closed; concurrent claims and JWKS fetches provision the key once, a losing race uses the winner's key; transient signing failures leave the run to retry, permanent ones store a generic code only and discard what the payload staged.</td>
+</tr>
+<tr>
+<td><code>test_production_runner.py</code> (4)</td>
+<td>A production API refuses a non-<code>docker</code> worker at registration and at claim; development accepts the <code>local</code> runner; production settings refuse dev-grade values (SPECS §7.4, §13).</td>
+</tr>
+<tr>
+<td><code>test_worker_tools.py</code> (4)</td>
+<td>Tool-version matching; a stack's <code>tool_version</code> is validated; the claim skips a run the worker can't run; the queue reports no compatible worker.</td>
+</tr>
+<tr>
+<td><code>test_log_retention.py</code> (7)</td>
+<td>Two-tier logs (moto S3): archived after the grace window then hot-purged and served from S3; an archived run with hot rows never reads S3; download from either tier; an archive failure leaves the run unarchived; refresh-token families purged once fully expired; the audit purge needs the distinct DB role.</td>
 </tr>
 <tr>
 <td><code>test_scheduler.py</code> (4)</td>
@@ -1756,6 +1785,14 @@ all. Counts in parentheses include parametrized cases and drift as tests are add
 <tr>
 <td><code>test_repo_safety.py</code> (65)</td>
 <td>Repo introspection: discovery reads only regular <code>.tf</code> files inside the clone (symlinks never escape), <code>project_root</code> containment, clone budget, cleanup off the event loop; the repo token percent-encoded in clone URLs and masked in every git error (both forms); git killed and reaped on timeout.</td>
+</tr>
+<tr>
+<td><code>test_env_clones.py</code> (16)</td>
+<td>Environment clones (SPECS §21.2): settings, governance and dependency edges copied, never secrets; all or nothing; permissions (a space admin may not copy cloud integrations, an admin does; a shared upstream needs access to its space); dry run previews without rows or audit; null overrides rejected; integrity errors named; autodeploy forced off while something is left to fill or the env is protected; items shadowing a label set not copied; per-item copies audited; an edge from an uncloned stack and a tier change away from the reference flagged.</td>
+</tr>
+<tr>
+<td><code>test_rollouts.py</code> (28)</td>
+<td>Environment rollouts (SPECS §21): the graph applied under one approval; a plan that changes, forgets or does anything beyond creates, or an env that already has infrastructure, waits for a human; a failure skips its branch and can be retried; an expired approval pauses (also from the scheduler) and a re-approval resumes, audited as such; approval needs apply rights on every member, four-eyes vs the creator where it applies; one active rollout per env, cancel (a confirmed unclaimed run too, a cancel during the gate wins); preview flags mock plans and members no worker can take; members never fall back to autodeploy; a member made protected or moved to another tier after approval is not auto-confirmed, an approver removed from the space loses the gate; the pinned commit per stack; lock order; the cascade leaves active members alone; an active member can't be deleted.</td>
 </tr>
 <tr>
 <td><code>test_notifications.py</code> (10)</td>
@@ -1865,8 +1902,8 @@ The tier gate (an approver without <code>prod</code>) and staleness stay manual 
 <td>Repo-hook env stripped of cloud credentials and sensitive values; the cleartext tripwire on plan and output JSON.</td>
 </tr>
 <tr>
-<td><code>test_masking.py</code> (8)</td>
-<td>Masking (all secrets, longest first); platform hooks before repo hooks; plan summary and first error from tofu's JSON events; the masked plan JSON hides every sensitive value and keeps the rest, and a non-JSON document is masked as text.</td>
+<td><code>test_masking.py</code> (10)</td>
+<td>Masking (all secrets, longest first); platform hooks before repo hooks; plan summary and first error from tofu's JSON events (counters a newer tool reports kept, forgets counted from the plan JSON); the masked plan JSON hides every sensitive value and keeps the rest, and a non-JSON document is masked as text.</td>
 </tr>
 <tr>
 <td><code>test_workspace.py</code> (6)</td>
@@ -1875,6 +1912,34 @@ The tier gate (an approver without <code>prod</code>) and staleness stay manual 
 <tr>
 <td><code>test_concurrency.py</code> (3)</td>
 <td>The in-flight counter; <code>STACKD_MAX_CONCURRENT_JOBS</code> default and floor.</td>
+</tr>
+<tr>
+<td><code>test_cancel.py</code> (8)</td>
+<td>Stopping a job (SPECS §4.1): SIGINT stops the tool, one ignoring it is killed after the grace period; a stop between two commands starts no next one; past the point of no return a stop no longer applies; a command completing despite the signal is not a stop; the registry finds the job (an early cancel remembered); a canceled job is reported <code>job_canceled</code>, not failed.</td>
+</tr>
+<tr>
+<td><code>test_docker_runner.py</code> (10)</td>
+<td>The <code>docker</code> runner (SPECS §7.4): job containers hardened and mounting the workspace, repo-hook containers the checkout only, none of the host's env; output, env and exit code; timeout kills the container; nothing a command starts outlives it; no secret file for a repo hook; unprivileged, read-only rootfs; stdout/stderr kept apart. Real containers, skipped without a daemon.</td>
+</tr>
+<tr>
+<td><code>test_docker_job.py</code> (1)</td>
+<td>A whole plan → apply on the <code>docker</code> runner with a real tofu in the test image; skipped without a daemon or the image.</td>
+</tr>
+<tr>
+<td><code>test_runner_setting.py</code> (5)</td>
+<td><code>STACKD_RUNNER</code> only <code>local</code> or <code>docker</code> (no silent fallback); <code>docker</code> needs runner images; the runner is declared on every registration.</td>
+</tr>
+<tr>
+<td><code>test_tools.py</code> (4)</td>
+<td>Tool versions the worker declares: exact and series picks; runner images pinned by digest; the docker runner declares its images; the local runner probes the binaries on <code>PATH</code>.</td>
+</tr>
+<tr>
+<td><code>test_oidc_precedence.py</code> (2)</td>
+<td>With OIDC credentials, the host's own AWS credentials never reach tofu or a platform hook; without them, the static fallback is untouched (SPECS §10.5).</td>
+</tr>
+<tr>
+<td><code>test_repo_hook_policy.py</code> (2)</td>
+<td>Repo hooks at the apply stages run only on a tier that allows them; elsewhere skipped with a warning (SPECS §8.3).</td>
 </tr>
 <tr>
 <td><code>test_runner_diag.py</code> (1)</td>
@@ -1888,22 +1953,86 @@ The tier gate (an approver without <code>prod</code>) and staleness stay manual 
 </table>
 <h3 id="front-front">Front (<code>front/</code>)<a class="headerlink" href="#front-front" title="Permanent link">&para;</a></h3>
 <ul>
-<li><strong>vitest</strong> (<code>pnpm test</code>): <code>StateBadge.test.tsx</code> (label alongside color, mocked/fallback
-  modifiers), <code>ProvenanceBadge.test.ts</code> (provenance parsing) and <code>ProvenanceBadge.render.test.tsx</code>.</li>
-<li><strong>Playwright</strong> (<code>pnpm e2e</code>, <code>e2e/happy-path.spec.ts</code>): one smoke test — dev login reaches the
-  Stacks view — against a running dev stack (<code>PW_BASE_URL</code>, default <code>http://localhost:5173</code>). Not
-  run by CI yet.</li>
+<li><strong>vitest</strong> (<code>pnpm test</code> = <code>vitest run</code>, jsdom, <code>src/**/*.test.{ts,tsx}</code>). Counts are <code>it</code>/<code>test</code>
+  declarations; <code>tokens.test.ts</code> expands to 136 cases.</li>
+</ul>
+<table>
+<thead>
+<tr>
+<th>File</th>
+<th>Covers</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>src/identity/identity.test.tsx</code> (11)</td>
+<td><code>StateBadge</code> (applied vs no changes, where a run failed, the decision signal in text); <code>RunActionBar</code> (why bob can't confirm, alice's four-eyes context, no confirm/discard on a finished run, stopping a plan in one click and an apply in a deliberate second one, a stop already requested); <code>TypeToConfirm</code>; <code>EnvCell</code> wrapping.</td>
+</tr>
+<tr>
+<td><code>src/identity/ProvenanceBadge.test.ts</code> (5)</td>
+<td>Provenance parsing: prefixed kinds, <code>secret_fallback</code>/override vs bare secret, a credential shadowed by the OIDC integration, bare layers, unknown token → stack.</td>
+</tr>
+<tr>
+<td><code>src/lib/lib.test.ts</code> (36)</td>
+<td><code>runOutcome</code>, the phase rail's segments, <code>envSummary</code> (DESIGN §2.3), permissions mirroring the API gates (stop, cancel, confirm, mock, destroy, missing tier), <code>planParse</code>, <code>logModel</code>, the cascade walk, time formatting.</td>
+</tr>
+<tr>
+<td><code>src/styles/tokens.test.ts</code> (4 <code>it.each</code>, 136 cases)</td>
+<td>Re-checks the DESIGN §3.1 contrast table against <code>tokens.css</code>, both themes.</td>
+</tr>
+<tr>
+<td><code>src/features/audit/auditModel.test.ts</code> (6)</td>
+<td>Audit rows: targets and links, context summary without credential-like keys, consequential rows flagged, action groups, URL filters.</td>
+</tr>
+<tr>
+<td><code>src/features/overview/attention.test.ts</code> (7)</td>
+<td>Overview attention buckets (needs you / waiting / mocked / failures, drift, stale plans) and matrix columns and filters.</td>
+</tr>
+<tr>
+<td><code>src/features/queue/queueModel.test.ts</code> (8)</td>
+<td>Queue grouping and blocking reasons in words (holder run, no worker, apply reservation, a decision pending), filters, wait time.</td>
+</tr>
+<tr>
+<td><code>src/features/runs/CheckList.test.tsx</code> (10)</td>
+<td>Check results with their stage and a label, not colour alone; fallback to <code>checks</code> for older runs; the rail's Checking segment.</td>
+</tr>
+<tr>
+<td><code>src/features/rollouts/rolloutModel.test.ts</code> (6)</td>
+<td>Rollout members by level, plan summary, pending members, approval lifetime, progress, a label and glyph for every state.</td>
+</tr>
+<tr>
+<td><code>src/features/rollouts/clone.test.ts</code> (4)</td>
+<td><code>parseLabels</code> for the clone dialog.</td>
+</tr>
+<tr>
+<td><code>src/features/rollouts/CloneNotes.test.tsx</code> (4)</td>
+<td>Clone notes and warnings (label-attached sets, what is not copied, uncloned upstream, tier change), in words.</td>
+</tr>
+<tr>
+<td><code>src/features/settings/userChanges.test.ts</code> (2)</td>
+<td>Staged user changes: only real differences, summarised in words.</td>
+</tr>
+</tbody>
+</table>
+<ul>
+<li><strong>Playwright</strong> (<code>pnpm e2e</code>, <code>e2e/happy-path.spec.ts</code>): one smoke test — dev login as admin
+  reaches the overview of a space (<code>/s/&lt;space&gt;</code>) — against a running dev stack (<code>PW_BASE_URL</code>,
+  default <code>http://localhost:5173</code>). Not run by CI yet.</li>
 <li><strong>Ladle stories</strong> (<code>pnpm ladle</code> / <code>pnpm ladle:build</code>) pin the identity components visually (the
-  DESIGN §8 contract): <code>StateBadge</code>, <code>PhaseRail</code>, <code>ProvenanceBadge</code>, plus <code>BrandMark</code> and the base
-  UI kit.</li>
+  DESIGN §8 contract), in <code>src/identity/</code>: <code>StateBadge</code>, <code>PhaseRail</code>, <code>ProvenanceBadge</code>,
+  <code>LogViewer</code>, <code>PlanDiff</code>, <code>RunActionBar</code>, <code>EnvCell</code>, <code>TypeToConfirm</code>; plus <code>Brand</code>
+  (<code>src/app/Brand.stories.tsx</code>) and a <code>Checkbox</code> story (<code>src/components/ui.stories.tsx</code>).</li>
 </ul>
 <hr />
 <h2 id="5-counts">5. Counts<a class="headerlink" href="#5-counts" title="Permanent link">&para;</a></h2>
-<p>Roughly <strong>282 API tests</strong> (38 files), <strong>184 worker tests</strong> (15 files), <strong>1 e2e scenario</strong> and
-<strong>9 front unit tests</strong>, parametrized cases included. The numbers move with every change; count them
-instead of trusting this page:</p>
+<p>About <strong>383 API tests</strong> (45 files), <strong>218 worker tests</strong> (22 files, the docker-runner ones
+included), <strong>1 e2e scenario</strong>, and <strong>103 front vitest tests</strong> in 12 files (235 cases once the
+token-contrast <code>it.each</code> expands). Python counts are <code>pytest --collect-only</code> totals, parametrized
+cases included; the front count is a grep of <code>it(</code>/<code>test(</code>/<code>it.each(</code> declarations (as of
+2026-11-05). The numbers move with every change; count them instead of trusting this page:</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="nb">cd</span><span class="w"> </span>api<span class="w"> </span><span class="o">&amp;&amp;</span><span class="w"> </span>uv<span class="w"> </span>run<span class="w"> </span>pytest<span class="w"> </span>--collect-only<span class="w"> </span>-q<span class="w"> </span><span class="p">|</span><span class="w"> </span>tail<span class="w"> </span>-1<span class="w">      </span><span class="c1"># unit + integration</span>
 <a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a><span class="nb">cd</span><span class="w"> </span>worker<span class="w"> </span><span class="o">&amp;&amp;</span><span class="w"> </span>uv<span class="w"> </span>run<span class="w"> </span>pytest<span class="w"> </span>--collect-only<span class="w"> </span>-q<span class="w"> </span><span class="p">|</span><span class="w"> </span>tail<span class="w"> </span>-1
+<a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a><span class="nb">cd</span><span class="w"> </span>front<span class="w"> </span><span class="o">&amp;&amp;</span><span class="w"> </span>pnpm<span class="w"> </span><span class="nb">exec</span><span class="w"> </span>vitest<span class="w"> </span>list<span class="w"> </span><span class="p">|</span><span class="w"> </span>wc<span class="w"> </span>-l<span class="w">                 </span><span class="c1"># one line per case</span>
 </code></pre></div>
 <hr />
 <h2 id="6-adding-a-test">6. Adding a test<a class="headerlink" href="#6-adding-a-test" title="Permanent link">&para;</a></h2>

@@ -1321,7 +1321,7 @@
 <p>This is a security upgrade over a stored secret: no secret at rest in Stackd's database, automatic rotation (you rotate in the manager, not here), and a single revocable bootstrap credential per source.</p>
 <div class="admonition info">
 <p class="admonition-title">Provider support</p>
-<p><strong>Proton Pass</strong> is the first provider, via its <a href="https://proton.me/blog/proton-pass-cli">CLI</a> and scoped Personal Access / AI Access Tokens. The model is provider-agnostic — Vault, AWS Secrets Manager, 1Password and others plug into the same interface.</p>
+<p><strong>Proton Pass</strong> is the only provider today (<code>"provider": "proton_pass"</code>), via its <a href="https://proton.me/blog/proton-pass-cli">CLI</a> and scoped Personal Access / AI Access Tokens. The model is provider-agnostic — Vault, AWS Secrets Manager, 1Password and others can plug into the same interface later.</p>
 </div>
 <h2 id="how-it-fits-together">How it fits together<a class="headerlink" href="#how-it-fits-together" title="Permanent link">&para;</a></h2>
 <pre class="mermaid"><code>flowchart LR
@@ -1331,7 +1331,7 @@
 <p>Resolution precedence per reference mirrors the rule for dependency mocks — <strong>real value &gt; fallback &gt; error</strong>:</p>
 <ol>
 <li><strong>Provider reachable</strong> → the live value is used. Provenance <code>secret:&lt;source&gt;</code>.</li>
-<li><strong>Provider unreachable</strong> → the configured <a href="#fallback-when-the-source-is-down">fallback</a> applies, or the run fails closed.</li>
+<li><strong>Provider unreachable</strong>, or the entry can't be fetched (timeout, not found) → the configured <a href="#fallback-when-the-source-is-down">fallback</a> applies, or the run fails closed.</li>
 </ol>
 <p>The fetched value flows into the run exactly like a stored sensitive variable: it lands in the worker's <code>tfvars</code>/<code>sensitive_env</code> and the agent masks it in all logs.</p>
 <h2 id="1-create-a-secret-source">1. Create a secret source<a class="headerlink" href="#1-create-a-secret-source" title="Permanent link">&para;</a></h2>
@@ -1344,9 +1344,11 @@
 <a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a><span class="s1">        &quot;bootstrap_secret&quot;: &quot;&lt;proton personal access token&gt;&quot;</span>
 <a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a><span class="s1">      }&#39;</span><span class="w"> </span><span class="p">|</span><span class="w"> </span>jq<span class="w"> </span>-r<span class="w"> </span>.id<span class="k">)</span>
 </code></pre></div>
-<p>In the UI: <strong>Stack → Secret sources → Manage secret sources</strong>.</p>
+<p>In the UI: a stack's <strong>Settings → Secret sources</strong> (the sources of the stack's space) → <strong>Add source</strong>.
+<strong>Rotate token</strong> replaces the credential (<code>PATCH …/secret-sources/{id}</code> with a new
+<code>bootstrap_secret</code>); deleting a source still referenced by a variable is refused (<code>409 Secret source in use</code>).</p>
 <h2 id="2-reference-it-from-a-variable">2. Reference it from a variable<a class="headerlink" href="#2-reference-it-from-a-variable" title="Permanent link">&para;</a></h2>
-<p>Point a variable at the source with a provider-specific locator. For Proton Pass that is a <code>pass://vault/item/field</code> URI. A referenced variable is implicitly <strong>sensitive</strong>.</p>
+<p>Point a variable at the source with a provider-specific locator. For Proton Pass that is a <code>pass://vault/item/field</code> URI. A referenced variable is implicitly <strong>sensitive</strong>, and carries a reference <strong>instead of</strong> a <code>value</code> (give exactly one). The source must belong to the variable's space — the stack's, or the variable set's — or the request fails with <code>404 Secret source not found</code>.</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>curl<span class="w"> </span>-s<span class="w"> </span>-X<span class="w"> </span>POST<span class="w"> </span>localhost:8000/api/v1/environments/<span class="nv">$ENV</span>/variables<span class="w"> </span><span class="se">\</span>
 <a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="w">  </span>-H<span class="w"> </span><span class="s2">&quot;Authorization: Bearer </span><span class="nv">$TOKEN</span><span class="s2">&quot;</span><span class="w"> </span>-H<span class="w"> </span><span class="s1">&#39;content-type: application/json&#39;</span><span class="w"> </span><span class="se">\</span>
 <a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a><span class="w">  </span>-d<span class="w"> </span><span class="s1">&#39;{</span>
@@ -1356,7 +1358,7 @@
 <a id="__codelineno-1-7" name="__codelineno-1-7" href="#__codelineno-1-7"></a><span class="s1">        &quot;secret_ref&quot;: &quot;pass://infra/prod-db/password&quot;</span>
 <a id="__codelineno-1-8" name="__codelineno-1-8" href="#__codelineno-1-8"></a><span class="s1">      }&#39;</span>
 </code></pre></div>
-<p>The resolved value shows up in <code>GET /environments/{id}/resolved-variables</code> with provenance <code>secret:proton</code> (and masked, since it is sensitive).</p>
+<p><code>GET /environments/{id}/resolved-variables</code> lists it like any sensitive variable — masked, with the provenance of the layer that defines it (<code>env</code> here): nothing is fetched there. The live fetch happens when a worker claims the run's job; the run's <code>variable_provenance</code> then records <code>secret:proton</code> for it, shown on the run's <strong>Inputs</strong> tab.</p>
 <h2 id="fallback-when-the-source-is-down">Fallback when the source is down<a class="headerlink" href="#fallback-when-the-source-is-down" title="Permanent link">&para;</a></h2>
 <p>Each reference has a <code>secret_fallback_mode</code> that decides what happens if the provider is unreachable at run time:</p>
 <table>
@@ -1412,7 +1414,7 @@
 <p>Leave <code>allow_fallback_apply</code> off on production environments. A fallback is a break-glass affordance for an outage, not a normal path — keeping it off forces a deliberate, audited opt-in before a non-live secret ever reaches prod.</p>
 </div>
 <h2 id="audit">Audit<a class="headerlink" href="#audit" title="Permanent link">&para;</a></h2>
-<p>Source management and every fallback event are audited (<code>secret_source.created</code>, <code>secret_source.token_rotated</code>, <code>secret.fallback_used</code>, <code>secret.fallback_overridden</code>). A run failed because a reference could not resolve is audited as <code>run.apply_failed</code> with <code>reason: secret</code>. The secret value itself is never written to the audit context. Successful live resolutions are not audited individually — the run's <code>variable_provenance</code> records <code>secret:&lt;source&gt;</code> per variable.</p>
+<p>Source management and every fallback event are audited (<code>secret_source.created</code>, <code>secret_source.updated</code>, <code>secret_source.token_rotated</code>, <code>secret_source.deleted</code>, <code>secret.fallback_used</code>, <code>secret.fallback_overridden</code>). A run failed because a reference could not resolve is audited as <code>run.apply_failed</code> with <code>reason: secret</code>. The secret value itself is never written to the audit context. Successful live resolutions are not audited individually — the run's <code>variable_provenance</code> records <code>secret:&lt;source&gt;</code> per variable.</p>
 <h2 id="see-also">See also<a class="headerlink" href="#see-also" title="Permanent link">&para;</a></h2>
 <ul>
 <li><a href="../variables/">Variables &amp; secrets</a></li>

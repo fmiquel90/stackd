@@ -1248,7 +1248,7 @@ first apply ever happens.</p>
 <p>A dependency is an edge <code>upstream env → downstream env</code> plus a list of
 <code>output_references</code>. Each reference maps an upstream <code>output_name</code> (a Terraform
 output) to a downstream <code>input_name</code> (a variable, without the <code>TF_VAR_</code> prefix), with
-an optional <code>mock_value</code>.</p>
+an optional <code>mock_value</code> (any JSON value: string, number, list, map).</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>curl<span class="w"> </span>-s<span class="w"> </span>-X<span class="w"> </span>POST<span class="w"> </span>localhost:8000/api/v1/environments/<span class="nv">$APP_DEV</span>/dependencies<span class="w"> </span><span class="se">\</span>
 <a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="w">  </span>-H<span class="w"> </span><span class="s2">&quot;Authorization: Bearer </span><span class="nv">$TOKEN</span><span class="s2">&quot;</span><span class="w"> </span>-H<span class="w"> </span><span class="s1">&#39;content-type: application/json&#39;</span><span class="w"> </span>-d<span class="w"> </span><span class="s1">&#39;{</span>
 <a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a><span class="s1">    &quot;upstream_env_id&quot;: &quot;&#39;</span><span class="s2">&quot;</span><span class="nv">$NETWORK_DEV</span><span class="s2">&quot;</span><span class="s1">&#39;&quot;,</span>
@@ -1258,7 +1258,8 @@ an optional <code>mock_value</code>.</p>
 <a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a><span class="s1">    ]</span>
 <a id="__codelineno-0-8" name="__codelineno-0-8" href="#__codelineno-0-8"></a><span class="s1">  }&#39;</span>
 </code></pre></div>
-<p>Cycles are rejected at creation (<code>422</code>). The only structural constraint is
+<p>Cycles are rejected at creation (<code>422</code>), and so is a second edge between the same two
+environments (<code>409</code>). Beyond that, the only structural constraint is
 <code>upstream &lt;&gt; downstream</code> — two environments <strong>of the same stack</strong> may depend on each
 other (primary/secondary region pattern). To wire same-named environments across two
 stacks in bulk, use the helper:</p>
@@ -1268,11 +1269,15 @@ stacks in bulk, use the helper:</p>
 </code></pre></div>
 <p>It links each environment of the stack in the path to the same-named environment of
 <code>upstream_stack_id</code>, skipping pairs already linked and any edge that would close a
-cycle, and returns <code>{"created": N}</code> — running it twice is harmless. Add the
-<code>output_references</code> on each edge afterwards.</p>
+cycle, and returns <code>{"created": N}</code> — running it twice is harmless. The edges it creates
+carry <strong>no</strong> <code>output_references</code>, and there is no endpoint to edit an edge: to give one
+references, delete it and re-create it with <code>POST …/environments/{id}/dependencies</code> as
+above. Until then, an <code>on_output_change</code> edge has nothing to compare and only triggers a
+downstream that has never finished a run (see <a href="#cascade">Cascade</a>).</p>
 <h2 id="how-inputs-resolve">How inputs resolve<a class="headerlink" href="#how-inputs-resolve" title="Permanent link">&para;</a></h2>
-<p>Inputs are resolved fresh <strong>at claim time</strong> and snapshotted into <code>resolved_inputs</code>.
-The rule is <strong>real upstream output &gt; mock &gt; explicit error</strong>.</p>
+<p>Inputs are resolved fresh <strong>at claim time</strong> — at the plan claim and again at the apply
+claim — and snapshotted into <code>resolved_inputs</code>. The rule is <strong>real upstream output &gt; mock &gt;
+explicit error</strong>.</p>
 <pre class="mermaid"><code>flowchart TD
   A[Resolve reference] --&gt; B{Upstream output exists?}
   B --&gt;|yes| C[Use real value]
@@ -1290,14 +1295,16 @@ validate config. A run that injected a mock is flagged <code>used_mocks=true</co
 <p class="admonition-title">A mocked run cannot be applied</p>
 <p><code>unconfirmed → confirmed</code> is <strong>refused</strong> when <code>used_mocks=true</code> and the environment
 keeps the default <code>allow_mock_apply=false</code>. A mocked plan is for validation, not for
-real changes. Set <code>allow_mock_apply=true</code> on the environment to override. Mocked runs
-are never autodeployed; PR (<code>proposed</code>) runs use mocks freely since they are plan-only.</p>
+real changes. Set <code>allow_mock_apply=true</code> on the environment to override. The gate is
+checked again at the apply claim: an input that falls back to a mock between confirmation
+and apply fails the run (<code>dependency_mock:mock_apply_disabled</code>). Mocked runs are never
+autodeployed; PR (<code>proposed</code>) runs use mocks freely since they are plan-only.</p>
 </div>
 <h2 id="cascade">Cascade<a class="headerlink" href="#cascade" title="Permanent link">&para;</a></h2>
-<p>On a tracked apply finishing (<code>applying → finished</code>), Stackd parses <code>outputs.json</code> and
-upserts non-sensitive outputs into <code>env_outputs</code> (each with a <code>value_hash</code>). It then
-walks the outgoing edges and triggers downstream runs (<code>type=tracked</code>,
-<code>triggered_by=dependency</code>, sharing a <code>run_group_id</code>):</p>
+<p>On a tracked apply finishing (<code>applying → finished</code>), Stackd upserts the run's outputs into
+<code>env_outputs</code> (a <code>sensitive</code> one with no value, never propagated). It then walks the
+outgoing edges and triggers downstream runs (<code>type=tracked</code>, <code>triggered_by=dependency</code>,
+sharing a <code>run_group_id</code> — the triggering run's group, or the triggering run's own id):</p>
 <table>
 <thead>
 <tr>
@@ -1316,19 +1323,38 @@ walks the outgoing edges and triggers downstream runs (<code>type=tracked</code>
 </tr>
 <tr>
 <td><code>on_output_change</code></td>
-<td>triggered only if the resolved <code>value_hash</code> differs from the downstream's last run</td>
+<td>triggered only if a referenced upstream output differs from the value the downstream's last finished run consumed (its <code>resolved_inputs</code>); a downstream that never finished a run is always triggered</td>
 </tr>
 </tbody>
 </table>
-<p>Each finished upstream apply triggers its downstream runs on its own: a downstream with two
-parents can run twice. Waiting for <strong>all</strong> parents of a run group, and stopping a branch when a
-parent fails, are specified but not implemented yet (SPECS §9.2). Only a finished apply cascades:
-a failed run, including one whose <code>after_apply</code> hook failed, triggers nothing.</p>
+<p>The run group is decided as a whole (SPECS §9.2):</p>
+<ul>
+<li><strong>All parents first.</strong> A downstream waits until every upstream of the group that may still run
+  has settled, then gets <strong>at most one</strong> run in that group, released by the last of them.</li>
+<li><strong>Only an applied upstream feeds a run.</strong> The downstream runs if at least one upstream that was
+  <em>applied</em> in the group passes its edge's policy; otherwise it is skipped. An upstream whose plan
+  came back empty settles without triggering anything.</li>
+<li><strong>Stop on failure.</strong> A run of the group ending <code>failed</code>, <code>discarded</code> or <code>canceled</code> — including
+  one whose <code>after_apply</code> hook failed — triggers nothing, and no environment reachable from it
+  gets a run in that group.</li>
+</ul>
+<p>The group's status is computed on <code>GET /api/v1/runs/{id}</code> as <code>run_group: {id, status}</code>:
+<code>running</code> while a run of the group is queued or active, then <code>partial_failure</code> if one failed,
+was discarded or canceled, else <code>succeeded</code> (counting only the runs you can read).</p>
 <div class="admonition warning">
 <p class="admonition-title">Protections are never bypassed</p>
 <p>A cascade run is routed like any other plan. It auto-confirms only on an <code>autodeploy</code>,
 unprotected environment, with no mock and no <code>warn</code> check; a <strong>protected</strong> downstream always
 stops at <code>unconfirmed</code> and waits for a human — see <a href="../runs-and-approvals/">Runs &amp; approvals</a>.</p>
+</div>
+<div class="admonition note">
+<p class="admonition-title">Cascades and environment rollouts</p>
+<p>A run that belongs to an environment rollout never cascades: the rollout drives its members,
+and their downstreams outside the rollout are not triggered (they show as stale). A downstream
+that is a member of an <strong>active</strong> rollout gets no cascade run either — it is skipped in the
+group and the rollout plans it in its turn. If that member had already planned, the rollout's
+creator and approver get a <code>rollout_upstream_changed</code> in-app notification instead (SPECS §9.2,
+§21).</p>
 </div>
 <p>Launch a whole subgraph at once with <code>with_downstream: true</code> in the trigger body; the
 root starts and subsequent levels follow via cascade:</p>
@@ -1337,11 +1363,15 @@ root starts and subsequent levels follow via cascade:</p>
 <a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a><span class="w">  </span>-d<span class="w"> </span><span class="s1">&#39;{&quot;with_downstream&quot;: true}&#39;</span>
 </code></pre></div>
 <h2 id="inspect">Inspect<a class="headerlink" href="#inspect" title="Permanent link">&para;</a></h2>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a>curl<span class="w"> </span>-s<span class="w"> </span>localhost:8000/api/v1/environments/<span class="nv">$APP_DEV</span>/outputs<span class="w">   </span>-H<span class="w"> </span><span class="s2">&quot;Authorization: Bearer </span><span class="nv">$TOKEN</span><span class="s2">&quot;</span>
-<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a>curl<span class="w"> </span>-s<span class="w"> </span>localhost:8000/api/v1/graph<span class="w">                            </span>-H<span class="w"> </span><span class="s2">&quot;Authorization: Bearer </span><span class="nv">$TOKEN</span><span class="s2">&quot;</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a>curl<span class="w"> </span>-s<span class="w"> </span>localhost:8000/api/v1/environments/<span class="nv">$APP_DEV</span>/outputs<span class="w">      </span>-H<span class="w"> </span><span class="s2">&quot;Authorization: Bearer </span><span class="nv">$TOKEN</span><span class="s2">&quot;</span>
+<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a>curl<span class="w"> </span>-s<span class="w"> </span>localhost:8000/api/v1/environments/<span class="nv">$APP_DEV</span>/dependencies<span class="w"> </span>-H<span class="w"> </span><span class="s2">&quot;Authorization: Bearer </span><span class="nv">$TOKEN</span><span class="s2">&quot;</span>
+<a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a>curl<span class="w"> </span>-s<span class="w"> </span>localhost:8000/api/v1/graph<span class="w">                               </span>-H<span class="w"> </span><span class="s2">&quot;Authorization: Bearer </span><span class="nv">$TOKEN</span><span class="s2">&quot;</span>
 </code></pre></div>
-<p><code>/graph</code> only shows the environments and edges of the spaces you can see. There is no
-run-group endpoint yet: follow a cascade on the graph page, or through the downstream
+<p><code>/outputs</code> lists a sensitive output with a <code>null</code> value. <code>/dependencies</code> lists the
+environment's incoming edges; a reference shows <code>has_mock</code>, never the mock value itself.
+<code>/graph</code> only shows the environments and edges of the spaces you can see. There is no
+endpoint listing a run group's runs: follow a cascade on the graph page, through a run's
+<code>run_group</code> and <code>parent_run_id</code> (<code>GET /api/v1/runs/{id}</code>), or through the downstream
 environments' runs (<code>triggered_by: "dependency"</code>).</p>
 <p>To remove an edge: <code>DELETE /api/v1/dependencies/{id}</code>.</p>
 <h2 id="see-also">See also<a class="headerlink" href="#see-also" title="Permanent link">&para;</a></h2>

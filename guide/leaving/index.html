@@ -1383,12 +1383,18 @@ how to leave and get everything back.</p>
 <h2 id="what-lives-only-in-stackd-but-is-exportable">What lives only in Stackd (but is exportable)<a class="headerlink" href="#what-lives-only-in-stackd-but-is-exportable" title="Permanent link">&para;</a></h2>
 <ul>
 <li><strong>Orchestration config</strong> — stacks, environments, tiers, dependencies, variable sets. Exportable
-  via the API (<code>GET /stacks</code>, <code>/environments/{id}</code>, <code>/graph</code>,
+  via the API (<code>GET /stacks</code>, <code>/stacks/{id}/environments</code>, <code>/environments/{id}</code>,
+  <code>/environments/{id}/dependencies</code>, <code>/graph</code>, <code>/variable-sets</code>,
   <code>/environments/{id}/resolved-variables</code>). Re-creatable; it isn't infrastructure.</li>
-<li><strong>History</strong> — runs, logs, audit. The audit trail exports to CSV (<code>GET /api/v1/audit/export</code>).</li>
+<li><strong>History</strong> — runs, logs, audit. Runs list per environment (<code>GET /environments/{id}/runs</code>); a
+  run's logs download as plain text (<code>GET /runs/{id}/logs/download</code>), and once archived they also
+  sit in your bucket under <code>logs/&lt;run_id&gt;/&lt;phase&gt;.log.gz</code>. The audit trail exports to CSV
+  (<code>GET /api/v1/audit/export</code>, admin, same filters as <code>GET /audit</code>). Export it before it ages out
+  if your instance purges it (<code>AUDIT_RETENTION_DAYS</code>, 730 days, with a purge role configured).</li>
 <li><strong>Sensitive variable values</strong> — write-only by design (AES-GCM, never returned in clear). Keep
-  your own source of truth for secrets — you should anyway. Non-sensitive values come back via
-  <code>/resolved-variables</code>.</li>
+  your own source of truth for secrets — you should anyway; secrets read from an
+  <a href="../external-secrets/">external secret source</a> already live in your own secret manager.
+  Non-sensitive values come back via <code>/resolved-variables</code> (sensitive ones come back masked).</li>
 </ul>
 <div class="admonition tip">
 <p class="admonition-title">Want zero state exit cost?</p>
@@ -1413,6 +1419,10 @@ token + the HTTP backend config, valid 30 minutes). In a local checkout, add a
 <a id="__codelineno-0-8" name="__codelineno-0-8" href="#__codelineno-0-8"></a><span class="c1"># (`s3`, local…), then:</span>
 <a id="__codelineno-0-9" name="__codelineno-0-9" href="#__codelineno-0-9"></a>tofu<span class="w"> </span>init<span class="w"> </span>-migrate-state
 </code></pre></div>
+<p>The state versions are also plain tfstate objects in Stackd's bucket, at
+<code>states/&lt;environment_id&gt;/&lt;version_id&gt;.tfstate</code> — readable with your own S3 credentials, no API
+involved. <code>GET /api/v1/environments/{id}/state/versions</code> lists them (id, serial, lineage), newest
+first.</p>
 <h3 id="2-repoint-terraform-ci-at-the-repos-directly">2. Repoint terraform / CI at the repos directly<a class="headerlink" href="#2-repoint-terraform-ci-at-the-repos-directly" title="Permanent link">&para;</a></h3>
 <p>Your code never moved — point your existing CI or local <code>tofu</code> at the repos and backends and you're
 running on your own again.</p>

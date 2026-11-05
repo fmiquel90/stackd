@@ -601,6 +601,28 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#rollouts" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Rollouts
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#run-logs" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Run logs
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#proposed-runs-from-a-pr" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -1296,6 +1318,28 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#rollouts" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Rollouts
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#run-logs" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Run logs
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#proposed-runs-from-a-pr" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -1358,12 +1402,21 @@
 <code>plan</code>, and reports back. With a non-empty diff the run stops at <strong><code>unconfirmed</code></strong> and waits for a
 human. After <strong>confirm</strong>, a worker (not necessarily the same one) claims the <strong>apply job</strong> and
 drives the run to <strong><code>finished</code></strong>. An empty diff goes straight to <code>finished</code>; a
-failure to <code>failed</code>. A human can <code>discard</code> an <code>unconfirmed</code> run, or <code>cancel</code> a <code>queued</code>, <code>confirmed</code> or
-<code>unconfirmed</code> one. A run a worker is <strong>executing</strong> can be <strong>stopped</strong>: the worker is asked on its next
-heartbeat and interrupts the tool as a Ctrl-C would (tofu finishes the operation in flight and releases
-the state lock). A stopped plan ends <code>canceled</code>. A stopped <strong>apply</strong> ends <code>failed</code> with
-<code>canceled_during_apply</code> — never <code>canceled</code>, because infrastructure may be partly changed — and needs the
-right to apply, like starting it did.</p>
+failure to <code>failed</code>. A human (<code>writer</code>+) can <code>discard</code> an <code>unconfirmed</code> run (<strong>Discard</strong>), or
+<code>cancel</code> a <code>queued</code>, <code>confirmed</code> or <code>unconfirmed</code> one (<strong>Cancel run</strong>) — both end it at once, nothing
+applied. A run a worker is <strong>executing</strong> can be <strong>stopped</strong> (<strong>Stop run</strong> / <strong>Stop apply</strong>, the same
+<code>POST /runs/{id}/cancel</code>): the stop is recorded and audited (<code>run.cancel_requested</code>), the worker is
+asked on its next heartbeat and interrupts the tool as a Ctrl-C would (SIGINT: tofu finishes the
+operation in flight and releases the state lock). A tool still running after the grace period
+(<code>STACKD_CANCEL_GRACE_SECONDS</code> on the worker, 120 s by default) is killed. The run only ends once the
+worker reports it stopped. A stopped plan (or read-only <a href="../commands/">command</a>) ends <code>canceled</code> —
+also when the plan finished before the stop reached it: it is never held for approval nor
+auto-confirmed. A stopped <strong>apply</strong> (or mutating command) ends <code>failed</code> with
+<code>canceled_during_apply</code> — never <code>canceled</code>, because infrastructure may be partly changed —, nothing
+cascades from it, and stopping it needs the right to apply, like starting it did (the UI asks for a
+second click). Once tofu's apply has succeeded, a late stop is ignored: the outputs still get
+recorded. Asking again is harmless: it re-sends the request. A worker that went offline never
+reports: the run ends through <a href="../workers-and-scaling/#worker-loss">worker loss</a>.</p>
 <div class="admonition note">
 <p class="admonition-title">Note</p>
 <p>State only ever changes through one function (<code>transition()</code>), which records a <code>run_event</code> and
@@ -1399,8 +1452,8 @@ after the apply (the <code>after_apply</code> hooks never see it).</p>
    (not an ordered <code>dev&lt;staging&lt;prod</code>), so a grant can be non-contiguous — e.g. <code>{dev, prod}</code>
    confirms in dev and prod but not staging.</li>
 </ol>
-<p>A <code>destroy</code> run additionally requires the <code>can_destroy</code> permission. A tier flagged
-<code>requires_four_eyes</code> (e.g. <code>prod</code>) also forces the triggerer ≠ the confirmer.</p>
+<p>A <code>destroy</code> run additionally requires the <code>can_destroy</code> permission — to trigger it, too. A tier
+flagged <code>requires_four_eyes</code> (e.g. <code>prod</code>) also forces the triggerer ≠ the confirmer.</p>
 <p>These are your <strong>effective</strong> permissions in the environment's space: a space membership can set a
 different role, tier set or destroy right than your instance defaults.</p>
 <table>
@@ -1436,17 +1489,21 @@ different role, tier set or destroy right than your instance defaults.</p>
 <h2 id="four-eyes">Four-eyes<a class="headerlink" href="#four-eyes" title="Permanent link">&para;</a></h2>
 <p>On an environment whose tier is flagged <code>requires_four_eyes</code> (the seeded <code>prod</code>), a <code>protected</code>
 environment, or any env with <code>require_second_pair_of_eyes</code>, the person who <strong>triggered</strong> the run
-cannot be the one who <strong>confirms</strong> it — another authorized approver must. It only applies to runs
-a human triggered: a webhook or cascade run has no triggerer to oppose, so any authorized approver
-can confirm it.</p>
+cannot be the one who <strong>confirms</strong> it — another authorized approver must. An environment whose tier
+is missing from the catalog requires four-eyes too (fail closed). It only applies to runs a human
+triggered: a webhook or cascade run has no triggerer to oppose, so any authorized approver can
+confirm it. A <a href="#rollouts">rollout</a>'s runs count its creator as their triggerer.</p>
 <h2 id="friction-proportional-to-risk">Friction proportional to risk<a class="headerlink" href="#friction-proportional-to-risk" title="Permanent link">&para;</a></h2>
-<p>An authorized apply on an ordinary tier is one click. Confirming on a tier flagged
-<code>requires_four_eyes</code> or any <strong><code>destroy</code></strong> run opens a confirmation popover: type the <strong>environment name</strong> + review a <code>+a ~c −d</code> plan summary. This
+<p>An authorized apply on an ordinary environment is one click (<strong>Confirm apply</strong>). Confirming where
+four-eyes applies (a tier flagged <code>requires_four_eyes</code>, a <code>protected</code> environment, or
+<code>require_second_pair_of_eyes</code>) or any <strong><code>destroy</code></strong> run (<strong>Confirm destroy</strong>) opens a confirmation
+popover: type the <strong>environment name</strong> + review a <code>+a ~c −d</code> plan summary. This
 is a misclick safeguard only — it never bypasses <code>can_apply</code> (still evaluated server-side).</p>
 <h2 id="autodeploy-checks">Autodeploy &amp; checks<a class="headerlink" href="#autodeploy-checks" title="Permanent link">&para;</a></h2>
 <p>An environment with <code>autodeploy</code> auto-confirms when the plan is clean — <strong>but a <code>warn</code> check forces
-<code>unconfirmed</code></strong> so a human still sees it. A <code>protected</code> environment can never autodeploy, and
-requires four-eyes.</p>
+<code>unconfirmed</code></strong> so a human still sees it, and so does a run that consumed a mock. A <code>protected</code>
+environment can never autodeploy, and requires four-eyes. A rollout's run never autodeploys: it
+follows the <a href="#rollouts">rollout gate</a>.</p>
 <p>Every <a href="../hooks/">hook</a> result is kept on the run with the stage it ran at, from the plan job and
 then the apply job: <code>check_results.results</code> lists them all (<code>ok</code>, <code>warn</code>, <code>fail</code>) — what the run
 page shows, with each one's stage — and <code>check_results.checks</code> only the ones that warned or
@@ -1458,13 +1515,54 @@ check fails the run at its stage; a failing <code>before_apply</code> check mean
 sets <code>allow_mock_apply=true</code> — see <a href="../dependencies-and-mocks/">Dependencies &amp; mocks</a>.</p>
 <h2 id="promotion-trunk-based">Promotion (trunk-based)<a class="headerlink" href="#promotion-trunk-based" title="Permanent link">&para;</a></h2>
 <p>To roll out the <strong>exact commit</strong> running on one environment to another of the same stack
-(dev → staging → prod), use <strong>promote</strong> — the env's <strong>Promote</strong> tab, or:</p>
+(dev → staging → prod), use <strong>promote</strong> — on the target env, <strong>More → Promote from a sibling…</strong>, or:</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>curl<span class="w"> </span>-s<span class="w"> </span>-X<span class="w"> </span>POST<span class="w"> </span>localhost:8000/api/v1/environments/<span class="nv">$STAGING_ID</span>/promote<span class="w"> </span>-H<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$AUTH</span><span class="s2">&quot;</span><span class="w"> </span><span class="se">\</span>
-<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="w">  </span>-d<span class="w"> </span><span class="s1">&#39;{&quot;from_environment_id&quot;: &quot;&#39;</span><span class="nv">$DEV_ID</span><span class="s1">&#39;&quot;}&#39;</span>
+<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="w">  </span>-H<span class="w"> </span><span class="s1">&#39;content-type: application/json&#39;</span><span class="w"> </span>-d<span class="w"> </span><span class="s1">&#39;{&quot;from_environment_id&quot;: &quot;&#39;</span><span class="nv">$DEV_ID</span><span class="s1">&#39;&quot;}&#39;</span>
 </code></pre></div>
 <p>It pins a new tracked run on the target to the source's last applied commit, so you deploy <em>what
 was tested</em> — not whatever HEAD happens to be. The apply is gated as usual (tier + four-eyes) at
 confirm. This is the same-stack counterpart to the cross-stack <a href="../dependencies-and-mocks/">cascade</a>.</p>
+<h2 id="rollouts">Rollouts<a class="headerlink" href="#rollouts" title="Permanent link">&para;</a></h2>
+<p>A <strong>rollout</strong> plans and applies a set of environments of one space — typically the ones a
+<a href="../stacks-and-environments/#cloning-an-environment-across-stacks">clone</a> just created — in
+dependency order, under <strong>one approval</strong>. Start one from an environment's <strong>More → Roll out every
+“name” environment…</strong> (every environment of that name in the space), from the clone dialog once it
+is done, or:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>curl<span class="w"> </span>-s<span class="w"> </span>-X<span class="w"> </span>POST<span class="w"> </span>localhost:8000/api/v1/rollouts<span class="w"> </span>-H<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$AUTH</span><span class="s2">&quot;</span><span class="w"> </span>-H<span class="w"> </span><span class="s1">&#39;content-type: application/json&#39;</span><span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="w">  </span>-d<span class="w"> </span><span class="s1">&#39;{&quot;space_id&quot;: &quot;&#39;</span><span class="nv">$SPACE_ID</span><span class="s1">&#39;&quot;, &quot;env_name&quot;: &quot;prod-euw3&quot;}&#39;</span><span class="w">    </span><span class="c1"># or &quot;environment_ids&quot;: [...]</span>
+</code></pre></div>
+<ul>
+<li>A rollout is created <code>awaiting_approval</code> (<code>writer</code> in the space): nothing runs until an approver
+  approves it — the <strong>Rollouts</strong> page → <strong>Approve…</strong>, typing its name, or
+  <code>POST /api/v1/rollouts/{id}/approve</code>. Approving requires <code>can_apply</code> on <strong>every</strong> member and, when
+  any member requires four-eyes, someone other than the rollout's creator.</li>
+<li>Each member is then planned — an ordinary tracked run — once its upstream members are done. All the
+  member runs of a stack plan the same commit: the one its first plan fixed.</li>
+<li><strong>The rollout gate.</strong> While the approval lasts (<code>STACKD_ROLLOUT_APPROVAL_TTL_SECONDS</code>, 24 h by
+  default), a member's plan is confirmed without asking again — the approver recorded as the
+  confirmer — only if it <strong>only creates</strong> resources, in an environment never applied before (managed
+  state, nothing stored yet), on the pinned commit, with no mock, no secret fallback and no <code>warn</code>
+  or <code>fail</code> check. Any other plan stops at <code>unconfirmed</code> for an ordinary confirmation (<code>can_apply</code> +
+  four-eyes), and the rollout shows <code>paused</code> meanwhile.</li>
+<li>The gate closes — the rollout pauses — when the approval expires, the approver loses the right to
+  apply on a member, or a member's tier, <code>protected</code> or four-eyes requirement changes: <strong>Approve
+  again…</strong> reopens it.</li>
+<li>A member run that fails, is discarded or canceled skips the members downstream of it; the rollout
+  ends <code>failed</code> once nothing else runs. <strong>Retry the failed environments</strong> (<code>POST …/retry</code>) starts the
+  failed and skipped members again. <strong>Cancel rollout</strong> (<code>POST …/cancel</code>) cancels the member runs not
+  executing yet; one in progress finishes on its own.</li>
+<li>An environment belongs to one active rollout at a time (<code>409 Already rolling out</code>).</li>
+</ul>
+<p>See <a href="../../SPECS/">SPECS §21</a>.</p>
+<h2 id="run-logs">Run logs<a class="headerlink" href="#run-logs" title="Permanent link">&para;</a></h2>
+<p>The run page streams the log live, by phase. Once a run has ended, its logs are archived to the
+object store (<code>logs/{run_id}/{phase}.log.gz</code>) and the database copy is purged
+<code>LOG_HOT_RETENTION_DAYS</code> (7 by default) later; reads switch to the archive transparently. The log
+viewer's <strong>Save</strong> button saves the lines it shows as <code>run.log</code>; the API serves the whole log as
+plain text, ANSI colours kept:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a>curl<span class="w"> </span>-s<span class="w"> </span><span class="s2">&quot;localhost:8000/api/v1/runs/</span><span class="nv">$RUN_ID</span><span class="s2">/logs/download?phase=all&quot;</span><span class="w"> </span>-H<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$AUTH</span><span class="s2">&quot;</span><span class="w"> </span>-o<span class="w"> </span>run.log
+</code></pre></div>
+<p><code>phase=all</code> (the default) or one phase name; <code>404</code> when the run has no logs for it.</p>
 <h2 id="proposed-runs-from-a-pr">Proposed runs (from a PR)<a class="headerlink" href="#proposed-runs-from-a-pr" title="Permanent link">&para;</a></h2>
 <p>A pull request triggers a <strong>proposed</strong> run: plan-only, with a read-only state token — a preview
 that is never applied and saves no plan file. See <a href="../../SPECS/">the Git integration in SPECS</a>.</p>
@@ -1479,16 +1577,19 @@ What a plan needs stays: the cloud credentials of the <strong>plan role</strong>
 with <code>No value for required variable</code>. Plan with credentials that need no static secret (the
 OIDC plan role) for pull requests to plan. The pull request's code can still read the state
 (secrets a resource keeps there included) and use the plan role: keep that role read-only and
-away from secret stores. A per-environment opt-in giving proposed runs the secrets is specified
-but not implemented. A drift check is a proposed run too, of the last applied commit: it keeps
-the secrets.</p>
+away from secret stores. There is no opt-in giving proposed runs the secrets: they are always
+withheld. A drift check is a proposed run too, of the last applied commit: it keeps the secrets.</p>
 </div>
 <h2 id="triggering-over-the-api">Triggering over the API<a class="headerlink" href="#triggering-over-the-api" title="Permanent link">&para;</a></h2>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>curl<span class="w"> </span>-s<span class="w"> </span>-X<span class="w"> </span>POST<span class="w"> </span>localhost:8000/api/v1/environments/<span class="nv">$ENV_ID</span>/runs<span class="w"> </span>-H<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$AUTH</span><span class="s2">&quot;</span><span class="w"> </span><span class="se">\</span>
-<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="w">  </span>-H<span class="w"> </span><span class="s1">&#39;content-type: application/json&#39;</span><span class="w"> </span>-d<span class="w"> </span><span class="s1">&#39;{}&#39;</span><span class="w">                                         </span><span class="c1"># trigger plan</span>
-<a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a>curl<span class="w"> </span>-s<span class="w"> </span>-X<span class="w"> </span>POST<span class="w"> </span>localhost:8000/api/v1/runs/<span class="nv">$RUN_ID</span>/confirm<span class="w"> </span>-H<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$AUTH</span><span class="s2">&quot;</span><span class="w">                 </span><span class="c1"># approve → apply</span>
-<a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a>curl<span class="w"> </span>-s<span class="w"> </span>-X<span class="w"> </span>POST<span class="w"> </span>localhost:8000/api/v1/runs/<span class="nv">$RUN_ID</span>/discard<span class="w"> </span>-H<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$AUTH</span><span class="s2">&quot;</span><span class="w">                 </span><span class="c1"># discard</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a>curl<span class="w"> </span>-s<span class="w"> </span>-X<span class="w"> </span>POST<span class="w"> </span>localhost:8000/api/v1/environments/<span class="nv">$ENV_ID</span>/runs<span class="w"> </span>-H<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$AUTH</span><span class="s2">&quot;</span><span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a><span class="w">  </span>-H<span class="w"> </span><span class="s1">&#39;content-type: application/json&#39;</span><span class="w"> </span>-d<span class="w"> </span><span class="s1">&#39;{}&#39;</span><span class="w">                                         </span><span class="c1"># trigger plan</span>
+<a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a>curl<span class="w"> </span>-s<span class="w"> </span>-X<span class="w"> </span>POST<span class="w"> </span>localhost:8000/api/v1/runs/<span class="nv">$RUN_ID</span>/confirm<span class="w"> </span>-H<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$AUTH</span><span class="s2">&quot;</span><span class="w">                 </span><span class="c1"># approve → apply</span>
+<a id="__codelineno-4-4" name="__codelineno-4-4" href="#__codelineno-4-4"></a>curl<span class="w"> </span>-s<span class="w"> </span>-X<span class="w"> </span>POST<span class="w"> </span>localhost:8000/api/v1/runs/<span class="nv">$RUN_ID</span>/discard<span class="w"> </span>-H<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$AUTH</span><span class="s2">&quot;</span><span class="w">                 </span><span class="c1"># discard</span>
+<a id="__codelineno-4-5" name="__codelineno-4-5" href="#__codelineno-4-5"></a>curl<span class="w"> </span>-s<span class="w"> </span>-X<span class="w"> </span>POST<span class="w"> </span>localhost:8000/api/v1/runs/<span class="nv">$RUN_ID</span>/cancel<span class="w"> </span>-H<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$AUTH</span><span class="s2">&quot;</span><span class="w">                  </span><span class="c1"># cancel / stop</span>
 </code></pre></div>
+<p>A <code>destroy</code> run is triggered with <code>-d '{"type":"destroy"}'</code>; <code>commit_sha</code> (a full SHA, a branch or
+a tag) pins the plan to that commit, and <code>with_downstream: true</code> starts a
+<a href="../dependencies-and-mocks/">cascade</a> group.</p>
 <h2 id="see-also">See also<a class="headerlink" href="#see-also" title="Permanent link">&para;</a></h2>
 <ul>
 <li><a href="../variables/">Variables &amp; secrets</a> · <a href="../hooks/">Hooks &amp; <code>.stackd.yml</code></a> · <a href="../notifications/">Notifications</a></li>

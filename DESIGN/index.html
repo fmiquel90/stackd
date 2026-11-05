@@ -2059,7 +2059,9 @@ the API exists, marked <strong>[with Ax]</strong>.</p>
 </table>
 <p><code>command</code> runs use <code>Prepare · Run</code>. After the last segment, the rail ends with the <strong>outcome cap</strong>: the
 terminal outcome label of §3.2 (<code>APPLIED +3 ~1 −0</code>, <code>NO CHANGES</code>, <code>FAILED at Check</code>, <code>DISCARDED</code>,
-<code>CANCELED</code>, <code>PLANNED</code>, <code>DESTROYED −3</code>, <code>EXECUTED</code>), or nothing while the run is live.</p>
+<code>CANCELED</code>, <code>PLANNED</code>, <code>DESTROYED −3</code>, <code>EXECUTED</code>), or nothing while the run is live.
+<strong>[not built yet]</strong> <code>PhaseRail</code> renders no cap today: on the run page the outcome is carried by the <code>StateBadge</code>
+of the action bar, and in a cell by the compact badge next to the mini rail.</p>
 <p><strong>Segment status</strong> (each status = colour + glyph + text, never colour alone):</p>
 <table>
 <thead>
@@ -2117,18 +2119,22 @@ terminal outcome label of §3.2 (<code>APPLIED +3 ~1 −0</code>, <code>NO CHANG
 </table>
 <p><strong>Failed segment</strong>: <code>Apply</code> if <code>confirmed_at</code> is set; otherwise the segment of the stage of the first
 <code>fail</code> check (<code>before_init</code>/<code>after_init</code> → Prepare, <code>before_plan</code> → Plan, <code>after_plan</code> → Check);
-otherwise <code>Plan</code> (a tofu failure before a plan exists). A failure during Apply is labelled
+otherwise <code>Plan</code> (a tofu failure before a plan exists), or <code>Prepare</code> when no worker ever claimed the
+run (<code>command</code> runs: <code>Run</code> once claimed, else <code>Prepare</code>). A failure during Apply is labelled
 <strong>"FAILED during apply — infrastructure may be partially changed"</strong>: that sentence is the most
 important thing on the page and is never truncated.</p>
 <p><strong>Metadata</strong> under each vertical segment (mono, <code>text-secondary</code>): duration computed from the first
-and last log line timestamps of that phase <strong>[today]</strong>, exact from run events <strong>[with A7]</strong>; Plan: the
-summary <code>+a ~c −d</code>; Check: <code>2 ok · 1 warn</code>; Decision: <code>alice · 12:04</code> or <code>auto</code> or <code>waiting 12m</code>.</p>
-<p><strong>Interaction</strong>: each vertical segment is a button that opens the Logs tab scrolled to that phase's
-first section (<code>?tab=logs&amp;section=planning</code>). Keyboard: segments are in the tab order after the
-action bar.</p>
+and last log line timestamps of that phase <strong>[today]</strong>, exact from run events <strong>[with A7]</strong> — on
+Plan, Apply and Run, and only once the phase ran; Plan: the summary <code>+a ~c −d</code>; Check: <code>2 ok · 1 warn</code>;
+Decision: the confirmer's email (<code>… (rollout approval)</code> under a rollout, §5.11), <code>auto</code>, <code>discarded</code>,
+<code>canceled</code> or <code>no changes</code>. A "waiting 12m" on a pending decision is <strong>[not built yet]</strong>.</p>
+<p><strong>Interaction</strong>: each segment with a log phase (Plan, Check, Apply, Run) is a button that opens the
+Logs tab at that phase's first line (<code>?tab=logs&amp;line=planning.1</code>). Keyboard: segments are in the tab
+order after the action bar. Below 1024 px the vertical rail is replaced by a <strong>horizontal</strong> variant
+(same segments, labels under a coloured top rule) above the tabs.</p>
 <p><strong>Mini variant</strong>: 5 cells of 10 × 4 px, 2 px gaps, same statuses (pending = 1 px outline, done =
-fill, failed = fill + <code>✕</code> cap glyph after the rail, waiting = fill amber), followed by the outcome
-glyph. <code>role="img"</code> with an <code>aria-label</code> that reads the outcome: "Unconfirmed, needs your decision, plan +2 ~1 −0".</p>
+fill, failed = fill + <code>✕</code> cap glyph after the rail, waiting = fill amber), followed — in <code>EnvCell</code> —
+by the compact state badge. <code>role="img"</code> with an <code>aria-label</code> that reads the outcome: "Unconfirmed, needs your decision, plan +2 ~1 −0".</p>
 <p><strong>Motion</strong>: the active segment pulses (opacity 1 → 0.45, 1.6 s) — the only ambient animation in the
 app; <code>prefers-reduced-motion</code> replaces it with a static 0.7 opacity.</p>
 <h3 id="23-the-truth-of-an-environment-new-in-v2">2.3 The truth of an environment (new in v2)<a class="headerlink" href="#23-the-truth-of-an-environment-new-in-v2" title="Permanent link">&para;</a></h3>
@@ -2342,7 +2348,7 @@ text</strong> (badges are 11–12 px), <strong>≥ 3:1 for non-text UI</strong> 
 <tr>
 <td><code>text-primary</code></td>
 <td>16.2 / 14.8 / 12.9 / 16.7</td>
-<td>14.3 / 15.2 / 13.5 / 13.0</td>
+<td>14.2 / 15.2 / 13.5 / 13.0</td>
 </tr>
 <tr>
 <td><code>text-secondary</code></td>
@@ -2362,7 +2368,7 @@ text</strong> (badges are 11–12 px), <strong>≥ 3:1 for non-text UI</strong> 
 <tr>
 <td><code>state-decision</code></td>
 <td>10.2 / 9.3 / 8.1 / 10.5</td>
-<td>6.0 / 6.3 / 5.6 / 5.4</td>
+<td>5.9 / 6.3 / 5.6 / 5.4</td>
 </tr>
 <tr>
 <td><code>state-finished</code></td>
@@ -2386,12 +2392,13 @@ text</strong> (badges are 11–12 px), <strong>≥ 3:1 for non-text UI</strong> 
 </tr>
 <tr>
 <td><code>border-control</code> (non-text, ≥ 3)</td>
-<td>4.3 / 4.0 / 3.4 / 4.4</td>
+<td>4.3 / 3.9 / 3.4 / 4.4</td>
 <td>3.3 / 3.5 / 3.1 / 3.0</td>
 </tr>
 </tbody>
 </table>
-<p>On tints, every state colour and both text colours stay ≥ 5.0:1 (dark ≥ 6.2, light ≥ 5.1). <code>on-fill</code> on fills (dark / light): on <code>state-decision</code> 10.2 / 6.3; on <code>text-primary</code> 16.2 / 15.2;
+<p>On tints, every state colour and both text colours stay ≥ 4.9:1 (dark ≥ 6.2, light ≥ 4.9 — the
+lowest is <code>state-queued</code> on <code>failed-tint</code>, 4.96). <code>on-fill</code> on fills (dark / light): on <code>state-decision</code> 10.2 / 6.3; on <code>text-primary</code> 16.2 / 15.2;
 on <code>state-failed</code> 7.5 / 5.8; on <code>mock</code> 7.5 / 6.6.</p>
 <p>Trade-off, stated: AA forces the light amber down to <code>#8A5300</code>, which reads as ochre rather than
 signal amber. It is still the only warm hue of the light theme, and the decision is always carried by
@@ -2417,8 +2424,8 @@ the <code>⏸</code> glyph and the "needs you" label as well.</p>
 <td><code>state-queued</code></td>
 </tr>
 <tr>
-<td><code>preparing</code> <code>planning</code> <code>checking</code> <code>confirmed</code> <code>applying</code></td>
-<td>PREPARING / PLANNING / CHECKING / APPLYING (<code>confirmed</code> shows APPLYING · STARTING)</td>
+<td><code>preparing</code> <code>planning</code> <code>checking</code> <code>confirmed</code> <code>applying</code> <code>running</code></td>
+<td>PREPARING / PLANNING / CHECKING / APPLYING / RUNNING (<code>confirmed</code> shows APPLYING · STARTING; <code>running</code> is a <code>command</code> run)</td>
 <td><code>◐</code> (pulse)</td>
 <td><code>state-running</code></td>
 </tr>
@@ -2430,7 +2437,7 @@ the <code>⏸</code> glyph and the "needs you" label as well.</p>
 </tr>
 <tr>
 <td><code>failed</code></td>
-<td>FAILED (+ <code>at &lt;segment&gt;</code>)</td>
+<td>FAILED (+ <code>at &lt;segment&gt;</code>), or FAILED DURING APPLY once an apply was decided (§2.2)</td>
 <td><code>✕</code></td>
 <td><code>state-failed</code></td>
 </tr>
@@ -2567,7 +2574,7 @@ Two forms:</p>
 <tr>
 <td>PR</td>
 <td><code>PR</code></td>
-<td><code>text-secondary</code></td>
+<td><code>state-queued</code> (outlined)</td>
 <td>the env's active run is a proposed run</td>
 </tr>
 </tbody>
@@ -2631,8 +2638,9 @@ button unrelated to a success, never amber for telemetry or log severity.</p>
 </table>
 <p><strong>"Data is mono" rule</strong>: everything that comes from the system — a <code>commit abc1234</code>, a <code>vpc-0f3a…</code>, a
 <code>+3 ~1 −0</code>, a duration — is in mono; everything the interface says is in Sans. Weights: 400, 500
-(mono labels), 600. Fonts are <strong>self-hosted</strong> (<code>@fontsource</code>), Latin subset, weights Sans 400/600 and
-Mono 400/500 preloaded, <code>font-display: swap</code>, fallback metrics overrides to avoid layout shift.</p>
+(mono labels), 600. Fonts are <strong>self-hosted</strong> (<code>@fontsource</code>), Latin subset, only weights Sans 400/600 and
+Mono 400/500 imported (<code>main.tsx</code>), <code>font-display: swap</code>. Preloading and fallback metric overrides
+(against layout shift) are <strong>[not built yet]</strong>.</p>
 <h3 id="34-spacing-radius-elevation">3.4 Spacing, radius, elevation<a class="headerlink" href="#34-spacing-radius-elevation" title="Permanent link">&para;</a></h3>
 <ul>
 <li>4 px grid. Dense table cell padding 6 × 10 px (row height 32 px); comfortable rows (attention zone, run history) 8 × 12 px (36 px); forms 12 px gaps.</li>
@@ -2679,10 +2687,10 @@ a state colour never silently changes the diff (they alias the state values toda
 <td>UPDATE</td>
 </tr>
 <tr>
-<td><code>diff-read</code> / no-op</td>
+<td><code>diff-read</code></td>
 <td>= <code>text-secondary</code></td>
-<td><code>&lt;=</code> / <code>·</code></td>
-<td>READ / NO-OP</td>
+<td><code>&lt;=</code> / <code>→</code> / <code>·</code></td>
+<td>READ / MOVE / OTHER</td>
 </tr>
 </tbody>
 </table>
@@ -2793,10 +2801,10 @@ is reserved to the decision. Zero counts are rendered in <code>text-secondary</c
 <a id="__codelineno-0-15" name="__codelineno-0-15" href="#__codelineno-0-15"></a>└──────────────┴───────────────────────────────────────────────────────────┘
 </code></pre></div>
 <ul>
-<li><strong>Side nav (208 px, labels always visible — v1 decision kept)</strong>: Overview (count badge = decisions that need <em>you</em>), Graph, Rollouts (§5.11), Queue (count badge = runs waiting &gt; 2 min), Workers, Audit (admin only, §5.6), Variable sets, Settings. At the bottom: the <strong>space switcher</strong> (a Radix dropdown listing spaces with their stack counts) and the user block (email, role, allowed tiers, theme toggle, sign out). Active item: selection mark (§2.1).</li>
-<li><strong>Top bar</strong>: entity breadcrumb, connection indicator (<code>● live</code> / <code>◌ reconnecting…</code>), ⌘K button, notification bell.</li>
-<li><strong>Breadcrumb</strong>: built from entities, never from path segments: <code>space / stack / env / run 01a1276c</code>. Each segment is a link; the run segment copies the run URL on click.</li>
-<li><strong>Responsive</strong>: ≥ 1024 px as above. 768–1023 px: the side nav becomes a drawer opened from a menu button in the top bar. &lt; 768 px: a <strong>bottom bar</strong> with three destinations (Overview, Queue, Menu — notifications stay in the top bar at every width) and the run page's action bar docked above it.</li>
+<li><strong>Side nav (208 px, labels always visible — v1 decision kept)</strong>: Overview (solid amber count badge = decisions that need <em>you</em>), Graph, Rollouts (§5.11), Queue (neutral outlined count badge = runs waiting &gt; 2 min), Workers (<code>online/total</code> in mono, red when none is online or the API is down), Audit (admin only, §5.6), Variable sets, Settings. At the bottom: the <strong>space switcher</strong> (a Radix dropdown listing the space names, the current one marked; hidden when the user sees a single space) and the user block (email, role, allowed tiers) opening a menu with the theme toggle, keyboard shortcuts, single-key shortcuts on/off and sign out. Active item: selection mark (§2.1).</li>
+<li><strong>Top bar</strong>: entity breadcrumb, connection indicator (<code>● live</code> / <code>◌ reconnecting…</code>), ⌘K button ("Search ⌘K"), notification bell.</li>
+<li><strong>Breadcrumb</strong>: built from entities, never from path segments: <code>space / stack / env / run 01a1276c</code>. Each segment but the last is a link; the run segment is the current page (its URL is copied with ⌘K "Copy the link to this page").</li>
+<li><strong>Responsive</strong>: ≥ 1024 px as above. 768–1023 px: the side nav becomes a drawer (a sheet from the right) opened from a menu button in the top bar. &lt; 768 px: a <strong>bottom bar</strong> with three destinations (Overview, Queue, Menu — the Menu opens the same drawer; notifications stay in the top bar at every width) and the run page's action bar docked above it.</li>
 </ul>
 <h3 id="41-urls-v2">4.1 URLs (v2)<a class="headerlink" href="#41-urls-v2" title="Permanent link">&para;</a></h3>
 <table>
@@ -2840,24 +2848,32 @@ is reserved to the decision. Zero counts are rendered in <code>text-secondary</c
 <td>Rollout page (§5.11; space resolved from the rollout, like the run page)</td>
 </tr>
 <tr>
-<td><code>/queue</code>, <code>/workers</code>, <code>/audit</code>, <code>/settings</code>, <code>/variable-sets</code></td>
-<td>instance or space-scoped pages (variable sets: <code>/s/:space/variable-sets</code>)</td>
+<td><code>/s/:space/variable-sets</code>, <code>/s/:space/variable-sets/:set</code></td>
+<td>Variable sets list and one set (§5.10)</td>
+</tr>
+<tr>
+<td><code>/queue</code>, <code>/workers</code>, <code>/audit</code>, <code>/settings</code></td>
+<td>instance pages</td>
 </tr>
 </tbody>
 </table>
 <p>Names are used instead of UUIDs where they are unique in their parent (space names; stack per space;
-env per stack — SPECS constraints). A renamed entity breaks old name-based links, so <strong>v1 UUID routes
-stay as redirects</strong> (<code>/stacks/:uuid</code> → <code>/s/&lt;space&gt;/stacks/&lt;name&gt;</code>), and the run URL stays UUID-based
-(it is the incident link).</p>
-<p><strong>Everything that determines what is on screen is in the URL</strong>: tab (<code>?tab=plan</code>), filters (<code>?q=app&amp;state=attention&amp;tier=prod</code>), log position (<code>?tab=logs&amp;line=planning.87</code>), plan search (<code>?plan_q=nat</code>), graph filter and view (<code>?env=prod&amp;view=list</code>). The active space is the URL's, never in-memory state. (No browser storage, CLAUDE §4.8.)</p>
+env per stack — SPECS constraints). A renamed entity breaks old name-based links, so <strong>v1 routes
+stay as redirects</strong> (<code>/stacks/:uuid</code> → <code>/s/&lt;space&gt;/stacks/&lt;name&gt;</code>; <code>/stacks</code>, <code>/graph</code> and
+<code>/variable-sets</code> → the current space's page), and the run URL stays UUID-based (it is the incident link).</p>
+<p><strong>Everything that determines what is on screen is in the URL</strong>: tab (<code>?tab=plan</code>), filters (<code>?q=app&amp;state=attention&amp;tier=prod</code>), the overview's selected cell and cascade preview (<code>?sel=demo-network/prod&amp;cascade=1</code>), log position (<code>?tab=logs&amp;line=planning.87</code>), plan search (<code>?plan_q=nat</code>), graph filter, view and node (<code>?env=prod&amp;tier=prod&amp;view=list&amp;node=&lt;id&gt;</code>), env run-history filter (<code>?kind=</code>), stack settings section (<code>?tab=settings&amp;sub=hooks</code>). The active space is the URL's, never in-memory state. (No browser storage, CLAUDE §4.8.)</p>
 <h3 id="42-k-command-palette">4.2 ⌘K command palette<a class="headerlink" href="#42-k-command-palette" title="Permanent link">&para;</a></h3>
-<p>Opened with ⌘K / Ctrl-K from anywhere (<code>cmdk</code> on a Radix dialog). Sections, in order:
-1. <strong>Needs you</strong> — pending decisions the user can act on (jump to the run).
-2. <strong>Go to</strong> — stacks, environments (<code>demo-network/prod</code>), recent runs by short ID, pages.
-3. <strong>Actions on the current page</strong> — Plan this env, Plan with downstream, Confirm / Discard / Cancel (opens the same confirmation as the button, never bypasses it), Re-plan, Copy run link, Copy commit SHA, Toggle theme.
-4. <strong>Spaces</strong> — switch space.</p>
-<p>Results show the env summary glyphs (§2.3). The palette never performs a state-changing action
-without the same friction as the button it mirrors.</p>
+<p>Opened with ⌘K / Ctrl-K from anywhere (<code>cmdk</code> on a Radix dialog). Sections, in order <strong>[today]</strong>:
+1. <strong>Run</strong> — shown when the query is a full run UUID: open that run.
+2. <strong>Go to</strong> — the nav pages (Audit for admins only).
+3. <strong>Stacks</strong> and <strong>Environments</strong> (<code>demo-network/prod</code>, with the tier) across the user's spaces.
+4. <strong>Actions</strong> — Switch to light/dark theme, Copy the link to this page.
+5. <strong>Spaces</strong> — switch space (when the user sees more than one).</p>
+<p>Specified, <strong>[not built yet]</strong>: a <strong>Needs you</strong> section first (pending decisions the user can act on),
+recent runs by short ID, actions on the current page (Plan this env, Plan with downstream, Confirm /
+Discard / Cancel — opening the same confirmation as the button, never bypassing it —, Re-plan, Copy
+commit SHA), and the env summary glyphs (§2.3) on results. The palette never performs a
+state-changing action without the same friction as the button it mirrors.</p>
 <h3 id="43-keyboard-map">4.3 Keyboard map<a class="headerlink" href="#43-keyboard-map" title="Permanent link">&para;</a></h3>
 <table>
 <thead>
@@ -2885,12 +2901,12 @@ without the same friction as the button it mirrors.</p>
 </tr>
 <tr>
 <td><code>/</code></td>
-<td>lists, matrix, plan, logs</td>
+<td>log viewer (lists, matrix and plan: <strong>[not bound yet]</strong>)</td>
 <td>focus the filter / search</td>
 </tr>
 <tr>
 <td><code>j</code> <code>k</code></td>
-<td>lists, matrix rows, attention zone</td>
+<td>matrix rows, attention zone</td>
 <td>next / previous row</td>
 </tr>
 <tr>
@@ -2899,9 +2915,19 @@ without the same friction as the button it mirrors.</p>
 <td>previous / next cell in the row</td>
 </tr>
 <tr>
+<td><code>Home</code> <code>End</code></td>
+<td>matrix</td>
+<td>first / last cell of the row</td>
+</tr>
+<tr>
 <td><code>Enter</code></td>
-<td>list, matrix</td>
-<td>open</td>
+<td>attention zone, matrix</td>
+<td>open (matrix: the env page)</td>
+</tr>
+<tr>
+<td><code>r</code> / <code>s</code></td>
+<td>matrix</td>
+<td>open the cell's run / toggle the downstream preview</td>
 </tr>
 <tr>
 <td><code>]</code> <code>[</code></td>
@@ -2924,14 +2950,19 @@ without the same friction as the button it mirrors.</p>
 <td>full screen, timestamps, wrap, jump to first error</td>
 </tr>
 <tr>
+<td><code>n</code> / <code>N</code></td>
+<td>log viewer</td>
+<td>next / previous search match</td>
+</tr>
+<tr>
 <td><code>Esc</code></td>
 <td>overlays</td>
 <td>close, focus returns to the trigger</td>
 </tr>
 </tbody>
 </table>
-<p>Single-letter shortcuts are inactive while focus is in a text field, and can be disabled from the
-user menu (WCAG 2.1.4); the setting lives in memory.</p>
+<p>Single-letter shortcuts are inactive while focus is in a text field or an overlay is open, and can be
+disabled from the user menu or Settings → Preferences (WCAG 2.1.4); the setting lives in memory.</p>
 <hr />
 <h2 id="5-key-screens-decisions">5. Key screens — decisions<a class="headerlink" href="#5-key-screens-decisions" title="Permanent link">&para;</a></h2>
 <h3 id="51-sspace-the-overview-home">5.1 <code>/s/:space</code> — the overview (home)<a class="headerlink" href="#51-sspace-the-overview-home" title="Permanent link">&para;</a></h3>
@@ -2952,24 +2983,25 @@ user menu (WCAG 2.1.4); the setting lives in memory.</p>
 <a id="__codelineno-1-14" name="__codelineno-1-14" href="#__codelineno-1-14"></a> demo-app         ▰▰▰▰ ✓ APPLIED +3   2h       ▰▰▰▰ ✓ APPLIED +3   1h  ≈       ▰▰⏸· ⏸ 20m  ◆
 <a id="__codelineno-1-15" name="__codelineno-1-15" href="#__codelineno-1-15"></a> demo-dns         ▰▰✕   ✕ FAILED at Check 6m   ▰▰⏸· ⏸ DESTROY −3  9m            —
 <a id="__codelineno-1-16" name="__codelineno-1-16" href="#__codelineno-1-16"></a> demo-network     ▰▰⏸· ⏸ 9m  ↑                 ▰▰⏸· ⏸ 12m  ↑                  ▰▰⏸· ⏸ 20m
-<a id="__codelineno-1-17" name="__codelineno-1-17" href="#__codelineno-1-17"></a> j/k rows · h/l cells · ⏎ open env · r open run · p plan · s show downstream
+<a id="__codelineno-1-17" name="__codelineno-1-17" href="#__codelineno-1-17"></a> h/j/k/l move · ⏎ open · r run · s downstream
 </code></pre></div>
 <p><strong>Attention zone</strong> (pinned above the matrix, never auto-collapsed while it holds a <em>needs you</em> item):</p>
 <ul>
-<li>Groups, in order: <strong>Needs you</strong> (unconfirmed, the user can confirm), <strong>Waiting on someone</strong> (unconfirmed, the user cannot confirm — with the missing condition in words), <strong>Failed</strong> (env's primary run failed), <strong>Drift</strong> (<code>drifted</code> or check error), <strong>Blocked</strong> (primary run mocked or fallback with apply not allowed). A row appears in the first matching group only. A stale plan (unconfirmed run whose commit ≠ env head) is a <code>↑ stale plan</code> tag on its row — every unconfirmed run already falls in one of the first three groups.</li>
-<li>Row: summary glyph + <code>stack / env</code> + badge + plan summary + who/age + the reason or next step + Enter target (the run page, Plan tab for decisions, Logs tab at first error for failures, env page for drift).</li>
+<li>Groups, in order: <strong>Needs you</strong> (unconfirmed, the user can confirm), <strong>Waiting on someone</strong> (unconfirmed, the user cannot confirm — with the missing condition in words), <strong>Blocked</strong> (unconfirmed, and nobody can confirm: mocked or fallback with apply not allowed on the env), <strong>Failed</strong> (env's primary run failed, during apply or before), <strong>Drift</strong> (<code>drifted</code> or check error). A row appears in the first matching group only. A stale plan (unconfirmed run whose commit ≠ env head) is a <code>↑ stale plan</code> tag on its row — every unconfirmed run already falls in one of the first three groups.</li>
+<li>Row: badge (compact) + <code>stack / env</code> + plan summary + who/age + the reason or next step + Enter target (the run page: Plan tab for decisions, Logs tab — opening at the first error — for failures; for drift, the drift run's Plan tab, else the env page).</li>
 <li>Empty zone: one line, "Nothing needs attention in demo." — not hidden, so its absence is never ambiguous.</li>
 </ul>
 <p><strong>Matrix</strong>:</p>
 <ul>
-<li>Rows = stacks of the space (sortable by name, by "worst state", by last activity). Columns = environment <strong>names</strong> present in the space, ordered by tier <code>position</code>, then env <code>position</code>, then name; a stack without that env shows <code>—</code>. A column header shows the env name, plus <code>four-eyes</code> when every env in the column is on a <code>requires_four_eyes</code> tier.</li>
-<li>Sticky header row and first column. Above 8 columns the matrix scrolls horizontally inside its own container, never the page.</li>
-<li><strong><code>EnvCell</code></strong> (one per env, 200 px min): line 1 = mini rail + outcome/state glyph + short label (+ plan summary if relevant); line 2 = relative age + modifiers (<code>↑</code> <code>≈</code> <code>⚿</code> <code>◆</code> <code>◈</code> <code>PR</code>). Cell background stays <code>bg-surface</code>, except <code>decision-tint</code> when the cell <em>needs you</em>. Hover/focus shows a popover: branch, deployed commit, head commit, last run, triggerer, and the actions the user can take (Open, Plan, Open run).</li>
-<li><strong>Cascade preview on demand</strong>: <code>s</code> (or "Show downstream" in the cell menu) outlines the selected cell's downstream cells (BFS over <code>GET /graph</code> edges) with the selection mark, and a strip under the matrix lists "demo-network/prod → demo-app/prod via <code>network_name</code> (on_output_change)". <code>Esc</code> clears.</li>
-<li><strong>Filters</strong> in a top bar, reflected in the URL: text (stack or env name), state (<code>all</code>, <code>needs attention</code>, <code>needs you</code>, <code>running</code>, <code>failed</code>, <code>drift</code>, <code>stale</code>), tier. Filtering by state hides non-matching rows, not cells.</li>
-<li><strong>Keyboard</strong>: the matrix is a <code>role="grid"</code> with roving tabindex (<code>h/j/k/l</code>, arrows, Enter); the attention zone is a list before it in the tab order.</li>
-<li><strong>Data</strong> <strong>[today]</strong>: <code>stacks.list</code> → <code>stacks.environments</code> per stack → <code>runs.list</code> per env (the summary needs the active run and the last tracked outcome), one WebSocket subscribed to every <code>environment:&lt;id&gt;</code> channel invalidating <code>["env-runs", id]</code>, 30 s poll fallback. Skeleton cells while loading. <strong>[with A4]</strong> one request.</li>
-<li><strong>Empty states</strong>: no stack → "No stack in demo yet. Connect a repository." + New stack (writer+); no stack in this space but in others → list them.</li>
+<li>Rows = stacks of the space, by name (sorting by "worst state" or last activity is <strong>[not built yet]</strong>). Columns = environment <strong>names</strong> present in the space, ordered by tier <code>position</code>, then env <code>position</code>, then name; a stack without that env shows <code>—</code>. A column header shows the env name, plus <code>four-eyes</code> when every env in the column is on a <code>requires_four_eyes</code> tier.</li>
+<li>Sticky header row and first column. A wide matrix scrolls horizontally inside its own container, never the page.</li>
+<li><strong><code>EnvCell</code></strong> (one per env, 180 px min): line 1 = mini rail + compact state badge (wrapping under the rail when the cell is narrow); line 2 = relative age (+ plan summary when unconfirmed) + modifiers (<code>↑</code> <code>≈</code> <code>⚿</code> <code>◆</code> <code>◈</code> <code>PR</code>). Cell background stays the matrix's <code>bg-surface</code>, except <code>decision-tint</code> when the cell <em>needs you</em>.</li>
+<li><strong>Selection details</strong>: clicking or focusing a cell selects it (<code>?sel=stack/env</code>) and opens a panel under the matrix: <code>stack / env</code>, tier, branch, modifiers, deployed commit, branch head, active run or last outcome with who/age, "Confirm needs …" for a pending run, and the actions the user can take (Show downstream, Open run, Open environment, Plan — writer+, when no run is active). A hover popover on the cell is <strong>[not built yet]</strong>.</li>
+<li><strong>Cascade preview on demand</strong>: <code>s</code> (or "Show downstream" in the selection panel; <code>?cascade=1</code>) outlines the selected cell's downstream cells (BFS over <code>GET /graph</code> edges) with a dashed selection mark and a <code>↳ will plan</code> / <code>↳ plans if outputs change</code> line, and the panel lists them ("demo-app/prod (if outputs change)"). <code>s</code> again or "Hide downstream" clears.</li>
+<li><strong>Filters</strong> in a top bar, reflected in the URL: text (stack or env name), state (All, Needs attention, Needs you, Running, Failed, Drift, Branch ahead), tier. Filtering by state hides non-matching rows, not cells.</li>
+<li><strong>Keyboard</strong>: the matrix is a <code>role="grid"</code> with roving tabindex (<code>h/j/k/l</code>, arrows, <code>Home</code>/<code>End</code>, Enter, <code>r</code>, <code>s</code>); the attention zone is a list before it in the tab order.</li>
+<li><strong>Data</strong> <strong>[today]</strong>: <code>stacks.list</code> → <code>stacks.environments</code> per stack → <code>runs.list</code> per env (the summary needs the active run and the last tracked outcome), one WebSocket subscribed to every <code>environment:&lt;id&gt;</code> channel invalidating <code>["env-runs", id]</code> (and the stack's environments), plus a 60 s poll. Skeleton blocks while loading. <strong>[with A4]</strong> one request.</li>
+<li><strong>Empty states</strong>: no stack → "No stack in demo yet. Connect a repository to get started." + New stack (writer+), and the user's other spaces listed as links. The header carries <strong>New environment from…</strong> (§5.11) and <strong>New stack</strong> (writer+).</li>
 <li><strong>&lt; 768 px</strong>: the attention zone first, then one block per stack listing its envs as rows (<code>EnvCell</code> full width). No horizontal scroll.</li>
 </ul>
 <h3 id="52-runsid-the-most-important-screen">5.2 <code>/runs/{id}</code> — the most important screen<a class="headerlink" href="#52-runsid-the-most-important-screen" title="Permanent link">&para;</a></h3>
@@ -2993,10 +3025,12 @@ user menu (WCAG 2.1.4); the setting lives in memory.</p>
 <a id="__codelineno-2-18" name="__codelineno-2-18" href="#__codelineno-2-18"></a>│ ○ Apply    │ + CREATE   4  ▸ terraform_data.network  ▸ …subnet_private  ▸ …subnet_db  ▸ …     │
 <a id="__codelineno-2-19" name="__codelineno-2-19" href="#__codelineno-2-19"></a>└────────────┴──────────────────────────────────────────────────────────────────────────────────┘
 </code></pre></div>
-<p><strong>Header</strong> (identity, read-only): breadcrumb; run type; commit SHA (copy) + message + author;
-branch; how it was triggered (<code>manual by bob</code>, <code>webhook</code>, <code>dependency from demo-network/prod</code>
-<strong>[today: upstream env]</strong> / <code>[with A5: upstream run]</code>, <code>schedule (drift check)</code>); age (relative,
-absolute ISO on hover); total duration; worker. A <code>PR</code> marker for proposed runs.</p>
+<p><strong>Header</strong> (identity, read-only): <code>stack / env</code> (link to the env page) + run short ID; run type
+(a <code>PR plan</code> badge for proposed runs, a <code>− destroy</code> badge for destroys); commit SHA (copy) + message +
+author; branch; how it was triggered (<code>triggered by bob@…</code>, <code>via webhook</code>, <code>via dependency</code>, <code>via drift
+check</code> <strong>[today]</strong>; the upstream env / run of a cascade <code>[with A5]</code>); the rollout and level (§5.11);
+age (relative, absolute ISO on hover); total duration; the command and its arguments for a <code>command</code>
+run. The worker is <strong>[not shown yet]</strong>.</p>
 <p><strong><code>RunActionBar</code></strong> — sticky under the top bar on desktop, docked at the bottom on &lt; 768 px:</p>
 <ol>
 <li><strong>State line</strong>: <code>StateBadge</code> (with outcome and modifiers), then one sentence that says what the
@@ -3006,14 +3040,18 @@ absolute ISO on hover); total duration; worker. A <code>PR</code> marker for pro
    when the tier is missing from the catalog —, <code>protected</code>, or <code>require_second_pair_of_eyes</code>):
    who triggered, and the consequence. When the run is finished: "Triggered by bob · confirmed by
    alice 12:04".</li>
-<li><strong>Your standing</strong>: "You (alice · approver · dev staging prod) can confirm" or the first blocking
-   reason. <strong>[today]</strong> computed from <code>/auth/me</code>, labelled "based on your instance permissions" when
-   the space has per-space memberships the client cannot read; <strong>[with A2]</strong> exact. "Who may still
-   confirm" is stated as a rule (<strong>[today]</strong>) — names come with A3.</li>
-<li><strong>Cascade preview</strong>: downstream envs from <code>GET /graph</code> (BFS): <code>always</code> → "will plan",
-   <code>on_output_change</code> → "plans if <outputs> change", <code>never</code> → omitted. Mock edges marked.</li>
-<li><strong>Actions</strong>, right-aligned, in this order: Cancel run · Discard · <strong>Confirm</strong> (amber, the only
-   amber button of the app) · next-decision arrows.</li>
+<li><strong>Your standing</strong> (unconfirmed runs): "You (alice@… · approver · dev staging prod) can confirm" /
+   "cannot confirm" — the reasons are listed under the bar. <strong>[today]</strong> computed from <code>/auth/me</code>,
+   labelled "Based on your instance permissions" when the user sees more than one space (per-space
+   memberships the client cannot read); <strong>[with A2]</strong> exact. "Who may still confirm" is stated as a
+   rule (<strong>[today]</strong>) — names come with A3.</li>
+<li><strong>Cascade preview</strong> (unconfirmed runs): downstream envs from <code>GET /graph</code> (BFS): <code>always</code> → "will
+   plan", <code>on_output_change</code> → "if <outputs> change", <code>never</code> → omitted. Mock edges are marked in the
+   confirm popover ("◆ mock defined").</li>
+<li><strong>Actions</strong>, right-aligned, in this order: Cancel run / Stop run / Stop apply · Discard ·
+   <strong>Confirm</strong> (amber — the <code>decision</code> button variant, also used only by a rollout's Approve and by the
+   typed-name submit that turns a safety switch off, §5.7) · Plan again (terminal runs, desktop) ·
+   next-decision arrows (desktop).</li>
 </ol>
 <p><strong>Action availability and disabled reasons</strong> — an action that does not apply to the run's state is
 <strong>not rendered</strong>; an action that applies but is refused is rendered <strong>disabled with its reason as
@@ -3030,7 +3068,7 @@ visible text</strong> under the bar (and as <code>aria-describedby</code>), neve
 <tr>
 <td>Confirm</td>
 <td><code>unconfirmed</code></td>
-<td>role not approver/admin ("approver role required"); <code>env.tier ∉ allowed_tiers</code> ("tier prod is not in your allowed tiers: dev, staging"); four-eyes and <code>trigger_user_id = you</code> with <code>triggered_by=manual</code> ("you triggered this run; four-eyes requires someone else"); <code>type=destroy</code> and not <code>can_destroy</code> ("destroy permission required"); <code>used_mocks</code> and not <code>allow_mock_apply</code> ("mocked inputs — apply disabled on this environment"); <code>used_secret_fallback</code> and not <code>allow_fallback_apply</code> ("a secret came from a fallback — apply disabled")</td>
+<td>account disabled ("your account is disabled"); role not approver/admin ("approver role required"); no allowed tiers ("no allowed tiers — you cannot confirm applies"); <code>env.tier ∉ allowed_tiers</code> ("tier prod is not in your allowed tiers (dev, staging)"); <code>type=destroy</code> and not <code>can_destroy</code> ("destroy permission required"); <code>used_mocks</code> and not <code>allow_mock_apply</code> ("mocked inputs — apply is disabled on this environment (allow_mock_apply is off)"); <code>used_secret_fallback</code> and not <code>allow_fallback_apply</code> ("a secret came from a fallback — apply is disabled (allow_fallback_apply is off)"); four-eyes and <code>trigger_user_id = you</code> with <code>triggered_by=manual</code> ("you triggered this run; four-eyes requires someone else to confirm")</td>
 </tr>
 <tr>
 <td>Discard</td>
@@ -3038,13 +3076,23 @@ visible text</strong> under the bar (and as <code>aria-describedby</code>), neve
 <td>role reader ("writer role required") — SPECS §2.3</td>
 </tr>
 <tr>
-<td>Cancel</td>
-<td><code>queued</code>, <code>unconfirmed</code></td>
-<td>role reader; on executing states it is not rendered, and the bar says "Cancelling a running job is not supported yet" (SPECS §4.1)</td>
+<td>Cancel run</td>
+<td><code>queued</code>, <code>confirmed</code>, <code>unconfirmed</code> — ends the run at once</td>
+<td>role reader</td>
 </tr>
 <tr>
-<td>Re-plan on head</td>
-<td><code>unconfirmed</code> with a stale plan, or any terminal state ("Plan again")</td>
+<td>Stop run</td>
+<td><code>preparing</code>, <code>planning</code>, <code>checking</code>, <code>running</code> (a read-only command) — asks the worker to stop the tool (SPECS §4.1); the run ends when the worker reports; "Stop again" once requested</td>
+<td>role reader</td>
+</tr>
+<tr>
+<td>Stop apply</td>
+<td><code>applying</code>, or a <code>running</code> mutating command — <strong>two clicks</strong>: the first turns the label into "Stop the apply? It may be left partly applied — click again" for 6 s</td>
+<td>role reader, plus the apply right (role, tier, destroy — not the mock/fallback/four-eyes gates)</td>
+</tr>
+<tr>
+<td>Plan again / Re-plan on head</td>
+<td>any terminal state ("Plan again", in the bar, desktop); <code>unconfirmed</code> with a stale plan ("Re-plan on head", in the stale banner) — <code>tracked</code> and <code>destroy</code> runs only</td>
 <td>role reader</td>
 </tr>
 </tbody>
@@ -3060,51 +3108,54 @@ mobile) containing: the plan summary in big mono; the <strong>list of destroyed 
 is enabled only when the typed name matches exactly. The popover is a misclick safeguard, not a
 permission check (<code>can_apply</code> is still evaluated by the API).</p>
 <p><strong>Banners</strong> (between the bar and the tabs, at most one of each, in this order):
-- <strong>Failed during apply</strong> (<code>failed-tint</code>, red <code>✕</code>): "Failed during apply — infrastructure may be partially changed. First error: …" + "Jump to first error".
-- <strong>Failed</strong> (other phases): the run's <code>error</code>, plus the failing check's name and output when the error is a bare stage name <strong>[today]</strong>.
-- <strong>Stale plan</strong> (neutral, <code>↑</code>): when the run is <code>unconfirmed</code> and <code>env.head_sha ≠ run.commit_sha</code> — "Plan computed on <code>2af0351</code>. The branch head is now <code>125304e</code> (N commits ahead / ahead)." + <strong>Re-plan on head</strong> (= Discard + new tracked run, two audited calls). Confirming stays possible.
-- <strong>Mocked</strong> (<code>mock-tint</code>, <code>◆</code>): "This plan used mock values for: network_name. A mocked plan cannot be applied here (<code>allow_mock_apply</code> is off)." The mocked inputs are listed.
-- <strong>Queued</strong> (neutral): the <code>blocking_reason</code> from <code>GET /queue</code> in words ("waiting: another run is active on this environment → run 01a1276c").</p>
+- <strong>Stop requested</strong> (neutral): while an executing run has <code>cancel_requested_at</code> — "Stop requested — waiting for the worker." and what the worker does (interrupts the tool as a Ctrl-C would; the run ends when the worker reports it).
+- <strong>Failed during apply</strong> (<code>failed-tint</code>, red <code>✕</code>): "Failed during apply — infrastructure may be partially changed." + the run's error + "Jump to first error". A stop during apply (<code>error = canceled_during_apply</code>) reads "Stopped during apply on request — infrastructure may be partially changed." with "Review what was applied before planning again".
+- <strong>Failed</strong> (other phases): "Failed at <segment> — nothing was applied." + the run's <code>error</code>, or the failing check's name, stage and output when there is one <strong>[today]</strong>; "Jump to first error".
+- <strong>Stale plan</strong> (neutral, <code>↑</code>): when the run is <code>unconfirmed</code> and <code>env.head_sha ≠ run.commit_sha</code> — "Plan computed on <code>2af0351</code>. The branch head is now <code>125304e</code> (N commits ahead / ahead)." + <strong>Re-plan on head</strong> (= Discard + new tracked run, two audited calls). Confirming stays possible and still applies the planned commit.
+- <strong>Mocked</strong> (<code>mock-tint</code>, <code>◆</code>): "This plan used mock values — it is not real." The mocked inputs are listed, then "A mocked plan cannot be applied here (allow_mock_apply is off)" or that the env allows it.
+- <strong>Fallback</strong> (<code>decision</code> tone, <code>◈</code>): "A secret came from a fallback, not the real source." + whether <code>allow_fallback_apply</code> lets it through.
+- <strong>Queued</strong> (neutral): the <code>blocking_reason</code> from <code>GET /queue</code> in words ("Waiting: another run is active on this environment.") + a link to the queue.</p>
 <p><strong>Tabs</strong> (URL <code>?tab=</code>); the default tab depends on the state: Plan for <code>unconfirmed</code> and finished
 tracked runs, Logs (following) for live runs, Logs at the first error for failed runs.</p>
 <ul>
 <li><strong>Plan</strong> — <code>PlanDiff</code>:</li>
-<li>Summary line in big mono (<code>+4 ~0 −1</code>, zeros neutral), then groups in a fixed order: <strong>DESTROY</strong>, <strong>REPLACE</strong>, CREATE, UPDATE, READ, MOVED, then "<strong>Tag-only updates (n)</strong>" and "No-op (n)" collapsed.</li>
+<li>Summary line in big mono (<code>+4 ~0 −1</code>, zeros neutral), then groups in a fixed order: <strong>DESTROY</strong>, <strong>REPLACE</strong>, CREATE, UPDATE, READ, MOVE, OTHER (e.g. "will no longer be managed"), then "<strong>Tag-only updates · n</strong>" and "Changes to outputs" collapsed, the tool's summary line, and the plan legend as printed (collapsed).</li>
 <li><strong>DESTROY and REPLACE groups are always expanded, and cannot be collapsed, filtered out or scrolled away by search</strong> — search highlights in them, filters the others.</li>
 <li>A resource row: action glyph + label, address in mono, a one-line hint (<code>2 attributes</code>, <code>forces replacement: ami</code>). Expanded: the attribute diff in <code>bg-sunken</code>, one line per attribute (<code>+ − ~</code> with diff tokens), <code>(sensitive value)</code> as tofu prints it, never a reveal.</li>
 <li>Tag-only = an update whose changed attributes are all <code>tags</code> / <code>tags_all</code> (or nested under them).</li>
 <li>Search (<code>/</code>, URL <code>?plan_q=</code>) on address and attribute name, with a match counter.</li>
 <li><strong>[today]</strong> parsed from the <code>section="plan"</code> log block (<code>tofu show -no-color</code>): blocks start at <code># &lt;address&gt; will be created | updated in-place | destroyed | must be replaced | read during apply | has moved to</code>. Anything the parser does not recognise is shown verbatim in a "Unparsed plan output" block <strong>above</strong> the groups, so no line is ever dropped; if the block is missing (older run, failed plan) the tab says so and links to the logs. <strong>[with A1]</strong> from <code>resource_changes</code>.</li>
 <li>Resource rows accept a comment anchored to the resource (<code>anchor.kind="resource"</code>, SPECS §16.2).</li>
-<li><strong>Checks</strong> — one row per check (<code>results</code>, SPECS §8.3): status badge, stage, name, duration, output (pre-wrapped mono). Plan-stage <code>warn</code> = amber with "requires manual confirmation"; apply-stage <code>warn</code> neutral "after confirmation — informational". Tab label carries counts (<code>2 ok · 1 warn</code>).</li>
-<li><strong>Logs</strong> — <code>LogViewer</code> (§5.3), filling the viewport height.</li>
-<li><strong>Inputs</strong> — resolved variables with <code>ProvenanceBadge</code>; mocked and fallback values listed first; sensitive values <code>•••</code> with no reveal.</li>
+<li><strong>Checks</strong> — one row per check (<code>results</code>, SPECS §8.3; older runs fall back to <code>checks</code>): status badge, stage (<code>—</code> when not recorded), name, output (pre-wrapped mono). A plan-stage <code>warn</code> adds "manual confirmation required" in amber; an apply-stage <code>warn</code> adds "after confirmation — informational", neutral. Tab label carries counts (<code>2 ok · 1 warn</code>).</li>
+<li><strong>Logs</strong> — <code>LogViewer</code> (§5.3), 70 vh tall.</li>
+<li><strong>Inputs</strong> — each input's name with its <code>ProvenanceBadge</code>; values that are not the real thing (mock, fallback, override) listed first. Values are not kept on the run, so none is shown; sensitive values are never shown anywhere.</li>
 <li><strong>Discussion</strong> — general threads + resource/line-anchored threads (SPECS §16); open-thread count in the tab label, <strong>neutral</strong> (advisory, SPECS §16.4).</li>
 </ul>
 <p><strong>Next decision</strong>: <code>]</code> / <code>[</code> and the arrows in the bar walk the user's <em>needs you</em> list (same source as
 the attention zone), keeping the tab.</p>
 <p><strong>Live updates</strong>: the badge, rail, banners and bar update in place on WS events; a polite live region
-announces state changes ("Run is now awaiting decision"); focus never moves.</p>
-<p><strong>&lt; 768 px</strong>: header condensed to two lines; the rail becomes a horizontal strip with labels under the
-header; the action bar is docked at the bottom with 44 px buttons (Confirm full width, Discard and
-Cancel in an overflow); tabs scroll horizontally; the confirm popover becomes a bottom sheet.</p>
+announces state changes ("Run is now applying."); focus never moves.</p>
+<p><strong>&lt; 768 px</strong>: the action bar is docked at the bottom with 44 px buttons (Confirm stretches, Discard
+and Cancel/Stop stay visible beside it; Plan again and the next-decision arrows are hidden); the
+confirm popover becomes a bottom sheet; tabs scroll horizontally. Below 1024 px the rail is the
+horizontal strip above the tabs (§2.2). A condensed two-line header is <strong>[not built yet]</strong>.</p>
 <h3 id="53-log-viewer-logviewer">5.3 Log viewer (<code>LogViewer</code>)<a class="headerlink" href="#53-log-viewer-logviewer" title="Permanent link">&para;</a></h3>
 <ul>
-<li><code>bg-sunken</code>, JetBrains Mono 12/18, virtualized (<code>react-virtuoso</code>), ANSI rendered with <code>anser</code> mapped onto tokens (red → <code>state-failed</code>, green → <code>state-finished</code>, yellow → <code>text-primary</code> bold — not amber, blue → <code>state-running</code>, magenta → <code>mock</code>, cyan/white/black → text tokens).</li>
-<li><strong>Order and sections</strong>: chunks are ordered by lifecycle phase (<code>planning</code>, <code>checking</code>, <code>applying</code>, <code>running</code> — the phases of one run never interleave), then <code>seq</code>. Not by timestamp: line times are <code>HH:MM:SS</code> without a date. (The API orders by phase <em>name</em>, so <code>checking</code> would come first, AUDIT §6.) Sections = consecutive runs of the same <code>(phase, section)</code>: <code>null</code> → "tofu", <code>plan</code> → "Plan output", <code>hook:&lt;name&gt;</code> → "Hook <name>". Section header: chevron, name, line count, duration, and <code>✕ failed</code> when a failing check has that hook name. No per-line prefix.</li>
+<li><code>bg-sunken</code>, JetBrains Mono 12 px on 24 px rows (§7 target size), virtualized (<code>react-virtuoso</code>), ANSI rendered with <code>anser</code> mapped onto tokens (red → <code>state-failed</code>, green → <code>state-finished</code>, yellow → <code>text-primary</code> bold — not amber, blue → <code>state-running</code>, magenta → <code>mock</code>, cyan/white → <code>text-primary</code>, black → <code>text-secondary</code>).</li>
+<li><strong>Order and sections</strong>: chunks are ordered by lifecycle phase (<code>preparing</code>, <code>planning</code>, <code>checking</code>, <code>applying</code>, <code>running</code> — the phases of one run never interleave), then <code>seq</code>. Not by timestamp: line times are <code>HH:MM:SS</code> without a date. (The API orders by phase <em>name</em>, so <code>checking</code> would come first, AUDIT §6.) Sections = consecutive runs of the same <code>(phase, section)</code>: <code>null</code> → the phase's name ("Prepare", "Init &amp; plan", "Checks", "Apply", "Command"), <code>plan</code> → "Plan output", <code>hook:&lt;name&gt;</code> → "Hook · <name>". Section header: chevron, name, line count, duration, and <code>✕ failed</code> when the section holds an error line or a failing check has that hook name. No per-line prefix.</li>
 <li><strong>Gutter</strong>: line numbers per phase (<code>planning.87</code>); click = sets <code>?line=planning.87</code> and copies the URL; on arrival the line is highlighted and centred.</li>
-<li><strong>Follow tail</strong> on by default while the run is live; any upward scroll suspends it and shows "↓ Resume (N new lines)".</li>
-<li><strong>First error</strong>: lines starting with <code>Error:</code> / <code>│ Error:</code> or rendered with ANSI red; "Jump to first error" (<code>e</code>) and an error count in the toolbar.</li>
-<li><strong>Search</strong> <code>⌘F</code> / <code>/</code> when the viewer has focus: highlight, counter, <code>n</code> / <code>N</code>.</li>
-<li><strong>Toggles</strong>: timestamps (<code>t</code>), wrap (<code>w</code>), full screen (<code>f</code>), "Save as text" (client-side <strong>[today]</strong>, A10).</li>
-<li><strong>Streaming</strong>: on a WS signal <code>{phase, max_seq}</code> fetch <code>GET /runs/{id}/logs?phase=&amp;after_seq=&lt;last&gt;</code> and append; reconnection catches up the same way. Comment-on-line affordance as today (hover / focus a line, <code>c</code>).</li>
-<li><strong>Mobile</strong>: wrap on by default, toolbar collapsed into a menu, sections collapsed except the failing one.</li>
+<li><strong>Follow tail</strong> on by default while the run is live; any upward scroll suspends it and shows "Resume following (N new lines)".</li>
+<li><strong>First error</strong>: lines starting with <code>Error:</code> / <code>│ Error:</code> (ANSI codes allowed before it); "First error (n)" (<code>e</code>) in the toolbar, and a <code>✕ n</code> count on the Logs tab. A failed run opens the Logs tab at its first error, else at its failing hook's section.</li>
+<li><strong>Search</strong> <code>⌘F</code> / <code>/</code> when the viewer has focus: highlight, counter, <code>n</code> / <code>N</code> (Enter / Shift-Enter in the field).</li>
+<li><strong>Toggles</strong>: timestamps (<code>t</code>), wrap (<code>w</code>, on by default), full screen (<code>f</code>), "Save" — a client-side text file of the loaded lines <strong>[today]</strong>. The API now serves <code>GET /runs/{id}/logs/download</code> (A10) from either storage tier; the viewer does not use it yet.</li>
+<li><strong>Streaming</strong>: on a WS signal <code>{phase, max_seq}</code> fetch <code>GET /runs/{id}/logs?phase=&amp;after_seq=&lt;last&gt;</code> and append (one fetch in flight per phase). Logs of a run archived to object storage are served by the same endpoint, transparently. Comment-on-line affordance: a comment button revealed on hover / focus of a line (always visible on coarse pointers).</li>
+<li><strong>Mobile</strong> <strong>[not built yet]</strong>: toolbar collapsed into a menu, sections collapsed except the failing one.</li>
 </ul>
 <h3 id="54-sspacegraph-and-run-groups">5.4 <code>/s/:space/graph</code> and run groups<a class="headerlink" href="#54-sspacegraph-and-run-groups" title="Permanent link">&para;</a></h3>
 <ul>
 <li>react-flow, dagre left→right. <strong>Filter</strong> by env name and tier (URL), applied to the graph and the list alike.</li>
-<li><strong>Node</strong> = <code>EnvCell</code> content (stack/env, mini rail, outcome, modifiers) inside a 220 px card. Nodes are focusable in topological order with <code>aria-label</code> = env name + summary. Click / Enter opens the <strong>node drawer</strong> (non-modal sheet): env summary, last run (link), published outputs (sensitive masked), dependencies in and out, actions (Open env, Plan).</li>
-<li><strong>Edge label</strong> = the output names it carries (<code>network_name</code>, <code>+2</code> when more), from the downstream env's dependency references (fetched lazily per visible edge). Edge style: solid <code>text-secondary</code>; <strong>dashed magenta only when the downstream env's primary run consumed a mock for one of the edge's inputs</strong> (<code>variable_provenance[input] = "mock"</code>); a reference with a mock <em>defined</em> but unused shows a small neutral <code>◇ mock</code> marker. Policy shown on hover (<code>on_output_change</code>).</li>
+<li><strong>Node</strong> = <code>EnvCell</code> content (stack/env, mini rail, outcome, modifiers) inside a 230 px card. Nodes are focusable in topological order with <code>aria-label</code> = env name + summary. Click / Enter opens the <strong>node drawer</strong> (non-modal sheet): env summary, last run (link), published outputs (sensitive masked), dependencies in and out, actions (Open env, Plan).</li>
+<li><strong>Edge label</strong> = the output names it carries (the first two, then <code>+n</code>), from the downstream env's dependency references (fetched lazily per visible edge). Edge style: solid <code>text-secondary</code>; <strong>dashed magenta, labelled <code>◆ mock</code>, only when the downstream env's primary run consumed a mock for one of the edge's inputs</strong> (<code>variable_provenance[input] = "mock"</code>); a reference with a mock <em>defined</em> but unused adds a small neutral <code>◇</code> to the label. The policy (<code>on_output_change</code>) is shown in the list view and the node drawer.</li>
 <li>React Flow's controls, labels and background are re-skinned onto tokens (no library default colour).</li>
 <li><strong>List view</strong> (<code>?view=list</code>): the full equivalent — an adjacency table <code>upstream → downstream · outputs · policy · mock used?</code> with the same filter, sortable, every row expandable to its references.</li>
 <li><strong>Run groups</strong>: the API now exposes <code>run_group_id</code>, <code>parent_run_id</code> and <code>run_group {id, status}</code> on <code>GET /runs/{id}</code> (SPECS §9.2, AUDIT A5); the front does not use them yet. <strong>[today]</strong> a run page's cascade preview and the graph highlight "runs started via dependency after this apply" (downstream env runs with <code>triggered_by=dependency</code> created after the upstream's <code>finished_at</code>), labelled as such. <strong>[with A5]</strong> the real group view: same graph, nodes colouring live, a group header with progress.</li>
@@ -3114,7 +3165,8 @@ Cancel in an overflow); tabs scroll horizontally; the confirm popover becomes a 
 <p>The visual answer to "why isn't my run starting?". In the nav, with a count badge when a run has
 waited more than 2 minutes.</p>
 <ul>
-<li>Three groups: <strong>Executing</strong> (<code>preparing</code>, <code>planning</code>, <code>checking</code>, <code>applying</code> — worker name, phase, duration), <strong>Waiting for a worker</strong> (<code>queued</code>, <code>confirmed</code> — age, blocking reason), and a one-line link "<strong>N runs await a human decision</strong> → Overview" (unconfirmed runs are not in the machine queue).</li>
+<li>Three groups: <strong>Executing</strong> (<code>preparing</code>, <code>planning</code>, <code>checking</code>, <code>applying</code>, <code>running</code> — worker name, phase, duration), <strong>Waiting for a worker</strong> (<code>queued</code>, <code>confirmed</code> — age, blocking reason), and a one-line link "<strong>N runs await a human decision</strong> → Overview" (unconfirmed runs are not in the machine queue).</li>
+<li>No WebSocket channel carries the queue: the page polls <code>GET /queue</code> every 3 s (the nav badge every 15 s).</li>
 <li>Every row resolves names: <code>stack / env</code>, run short ID, type, worker name. Ages come from each run's <code>created_at</code> (<strong>[today]</strong> one <code>runs.get</code> per row; the queue rarely exceeds a few dozen).</li>
 <li>Blocking reasons in words with a link: <code>another run is active on this environment → run 01a1276c</code>, <code>environment locked</code>, <code>no worker compatible with labels {…}</code>, <code>apply affinity reservation (worker vm, 38 s left)</code>.</li>
 <li>Filter by stack/env/pool (URL).</li>
@@ -3126,7 +3178,7 @@ waited more than 2 minutes.</p>
 <li><strong>Admin only</strong> (SPECS §2.4 residual): hidden from the nav for other roles; a direct visit says "The audit journal is restricted to administrators" (AUDIT A9).</li>
 <li>Dense chronological table: mono ISO timestamp (local, with relative on hover), actor (email), action as a neutral badge, <strong>target as a link</strong> (<code>run 01a1276c · demo-network/prod</code>, resolved from <code>target_kind</code>/<code>target_id</code>), context summarised (<code>+4 ~0 −0</code>, <code>tier prod</code>, <code>commit 2af0351</code>). A system <code>run.confirmed</code> under a rollout's approval reads "auto-confirmed under the rollout approval of alice@…" (SPECS §21.5) — never as alice's confirm. The CSV export carries the context as a JSON column.</li>
 <li><code>run.confirmed</code>, <code>run.applied</code> and destroys have a slightly contrasted row (<code>bg-raised</code>).</li>
-<li><code>auth.login</code> / <code>auth.refresh</code> hidden by default ("Show sign-ins" toggle) — they are 90 % of the volume.</li>
+<li><code>auth.login</code> / <code>auth.refresh</code> / <code>auth.logout</code> hidden by default ("Show sign-ins" toggle) — they are 90 % of the volume. Older events load on demand ("Load older events").</li>
 <li>Filters (all in the URL, mapped to the API's <code>actor</code>, <code>action</code>, <code>target_kind</code>, <code>target_id</code>, <code>from_</code>, <code>to</code>): actor, action (grouped select by domain), target (picker: stack, env, run), period. CSV export on the right with the same filters.</li>
 </ul>
 <h3 id="57-forms-configuration-and-dangerous-switches">5.7 Forms, configuration and dangerous switches<a class="headerlink" href="#57-forms-configuration-and-dangerous-switches" title="Permanent link">&para;</a></h3>
@@ -3149,8 +3201,8 @@ waited more than 2 minutes.</p>
 <td>type the name (dialog)</td>
 </tr>
 <tr>
-<td><strong>Turn off</strong> <code>requires_four_eyes</code> on a tier, <code>protected</code> or <code>require_second_pair_of_eyes</code> on an env; turn <strong>on</strong> <code>allow_mock_apply</code> / <code>allow_fallback_apply</code></td>
-<td>type the tier / env name (dialog that states the consequence: "Members who trigger a prod run will be able to confirm it themselves")</td>
+<td><strong>Turn off</strong> <code>requires_four_eyes</code> on a tier, <code>protected</code> or <code>require_second_pair_of_eyes</code> on an env; turn <strong>on</strong> <code>allow_mock_apply</code> / <code>allow_fallback_apply</code> on an env or <code>repo_hooks_at_apply</code> on a tier</td>
+<td>type the tier / env name (dialog that states the consequence: "Members who trigger a prod run will be able to confirm it themselves"); its submit is the amber <code>decision</code> button</td>
 </tr>
 <tr>
 <td>Force-unlock a state (admin only; hidden for others)</td>
@@ -3169,7 +3221,7 @@ waited more than 2 minutes.</p>
 <td>dialog listing every member env with its tier and the gate ("creates-only plans will be applied without asking again, for 24 h"); type the rollout's environment name</td>
 </tr>
 <tr>
-<td>Turning a safety switch <strong>on</strong> (four-eyes on, protected on)</td>
+<td>Turning a safety switch <strong>on</strong> (four-eyes on, protected on, repo hooks at apply forbidden)</td>
 <td>none (one click; reducing risk has no friction)</td>
 </tr>
 </tbody>
@@ -3178,30 +3230,31 @@ waited more than 2 minutes.</p>
 <li>Wizard (new stack): numbered steps; each step independently validatable (the repo check runs at step 1).</li>
 </ul>
 <h3 id="58-stack-page-and-environment-page">5.8 Stack page and environment page<a class="headerlink" href="#58-stack-page-and-environment-page" title="Permanent link">&para;</a></h3>
-<p><strong>Stack page</strong> <code>/s/:space/stacks/:stack</code> — tabs <strong>Environments</strong> and <strong>Settings</strong> (general, variables,
-hooks, notifications, secret sources; URL <code>?tab=</code>).</p>
+<p><strong>Stack page</strong> <code>/s/:space/stacks/:stack</code> — tabs <strong>Environments</strong> and <strong>Settings</strong> (sections general,
+variables, hooks, notifications, secret sources; URL <code>?tab=settings&amp;sub=</code>).</p>
 <ul>
-<li>Environments = a table, one row per env: <code>EnvCell</code> content, tier, branch, deployed commit, protections (badges: <code>four-eyes</code>, <code>protected</code>, <code>autodeploy</code>, <code>managed state</code>), and row actions (Plan, Open). The row opens the env page. "Add environment" (writer+) opens a dialog.</li>
+<li>Environments = a table, one row per env: the env name (link to the env page), <code>EnvCell</code>, tier, branch, deployed commit, protections (badges: <code>four-eyes</code>, <code>protected</code>, <code>2nd eyes</code>, <code>autodeploy</code>); branch, deployed commit and protections are hidden below 768 px. Row actions (Plan, Open) are <strong>[not built yet]</strong>. "Add environment" (writer+) opens a dialog.</li>
 </ul>
 <p><strong>Environment page</strong> <code>/s/:space/stacks/:stack/envs/:env</code> (new in v2):</p>
 <ul>
-<li><strong>Header</strong>: <code>stack / env</code>, tier, branch, deployed commit vs head (<code>2af0351 → 125304e ↑</code>, refresh-head button), drift (<code>≈ drifted, checked 1h ago → drift run</code>), lock, protection badges.</li>
-<li><strong>Primary actions</strong> (writer+): <strong>Plan</strong> (primary button), and a "More" menu: Plan with downstream (<code>with_downstream</code>), Destroy… (shown only with <code>can_destroy</code>; opens a dialog explaining the run will need typed confirmation at apply), Promote from… (sibling env, SPECS §9.7), Run command… (allowlist, SPECS §4.3), New environment from… (this env preselected as the model) and Roll out every “<name>” environment… (SPECS §21, DESIGN §5.11).</li>
-<li><strong>Tabs</strong> (URL): <strong>Runs</strong> (default) — history table: run short ID, type (<code>tracked</code>, <code>destroy</code>, <code>PR</code>, <code>drift</code>, <code>command</code>), trigger (who/how), outcome badge, plan summary, commit, age, duration; filter by type; paginated client-side <strong>[today]</strong>. <strong>Inputs</strong> (Resolved with provenance / Environment overrides / Discover inputs), <strong>Outputs</strong>, <strong>Dependencies</strong>, <strong>State</strong> (versions; force-unlock admin-only per §5.7), <strong>Settings</strong> (name, tier, branch, flags with the §5.7 friction, backend config, labels, hooks, notifications, cloud integration), and a <strong>Danger zone</strong> at the bottom of Settings (delete environment, typed name).</li>
+<li><strong>Header</strong>: <code>stack / env</code>, badges (tier, <code>four-eyes</code>, <code>protected</code>, <code>second pair of eyes</code>, <code>autodeploy</code>, <code>managed state</code>); a summary strip with the env's <code>EnvCell</code> (active run or last outcome), branch, deployed commit and head (<code>↑</code> when ahead; a Refresh button, writer+), drift (<code>≈ DRIFT</code> + "see the drift" → drift run, or "No drift detected · checked 1h ago" / "Drift detection off"), lock.</li>
+<li><strong>Primary actions</strong> (writer+): <strong>Plan</strong> (primary button), and a "More" menu: Plan with downstream (<code>with_downstream</code>), Promote from a sibling… (SPECS §9.7), Run a command… (allowlist, SPECS §4.3), New environment from… (this env preselected as the model), Roll out every “<name>” environment… (SPECS §21, DESIGN §5.11) and Plan a destroy… (shown only with <code>can_destroy</code>; opens a dialog explaining the run will need typed confirmation at apply).</li>
+<li><strong>Tabs</strong> (URL): <strong>Runs</strong> (default) — history table: run short ID, kind (<code>tracked</code>, <code>destroy</code>, <code>PR</code>, <code>drift</code>, <code>command</code>), outcome badge, mini rail, commit, trigger (who/how), start, duration; filter by kind (<code>?kind=</code>); paginated client-side, 50 at a time <strong>[today]</strong>. <strong>Inputs</strong> (Resolved with provenance / Environment overrides / Discover inputs), <strong>Outputs</strong>, <strong>Dependencies</strong>, <strong>State</strong> (versions; force-unlock admin-only per §5.7), <strong>Settings</strong> (name, tier, branch, flags with the §5.7 friction, backend config, labels, hooks, notifications, cloud integration), and a <strong>Danger zone</strong> at the bottom of Settings (delete environment, typed name).</li>
 </ul>
 <h3 id="59-workers-workers-pools">5.9 <code>/workers</code> — workers &amp; pools<a class="headerlink" href="#59-workers-workers-pools" title="Permanent link">&para;</a></h3>
 <ul>
 <li>Health strip: API status, database, workers online/total, runs active/queued, recent warnings — values in <code>text-primary</code>; only a failing check is red. No green for "ok" (telemetry is neutral, §3.6).</li>
-<li>Workers grouped by pool: name, labels, status (<code>online</code> / <code>offline</code> as text + <code>●</code> / <code>○</code>), last heartbeat (relative), agent version, Diagnostics / Logs actions (admin).</li>
+<li>Workers grouped by pool (<code>n/m online</code>, pool labels): name, status (<code>● online</code> neutral, <code>✕ offline</code> in red — an error), last heartbeat (relative), labels, runner (<code>docker</code> / <code>local</code>), agent version, Diagnostics / Logs actions (admin).</li>
 <li>Pool management (admin): create (token shown <strong>once</strong> in a banner with a copy action, hashed at rest), delete (typed name, §5.7).</li>
-<li>Platform logs: HTTP status and level neutral; <code>ERROR</code> / <code>CRITICAL</code> and 5xx in red; the worker long-poll on <code>/worker/v1/jobs/claim</code> is labelled "long-poll" and excluded from the "slow" highlight.</li>
+<li>Platform logs (admin): HTTP status and level neutral; <code>ERROR</code> / <code>CRITICAL</code> and 5xx in red; the worker long-poll on <code>/worker/v1/jobs/claim</code> is labelled "long-poll" and excluded from the "slow" highlight.</li>
 </ul>
 <h3 id="510-variable-sets-settings-login-notifications-new-section-in-v2">5.10 Variable sets, settings, login, notifications (new section in v2)<a class="headerlink" href="#510-variable-sets-settings-login-notifications-new-section-in-v2" title="Permanent link">&para;</a></h3>
 <ul>
-<li><strong>Variable sets</strong> (<code>/s/:space/variable-sets</code>): one row per set with how it reaches envs (<code>auto-attach</code>, <code>rule: team=payments</code>, <code>3 attachments</code>); the row opens a page with tabs Variables / Attachments / Settings. Delete per §5.7.</li>
-<li><strong>Settings</strong> (<code>/settings</code>): <strong>Preferences</strong> for everyone (theme: system / dark / light; single-key shortcuts on/off — in memory, for the tab only, until A8). Admin only: <strong>Tiers</strong> (name, <code>requires_four_eyes</code> with §5.7 friction, position, envs using it, delete per §5.7), <strong>Users &amp; roles</strong> (staged edits, §5.7), <strong>Spaces</strong> (members, per-space role and tiers), <strong>Deployment</strong> (version, environment).</li>
+<li><strong>Variable sets</strong> (<code>/s/:space/variable-sets</code>): one row per set with how it reaches envs (<code>auto-attach · whole space</code>, <code>rule: team=payments</code>, <code>3 attachments</code>); the set opens its page (<code>/s/:space/variable-sets/:set</code>) with tabs Variables / Attachments / Settings (<code>?tab=</code>). Delete per §5.7.</li>
+<li><strong>Settings</strong> (<code>/settings</code>): <strong>Preferences</strong> for everyone (theme: follow the system / dark / light; single-key shortcuts on/off — in memory, for the tab only, until A8) and <strong>Deployment</strong> for everyone (environment, version, database status). Admin only: <strong>Tiers</strong> (name, <code>requires_four_eyes</code> and <code>repo_hooks_at_apply</code> with §5.7 friction, display order, envs using it, delete per §5.7), <strong>Users</strong> (role, allowed tiers, <code>can_destroy</code>, disabled — staged edits, §5.7), <strong>Spaces</strong> (members, per-space role and tiers).</li>
 <li><strong>Login</strong>: brand mark, "Sign in with Google"; in dev, the personas show email and role, and their allowed tiers once the dev endpoint returns them (needs API work A12).</li>
-<li><strong>Notifications</strong> (bell popover, Radix): each item names what and where ("Run failed · demo-dns/dev · 6m"), links to the run (Logs at first error for failures) — a rollout notification (<code>rollout_paused</code>, <code>rollout_succeeded</code>, <code>rollout_failed</code>, <code>rollout_upstream_changed</code> "Upstream applied under a rollout", SPECS §21.7) to the rollout page —, mark read on open; "Mark all read" / "Clear read". The bell badge counts unread, neutral (not violet, not amber).</li>
+<li><strong>First-login walkthrough</strong>: a short dialog tour (overview, stacks and environments, runs, permissions, dependencies…) shown until the user completes it; closing it in any way completes it, persisted server-side (no browser storage).</li>
+<li><strong>Notifications</strong> (bell popover, Radix): each item names what and where ("Run failed · demo-dns/dev · 6m"), links to the run (Logs at first error for failures) — a rollout notification (<code>rollout_paused</code>, <code>rollout_succeeded</code>, <code>rollout_failed</code>, <code>rollout_upstream_changed</code> "Upstream applied under a rollout", SPECS §21.7) to the rollout page. Opening the popover marks every item read (items that were unread keep a "new" mark while it stays open); "Clear read" removes the read ones. The bell badge counts unread, neutral (not violet, not amber).</li>
 </ul>
 <h3 id="511-environment-clones-and-rollouts-specs-21">5.11 Environment clones and rollouts (SPECS §21)<a class="headerlink" href="#511-environment-clones-and-rollouts-specs-21" title="Permanent link">&para;</a></h3>
 <p><strong>New environment from…</strong> (overview header action, and the env page "More" menu with that env
@@ -3265,8 +3318,8 @@ approval)" — never a plain "confirmed by alice": she approved the rollout, not
 <hr />
 <h2 id="6-real-time-patterns">6. Real-time patterns<a class="headerlink" href="#6-real-time-patterns" title="Permanent link">&para;</a></h2>
 <ul>
-<li><strong>One multiplexed WebSocket per tab</strong> (a shared hub in <code>api/stream.ts</code>): components declare the channels they need (<code>run:&lt;id&gt;</code>, <code>environment:&lt;id&gt;</code>, <code>user:&lt;id&gt;</code>); the hub subscribes/unsubscribes with reference counting. TanStack Query remains the source of truth: WS events <strong>invalidate</strong> queries (they never patch the cache), except logs, which are fetched incrementally with <code>after_seq</code> on each signal (§5.3).</li>
-<li>Poll fallbacks only while the socket is down (no permanent 4 s polling).</li>
+<li><strong>One multiplexed WebSocket per tab</strong> (a shared hub in <code>api/stream.ts</code>): components declare the channels they need (<code>run:&lt;id&gt;</code>, <code>environment:&lt;id&gt;</code>, <code>user:&lt;id&gt;</code>, <code>rollout:&lt;id&gt;</code>); the hub subscribes with reference counting and re-subscribes after a reconnect (the server has no unsubscribe: a released channel stays on the socket until the next reconnect, and listeners filter signals on their payload). The token is sent as the first message, never in the URL; reconnects back off exponentially up to 30 s. TanStack Query remains the source of truth: WS events <strong>invalidate</strong> queries (they never patch the cache), except logs, which are fetched incrementally with <code>after_seq</code> on each signal and merged into the log query (§5.3).</li>
+<li>Slow safety-net polls run alongside the socket (60 s on the overview, stack and env pages, 15 s on a live run) — no fast permanent polling on socket-backed pages. Pages with no channel poll: the queue (3 s), workers health (5 s).</li>
 <li>A state change is visible everywhere it appears (rail, badges, matrix, attention zone) without a refresh.</li>
 <li><strong>Connection indicator</strong> in the top bar (<code>● live</code>); on a disconnect a thin "Reconnecting…" bar under the top bar, catch-up on reconnect, never a blocking modal.</li>
 <li>No toast for background events (a run that finishes is seen on its rail; the bell receives the notification). Toasts are reserved for feedback on the current user's own actions.</li>
@@ -3298,16 +3351,18 @@ approval)" — never a plain "confirmed by alice": she approved the rollout, not
 <h2 id="8-implementation">8. Implementation<a class="headerlink" href="#8-implementation" title="Permanent link">&para;</a></h2>
 <ul>
 <li><strong>Stack</strong> (CLAUDE §3): React 19, Vite 7, strict TypeScript, TanStack Query, Tailwind v4 with the tokens of §3 exposed as theme colours, react-router 7.</li>
-<li><strong>Dependencies added in the redesign</strong> (agreed): Radix primitives (Dialog, Popover, DropdownMenu, Tooltip, Tabs), wrapped and fully re-skinned in <code>src/ui/</code> <strong>the shadcn/ui way</strong> — owned code, Tailwind utilities on the tokens, a small <code>cn()</code> helper — but written by hand, not generated by the shadcn CLI (no <code>components.json</code>, no <code>class-variance-authority</code> / <code>tailwind-merge</code>); scrolling stays native (no ScrollArea); <code>cmdk</code> (⌘K); <code>react-virtuoso</code> (logs, long tables); <code>anser</code> (ANSI); <code>@fontsource/ibm-plex-sans</code>, <code>@fontsource/jetbrains-mono</code> (self-hosted fonts). Tooling: <code>eslint</code> (flat config) + <code>typescript-eslint</code> + <code>eslint-plugin-react-hooks</code> + <code>eslint-plugin-jsx-a11y</code>, <code>prettier</code>. Already present: <code>@xyflow/react</code> + <code>dagre</code>, <code>lucide-react</code>, Ladle.</li>
-<li><strong>Tokens</strong>: <code>styles/tokens.css</code> defines the variables of §3 for <code>[data-theme="dark"]</code> and <code>[data-theme="light"]</code>; <code>index.css</code> maps them into Tailwind (<code>bg-surface</code>, <code>text-secondary</code>, <code>text-state-failed</code>, <code>border-control</code>…). <strong>Components use Tailwind utilities only</strong>: no <code>style={{…}}</code> except for computed geometry (virtualized heights, graph positions); a lint rule (<code>no-restricted-syntax</code> on <code>style</code> attributes) and a CI check added in stage 3 (grep for hex/rgb colours, inline colour styles and <code>localStorage</code>/<code>sessionStorage</code>) enforce it.</li>
-<li><strong>Theme</strong>: follows <code>prefers-color-scheme</code>; the user menu toggle overrides it <strong>in memory</strong> (lost on reload) — persistence needs a profile field (AUDIT A8). <code>&lt;html data-theme&gt;</code> is set before first paint by an inline script that reads only <code>matchMedia</code>.</li>
+<li><strong>Dependencies added in the redesign</strong> (agreed): Radix primitives (Dialog, Popover, DropdownMenu, Tooltip, Tabs), wrapped and fully re-skinned in <code>src/ui/</code> <strong>the shadcn/ui way</strong> — owned code, Tailwind utilities on the tokens, a small <code>cn()</code> helper — but written by hand, not generated by the shadcn CLI (no <code>components.json</code>, no <code>class-variance-authority</code> / <code>tailwind-merge</code>); scrolling stays native (no ScrollArea); <code>cmdk</code> (⌘K); <code>react-virtuoso</code> (the log viewer); <code>anser</code> (ANSI); <code>@fontsource/ibm-plex-sans</code>, <code>@fontsource/jetbrains-mono</code> (self-hosted fonts). Tooling: <code>eslint</code> (flat config) + <code>typescript-eslint</code> + <code>eslint-plugin-react-hooks</code> + <code>eslint-plugin-jsx-a11y</code>, <code>prettier</code>. Already present: <code>@xyflow/react</code> + <code>dagre</code>, <code>lucide-react</code>, Ladle.</li>
+<li><strong>Tokens</strong>: <code>styles/tokens.css</code> defines the variables of §3 for <code>[data-theme="dark"]</code> and <code>[data-theme="light"]</code>; <code>index.css</code> maps them into Tailwind under distinct utility names, since <code>@theme</code> re-emits its variables and a same-name alias would be a cycle (<code>bg-base</code>/<code>surface</code>/<code>raised</code>/<code>sunken</code>, <code>border-line</code>, <code>border-control</code>, <code>bg-scrim</code>, <code>text-primary</code>, <code>text-muted</code> = text-secondary, <code>ring</code>, <code>logo</code>, <code>text-onfill</code>, <code>text-st-&lt;state&gt;</code>, <code>text-mocked</code>, <code>bg-tint-&lt;state&gt;</code>, <code>text-df-&lt;action&gt;</code>…), plus the type scale (<code>text-eyebrow</code> … <code>text-display</code>) and radii (<code>rounded-base</code>, <code>rounded-badge</code>). <strong>Components use Tailwind utilities only</strong>: no <code>style={{…}}</code> except for computed geometry (virtualized heights, graph positions). Enforced by a lint rule (<code>no-restricted-syntax</code> on colour properties inside <code>style</code> attributes, plus <code>no-restricted-globals</code> / <code>no-restricted-properties</code> on <code>localStorage</code> / <code>sessionStorage</code>) and by <code>pnpm check:invariants</code> in CI (<code>front/scripts/check-invariants.mjs</code>: no browser storage, no hex / <code>rgb()</code> / <code>hsl()</code> literal outside <code>tokens.css</code>, no <code>text-base</code> — a colour here, not a size).</li>
+<li><strong>Theme</strong>: follows <code>prefers-color-scheme</code>; the user menu toggle, Settings → Preferences or ⌘K overrides it <strong>in memory</strong> (lost on reload) — persistence needs a profile field (AUDIT A8). <code>&lt;html data-theme&gt;</code> is set before first paint by an inline script that reads only <code>matchMedia</code>.</li>
 <li><strong>Folder structure</strong>:</li>
-<li><code>src/ui/</code> — re-skinned primitives: Button (<code>primary</code>, <code>secondary</code>, <code>ghost</code>, <code>decision</code>, <code>danger</code>), IconButton, Input, Select, Checkbox, Switch, Field, Tabs, Dialog, Popover, Sheet, DropdownMenu, Tooltip, Command, Table, Badge, Banner (<code>info</code>, <code>decision</code>, <code>failed</code>, <code>mock</code>), Kbd, Skeleton, EmptyState, CopyButton, RelativeTime, Sha, TypeToConfirm.</li>
-<li><code>src/identity/</code> — the identity components, each with a Ladle story (below).</li>
-<li><code>src/features/&lt;domain&gt;/</code> — <code>overview</code>, <code>runs</code>, <code>environments</code>, <code>stacks</code>, <code>graph</code>, <code>queue</code>, <code>workers</code>, <code>audit</code>, <code>variable-sets</code>, <code>settings</code>, <code>notifications</code>: page components, their queries and local components. A page file stays under ~250 lines; data hooks live next to it (<code>useRunPage</code>, <code>useOverview</code>).</li>
+<li><code>src/ui/</code> — re-skinned primitives: Button (<code>primary</code>, <code>secondary</code>, <code>ghost</code>, <code>decision</code>, <code>danger</code>; sizes <code>sm</code>, <code>md</code>, <code>touch</code>), Input, NativeSelect, Checkbox, Field, Tabs, Table (<code>Th</code>, <code>Td</code>), Badge, Banner (<code>info</code>, <code>decision</code>, <code>failed</code>, <code>mock</code>), Kbd, Skeleton, EmptyState, CopyButton, RelativeTime, Sha (<code>primitives.tsx</code>); Dialog, Sheet, Popover, Menu (DropdownMenu), Tooltip (<code>overlays.tsx</code>); ConfirmPopover, TypeNameDialog; <code>cn</code>, <code>useMediaQuery</code>. No IconButton or Switch primitive (icon-only tools are <code>Button</code>s with an <code>aria-label</code>); ⌘K uses <code>cmdk</code> directly in <code>app/CommandPalette.tsx</code>.</li>
+<li><code>src/identity/</code> — the identity components, each with a Ladle story (below), plus <code>TypeToConfirm</code> and the shared story fixtures.</li>
+<li><code>src/app/</code> — the shell: routes and nav (<code>AppShell</code>, <code>nav.ts</code>), space context, ⌘K, keyboard map, theme, live-region announcer, notification bell, login, walkthrough, brand.</li>
+<li><code>src/features/&lt;domain&gt;/</code> — <code>overview</code>, <code>runs</code>, <code>environments</code>, <code>stacks</code>, <code>graph</code>, <code>queue</code>, <code>workers</code>, <code>audit</code>, <code>variableSets</code>, <code>settings</code>, <code>rollouts</code> (rollouts and the clone dialog), <code>data</code> (<code>useSpaceEnvs</code>, the space-wide env summaries shared by the overview, the graph, the run page and the nav badge): page components, their queries and local components. A page file stays under ~250 lines; data hooks live next to it (<code>useRunPage</code>, <code>useSpaceEnvs</code>).</li>
+<li><code>src/components/</code> — configuration panels kept from v1 (variables, hooks, notifications, secret sources, cloud, dependencies, promote, command, stack general) and their small <code>ui.tsx</code> kit (<code>DeleteButton</code>, <code>ItemTile</code>, <code>LabelsEditor</code>…), restyled onto the tokens.</li>
 <li><code>src/lib/</code> — pure, unit-tested logic: <code>envSummary</code> (§2.3), <code>runOutcome</code> (§3.2), <code>phases</code> (§2.2), <code>permissions</code> (§5.2 reasons), <code>planParse</code> (§5.2), <code>logModel</code> (§5.3 ordering/sections/first error), <code>cascade</code> (BFS over graph edges), <code>time</code>.</li>
 <li><code>src/api/</code> — client, resources, types (aligned with the API's <code>RunOut</code>: <code>commit_author</code>, <code>claimed_at</code>, <code>confirmed_at</code>, <code>worker_id</code>, <code>command</code>), <code>stream.ts</code> hub.</li>
-<li><strong>Identity components</strong> (contract = Ladle story covering every state, both themes via a theme decorator, and the mocked modifier):</li>
+<li><strong>Identity components</strong> (contract = Ladle story covering every state, both themes — <code>.ladle/components.tsx</code> renders every story in the dark and the light theme side by side —, and the mocked modifier):</li>
 </ul>
 <table>
 <thead>
@@ -3320,32 +3375,32 @@ approval)" — never a plain "confirmed by alice": she approved the rollout, not
 <tbody>
 <tr>
 <td><code>PhaseRail</code></td>
-<td><code>run</code>, <code>variant: vertical \| mini</code>, <code>onSelect?</code></td>
+<td><code>segments</code> (from <code>phases.buildSegments(run, durations, confirmer)</code>), <code>variant: vertical \| horizontal \| mini</code>, <code>onSelect?</code>, <code>label?</code> (mini)</td>
 <td>every run state, each failed segment, failed during apply, no changes, auto-confirmed, proposed, command, mocked</td>
 </tr>
 <tr>
 <td><code>StateBadge</code></td>
-<td><code>state</code>, <code>outcome?</code>, <code>modifiers</code>, <code>form?: needsYou \| waiting</code></td>
+<td><code>state</code>, <code>outcome?</code>, <code>counts?</code>, <code>failedAt?</code>, <code>decision?: needsYou \| waiting</code>, <code>compact?</code> — <code>RunStateBadge</code> derives them from a <code>run</code>; modifiers are a separate <code>ModifierChips</code></td>
 <td>all states, all outcomes, needs you vs waiting, every modifier, stacked modifiers</td>
 </tr>
 <tr>
 <td><code>EnvCell</code></td>
-<td><code>summary</code> (from <code>envSummary</code>), <code>selected?</code>, <code>downstream?</code></td>
+<td><code>summary</code> (from <code>envSummary</code>), <code>needsYou?</code>, <code>selected?</code>, <code>downstream?: will_plan \| plans_if_outputs_change</code>, <code>title?</code></td>
 <td>each primary state, each modifier, empty env, PR active, selected, downstream-highlighted, 390 px</td>
 </tr>
 <tr>
 <td><code>RunActionBar</code></td>
-<td><code>run</code>, <code>env</code>, <code>tier</code>, <code>me</code>, <code>cascade</code>, handlers</td>
+<td><code>run</code>, <code>env</code>, <code>rights</code> (from <code>permissions.runRights</code>), <code>me</code>, <code>whoMayConfirm</code>, <code>triggerer?</code>, <code>confirmer?</code>, <code>cascade</code>, <code>destroyed</code>, <code>replaced</code>, <code>pending?</code>, <code>apiError?</code>, handlers, <code>prevDecision?</code> / <code>nextDecision?</code></td>
 <td>needs you, waiting on someone (each reason), four-eyes self-triggered, destroy without right, mocked, fallback, stale, finished applied, failed during apply, loading, API refusal</td>
 </tr>
 <tr>
 <td><code>PlanDiff</code></td>
-<td><code>planText</code> (today) or <code>changes</code> (A1), <code>query?</code></td>
+<td><code>lines</code> (the plan log section, today) or <code>changes</code> (A1), <code>counts</code>, <code>query</code> + <code>onQueryChange</code>, <code>resourceAction?</code>, <code>emptyHint?</code></td>
 <td>create/update/delete/replace/read/moved, tag-only, long plan (500 resources), unparsed fallback, sensitive values, search</td>
 </tr>
 <tr>
 <td><code>LogViewer</code></td>
-<td><code>chunks</code>, <code>live</code>, <code>checks</code>, <code>initialLine?</code></td>
+<td><code>chunks</code>, <code>live</code>, <code>failedHooks?</code>, <code>initialLine?</code>, <code>onLineLink?</code>, <code>lineAction?</code>, <code>renderAfterLine?</code></td>
 <td>live following, paused with new lines, sections with a failed hook, first error, search, timestamps, ANSI palette, 20 000 lines</td>
 </tr>
 <tr>
@@ -3355,14 +3410,14 @@ approval)" — never a plain "confirmed by alice": she approved the rollout, not
 </tr>
 <tr>
 <td><code>TypeToConfirm</code></td>
-<td><code>name</code>, <code>summary</code>, <code>destroyed[]</code>, <code>cascade[]</code></td>
+<td><code>name</code>, <code>verb</code>, <code>because[]</code>, <code>counts</code>, <code>destroyed[]</code>, <code>replaced[]</code>, <code>cascade[]</code>, <code>pending?</code></td>
 <td>four-eyes apply, destroy, long destroy list, mobile sheet</td>
 </tr>
 </tbody>
 </table>
 <ul>
 <li><strong>Graphs</strong>: react-flow + dagre, loaded only on <code>/graph</code> (route-level code splitting and the <code>graph</code> chunk are kept from v1). Initial JS budget: ≤ 250 KB gz.</li>
-<li><strong>Tests</strong>: vitest for <code>src/lib/*</code> (envSummary, runOutcome, phases, permissions, planParse, logModel, cascade, contrast ratios from <code>tokens.css</code>) and for identity components; Playwright happy path extended: dev login → overview (attention zone lists a decision) → run page → confirm with typed name → applied outcome; run at 1440 and 390 px. <code>pnpm lint</code>, <code>pnpm typecheck</code>, <code>pnpm test</code> must pass (DEV / CLAUDE §6).</li>
+<li><strong>Tests</strong>: vitest for <code>src/lib/*</code> (envSummary, runOutcome, phases, permissions, planParse, logModel, cascade, contrast ratios from <code>tokens.css</code>) and for identity components; Playwright happy path: today dev login → overview, at desktop width; the extension (attention zone lists a decision → run page → confirm with typed name → applied outcome, at 1440 and 390 px) is <strong>[not built yet]</strong>. <code>pnpm check:invariants</code> runs in CI with them. <code>pnpm lint</code>, <code>pnpm typecheck</code>, <code>pnpm test</code> must pass (DEV / CLAUDE §6).</li>
 </ul>
 <hr />
 <h2 id="9-what-we-forbid-ourselves-reminder">9. What we forbid ourselves (reminder)<a class="headerlink" href="#9-what-we-forbid-ourselves-reminder" title="Permanent link">&para;</a></h2>

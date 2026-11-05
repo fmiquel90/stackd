@@ -1301,6 +1301,9 @@ for a read-only one.</p>
 <p>The token expires after <code>session_duration</code>, capped per phase: 30 min for <code>plan</code>, and the
 apply window (the apply budget + grace, 20 min by default) for <code>apply</code> — so apply
 credentials never outlive the job they were minted for.</p>
+<p>Besides <code>iss</code> (<code>STACKD_PUBLIC_URL</code>), <code>sub</code>, <code>aud</code> (always <code>sts.amazonaws.com</code>), <code>iat</code> and <code>exp</code>,
+the token carries <code>environment</code>, <code>tier</code>, <code>stack</code>, <code>phase</code>, <code>environment_id</code>, <code>run_id</code> and
+<code>triggered_by</code>.</p>
 <h2 id="how-the-issuer-works">How the issuer works<a class="headerlink" href="#how-the-issuer-works" title="Permanent link">&para;</a></h2>
 <p>Stackd exposes a standard OIDC discovery surface, RS256-signed:</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>GET /.well-known/openid-configuration   → issuer, jwks_uri, alg RS256
@@ -1311,8 +1314,8 @@ credentials never outlive the job they were minted for.</p>
 <p class="admonition-title">The issuer must be publicly reachable over HTTPS</p>
 <p>AWS STS calls <code>/.well-known/openid-configuration</code> and <code>/oidc/jwks</code> directly. The
 Stackd issuer URL must be reachable from AWS over HTTPS — a private-only deployment
-will fail every <code>AssumeRoleWithWebIdentity</code>. Expose it publicly, or use the provided
-Terraform module that registers the identity provider with its thumbprint.</p>
+will fail every <code>AssumeRoleWithWebIdentity</code>. Expose <code>/.well-known/openid-configuration</code> and
+<code>/oidc/jwks</code> publicly, even if the rest of the API stays private.</p>
 </div>
 <h2 id="the-signing-key">The signing key<a class="headerlink" href="#the-signing-key" title="Permanent link">&para;</a></h2>
 <p>Whoever holds the issuer's private key can mint a token for any role that trusts Stackd, so in
@@ -1352,12 +1355,14 @@ issuer rotates from its local key to the configured KMS key.</p>
 <p><strong>Rotation.</strong> <code>POST /api/v1/oidc/keys/rotate</code> (admin) makes a new key the signing one — a new KMS
 key named in <code>{"kms_key_arn": "…"}</code>, or a new local key on a local issuer. The previous key stays
 in the JWKS, so the tokens it signed keep verifying, and leaves it automatically once the longest
-of them has expired (the apply budget plus grace, plus five minutes of clock skew).
+of them has expired: the longer of the plan cap (30 min) and the apply window, plus five minutes
+of clock skew — 35 minutes with the defaults.
 <code>GET /api/v1/oidc/keys</code> lists the keys and their status. Both rotations and retirements are
 audited (<code>oidc_key.rotated</code>, <code>oidc_key.retired</code>).</p>
 <h2 id="1-configure-the-cloud-provider-aws">1. Configure the cloud provider (AWS)<a class="headerlink" href="#1-configure-the-cloud-provider-aws" title="Permanent link">&para;</a></h2>
-<p>On the AWS account, create an <strong>IAM OIDC identity provider</strong> trusting the Stackd issuer,
-then the roles each run will assume. A provided Terraform module sets this up.</p>
+<p>On the AWS account, create an <strong>IAM OIDC identity provider</strong> trusting the Stackd issuer — its URL
+is <code>STACKD_PUBLIC_URL</code> (the token's <code>iss</code>), its audience (client ID) <code>sts.amazonaws.com</code> — then the
+roles each run will assume. No Terraform module for this ships with Stackd yet.</p>
 <p>Use a separate role per phase:</p>
 <ul>
 <li><code>plan_role_arn</code> → a <strong>ReadOnly</strong> role (plus access to the state backend).</li>
@@ -1367,10 +1372,15 @@ then the roles each run will assume. A provided Terraform module sets this up.</
 <code>stack</code> segment</strong> — <code>tier</code> and <code>phase</code> are always pinned:</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="c1"># Trust policy of the prod APPLY role — refuses everything else</span>
 <a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a><span class="nb">condition</span><span class="w"> </span><span class="p">{</span>
-<a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a><span class="w">  </span><span class="na">test</span><span class="w">     </span><span class="o">=</span><span class="w"> </span><span class="s2">&quot;StringLike&quot;</span>
-<a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a><span class="w">  </span><span class="na">variable</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">&quot;stackd.example.com:sub&quot;</span>
-<a id="__codelineno-3-5" name="__codelineno-3-5" href="#__codelineno-3-5"></a><span class="w">  </span><span class="na">values</span><span class="w">   </span><span class="o">=</span><span class="w"> </span><span class="p">[</span><span class="s2">&quot;run:prod:*:apply&quot;</span><span class="p">]</span><span class="c1">   # any stack, but tier=prod AND phase=apply</span>
+<a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a><span class="w">  </span><span class="na">test</span><span class="w">     </span><span class="o">=</span><span class="w"> </span><span class="s2">&quot;StringEquals&quot;</span>
+<a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a><span class="w">  </span><span class="na">variable</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">&quot;stackd.example.com:aud&quot;</span>
+<a id="__codelineno-3-5" name="__codelineno-3-5" href="#__codelineno-3-5"></a><span class="w">  </span><span class="na">values</span><span class="w">   </span><span class="o">=</span><span class="w"> </span><span class="p">[</span><span class="s2">&quot;sts.amazonaws.com&quot;</span><span class="p">]</span>
 <a id="__codelineno-3-6" name="__codelineno-3-6" href="#__codelineno-3-6"></a><span class="p">}</span>
+<a id="__codelineno-3-7" name="__codelineno-3-7" href="#__codelineno-3-7"></a><span class="nb">condition</span><span class="w"> </span><span class="p">{</span>
+<a id="__codelineno-3-8" name="__codelineno-3-8" href="#__codelineno-3-8"></a><span class="w">  </span><span class="na">test</span><span class="w">     </span><span class="o">=</span><span class="w"> </span><span class="s2">&quot;StringLike&quot;</span>
+<a id="__codelineno-3-9" name="__codelineno-3-9" href="#__codelineno-3-9"></a><span class="w">  </span><span class="na">variable</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">&quot;stackd.example.com:sub&quot;</span>
+<a id="__codelineno-3-10" name="__codelineno-3-10" href="#__codelineno-3-10"></a><span class="w">  </span><span class="na">values</span><span class="w">   </span><span class="o">=</span><span class="w"> </span><span class="p">[</span><span class="s2">&quot;run:prod:*:apply&quot;</span><span class="p">]</span><span class="c1">   # any stack, but tier=prod AND phase=apply</span>
+<a id="__codelineno-3-11" name="__codelineno-3-11" href="#__codelineno-3-11"></a><span class="p">}</span>
 </code></pre></div>
 <div class="admonition warning">
 <p class="admonition-title">Never wildcard <code>tier</code> or <code>phase</code></p>
@@ -1384,22 +1394,26 @@ token. Keep <code>tier</code> and <code>phase</code> fixed in every condition.</
 different role or even a different AWS account). The resource is CRUD over:</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a>GET|PUT|DELETE /api/v1/environments/{id}/cloud-integration
 </code></pre></div>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a>curl<span class="w"> </span>-s<span class="w"> </span>-X<span class="w"> </span>PUT<span class="w"> </span>localhost:8000/api/v1/environments/<span class="nv">$PROD</span>/cloud-integration<span class="w"> </span>-H<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$AUTH</span><span class="s2">&quot;</span><span class="w"> </span>-d<span class="w"> </span><span class="s1">&#39;{</span>
-<a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a><span class="s1">  &quot;provider&quot;: &quot;aws&quot;,</span>
-<a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a><span class="s1">  &quot;plan_role_arn&quot;:  &quot;arn:aws:iam::123:role/stackd-prod-plan&quot;,</span>
-<a id="__codelineno-5-4" name="__codelineno-5-4" href="#__codelineno-5-4"></a><span class="s1">  &quot;apply_role_arn&quot;: &quot;arn:aws:iam::123:role/stackd-prod-apply&quot;,</span>
-<a id="__codelineno-5-5" name="__codelineno-5-5" href="#__codelineno-5-5"></a><span class="s1">  &quot;region&quot;: &quot;eu-west-1&quot;,</span>
-<a id="__codelineno-5-6" name="__codelineno-5-6" href="#__codelineno-5-6"></a><span class="s1">  &quot;session_duration&quot;: 3600</span>
-<a id="__codelineno-5-7" name="__codelineno-5-7" href="#__codelineno-5-7"></a><span class="s1">}&#39;</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a>curl<span class="w"> </span>-s<span class="w"> </span>-X<span class="w"> </span>PUT<span class="w"> </span>localhost:8000/api/v1/environments/<span class="nv">$PROD</span>/cloud-integration<span class="w"> </span>-H<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$AUTH</span><span class="s2">&quot;</span><span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a><span class="w">  </span>-H<span class="w"> </span><span class="s1">&#39;content-type: application/json&#39;</span><span class="w"> </span>-d<span class="w"> </span><span class="s1">&#39;{</span>
+<a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a><span class="s1">  &quot;provider&quot;: &quot;aws&quot;,</span>
+<a id="__codelineno-5-4" name="__codelineno-5-4" href="#__codelineno-5-4"></a><span class="s1">  &quot;plan_role_arn&quot;:  &quot;arn:aws:iam::123:role/stackd-prod-plan&quot;,</span>
+<a id="__codelineno-5-5" name="__codelineno-5-5" href="#__codelineno-5-5"></a><span class="s1">  &quot;apply_role_arn&quot;: &quot;arn:aws:iam::123:role/stackd-prod-apply&quot;,</span>
+<a id="__codelineno-5-6" name="__codelineno-5-6" href="#__codelineno-5-6"></a><span class="s1">  &quot;region&quot;: &quot;eu-west-1&quot;,</span>
+<a id="__codelineno-5-7" name="__codelineno-5-7" href="#__codelineno-5-7"></a><span class="s1">  &quot;session_duration&quot;: 3600</span>
+<a id="__codelineno-5-8" name="__codelineno-5-8" href="#__codelineno-5-8"></a><span class="s1">}&#39;</span>
 </code></pre></div>
-<p>AWS is the MVP target; GCP and Azure come later.</p>
+<p>Writing or deleting it is admin-only and audited (<code>cloud_integration.created</code>, <code>.updated</code>,
+<code>.deleted</code>); <code>session_duration</code> defaults to 3600 s and is capped per phase as above. AWS is the MVP
+target; GCP and Azure come later.</p>
 <h2 id="3-test-it">3. Test it<a class="headerlink" href="#3-test-it" title="Permanent link">&para;</a></h2>
 <p>A built-in <strong>AssumeRole test</strong> verifies the trust chain without launching a run:</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a>curl<span class="w"> </span>-s<span class="w"> </span>-X<span class="w"> </span>POST<span class="w"> </span>localhost:8000/api/v1/environments/<span class="nv">$PROD</span>/cloud-integration/test<span class="w"> </span>-H<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$AUTH</span><span class="s2">&quot;</span>
 </code></pre></div>
-<p>It signs a probe token and attempts the <code>AssumeRoleWithWebIdentity</code> end to end — a fast
-way to catch a missing identity provider, a too-narrow <code>sub</code> condition, or an
-unreachable issuer.</p>
+<p>It (admin-only) signs a probe <code>plan</code> token and attempts the <code>AssumeRoleWithWebIdentity</code> on the
+<strong>plan role</strong> end to end — a fast way to catch a missing identity provider, a too-narrow <code>sub</code>
+condition, or an unreachable issuer. It returns the assumed role's ARN, or a <code>422</code> with the STS
+error. The apply role is not exercised: its trust policy is only tested by a real apply.</p>
 <h2 id="what-the-agent-injects">What the agent injects<a class="headerlink" href="#what-the-agent-injects" title="Permanent link">&para;</a></h2>
 <p>When a <code>cloud_integration</code> is set, the worker exports, <strong>to tofu and to platform hooks only</strong>:</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a>AWS_WEB_IDENTITY_TOKEN_FILE = &lt;path to the token file, outside the checkout&gt;

@@ -1196,15 +1196,19 @@
 <p>Stackd exposes two REST surfaces under versioned prefixes:</p>
 <ul>
 <li><strong><code>/api/v1</code></strong> — the human/automation API (auth, spaces, stacks, environments, variables, runs,
-  hooks, dependencies, notifications, audit, state management, workers, health, logs).</li>
+  rollouts, hooks, dependencies, notifications, audit, state management, workers, health, logs).</li>
 <li><strong><code>/worker/v1</code></strong> — the worker (agent) API: register, heartbeat, claim, events, logs, artifacts
-  (including the saved plan the apply job downloads). Workers authenticate with a pool/worker
-  token; humans never call this.</li>
+  (including the saved plan the apply job downloads), command results. Workers authenticate with a
+  pool/worker token; humans never call this.</li>
 </ul>
 <p>Outside these prefixes: the Terraform HTTP state backend (<code>/state/v1/{env_id}</code>, used by tofu with
 a per-job state token), the OIDC issuer (<code>/.well-known/openid-configuration</code>, <code>/oidc/jwks</code>), and
 two unauthenticated probes, <code>/healthz</code> and <code>/metrics</code> (Prometheus).</p>
-<p>Errors follow <strong>RFC 9457</strong> (<code>application/problem+json</code>).</p>
+<p>Errors follow <strong>RFC 9457</strong> (<code>application/problem+json</code>); validation errors are a 422 problem with
+an <code>errors</code> list. A few sensitive routes are rate-limited per client IP (in-process, per replica) and
+answer <strong>429</strong> when the bucket is empty: the Google login callback and <code>/auth/refresh</code> (30/min),
+<code>POST /webhooks/github</code> (120/min) and <code>POST /environments/{id}/discover-inputs</code> (10/min). Every
+response carries an <code>X-Request-ID</code> header (echoed from the request when it sends one).</p>
 <h2 id="authentication">Authentication<a class="headerlink" href="#authentication" title="Permanent link">&para;</a></h2>
 <p>Human endpoints take a Bearer <strong>access token</strong> (a 15-minute JWT). In dev, get one via dev login:</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="nv">TOKEN</span><span class="o">=</span><span class="k">$(</span>curl<span class="w"> </span>-s<span class="w"> </span>-X<span class="w"> </span>POST<span class="w"> </span>localhost:8000/api/v1/auth/dev/login<span class="w"> </span><span class="se">\</span>
@@ -1216,8 +1220,8 @@ on <code>/refresh</code> and <code>/logout</code> use a CSRF double-submit token
 <h2 id="interactive-reference">Interactive reference<a class="headerlink" href="#interactive-reference" title="Permanent link">&para;</a></h2>
 <p>The API is FastAPI, so the full, always-current schema is served by the running instance:</p>
 <ul>
-<li><strong>Swagger UI</strong> — <code>/docs</code> (disabled when <code>STACKD_ENV=production</code>)</li>
-<li><strong>OpenAPI JSON</strong> — <code>/openapi.json</code></li>
+<li><strong>Swagger UI</strong> — <code>/docs</code> (disabled when <code>STACKD_ENV=production</code>; ReDoc is not served)</li>
+<li><strong>OpenAPI JSON</strong> — <code>/openapi.json</code> (served in every mode, production included)</li>
 </ul>
 <h2 id="the-main-surface">The main surface<a class="headerlink" href="#the-main-surface" title="Permanent link">&para;</a></h2>
 <p>A curated map, paths relative to <code>/api/v1</code> unless noted (the <a href="../SPECS/">Specification</a> §12 is the
@@ -1232,11 +1236,11 @@ exhaustive list):</p>
 <tbody>
 <tr>
 <td>Auth</td>
-<td><code>POST /auth/dev/login</code> (dev only), <code>POST /auth/refresh</code>, <code>POST /auth/logout</code>, <code>GET /auth/me</code></td>
+<td><code>GET /auth/google/start</code> + <code>/callback</code>, <code>POST /auth/refresh</code>, <code>POST /auth/logout</code>, <code>GET /auth/me</code>, <code>POST /auth/me/onboarded</code>; dev only: <code>GET /auth/dev/personas</code>, <code>POST /auth/dev/login</code></td>
 </tr>
 <tr>
 <td>Spaces</td>
-<td><code>GET/POST /spaces</code>, <code>GET/PUT /spaces/{id}/members</code>, <code>DELETE /spaces/{id}/members/{user_id}</code>, secret sources under <code>/spaces/{id}/secret-sources</code></td>
+<td><code>GET/POST /spaces</code>, <code>GET/PUT /spaces/{id}/members</code>, <code>DELETE /spaces/{id}/members/{user_id}</code>, secret sources under <code>/spaces/{id}/secret-sources</code>, <code>POST /spaces/{id}/environment-clones</code></td>
 </tr>
 <tr>
 <td>Stacks</td>
@@ -1252,7 +1256,11 @@ exhaustive list):</p>
 </tr>
 <tr>
 <td>Runs</td>
-<td><code>POST /environments/{id}/runs</code>, <code>/commands</code>, <code>/promote</code>; <code>GET /runs/{id}</code>, <code>POST /runs/{id}/confirm</code>/<code>discard</code>/<code>cancel</code>, <code>GET /runs/{id}/logs</code>/<code>plan</code>/<code>checks</code>, <code>POST /runs/{id}/vcs/resync</code></td>
+<td><code>POST /environments/{id}/runs</code>, <code>/commands</code>, <code>/promote</code>; <code>GET /environments/{id}/runs</code>; <code>GET /runs/{id}</code>, <code>POST /runs/{id}/confirm</code>/<code>discard</code>/<code>cancel</code>, <code>GET /runs/{id}/logs</code> (+ <code>/logs/download</code>)/<code>plan</code>/<code>checks</code>, <code>POST /runs/{id}/vcs/resync</code></td>
+</tr>
+<tr>
+<td>Rollouts</td>
+<td><code>GET/POST /rollouts</code>, <code>GET /rollouts/{id}</code>, <code>POST /rollouts/{id}/approve</code>/<code>retry</code>/<code>cancel</code></td>
 </tr>
 <tr>
 <td>Comments</td>
@@ -1264,19 +1272,19 @@ exhaustive list):</p>
 </tr>
 <tr>
 <td>Dependencies</td>
-<td>dependencies CRUD, <code>link-by-name</code>, <code>/outputs</code>, <code>/graph</code></td>
+<td><code>GET/POST /environments/{id}/dependencies</code>, <code>DELETE /dependencies/{id}</code>, <code>POST /stacks/{id}/dependencies/link-by-name</code>, <code>GET /environments/{id}/outputs</code>, <code>GET /graph</code></td>
 </tr>
 <tr>
 <td>State</td>
-<td><code>GET .../state/versions</code>, <code>POST .../state/import-session</code>, <code>DELETE .../state/lock</code> (force-unlock)</td>
+<td><code>GET /environments/{id}/state/versions</code>, <code>POST …/state/import-session</code>, <code>DELETE …/state/lock</code> (force-unlock)</td>
 </tr>
 <tr>
 <td>Cloud</td>
-<td><code>cloud-integration</code> CRUD + AssumeRole test</td>
+<td><code>GET/PUT/DELETE /environments/{id}/cloud-integration</code> + <code>POST …/cloud-integration/test</code> (AssumeRole test)</td>
 </tr>
 <tr>
 <td>Notifications</td>
-<td>targets: <code>GET/POST/PATCH/DELETE /stacks/{id}/notifications</code> and <code>/environments/{id}/notifications</code>, plus <code>…/{tid}/test</code>; your in-app feed: <code>GET /notifications</code>, <code>POST /notifications/read</code></td>
+<td>targets: <code>GET/POST/PATCH/DELETE /stacks/{id}/notifications</code> and <code>/environments/{id}/notifications</code>, plus <code>…/{tid}/test</code>; your in-app feed: <code>GET /notifications</code>, <code>POST /notifications/read</code>, <code>DELETE /notifications/{nid}</code>, <code>DELETE /notifications</code></td>
 </tr>
 <tr>
 <td>Users &amp; tiers</td>
@@ -1292,11 +1300,11 @@ exhaustive list):</p>
 </tr>
 <tr>
 <td>OIDC issuer</td>
-<td><code>GET /.well-known/openid-configuration</code>, <code>GET /oidc/jwks</code></td>
+<td>outside <code>/api/v1</code>: <code>GET /.well-known/openid-configuration</code>, <code>GET /oidc/jwks</code>; signing keys (admin): <code>GET /oidc/keys</code>, <code>POST /oidc/keys/rotate</code></td>
 </tr>
 <tr>
 <td>Workers</td>
-<td><code>GET/POST /worker-pools</code>, <code>DELETE /worker-pools/{id}</code> (admin), <code>GET /workers</code>, <code>GET /queue</code>, worker diagnostics</td>
+<td><code>GET/POST /worker-pools</code>, <code>DELETE /worker-pools/{id}</code> (admin), <code>GET /workers</code>, <code>GET /queue</code>, <code>GET/POST /workers/{id}/diagnostics</code> (admin)</td>
 </tr>
 <tr>
 <td>Observability</td>
