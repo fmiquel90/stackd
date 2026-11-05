@@ -80,8 +80,8 @@ THE memorable thing about the interface: a **vertical rail** on every run page t
 
 `command` runs use `Prepare · Run`. After the last segment, the rail ends with the **outcome cap**: the
 terminal outcome label of §3.2 (`APPLIED +3 ~1 −0`, `NO CHANGES`, `FAILED at Check`, `DISCARDED`,
-`CANCELED`, `PLANNED`, `DESTROYED −3`, `EXECUTED`), or nothing while the run is live. **[not built
-yet]** `PhaseRail` renders no cap today: on the run page the outcome is carried by the `StateBadge`
+`CANCELED`, `PLANNED`, `DESTROYED −3`, `EXECUTED`), or nothing while the run is live.
+**[not built yet]** `PhaseRail` renders no cap today: on the run page the outcome is carried by the `StateBadge`
 of the action bar, and in a cell by the compact badge next to the mini rail.
 
 **Segment status** (each status = colour + glyph + text, never colour alone):
