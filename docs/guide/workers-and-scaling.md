@@ -9,7 +9,7 @@ This page covers how the pull model works, how to run workers, and how to scale 
 A worker has **no inbound ports**. The API never connects out to it. Instead the worker drives everything:
 
 1. **Register** to a pool with the pool token → it gets a `worker_id` and a per-worker token. The token expires (default 24h); the worker re-registers automatically on a `401` to refresh it.
-2. **Heartbeat** every ~20s. The heartbeat response is the only *downward* channel (e.g. diagnostics, and later `cancel_job`).
+2. **Heartbeat** every ~20s. The heartbeat response is the only *downward* channel (diagnostics, and `cancel_job` to stop a running job).
 3. **Claim** a job via long-poll (`POST /worker/v1/jobs/claim?wait=25`), returning `204` when there is nothing to do.
 4. **Run** the job: clone the repo, run hooks + `init`/`plan`/`apply` (or the command), stream logs, report results and upload artifacts — including the saved plan the apply will use.
 5. Clean up the workspace and repeat.
@@ -92,6 +92,7 @@ STACKD_POOL_TOKEN=$POOL_TOKEN \
 | `STACKD_POOL_TOKEN` / `STACKD_POOL_TOKEN_FILE` | — | the pool token, or a file holding it |
 | `STACKD_WORKER_NAME` | the host name | the worker's name in the UI |
 | `STACKD_MAX_CONCURRENT_JOBS` | `1` | jobs run at once, always on different environments |
+| `STACKD_CANCEL_GRACE_SECONDS` | `120` | after a stop request interrupts the tool (SIGINT), how long it gets to stop by itself before it is killed |
 | `STACKD_HOOK_TIMEOUT_SECONDS` | `600` | each hook's time budget |
 | `STACKD_LEAK_TRIPWIRE` | `warn` | `fail` fails a plan whose non-sensitive output shows a secret |
 | `STACKD_WORKSPACE_ROOT` | `/tmp/stackd-ws` | where each job's workspace is created, then removed |

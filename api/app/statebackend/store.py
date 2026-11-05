@@ -49,6 +49,24 @@ def _delete_sync(key: str) -> None:
     _client().delete_object(Bucket=get_settings().s3_bucket, Key=key)  # type: ignore[no-untyped-call]
 
 
+def _list_sync(prefix: str) -> list[str]:
+    s = get_settings()
+    keys: list[str] = []
+    try:
+        pages = (
+            _client().get_paginator("list_objects_v2").paginate(Bucket=s.s3_bucket, Prefix=prefix)
+        )
+        for page in pages:
+            keys.extend(obj["Key"] for obj in page.get("Contents", []))
+    except ClientError:
+        return []
+    return keys
+
+
+async def list_keys(prefix: str) -> list[str]:
+    return await asyncio.to_thread(_list_sync, prefix)
+
+
 async def put_object(key: str, data: bytes) -> None:
     await asyncio.to_thread(_put_sync, key, data)
 

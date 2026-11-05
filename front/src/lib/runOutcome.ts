@@ -36,7 +36,9 @@ export type Outcome =
  * The terminal outcome of a run, or null while it is live. `confirmed_at` is set by a human confirm
  * and by the system auto-confirm alike, so it means "an apply was decided" (DESIGN §3.2).
  */
-export function outcomeOf(run: Pick<Run, "state" | "type" | "confirmed_at">): Outcome | null {
+export function outcomeOf(
+  run: Pick<Run, "state" | "type" | "confirmed_at"> & Partial<Pick<Run, "error">>,
+): Outcome | null {
   switch (run.state) {
     case "finished":
       if (run.type === "proposed") return "planned";
@@ -44,7 +46,9 @@ export function outcomeOf(run: Pick<Run, "state" | "type" | "confirmed_at">): Ou
       if (run.type === "destroy") return run.confirmed_at ? "destroyed" : "no_changes";
       return run.confirmed_at ? "applied" : "no_changes";
     case "failed":
-      // A failure after the apply was decided may have changed real infrastructure.
+      // A failure after the apply was decided may have changed real infrastructure — and so may a
+      // stopped job that held apply credentials: a mutating command is never confirmed (SPECS §4.1).
+      if (run.error === "canceled_during_apply") return "failed_during_apply";
       return run.confirmed_at && run.type !== "proposed" ? "failed_during_apply" : "failed";
     case "discarded":
       return "discarded";

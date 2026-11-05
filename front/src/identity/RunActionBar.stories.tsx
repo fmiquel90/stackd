@@ -98,6 +98,33 @@ export const InFlight = () => (
   </>
 );
 
+export const Stopping = () => (
+  <>
+    <Bar
+      r={{ ...run("applied"), state: "planning", finished_at: null }}
+      label="planning — Stop run (one click)"
+    />
+    <Bar
+      r={{ ...run("applied"), state: "applying", finished_at: null }}
+      label="applying — Stop apply (second click to confirm)"
+    />
+    <Bar
+      r={{
+        ...run("applied"),
+        state: "applying",
+        finished_at: null,
+        cancel_requested_at: "2026-10-10T20:05:00Z",
+      }}
+      label="stop requested — waiting for the worker, can be asked again"
+    />
+    <Bar
+      r={{ ...run("applied"), state: "applying", finished_at: null }}
+      me={BOB}
+      label="writer without the prod tier — stopping an apply refused, with the reason"
+    />
+  </>
+);
+
 export const Ended = () => (
   <>
     <Bar r={run("applied")} label="applied" />

@@ -43,7 +43,7 @@ class CommandResultIn(BaseModel):
 
 
 class EventIn(BaseModel):
-    event: str  # phase_started | phase_finished | job_failed
+    event: str  # phase_started | phase_finished | job_failed | job_canceled
     phase: str | None = None
     exit_code: int | None = None
     result: dict | None = None

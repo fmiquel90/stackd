@@ -128,3 +128,48 @@ describe("EnvCell", () => {
     expect(row?.className).toContain("flex-wrap");
   });
 });
+
+describe("RunActionBar — stopping a run a worker executes", () => {
+  function barFor(run: ReturnType<typeof makeRun>, onCancel = vi.fn()) {
+    const rights = runRights(run, env, prod, ALICE);
+    render(
+      <MemoryRouter>
+        <TooltipProvider>
+          <RunActionBar
+            run={run}
+            env={env}
+            rights={rights}
+            me={ALICE}
+            whoMayConfirm={null}
+            cascade={[]}
+            destroyed={[]}
+            replaced={[]}
+            onConfirm={vi.fn()}
+            onDiscard={vi.fn()}
+            onCancel={onCancel}
+            onReplan={vi.fn()}
+          />
+        </TooltipProvider>
+      </MemoryRouter>,
+    );
+    return onCancel;
+  }
+
+  it("stops a plan with one click", () => {
+    const onCancel = barFor(makeRun({ state: "planning" }));
+    fireEvent.click(screen.getByRole("button", { name: /Stop run/ }));
+    expect(onCancel).toHaveBeenCalledTimes(1);
+  });
+  it("makes stopping an apply a deliberate second click", () => {
+    const onCancel = barFor(makeRun({ state: "applying" }));
+    fireEvent.click(screen.getByRole("button", { name: /Stop apply/ }));
+    expect(onCancel).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: /partly applied/ }));
+    expect(onCancel).toHaveBeenCalledTimes(1);
+  });
+  it("says a stop was requested, and lets it be asked again", () => {
+    barFor(makeRun({ state: "planning", cancel_requested_at: "2026-10-10T20:01:00Z" }));
+    expect(screen.getByText(/Stop requested — waiting for the worker/)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Stop again/ })).toBeEnabled();
+  });
+});

@@ -62,6 +62,7 @@ class RunOut(BaseModel):
     commit_author: str | None
     triggered_by: TriggeredBy
     trigger_user_id: uuid.UUID | None
+    cancel_requested_at: datetime | None = None  # a stop was asked of the worker (§4.1)
     confirmed_by_user_id: uuid.UUID | None
     worker_id: uuid.UUID | None
     parent_run_id: uuid.UUID | None = None

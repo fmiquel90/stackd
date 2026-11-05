@@ -14,6 +14,7 @@ from contextlib import AbstractContextManager, ExitStack, contextmanager, nullco
 from pathlib import Path
 from typing import Any
 
+from agent import cancel
 from agent.client import ApiClient
 from agent.config import Settings
 from agent.logging import get_logger, setup as setup_logging
@@ -726,6 +727,11 @@ def handle_apply(
             )
             # Mask: a tofu diagnostic can echo a sensitive variable value verbatim (§5.1).
             return _job_failed(client, job_id, "apply", checks, error=masker.mask(error))
+        # The apply is done: what is left (outputs, after_apply hooks) is bookkeeping the run needs
+        # finished, so a stop request that arrives now no longer interrupts the job (§4.1).
+        _token = cancel.current()
+        if _token is not None:
+            _token.disarm()
         with _tofu_files(ws, cwd, job, tfvars=False):
             out = runner.capture([tool, "output", "-json"], cwd, tf_env)
         ok_output = out.returncode == 0
@@ -825,8 +831,20 @@ def handle_command_run(client: ApiClient, job: dict, settings: Settings) -> None
         ws.cleanup()
 
 
-def _handle_command(client: ApiClient, cmd: dict, settings: Settings) -> None:
-    """Downward commands delivered via heartbeat (§7.1). Today: read-only diagnostics."""
+def _handle_command(
+    client: ApiClient, cmd: dict, settings: Settings, jobs: cancel.JobRegistry | None = None
+) -> None:
+    """Downward commands delivered via heartbeat (§7.1): read-only diagnostics, and `cancel_job`,
+    which stops a job this worker is executing (§4.1)."""
+    if cmd.get("type") == "cancel_job" and jobs is not None:
+        job_id = str((cmd.get("payload") or {}).get("job_id", ""))
+        found = jobs.cancel(job_id)
+        log.info(
+            "cancel requested",
+            extra={"event": "agent.cancel_requested", "run_id": job_id, "running": found},
+        )
+        client.command_result(cmd["id"], {"job_id": job_id, "running_here": found})
+        return
     if cmd.get("type") == "diagnostics":
         from agent.diagnostics import collect
 
@@ -860,7 +878,12 @@ class _InFlight:
             return self._n
 
 
-def _heartbeat_loop(client: ApiClient, settings: Settings, inflight: _InFlight) -> None:
+def _heartbeat_loop(
+    client: ApiClient,
+    settings: Settings,
+    inflight: _InFlight,
+    jobs: cancel.JobRegistry | None = None,
+) -> None:
     """Beat on a fixed cadence, independent of the claim long-poll and of job execution — otherwise
     a blocking claim (poll_wait) or a long plan/apply would starve the heartbeat and the worker would
     be marked offline while it's actually fine. Reports in-flight count (→ busy/idle) and capacity.
@@ -871,7 +894,7 @@ def _heartbeat_loop(client: ApiClient, settings: Settings, inflight: _InFlight) 
                 in_flight=inflight.count(), capacity=settings.max_concurrent_jobs
             )
             for cmd in commands:
-                _handle_command(client, cmd, settings)
+                _handle_command(client, cmd, settings, jobs)
         except Exception as exc:  # noqa: BLE001 — never let a transient API error kill the heartbeat
             log.warning(
                 "heartbeat failed", extra={"event": "agent.heartbeat_error", "error": str(exc)}
@@ -898,6 +921,23 @@ def _run_job(client: ApiClient, job: dict, settings: Settings) -> None:
         else:
             handle_command_run(client, job, settings)
         log.info("job done", extra={"event": "agent.done", "run_id": job["job_id"]})
+    except cancel.JobCanceled:
+        # Stopped on a user's request (§4.1): the tool was interrupted, the workspace is gone
+        # (`finally: ws.cleanup()` ran). With the checks run so far, like a failure's.
+        log.info("job canceled", extra={"event": "agent.canceled", "run_id": job["job_id"]})
+        try:
+            client.event(
+                job["job_id"], "job_canceled", phase=job.get("phase"), result={"checks": checks}
+            )
+        except Exception as report_exc:  # noqa: BLE001 — e.g. the API already ended the run
+            log.warning(
+                "job_canceled not accepted",
+                extra={
+                    "event": "agent.report_error",
+                    "run_id": job["job_id"],
+                    "error": str(report_exc),
+                },
+            )
     except Exception as exc:  # noqa: BLE001 — report and keep polling
         jid, jphase = job.get("job_id"), job.get("phase")
         # The exception message can carry secrets (e.g. a clone URL with the repo token, a tofu
@@ -970,7 +1010,10 @@ def run() -> None:
     inflight = _InFlight()
     # Heartbeat runs on its own daemon thread so neither the claim long-poll nor a long-running job
     # can starve it (fixes the worker flickering offline between claims / during plan & apply).
-    threading.Thread(target=_heartbeat_loop, args=(client, settings, inflight), daemon=True).start()
+    jobs = cancel.JobRegistry(settings.cancel_grace_seconds)
+    threading.Thread(
+        target=_heartbeat_loop, args=(client, settings, inflight, jobs), daemon=True
+    ).start()
 
     # Up to max_concurrent_jobs run at once, each on its own thread (§7, Phase E). The semaphore
     # caps in-flight jobs; the API's SELECT … FOR UPDATE SKIP LOCKED + one-active-run-per-env index
@@ -978,10 +1021,13 @@ def run() -> None:
     pool = ThreadPoolExecutor(max_workers=settings.max_concurrent_jobs)
     slots = threading.Semaphore(settings.max_concurrent_jobs)
 
-    def _execute(job: dict) -> None:
+    def _execute(job: dict, token: cancel.CancelToken) -> None:
+        cancel.bind(token)  # this job's thread: the runners find its token here
         try:
             _run_job(client, job, settings)
         finally:
+            cancel.bind(None)
+            jobs.unregister(job["job_id"])
             inflight.dec()
             slots.release()
 
@@ -998,7 +1044,8 @@ def run() -> None:
             slots.release()
             continue
         inflight.inc()
-        pool.submit(_execute, job)
+        # Registered before the job starts, so a cancel that arrives first still finds it.
+        pool.submit(_execute, job, jobs.register(job["job_id"]))
 
 
 if __name__ == "__main__":

@@ -16,6 +16,7 @@ import { RunActionBar } from "@/identity/RunActionBar";
 import { buildLogModel } from "@/lib/logModel";
 import { runRights, whoMayConfirm } from "@/lib/permissions";
 import { buildSegments, checkEntries, failedSegment, type Segment } from "@/lib/phases";
+import { isStalePlan } from "@/features/overview/attention";
 import { formatCounts, outcomeOf, planCounts } from "@/lib/runOutcome";
 import { formatDuration } from "@/lib/time";
 import { Button } from "@/ui/Button";
@@ -182,12 +183,7 @@ export function RunPage() {
   }));
   const mocked = provenance.filter((x) => x.p.kind === "mock").map((x) => x.name);
   const openThreads = d.threads.filter((c) => isRoot(c) && !c.resolved).length;
-  const stale =
-    run.state === "unconfirmed" &&
-    !!env.head_sha &&
-    !!run.commit_sha &&
-    !env.head_sha.startsWith(run.commit_sha) &&
-    !run.commit_sha.startsWith(env.head_sha);
+  const stale = isStalePlan(run, env);
   const spaceName = spaces.find((s) => s.id === stack?.space_id)?.name;
   const envPath =
     stack && spaceName
@@ -301,11 +297,22 @@ export function RunPage() {
 
       {/* ---------- banners ---------- */}
       <div className="flex flex-col gap-2 px-4 pt-3 lg:px-6">
+        {run.cancel_requested_at &&
+          ["preparing", "planning", "checking", "applying", "running"].includes(run.state) && (
+            <Banner title="Stop requested — waiting for the worker.">
+              The worker interrupts the tool as a Ctrl-C would: tofu finishes the operation in flight,
+              releases the state lock and exits. The run ends when the worker reports it.
+            </Banner>
+          )}
         {outcome === "failed_during_apply" && (
           <Banner
             tone="failed"
             role="alert"
-            title="Failed during apply — infrastructure may be partially changed."
+            title={
+              run.error === "canceled_during_apply"
+                ? "Stopped during apply on request — infrastructure may be partially changed."
+                : "Failed during apply — infrastructure may be partially changed."
+            }
             action={
               firstErrorId && (
                 <Button size="sm" onClick={() => setParam({ tab: "logs", line: firstErrorId }, false)}>
@@ -314,7 +321,9 @@ export function RunPage() {
               )
             }
           >
-            {run.error}
+            {run.error === "canceled_during_apply"
+              ? "Review what was applied before planning again; a new plan will show the remainder."
+              : run.error}
           </Banner>
         )}
         {outcome === "failed" && (

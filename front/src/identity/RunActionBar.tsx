@@ -1,4 +1,4 @@
-import { useId, useState, type ReactNode } from "react";
+import { useEffect, useId, useState, type ReactNode } from "react";
 import { Link } from "react-router-dom";
 import { ChevronLeft, ChevronRight } from "lucide-react";
 import type { Environment, Run } from "@/api/types";
@@ -90,7 +90,16 @@ export function stateSentence(
     return `Waiting for a decision — needs ${who ?? "an authorized approver"}.`;
   }
   if (run.state === "queued") return "Queued — waiting for the environment and a worker.";
+  if (run.cancel_requested_at && RUNNING_WORDS[run.state] && run.state !== "confirmed")
+    return "Stop requested — waiting for the worker to stop the tool…";
   return RUNNING_WORDS[run.state] ?? run.state;
+}
+
+function cancelLabel(kind: "cancel" | "stop" | "stop_apply", requested: boolean, armed: boolean): string {
+  if (kind === "cancel") return "Cancel run";
+  if (requested) return "Stop again";
+  if (kind === "stop") return "Stop run";
+  return armed ? "Stop the apply? It may be left partly applied — click again" : "Stop apply";
 }
 
 function Reason({ id, action, reasons }: { id: string; action: string; reasons: string[] }) {
@@ -115,6 +124,13 @@ export function RunActionBar(props: RunActionBarProps) {
     apiError,
   } = props;
   const [open, setOpen] = useState(false);
+  // Stopping an apply halfway can leave infrastructure partly changed: a second, explicit click.
+  const [stopArmed, setStopArmed] = useState(false);
+  useEffect(() => {
+    if (!stopArmed) return;
+    const t = setTimeout(() => setStopArmed(false), 6000);
+    return () => clearTimeout(t);
+  }, [stopArmed]);
   const mobile = useMediaQuery(MOBILE);
   const rid = useId();
   const counts = planCounts(run);
@@ -184,7 +200,7 @@ export function RunActionBar(props: RunActionBarProps) {
     [
       ["Confirm", rights.confirm, "confirm"],
       ["Discard", rights.discard, "discard"],
-      ["Cancel", rights.cancel, "cancel"],
+      [rights.cancelKind === "cancel" ? "Cancel" : "Stop", rights.cancel, "cancel"],
     ] as const
   ).filter(([, r]) => r.visible && r.reasons.length);
 
@@ -267,9 +283,17 @@ export function RunActionBar(props: RunActionBarProps) {
               disabled={rights.cancel.reasons.length > 0}
               aria-describedby={rights.cancel.reasons.length ? `${rid}-cancel` : undefined}
               loading={pending.cancel}
-              onClick={props.onCancel}
+              onClick={() => {
+                if (rights.cancelKind === "stop_apply" && !stopArmed && !run.cancel_requested_at) {
+                  setStopArmed(true);
+                  return;
+                }
+                setStopArmed(false);
+                props.onCancel();
+              }}
             >
-              Cancel run {!mobile && <Kbd>x</Kbd>}
+              {cancelLabel(rights.cancelKind, !!run.cancel_requested_at, stopArmed)}{" "}
+              {!mobile && !stopArmed && <Kbd>x</Kbd>}
             </Button>
           )}
           {rights.discard.visible && (
@@ -315,17 +339,11 @@ export function RunActionBar(props: RunActionBarProps) {
         </div>
       </div>
 
-      {(unavailable.length > 0 ||
-        (rights.cancel.visible === false &&
-          ["preparing", "planning", "checking", "applying", "confirmed", "running"].includes(run.state))) && (
+      {unavailable.length > 0 && (
         <ul className="text-[12px] text-muted">
           {unavailable.map(([action, r, key]) => (
             <Reason key={key} id={`${rid}-${key}`} action={action} reasons={r.reasons} />
           ))}
-          {!rights.cancel.visible &&
-            ["preparing", "planning", "checking", "applying", "confirmed", "running"].includes(run.state) && (
-              <li>Cancelling a run a worker is executing is not supported yet.</li>
-            )}
         </ul>
       )}
 

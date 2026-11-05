@@ -121,9 +121,11 @@ class DockerEngine:
         resp = self._http.post(f"/containers/{cid}/wait", timeout=None)
         return int(self._check(resp, "wait").json().get("StatusCode", -1))
 
-    def kill(self, cid: str) -> bool:
-        """Kill a running container: True when it was running (and is now killed)."""
-        resp = self._http.post(f"/containers/{cid}/kill")
+    def kill(self, cid: str, signal: str | None = None) -> bool:
+        """Kill a running container (SIGKILL, or `signal`): True when it was running."""
+        resp = self._http.post(
+            f"/containers/{cid}/kill", params={"signal": signal} if signal else None
+        )
         if resp.status_code in (404, 409):  # gone, or already stopped: nothing was killed
             return False
         self._check(resp, "kill")

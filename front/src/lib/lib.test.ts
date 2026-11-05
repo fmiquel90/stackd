@@ -26,6 +26,10 @@ describe("runOutcome", () => {
     expect(outcomeOf(makeRun({ state: "finished", type: "destroy", confirmed_at: "x" }))).toBe("destroyed");
     expect(outcomeOf(makeRun({ state: "failed", confirmed_at: "x" }))).toBe("failed_during_apply");
     expect(outcomeOf(makeRun({ state: "failed" }))).toBe("failed");
+    // A stopped mutating command is never confirmed, yet may have changed the state (SPECS §4.1).
+    expect(outcomeOf(makeRun({ state: "failed", type: "command", error: "canceled_during_apply" }))).toBe(
+      "failed_during_apply",
+    );
     expect(outcomeOf(makeRun({ state: "planning" }))).toBeNull();
   });
   it("formats counts with a true minus", () => {
@@ -163,6 +167,36 @@ describe("permissions (mirrors the API gates)", () => {
     ]);
     expect(r.discard.reasons).toEqual([]);
     expect(r.needsYou).toBe(false);
+  });
+  it("stopping a plan is a request to the worker, open to a writer", () => {
+    const planning = makeRun({ state: "planning" });
+    const r = runRights(planning, prodEnv, prodTier, BOB);
+    expect(r.cancel.visible).toBe(true);
+    expect(r.cancelKind).toBe("stop");
+    expect(r.cancel.reasons).toEqual([]);
+  });
+  it("stopping an apply needs the right to apply — not the confirmation-only gates", () => {
+    const applying = makeRun({ state: "applying", used_mocks: true });
+    const bob = runRights(applying, prodEnv, prodTier, BOB);
+    expect(bob.cancelKind).toBe("stop_apply");
+    expect(bob.cancel.reasons).toEqual(["approver role required"]);
+    // alice triggered nothing here, and mocks/four-eyes don't matter once it is running
+    expect(
+      runRights({ ...applying, trigger_user_id: "user-alice" }, prodEnv, prodTier, ALICE).cancel.reasons,
+    ).toEqual([]);
+  });
+  it("a mutating command run holds apply credentials, a read-only one doesn't", () => {
+    const mk = (name: string) => makeRun({ type: "command", state: "running", command: { name, args: [] } });
+    expect(runRights(mk("state rm"), prodEnv, prodTier, ALICE).cancelKind).toBe("stop_apply");
+    expect(runRights(mk("state list"), prodEnv, prodTier, ALICE).cancelKind).toBe("stop");
+  });
+  it("a queued or confirmed run is canceled at once", () => {
+    for (const state of ["queued", "confirmed", "unconfirmed"] as const) {
+      const r = runRights(makeRun({ state }), prodEnv, prodTier, ALICE);
+      expect(r.cancel.visible).toBe(true);
+      expect(r.cancelKind).toBe("cancel");
+    }
+    expect(runRights(makeRun({ state: "finished" }), prodEnv, prodTier, ALICE).cancel.visible).toBe(false);
   });
   it("lets alice confirm: needs you, with friction", () => {
     const r = runRights(run, prodEnv, prodTier, ALICE);

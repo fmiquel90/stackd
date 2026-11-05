@@ -372,7 +372,7 @@ register (pool token) → heartbeat (every ~20s) → claim (long-poll)
   the worker). Today it carries **diagnostics**: an admin clicks a button, a `pending` command is
   queued, the worker picks it up on its next heartbeat, runs a **read-only** bundle (versions, disk,
   environment variable *names* — never values, recent agent logs) and posts it back. Same mechanism will carry
-  `cancel_job` later. Delivery latency is bounded by the heartbeat interval (~20 s).
+  `cancel_job`, which stops a job the worker is executing. Delivery latency is bounded by the heartbeat interval (~20 s).
 
 **Run an agent:**
 

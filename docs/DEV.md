@@ -145,7 +145,7 @@ Safeguard: the prod build of the API image **removes the dev_auth module** (not 
 ```
 
 - The seed stacks point to them with `repo_url: file:///stackd-dev/repos/demo-network` (`.dev/` is mounted at `/stackd-dev` in the API and the worker; `STACKD_SEED_REPO_BASE` overrides the base). `repo_auth_kind: none`. The fixtures carry no `.stackd.yml`.
-- **Simulate "a PR is merged"** without GitHub: `task push-change` commits a change in demo-network → staleness polling (reduced to **15 s** in dev via `STACKD_HEAD_POLL_INTERVAL`) turns `stale` to `true` (`GET /api/v1/environments/{id}`) on an env that already has a finished tracked run. The `↑1` chip of DESIGN §5.1 is not in the UI yet. Perfect for testing the "apply at 9am, merge at 9:15am" scenario.
+- **Simulate "a PR is merged"** without GitHub: `task push-change` commits a change in demo-network → staleness polling (reduced to **15 s** in dev via `STACKD_HEAD_POLL_INTERVAL`) turns `stale` to `true` (`GET /api/v1/environments/{id}`) on an env that already has a finished tracked run. The `↑1` chip of DESIGN §5.1 shows on the env cell and the stale-plan banner on an unconfirmed run's page. Perfect for testing the "apply at 9am, merge at 9:15am" scenario.
 - **Real webhooks**: `task dev-git` launches Gitea (profile `git`, port 3000). Pushing the fixtures to it and configuring its webhook to the API are manual for now (no `seed-gitea` or `webhook` task yet).
 
 ---

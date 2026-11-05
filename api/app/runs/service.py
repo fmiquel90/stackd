@@ -305,13 +305,21 @@ async def discard_run(session: AsyncSession, run: Run, user: User) -> Run:
     return run
 
 
+# States in which a worker is executing the run's job (§4.1): a cancel there is a request the worker
+# honours, not a transition.
+_EXECUTING_STATES = frozenset(
+    {RunState.preparing, RunState.planning, RunState.checking, RunState.applying, RunState.running}
+)
+
+
 async def cancel_run(session: AsyncSession, run: Run, user: User) -> Run:
-    # MVP: cancel queued/unconfirmed directly. Cancelling an in-flight run via the heartbeat
-    # command channel (SIGINT) is a follow-up (§7.1).
-    if run.state not in (RunState.queued, RunState.unconfirmed):
-        raise ProblemException(
-            409, "Cannot cancel", f"Cancelling a {run.state.value} run needs worker signalling."
-        )
+    """Cancel a run (§4.1). Not claimed yet (`queued`, `confirmed`) or waiting on a human
+    (`unconfirmed`): `canceled` at once. Executing: ask the worker to stop (see
+    `request_cancel`) — the run ends when the worker reports it."""
+    if run.state in _EXECUTING_STATES:
+        return await request_cancel(session, run, user)
+    if run.state not in (RunState.queued, RunState.confirmed, RunState.unconfirmed):
+        raise ProblemException(409, "Cannot cancel", f"A {run.state.value} run cannot be canceled.")
     await transition(
         session,
         run,
@@ -324,3 +332,58 @@ async def cancel_run(session: AsyncSession, run: Run, user: User) -> Run:
     await session.commit()
     await session.refresh(run)
     return run
+
+
+async def request_cancel(session: AsyncSession, run: Run, user: User) -> Run:
+    """Ask the worker executing `run` to stop it (SPECS §4.1, §7.1): record the request, audit it
+    and queue a `cancel_job` command for the worker's next heartbeat — one transaction. The state
+    does not change here: the worker interrupts the tool (SIGINT, a graceful stop), reports
+    `job_canceled`, and only then does `transition()` end the run. Idempotent: asking again
+    re-queues the command (the first may have been lost with a restarting worker) without a second
+    audit. A job holding apply credentials (an apply, a mutating command) needs `can_apply` — the
+    gate of starting it — since stopping it halfway leaves the infrastructure partially changed."""
+    from sqlalchemy import select
+
+    from app.models.worker_command import WorkerCommand
+    from app.workers.claim import holds_apply_credentials
+
+    # Re-read under the row lock: the job may have finished between the route's load and now.
+    locked = (
+        await session.execute(select(Run).where(Run.id == run.id).with_for_update())
+    ).scalar_one()
+    if locked.state not in _EXECUTING_STATES or locked.worker_id is None:
+        raise ProblemException(
+            409, "Cannot cancel", f"A {locked.state.value} run cannot be canceled."
+        )
+    if holds_apply_credentials(locked):
+        env = await session.get(Environment, locked.environment_id)
+        assert env is not None
+        membership = await _env_membership(session, user, env)
+        decision = can_apply(user, env, membership, is_destroy=locked.type == RunType.destroy)
+        if not decision.allowed:
+            raise ProblemException(403, "Forbidden", f"Stopping an apply: {decision.reason}")
+    first = locked.cancel_requested_at is None
+    if first:
+        locked.cancel_requested_at = datetime.now(UTC)
+        await record_audit(
+            session,
+            action="run.cancel_requested",
+            actor_kind=AuditActorKind.user,
+            actor_id=user.id,
+            actor_email=user.email,
+            target_kind="run",
+            target_id=locked.id,
+            context={
+                "state": locked.state.value,
+                "worker_id": str(locked.worker_id),
+                "environment_id": str(locked.environment_id),
+            },
+        )
+    session.add(
+        WorkerCommand(
+            worker_id=locked.worker_id, type="cancel_job", payload={"job_id": str(locked.id)}
+        )
+    )
+    await session.commit()
+    await session.refresh(locked)
+    return locked
