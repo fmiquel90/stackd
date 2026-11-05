@@ -97,8 +97,7 @@ These rules run through all the code. Violating them breaks the security or audi
 Everything goes through the **Taskfile** (see DEV.md, do not reintroduce a Makefile):
 
 ```
-task dev          # full local backend stack (compose + S3 bootstrap + migrations + fixtures + seed)
-task up           # task dev + the Vite front on :5173
+task dev          # full local stack incl. the front on :5173 (compose + S3 bootstrap + migrations + fixtures + seed)
 task test         # API pytest + front vitest (the worker suite: cd worker && uv run pytest)
 task e2e          # full non-regression scenario (the functional contract)
 task lint         # ruff check + ruff format --check (api)
