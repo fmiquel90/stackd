@@ -17,6 +17,7 @@ from app.enums import AuditActorKind, Role
 from app.errors import ProblemException
 from app.models.space import Space
 from app.models.space_membership import SpaceMembership
+from app.models.tier import Tier
 from app.models.user import User
 from app.spaces.service import (
     accessible_space_ids,
@@ -126,17 +127,25 @@ async def list_members(
 async def upsert_member(
     space_id: uuid.UUID, body: MemberUpsert, user: CurrentUser, session: DbSession
 ) -> MemberOut:
-    """Grant or update a member's space role/tier ceiling (space admin or instance admin)."""
+    """Grant or update a member's space role, allowed tier set and destroy right (space admin or
+    instance admin) — the effective values `can_apply` reads in this space (§2.4)."""
     await require_space_access(session, user, space_id, min_role=Role.admin)
     target = await session.get(User, body.user_id)
     if target is None:
         raise ProblemException(404, "User not found", None)
+    # allowed_tiers carries no FK: every entry must name a catalog tier, as for a user's instance
+    # tiers and an environment's tier (§2.4).
+    known = set((await session.execute(select(Tier.name))).scalars().all())
+    unknown = sorted(set(body.allowed_tiers) - known)
+    if unknown:
+        raise ProblemException(422, "Unknown tier", f"No such tier(s): {', '.join(unknown)}.")
+    allowed_tiers = sorted(set(body.allowed_tiers))
     membership = await get_membership(session, body.user_id, space_id)
     if membership is None:
         membership = SpaceMembership(space_id=space_id, user_id=body.user_id)
         session.add(membership)
     membership.role = body.role
-    membership.allowed_tiers = body.allowed_tiers
+    membership.allowed_tiers = allowed_tiers
     membership.can_destroy = body.can_destroy
     await record_audit(
         session,
@@ -146,7 +155,12 @@ async def upsert_member(
         actor_email=user.email,
         target_kind="space",
         target_id=space_id,
-        context={"user_id": str(body.user_id), "role": body.role.value},
+        context={
+            "user_id": str(body.user_id),
+            "role": body.role.value,
+            "allowed_tiers": allowed_tiers,
+            "can_destroy": body.can_destroy,
+        },
     )
     await session.commit()
     return MemberOut(

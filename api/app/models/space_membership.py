@@ -29,7 +29,7 @@ class SpaceMembership(Base):
         PGUUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE")
     )
     role: Mapped[Role] = mapped_column(Enum(Role, name="role"), default=Role.reader)
-    # Per-space tier ceiling (set membership, §2.4) — overrides the user's instance allowed_tiers.
+    # Per-space allowed tier set (§2.4) — overrides the user's instance allowed_tiers.
     allowed_tiers: Mapped[list[str]] = mapped_column(ARRAY(String), default=list)
     can_destroy: Mapped[bool] = mapped_column(Boolean, default=False)
     created_at: Mapped[datetime] = created_at_col()
