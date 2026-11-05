@@ -99,7 +99,8 @@ is a misclick safeguard only — it never bypasses `can_apply` (still evaluated 
 
 An environment with `autodeploy` auto-confirms when the plan is clean — **but a `warn` check forces
 `unconfirmed`** so a human still sees it, and so does a run that consumed a mock or resolved a
-secret through a fallback (unless the env sets `allow_fallback_apply`). A `destroy` run never
+secret through a fallback (even where the env sets `allow_fallback_apply`, which only lets an approver
+confirm it). A `destroy` run never
 autodeploys: an approver with the destroy right confirms it. A `protected`
 environment can never autodeploy, and requires four-eyes. A rollout's run never autodeploys: it
 follows the [rollout gate](#rollouts).

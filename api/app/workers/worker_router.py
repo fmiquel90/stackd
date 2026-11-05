@@ -399,7 +399,9 @@ async def _decide_after_plan(session: AsyncSession, worker: Worker, run: Run, re
         and env.autodeploy
         and not env.protected
         and not run.used_mocks
-        and not (run.used_secret_fallback and not env.allow_fallback_apply)
+        # Like a mocked plan: a fallback secret never autodeploys, even where the env allows
+        # fallback applies — that flag lets an approver apply one, not the system (§15.5).
+        and not run.used_secret_fallback
         and not warn
     )
     if autoconfirm:

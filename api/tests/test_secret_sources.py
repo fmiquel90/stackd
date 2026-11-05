@@ -110,8 +110,8 @@ async def test_autodeploy_stops_a_fallback_plan_at_unconfirmed(
     client: httpx.AsyncClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """Like the mock gate (#25): autodeploy never confirms a plan whose apply the fallback gate
-    would refuse — it stops at `unconfirmed` instead of failing at the apply claim. An env that
-    opted into fallback applies still autodeploys."""
+    would refuse — it stops at `unconfirmed` instead of failing at the apply claim. Even an env that
+    opted into fallback applies doesn't autodeploy one: an approver confirms it."""
     admin = await login(client, "admin")
     wh = await register_worker(client, admin, "pool-sfb-auto")
     stack = await make_stack(client, admin, "sfb-auto-stack")
@@ -144,7 +144,9 @@ async def test_autodeploy_stops_a_fallback_plan_at_unconfirmed(
         f"/api/v1/environments/{env_id}", headers=admin, json={"allow_fallback_apply": True}
     )
     allowed = await plan()
-    assert (allowed["used_secret_fallback"], allowed["state"]) == (True, "confirmed")
+    assert (allowed["used_secret_fallback"], allowed["state"]) == (True, "unconfirmed")
+    ok = await client.post(f"/api/v1/runs/{allowed['id']}/confirm", headers=admin)
+    assert ok.status_code == 200
 
 
 async def test_error_mode_fails_the_run(
