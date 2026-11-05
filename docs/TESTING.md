@@ -180,6 +180,7 @@ all. Counts in parentheses include parametrized cases and drift as tests are add
 | `test_worker_heartbeat.py` (2) | `in_flight` drives busy/idle; a bodyless heartbeat keeps the worker online. |
 | `test_worker_register.py` (1) | Re-registering under the same name reuses the worker row. |
 | `test_ws_notify.py` (1) | Each `transition()` emits a `LISTEN/NOTIFY` signal on the run channel. |
+| `test_ws_auth.py` (2) | WebSocket auth only from the first message: a `?token=` in the URL is never read, a non-auth first message or a bad token closes with 4401. |
 | `test_seed.py` (1) | The demo seed is idempotent and yields exactly the DEV §7 graph. |
 
 ### API — end-to-end (`api/e2e/`, 1 scenario)
