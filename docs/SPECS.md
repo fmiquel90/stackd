@@ -979,7 +979,7 @@ The loop ticks every 10 s.
 | Cold log archiving | every tick | runs terminal for ≥ 60 s (the agent's last buffered chunks, §5.1) with `logs_archived_at IS NULL` (20 per tick) → S3 `logs/{run_id}/{phase}.log.gz` (§5.2) |
 | OIDC key retirement | every tick | `retiring` keys past the longest token TTL → `retired`, out of the JWKS (§3.11) |
 | Rollout approval expiry | every tick | a started rollout whose approval has expired is advanced under its lock → `paused (approval_expired)` (§21.4), without waiting for its next event |
-| Retention purge | daily | hot `run_logs` rows 7 d after archiving (§5.2); refresh-token families whose every token has expired (§2.5); audit events older than `audit_retention_days` (730) through the distinct `stackd_audit_purge` role (§6.1), only if `STACKD_AUDIT_PURGE_DATABASE_URL` is set |
+| Retention purge | daily | hot `run_logs` rows 7 d after archiving (§5.2); refresh-token families whose every token has expired (§2.5); webhook delivery ids past the 5 min anti-replay window (§13); audit events older than `audit_retention_days` (730) through the distinct `stackd_audit_purge` role (§6.1), only if `STACKD_AUDIT_PURGE_DATABASE_URL` is set |
 
 **Single-execution guarantee**: each task takes a dedicated **PG advisory lock** (`pg_try_advisory_lock(<task_key>)`) before running; a replica that does not obtain the lock skips its tick. The lock is session-level, so it is taken and released on a **dedicated connection** held for the task's whole run, separate from the task's own DB session — the tasks commit mid-way, which returns the session's connection to the pool, and an unlock through it could land on another connection and leak the lock. No permanently elected leader (no external dependency), no double execution. The tasks are **idempotent** anyway (re-running a staleness computation or an archive breaks nothing) — the advisory lock mainly avoids redundant work and races on the `worker_lost` transitions.
 
@@ -1495,7 +1495,7 @@ POST /api/v1/environments/{id}/state/import-session      # admin, audited (§11.
 DELETE /api/v1/environments/{id}/state/lock              # force-unlock (admin, audited)
 
 # Webhooks
-POST /api/v1/webhooks/github                             # HMAC
+POST /api/v1/webhooks/github                             # HMAC + X-GitHub-Delivery anti-replay (§13)
 
 # Worker API (agents — detail §7)
 POST /worker/v1/register | /heartbeat | /jobs/claim
@@ -1530,11 +1530,30 @@ Specified but **not served yet**: `GET /api/v1/run-groups/{id}` (§9.4).
 | Apply permissions | tier per env × `allowed_tiers` set per user (§2.4, configurable catalog, non-linear); distinct `can_destroy`; double lock with the OIDC trust policy on the tier name |
 | Protected envs | autodeploy forbidden and 4-eyes (also automatic on a tier flagged `requires_four_eyes`, e.g. `prod`), never bypassed (cascade included); the *right* to apply comes from the tier, not from `protected`. A rollout's approval (§21.5) counts as the human decision only for creates-only plans in an environment never applied, approved under four-eyes, and only while the environment's tier, `protected` and four-eyes are what the approver saw |
 | Proposed runs | plan-only, state RO, mocks allowed; **secrets not injected**: repo code runs inside tofu (§7.4), and a pull request's has not been reviewed. The claim drops every sensitive variable, of either kind, and every external secret reference (§15, not even fetched) — so nothing of them is in `sensitive_env`, the tfvars, `mask_values` or the run's `variable_provenance`. One the plan needs gets no value, never a stand-in: tofu uses the variable's default in the repo, or fails with `No value for required variable`. Kept, as a plan needs them: the **plan role**'s OIDC credentials (read-only by design, §10.3 — scope it so), the `ro` state token (the state itself is readable: it can hold secrets of its own), the repo token to clone (it reaches neither tofu nor a hook, §8.3). A drift run (§19), a proposed run of the env's last applied commit, keeps the secrets. **Decided: no opt-in.** A per-environment opt-in giving proposed runs the secrets was specified and is rejected: it would hand them to unreviewed code |
-| Webhooks | HMAC SHA-256 (secret per stack, `stacks.webhook_secret_encrypted` §3.1 — the stacks fed by one repo webhook share its value); anti-replay 5 min — **not implemented yet** (HMAC only, no delivery-id/timestamp check) |
+| Webhooks | HMAC SHA-256 (secret per stack, `stacks.webhook_secret_encrypted` §3.1 — the stacks fed by one repo webhook share its value); anti-replay 5 min on the `X-GitHub-Delivery` id (below) |
 | Sessions | access JWT 15 min in Bearer header; refresh httpOnly `SameSite=Strict` + CSRF double-submit, rotation with reuse detection → family revocation (§2.5) |
 | Encryption at rest | AES-256-GCM, random 96-bit nonce per value, never reused (§1) |
 | Rate limiting | Google callback + `/auth/refresh`, `/webhooks/github`, `discover-inputs`: per-IP token buckets, per replica (§20.3). Worker register/claim are not throttled yet; hardening Phase 7 |
 | Audit | append-only **at the DB level** (INSERT-only role + anti-update/delete trigger §6.1), denormalized, transactional, 2 years |
+
+**Webhook anti-replay** (`POST /api/v1/webhooks/github`). Once the HMAC verifies, the delivery's
+`X-GitHub-Delivery` id is recorded in `webhook_deliveries (delivery_id text PK, received_at)`, in
+the request's transaction:
+
+- **Same id within 5 min → `200 {"matched": n, "triggered": 0, "duplicate": true}`**, nothing done.
+  A 2xx, not a 409: the delivery was already handled, so the receiver is idempotent, and GitHub (or a
+  proxy retry) does not show a handled event as a failed one; the body says why nothing happened.
+  GitHub's **Redeliver** reuses the id: within the window it is this no-op, past it the delivery is
+  processed again (a deliberate operator action). A delivery that failed (5xx) rolled its record
+  back, so its redelivery is processed.
+- **No `X-GitHub-Delivery` (or one over 128 chars) → 400** — GitHub always sends one, so a request
+  without it is not GitHub's; accepting it would make the check optional for a replayer.
+- Recorded only **after** the HMAC check: an unauthenticated caller can't burn a real delivery's id
+  (a bad signature stays a 401). Concurrent copies of one id serialize on its row.
+- Ids past the window are purged by the daily retention task (§7.5).
+- **Limit**: GitHub signs the body only — neither the delivery id nor a timestamp — so this stops
+  duplicate and replayed deliveries carrying their id, not an attacker who holds a captured,
+  signed body and forges a new id. The per-stack HMAC secret (and TLS) remains the control.
 
 ---
 
