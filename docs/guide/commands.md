@@ -8,7 +8,8 @@ managed backend as any other run.
 !!! note
     This is **not** arbitrary shell. The worker runs `<tool> <command> <args>` where `command` is
     taken verbatim from an allowlist. To remove a stuck lock, use the dedicated force-unlock
-    (UI **State** tab, or `DELETE /api/v1/environments/{id}/state/lock`) — it isn't a command.
+    (admin only: UI **State** tab → **Force unlock…**, or `DELETE /api/v1/environments/{id}/state/lock`)
+    — it isn't a command.
 
 ## Allowed commands
 
@@ -22,8 +23,8 @@ commands only need `writer`.
 
 ## Run one
 
-From the UI: open an environment → the **Command** tab → pick a command, add arguments, run. You
-land on the run page with live logs.
+From the UI: open an environment → **More → Run a command…** → pick a command, add arguments, run.
+You land on the run page with live logs.
 
 Over the API:
 
@@ -42,9 +43,16 @@ curl -s -X POST localhost:8000/api/v1/environments/$ENV_ID/commands -H "$AUTH" \
 }'
 ```
 
+Arguments are passed verbatim, one list item each; an argument starting with `-` (an option such
+as `-chdir` or `-state`) is refused (`400 Argument not allowed`), as is a command outside the
+allowlist (`400 Command not allowed`).
+
 The response is a normal run (`type: command`). It flows `queued → preparing → running →
 finished/failed`, holds the **one-active-run-per-env** lock (no command races a plan/apply), streams
-logs, and uses the managed state backend.
+logs, and uses the managed state backend. It can be stopped like any run
+([Runs & approvals](runs-and-approvals.md#the-lifecycle)): a stopped read-only command ends
+`canceled`; a stopped mutating command ends `failed` (`canceled_during_apply`), and stopping it
+needs apply rights.
 
 ## What it runs with
 

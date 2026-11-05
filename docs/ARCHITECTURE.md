@@ -253,6 +253,6 @@ the `one_active_run_per_env` unique index). What's worth knowing:
   dedicated connection), so a task runs once per tick across replicas. The git head poll runs as a
   separate task (at most 8 `ls-remote` at a time), so slow repos never delay worker-loss detection
   or notifications.
-- 📊 **No built-in autoscaler**, but `/api/v1/health` and `/api/v1/queue` expose the signals an external one
-  (ECS target-tracking, KEDA) can drive; `/metrics` serves Prometheus gauges. On Fargate, mind the
+- 📊 **No built-in autoscaler**, but `/api/v1/health` and `/api/v1/queue` expose the signals an
+  external one (ECS target-tracking, KEDA) can drive; `/metrics` serves Prometheus gauges. On Fargate, mind the
   runner execution model (no DinD).

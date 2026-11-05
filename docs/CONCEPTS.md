@@ -218,9 +218,10 @@ queued → preparing → planning → [checking] → unconfirmed → confirmed �
   drift) run, which is never applied.
 - **Cancel and stop.** A `queued`, `unconfirmed` or `confirmed` run is `canceled` at once. A run a
   worker is executing is *asked* to stop: the worker gets the request on its next heartbeat,
-  interrupts tofu and reports back, and the run ends `canceled` — or `failed` (`canceled_during_apply`) if the job held
-  apply credentials (an apply, a mutating command), since the infrastructure may be partly changed.
-  Stopping an apply requires the same `can_apply` as confirming it.
+  interrupts tofu and reports back, and the run ends `canceled` — or `failed`
+  (`canceled_during_apply`) if the job held apply credentials (an apply, a mutating command), since
+  the infrastructure may be partly changed. Stopping an apply requires the same `can_apply` as
+  confirming it.
 
 **Run and job.** A run is the *change*; a **job** is what a worker executes for it. A run that goes
 all the way has two jobs: the **plan job** (`preparing` → `planning` → `checking`: clone, hooks,
@@ -450,8 +451,8 @@ validation, not for real changes. The UI shows a violet `MOCKED` badge.
 **Cascade.** When `network/dev` finishes an apply, Stackd captures its outputs and triggers the
 downstream `app/dev` run automatically (`triggered_by=dependency`), passing the now-real value — as
 the dependency's `trigger_policy` says: `on_output_change` (the default: only if a referenced output
-differs from what `app/dev` last consumed), `always` or `never`. The
-cascade **never bypasses protections** — a protected downstream still stops at `unconfirmed`.
+differs from what `app/dev` last consumed), `always` or `never`. The cascade **never bypasses
+protections** — a protected downstream still stops at `unconfirmed`.
 
 ```
 network/dev  ──apply finished──▶  capture outputs  ──cascade──▶  app/dev run (real network_name)
@@ -619,9 +620,9 @@ Targets are deleted with their stack or environment.
 Five features built on the same machinery — runs, `transition()`, the audit log — none of which
 bypasses the apply gate.
 
-- **Drift detection.** Every 6 h (`STACKD_DRIFT_INTERVAL_SECONDS`), the scheduler queues a drift run
-  for each unlocked environment that has `drift_check_enabled`, an applied commit and no active run: a
-  read-only `proposed` run (`triggered_by=schedule`) planning that commit with `-refresh-only`,
+- **Drift detection.** Every 6 h (`STACKD_DRIFT_INTERVAL_SECONDS`), the scheduler queues a drift
+  run for each unlocked environment that has `drift_check_enabled`, an applied commit and no active
+  run: a read-only `proposed` run (`triggered_by=schedule`) planning that commit with `-refresh-only`,
   claimed after any user run. Unlike a PR plan it keeps the environment's secrets (it runs code that
   already ran with them). The outcome lands on the environment's `drift_status` — `drifted` (eligible
   approvers get an inbox alert), `in_sync` or `error` — and a successful apply clears it. Drift is
@@ -631,11 +632,10 @@ bypasses the apply gate.
   governance and dependency edges. A **rollout** then plans and applies a set of environments along
   their dependency edges under **one approval**: an approver who passes `can_apply` on every member
   (and is not the rollout's creator, when a member requires four-eyes) approves it once, for 24 h by
-  default. Each member is
-  planned once its upstreams are done, and auto-confirmed only if its plan **only creates**
-  resources in an environment never applied before (no mock, no secret fallback, no warning, on the
-  pinned commit); anything else stops at `unconfirmed` for an ordinary confirmation. A rollout's
-  runs never cascade.
+  default. Each member is planned once its upstreams are done, and auto-confirmed only if its plan
+  **only creates** resources in an environment never applied before (no mock, no secret fallback,
+  no warning, on the pinned commit); anything else stops at `unconfirmed` for an ordinary
+  confirmation. A rollout's runs never cascade.
 - **Plan review comments.** Threaded comments on a run (`/api/v1/runs/{id}/comments`), optionally
   anchored to a plan line or a resource address, resolvable. They are advisory: the open threads
   show next to *Confirm*, they never block it.

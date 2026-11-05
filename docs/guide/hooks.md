@@ -96,7 +96,7 @@ secret**. A platform hook is trusted.
 
 | | **Platform hook** | **Repo hook** |
 |---|---|---|
-| Process environment | the worker's, minus the agent's own `STACKD_*` settings | an allowlist of the worker's: `PATH`, `HOME`, locale, proxy and CA settings… |
+| Process environment | the worker's, minus the agent's own `STACKD_*` settings (on the `docker` runner: its proxy and locale settings only) | an allowlist of the worker's: `PATH`, `HOME`, locale, proxy and CA settings… (on the `docker` runner: proxy and locale only) |
 | Environment variables of the run | all, sensitive ones included | the non-sensitive ones |
 | Cloud credentials (OIDC) | yes | no |
 | `plan.json` at `after_plan` | tofu's plan JSON as is | a masked copy: every sensitive value is `***` |
@@ -122,13 +122,20 @@ worker's own user ([SPECS §8.3](../SPECS.md)).
 
 ## Managing platform hooks
 
-Platform hooks are CRUD over the API, scoped to a stack or an environment:
+Platform hooks are managed in the UI (a stack's **Settings → Hooks**, an environment's
+**Settings** tab → **Hooks**) or over the API, scoped to a stack or an environment (`writer`,
+audited `hook.created` / `hook.updated` / `hook.deleted`):
 
 ```bash
-curl -s -X POST localhost:8000/api/v1/stacks/$STACK_ID/hooks -H "$AUTH" -d '{
+curl -s -X POST localhost:8000/api/v1/stacks/$STACK_ID/hooks -H "$AUTH" \
+  -H 'content-type: application/json' -d '{
   "stage": "after_plan", "name": "tfsec", "command": "tfsec .", "on_failure": "fail"
 }'
 ```
+
+`stage` is one of the six stages above, `on_failure` defaults to `fail`, and `position` (default
+`0`) orders the hooks of a stage. The same routes exist under `/api/v1/environments/{id}/hooks`;
+`PATCH` and `DELETE` take `…/hooks/{hook_id}`.
 
 ## See also
 

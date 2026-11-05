@@ -11,6 +11,9 @@ Each variable has a `kind` that decides how the worker injects it:
 | `terraform` | written to an auto-loaded tfvars file, present only while a tofu command runs (listed as `TF_VAR_<name>`); hooks only see it inside `plan.json` |
 | `environment` | exposed as a plain process environment variable for the run: to tofu and hooks — to repo hooks only when it is not sensitive |
 
+A `terraform` variable is passed as a string; set `hcl: true` to write its value verbatim as an HCL
+expression instead (a list, a map, a number…).
+
 ## Where a variable can live
 
 - **Stack variable** — common to all environments of a stack (`environment_id` is null).
@@ -43,7 +46,7 @@ Only sets of the environment's own space take part. A `selector` (`{"label": "va
 
 ## Inspecting resolved values
 
-`GET /environments/{id}/resolved-variables` returns the fully resolved set, each entry tagged with its `injected_name` and `provenance`:
+`GET /environments/{id}/resolved-variables` returns the fully resolved set (layers 1–6; sensitive values masked `•••`), each entry tagged with its `injected_name` and `provenance`:
 
 ```bash
 curl -s localhost:8000/api/v1/environments/$ENV/resolved-variables \
@@ -52,8 +55,10 @@ curl -s localhost:8000/api/v1/environments/$ENV/resolved-variables \
 
 ```json
 [
-  { "name": "region", "injected_name": "TF_VAR_region", "value": "us-east-1", "provenance": "set:region-us" },
-  { "name": "cidr",   "injected_name": "TF_VAR_cidr",   "value": "10.9.0.0/16", "provenance": "env" }
+  { "name": "region", "injected_name": "TF_VAR_region", "kind": "terraform", "sensitive": false,
+    "hcl": false, "provenance": "set:region-us", "value": "us-east-1" },
+  { "name": "cidr", "injected_name": "TF_VAR_cidr", "kind": "terraform", "sensitive": false,
+    "hcl": false, "provenance": "env", "value": "10.9.0.0/16" }
 ]
 ```
 

@@ -503,14 +503,18 @@ run. The worker is **[not shown yet]**.
    when the tier is missing from the catalog —, `protected`, or `require_second_pair_of_eyes`):
    who triggered, and the consequence. When the run is finished: "Triggered by bob · confirmed by
    alice 12:04".
-3. **Your standing**: "You (alice · approver · dev staging prod) can confirm" or the first blocking
-   reason. **[today]** computed from `/auth/me`, labelled "based on your instance permissions" when
-   the space has per-space memberships the client cannot read; **[with A2]** exact. "Who may still
-   confirm" is stated as a rule (**[today]**) — names come with A3.
-4. **Cascade preview**: downstream envs from `GET /graph` (BFS): `always` → "will plan",
-   `on_output_change` → "plans if <outputs> change", `never` → omitted. Mock edges marked.
-5. **Actions**, right-aligned, in this order: Cancel run · Discard · **Confirm** (amber, the only
-   amber button of the app) · next-decision arrows.
+3. **Your standing** (unconfirmed runs): "You (alice@… · approver · dev staging prod) can confirm" /
+   "cannot confirm" — the reasons are listed under the bar. **[today]** computed from `/auth/me`,
+   labelled "Based on your instance permissions" when the user sees more than one space (per-space
+   memberships the client cannot read); **[with A2]** exact. "Who may still confirm" is stated as a
+   rule (**[today]**) — names come with A3.
+4. **Cascade preview** (unconfirmed runs): downstream envs from `GET /graph` (BFS): `always` → "will
+   plan", `on_output_change` → "if <outputs> change", `never` → omitted. Mock edges are marked in the
+   confirm popover ("◆ mock defined").
+5. **Actions**, right-aligned, in this order: Cancel run / Stop run / Stop apply · Discard ·
+   **Confirm** (amber — the `decision` button variant, also used only by a rollout's Approve and by the
+   typed-name submit that turns a safety switch off, §5.7) · Plan again (terminal runs, desktop) ·
+   next-decision arrows (desktop).
 
 **Action availability and disabled reasons** — an action that does not apply to the run's state is
 **not rendered**; an action that applies but is refused is rendered **disabled with its reason as
@@ -518,10 +522,12 @@ visible text** under the bar (and as `aria-describedby`), never only in a toolti
 
 | Action | Rendered when state is | Disabled when (reason text) |
 |---|---|---|
-| Confirm | `unconfirmed` | role not approver/admin ("approver role required"); `env.tier ∉ allowed_tiers` ("tier prod is not in your allowed tiers: dev, staging"); four-eyes and `trigger_user_id = you` with `triggered_by=manual` ("you triggered this run; four-eyes requires someone else"); `type=destroy` and not `can_destroy` ("destroy permission required"); `used_mocks` and not `allow_mock_apply` ("mocked inputs — apply disabled on this environment"); `used_secret_fallback` and not `allow_fallback_apply` ("a secret came from a fallback — apply disabled") |
+| Confirm | `unconfirmed` | account disabled ("your account is disabled"); role not approver/admin ("approver role required"); no allowed tiers ("no allowed tiers — you cannot confirm applies"); `env.tier ∉ allowed_tiers` ("tier prod is not in your allowed tiers (dev, staging)"); `type=destroy` and not `can_destroy` ("destroy permission required"); `used_mocks` and not `allow_mock_apply` ("mocked inputs — apply is disabled on this environment (allow_mock_apply is off)"); `used_secret_fallback` and not `allow_fallback_apply` ("a secret came from a fallback — apply is disabled (allow_fallback_apply is off)"); four-eyes and `trigger_user_id = you` with `triggered_by=manual` ("you triggered this run; four-eyes requires someone else to confirm") |
 | Discard | `unconfirmed` | role reader ("writer role required") — SPECS §2.3 |
-| Cancel | `queued`, `unconfirmed` | role reader; on executing states it is not rendered, and the bar says "Cancelling a running job is not supported yet" (SPECS §4.1) |
-| Re-plan on head | `unconfirmed` with a stale plan, or any terminal state ("Plan again") | role reader |
+| Cancel run | `queued`, `confirmed`, `unconfirmed` — ends the run at once | role reader |
+| Stop run | `preparing`, `planning`, `checking`, `running` (a read-only command) — asks the worker to stop the tool (SPECS §4.1); the run ends when the worker reports; "Stop again" once requested | role reader |
+| Stop apply | `applying`, or a `running` mutating command — **two clicks**: the first turns the label into "Stop the apply? It may be left partly applied — click again" for 6 s | role reader, plus the apply right (role, tier, destroy — not the mock/fallback/four-eyes gates) |
+| Plan again / Re-plan on head | any terminal state ("Plan again", in the bar, desktop); `unconfirmed` with a stale plan ("Re-plan on head", in the stale banner) — `tracked` and `destroy` runs only | role reader |
 
 Whatever the client computed, when the API refuses an action its `detail` is shown verbatim in a
 `failed-tint` banner under the bar.
@@ -536,49 +542,52 @@ is enabled only when the typed name matches exactly. The popover is a misclick s
 permission check (`can_apply` is still evaluated by the API).
 
 **Banners** (between the bar and the tabs, at most one of each, in this order):
-- **Failed during apply** (`failed-tint`, red `✕`): "Failed during apply — infrastructure may be partially changed. First error: …" + "Jump to first error".
-- **Failed** (other phases): the run's `error`, plus the failing check's name and output when the error is a bare stage name **[today]**.
-- **Stale plan** (neutral, `↑`): when the run is `unconfirmed` and `env.head_sha ≠ run.commit_sha` — "Plan computed on `2af0351`. The branch head is now `125304e` (N commits ahead / ahead)." + **Re-plan on head** (= Discard + new tracked run, two audited calls). Confirming stays possible.
-- **Mocked** (`mock-tint`, `◆`): "This plan used mock values for: network_name. A mocked plan cannot be applied here (`allow_mock_apply` is off)." The mocked inputs are listed.
-- **Queued** (neutral): the `blocking_reason` from `GET /queue` in words ("waiting: another run is active on this environment → run 01a1276c").
+- **Stop requested** (neutral): while an executing run has `cancel_requested_at` — "Stop requested — waiting for the worker." and what the worker does (interrupts the tool as a Ctrl-C would; the run ends when the worker reports it).
+- **Failed during apply** (`failed-tint`, red `✕`): "Failed during apply — infrastructure may be partially changed." + the run's error + "Jump to first error". A stop during apply (`error = canceled_during_apply`) reads "Stopped during apply on request — infrastructure may be partially changed." with "Review what was applied before planning again".
+- **Failed** (other phases): "Failed at <segment> — nothing was applied." + the run's `error`, or the failing check's name, stage and output when there is one **[today]**; "Jump to first error".
+- **Stale plan** (neutral, `↑`): when the run is `unconfirmed` and `env.head_sha ≠ run.commit_sha` — "Plan computed on `2af0351`. The branch head is now `125304e` (N commits ahead / ahead)." + **Re-plan on head** (= Discard + new tracked run, two audited calls). Confirming stays possible and still applies the planned commit.
+- **Mocked** (`mock-tint`, `◆`): "This plan used mock values — it is not real." The mocked inputs are listed, then "A mocked plan cannot be applied here (allow_mock_apply is off)" or that the env allows it.
+- **Fallback** (`decision` tone, `◈`): "A secret came from a fallback, not the real source." + whether `allow_fallback_apply` lets it through.
+- **Queued** (neutral): the `blocking_reason` from `GET /queue` in words ("Waiting: another run is active on this environment.") + a link to the queue.
 
 **Tabs** (URL `?tab=`); the default tab depends on the state: Plan for `unconfirmed` and finished
 tracked runs, Logs (following) for live runs, Logs at the first error for failed runs.
 
 - **Plan** — `PlanDiff`:
-  - Summary line in big mono (`+4 ~0 −1`, zeros neutral), then groups in a fixed order: **DESTROY**, **REPLACE**, CREATE, UPDATE, READ, MOVED, then "**Tag-only updates (n)**" and "No-op (n)" collapsed.
+  - Summary line in big mono (`+4 ~0 −1`, zeros neutral), then groups in a fixed order: **DESTROY**, **REPLACE**, CREATE, UPDATE, READ, MOVE, OTHER (e.g. "will no longer be managed"), then "**Tag-only updates · n**" and "Changes to outputs" collapsed, the tool's summary line, and the plan legend as printed (collapsed).
   - **DESTROY and REPLACE groups are always expanded, and cannot be collapsed, filtered out or scrolled away by search** — search highlights in them, filters the others.
   - A resource row: action glyph + label, address in mono, a one-line hint (`2 attributes`, `forces replacement: ami`). Expanded: the attribute diff in `bg-sunken`, one line per attribute (`+ − ~` with diff tokens), `(sensitive value)` as tofu prints it, never a reveal.
   - Tag-only = an update whose changed attributes are all `tags` / `tags_all` (or nested under them).
   - Search (`/`, URL `?plan_q=`) on address and attribute name, with a match counter.
   - **[today]** parsed from the `section="plan"` log block (`tofu show -no-color`): blocks start at `  # <address> will be created | updated in-place | destroyed | must be replaced | read during apply | has moved to`. Anything the parser does not recognise is shown verbatim in a "Unparsed plan output" block **above** the groups, so no line is ever dropped; if the block is missing (older run, failed plan) the tab says so and links to the logs. **[with A1]** from `resource_changes`.
   - Resource rows accept a comment anchored to the resource (`anchor.kind="resource"`, SPECS §16.2).
-- **Checks** — one row per check (`results`, SPECS §8.3): status badge, stage, name, duration, output (pre-wrapped mono). Plan-stage `warn` = amber with "requires manual confirmation"; apply-stage `warn` neutral "after confirmation — informational". Tab label carries counts (`2 ok · 1 warn`).
-- **Logs** — `LogViewer` (§5.3), filling the viewport height.
-- **Inputs** — resolved variables with `ProvenanceBadge`; mocked and fallback values listed first; sensitive values `•••` with no reveal.
+- **Checks** — one row per check (`results`, SPECS §8.3; older runs fall back to `checks`): status badge, stage (`—` when not recorded), name, output (pre-wrapped mono). A plan-stage `warn` adds "manual confirmation required" in amber; an apply-stage `warn` adds "after confirmation — informational", neutral. Tab label carries counts (`2 ok · 1 warn`).
+- **Logs** — `LogViewer` (§5.3), 70 vh tall.
+- **Inputs** — each input's name with its `ProvenanceBadge`; values that are not the real thing (mock, fallback, override) listed first. Values are not kept on the run, so none is shown; sensitive values are never shown anywhere.
 - **Discussion** — general threads + resource/line-anchored threads (SPECS §16); open-thread count in the tab label, **neutral** (advisory, SPECS §16.4).
 
 **Next decision**: `]` / `[` and the arrows in the bar walk the user's *needs you* list (same source as
 the attention zone), keeping the tab.
 
 **Live updates**: the badge, rail, banners and bar update in place on WS events; a polite live region
-announces state changes ("Run is now awaiting decision"); focus never moves.
+announces state changes ("Run is now applying."); focus never moves.
 
-**< 768 px**: header condensed to two lines; the rail becomes a horizontal strip with labels under the
-header; the action bar is docked at the bottom with 44 px buttons (Confirm full width, Discard and
-Cancel in an overflow); tabs scroll horizontally; the confirm popover becomes a bottom sheet.
+**< 768 px**: the action bar is docked at the bottom with 44 px buttons (Confirm stretches, Discard
+and Cancel/Stop stay visible beside it; Plan again and the next-decision arrows are hidden); the
+confirm popover becomes a bottom sheet; tabs scroll horizontally. Below 1024 px the rail is the
+horizontal strip above the tabs (§2.2). A condensed two-line header is **[not built yet]**.
 
 ### 5.3 Log viewer (`LogViewer`)
 
-- `bg-sunken`, JetBrains Mono 12/18, virtualized (`react-virtuoso`), ANSI rendered with `anser` mapped onto tokens (red → `state-failed`, green → `state-finished`, yellow → `text-primary` bold — not amber, blue → `state-running`, magenta → `mock`, cyan/white/black → text tokens).
-- **Order and sections**: chunks are ordered by lifecycle phase (`planning`, `checking`, `applying`, `running` — the phases of one run never interleave), then `seq`. Not by timestamp: line times are `HH:MM:SS` without a date. (The API orders by phase *name*, so `checking` would come first, AUDIT §6.) Sections = consecutive runs of the same `(phase, section)`: `null` → "tofu", `plan` → "Plan output", `hook:<name>` → "Hook <name>". Section header: chevron, name, line count, duration, and `✕ failed` when a failing check has that hook name. No per-line prefix.
+- `bg-sunken`, JetBrains Mono 12 px on 24 px rows (§7 target size), virtualized (`react-virtuoso`), ANSI rendered with `anser` mapped onto tokens (red → `state-failed`, green → `state-finished`, yellow → `text-primary` bold — not amber, blue → `state-running`, magenta → `mock`, cyan/white → `text-primary`, black → `text-secondary`).
+- **Order and sections**: chunks are ordered by lifecycle phase (`preparing`, `planning`, `checking`, `applying`, `running` — the phases of one run never interleave), then `seq`. Not by timestamp: line times are `HH:MM:SS` without a date. (The API orders by phase *name*, so `checking` would come first, AUDIT §6.) Sections = consecutive runs of the same `(phase, section)`: `null` → the phase's name ("Prepare", "Init & plan", "Checks", "Apply", "Command"), `plan` → "Plan output", `hook:<name>` → "Hook · <name>". Section header: chevron, name, line count, duration, and `✕ failed` when the section holds an error line or a failing check has that hook name. No per-line prefix.
 - **Gutter**: line numbers per phase (`planning.87`); click = sets `?line=planning.87` and copies the URL; on arrival the line is highlighted and centred.
-- **Follow tail** on by default while the run is live; any upward scroll suspends it and shows "↓ Resume (N new lines)".
-- **First error**: lines starting with `Error:` / `│ Error:` or rendered with ANSI red; "Jump to first error" (`e`) and an error count in the toolbar.
-- **Search** `⌘F` / `/` when the viewer has focus: highlight, counter, `n` / `N`.
-- **Toggles**: timestamps (`t`), wrap (`w`), full screen (`f`), "Save as text" (client-side **[today]**, A10).
-- **Streaming**: on a WS signal `{phase, max_seq}` fetch `GET /runs/{id}/logs?phase=&after_seq=<last>` and append; reconnection catches up the same way. Comment-on-line affordance as today (hover / focus a line, `c`).
-- **Mobile**: wrap on by default, toolbar collapsed into a menu, sections collapsed except the failing one.
+- **Follow tail** on by default while the run is live; any upward scroll suspends it and shows "Resume following (N new lines)".
+- **First error**: lines starting with `Error:` / `│ Error:` (ANSI codes allowed before it); "First error (n)" (`e`) in the toolbar, and a `✕ n` count on the Logs tab. A failed run opens the Logs tab at its first error, else at its failing hook's section.
+- **Search** `⌘F` / `/` when the viewer has focus: highlight, counter, `n` / `N` (Enter / Shift-Enter in the field).
+- **Toggles**: timestamps (`t`), wrap (`w`, on by default), full screen (`f`), "Save" — a client-side text file of the loaded lines **[today]**. The API now serves `GET /runs/{id}/logs/download` (A10) from either storage tier; the viewer does not use it yet.
+- **Streaming**: on a WS signal `{phase, max_seq}` fetch `GET /runs/{id}/logs?phase=&after_seq=<last>` and append (one fetch in flight per phase). Logs of a run archived to object storage are served by the same endpoint, transparently. Comment-on-line affordance: a comment button revealed on hover / focus of a line (always visible on coarse pointers).
+- **Mobile** **[not built yet]**: toolbar collapsed into a menu, sections collapsed except the failing one.
 
 ### 5.4 `/s/:space/graph` and run groups
 

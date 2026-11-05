@@ -25,7 +25,9 @@ also when the plan finished before the stop reached it: it is never held for app
 auto-confirmed. A stopped **apply** (or mutating command) ends `failed` with
 `canceled_during_apply` — never `canceled`, because infrastructure may be partly changed —, nothing
 cascades from it, and stopping it needs the right to apply, like starting it did (the UI asks for a
-second click). Asking again is harmless: it re-sends the request.
+second click). Once tofu's apply has succeeded, a late stop is ignored: the outputs still get
+recorded. Asking again is harmless: it re-sends the request. A worker that went offline never
+reports: the run ends through [worker loss](workers-and-scaling.md#worker-loss).
 
 !!! note
     State only ever changes through one function (`transition()`), which records a `run_event` and
