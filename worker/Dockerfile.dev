@@ -2,7 +2,7 @@
 # (DEV §5). Terraform is a user option (BUSL — see PLAN §5); baked in here for local dev convenience.
 FROM python:3.13-slim
 
-COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /bin/
+COPY --from=ghcr.io/astral-sh/uv:0.11.32 /uv /uvx /bin/
 
 ARG OPENTOFU_VERSION=1.12.2
 ARG TERRAFORM_VERSION=1.14.9
