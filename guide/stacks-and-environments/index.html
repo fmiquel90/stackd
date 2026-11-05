@@ -1369,6 +1369,10 @@
 <p class="admonition-title">One repo, several stacks</p>
 <p>A single repo can host many stacks by giving each a distinct <code>project_root</code> (e.g. <code>network</code>, <code>db</code>, <code>app</code>). One GitHub webhook per repo (<code>POST /api/v1/webhooks/github</code>) serves them all, but each stack holds <strong>its own</strong> HMAC secret (<code>webhook_secret</code>, write-only, set with <code>PATCH /api/v1/stacks/{id}</code> or in the stack's <strong>Settings → General</strong>): a delivery acts only on the stacks of that repo whose secret verifies its signature, so give the stacks fed by one webhook the same secret. On a push, the API then picks the environments tracking the pushed branch and triggers a run only when the push touches the stack's <code>project_root</code>. See <a href="../../SPECS/">SPECS §3.1</a>.</p>
 </div>
+<div class="admonition note">
+<p class="admonition-title">Redelivering a GitHub webhook</p>
+<p>Each delivery is acted on once: the API remembers its <code>X-GitHub-Delivery</code> id for <strong>5 minutes</strong>. A delivery GitHub sends again within that window — including <strong>Redeliver</strong> in the repo's webhook settings, which reuses the id — gets a <code>200</code> with <code>"duplicate": true</code> and does nothing. Past 5 minutes a Redeliver is processed again; a delivery that failed (5xx) can be redelivered at once. A request without the <code>X-GitHub-Delivery</code> header is refused (<code>400</code>). See <a href="../../SPECS/">SPECS §13</a>.</p>
+</div>
 <h3 id="validating-the-repo">Validating the repo<a class="headerlink" href="#validating-the-repo" title="Permanent link">&para;</a></h3>
 <p>Before creating environments, check that Stackd can reach the repo with the configured auth:</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>curl<span class="w"> </span>-s<span class="w"> </span>-X<span class="w"> </span>POST<span class="w"> </span>localhost:8000/api/v1/stacks/<span class="nv">$STACK</span>/check-repo<span class="w"> </span><span class="se">\</span>

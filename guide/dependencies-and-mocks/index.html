@@ -1323,7 +1323,7 @@ sharing a <code>run_group_id</code> — the triggering run's group, or the trigg
 </tr>
 <tr>
 <td><code>on_output_change</code></td>
-<td>triggered only if a referenced upstream output differs from the value the downstream's last finished run consumed (its <code>resolved_inputs</code>); a downstream that never finished a run is always triggered</td>
+<td>triggered only if a referenced upstream output differs from the value the downstream's last <strong>apply</strong> consumed (its <code>resolved_inputs</code>) — a plan-only run in between (proposed, drift, empty diff) doesn't count; a downstream never applied is always triggered</td>
 </tr>
 </tbody>
 </table>

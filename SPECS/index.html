@@ -3862,14 +3862,19 @@
 <a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>3. Google → /api/v1/auth/google/callback?code&amp;state
 <a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a>4. API    → exchange code+verifier, validate the id_token (JWKS, iss, aud, exp, nonce)
 <a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a>5. API    → admission: email_verified == true, hd ∈ STACKD_ALLOWED_DOMAINS → otherwise 403
-<a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a>6. API    → upsert User on google_sub (stable, unlike the email)
-<a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a>7. API    → session: access JWT 15 min (front memory, never in browser storage)
-<a id="__codelineno-0-8" name="__codelineno-0-8" href="#__codelineno-0-8"></a>            + refresh httpOnly 14 d, persisted in `refresh_tokens` (§2.5) with
-<a id="__codelineno-0-9" name="__codelineno-0-9" href="#__codelineno-0-9"></a>            rotation and reuse detection → family revocation
-<a id="__codelineno-0-10" name="__codelineno-0-10" href="#__codelineno-0-10"></a>8. Front  → POST /api/v1/auth/refresh (the callback only sets the cookies and redirects to the
-<a id="__codelineno-0-11" name="__codelineno-0-11" href="#__codelineno-0-11"></a>            SPA: the access token comes from this first refresh), then GET /api/v1/auth/me
+<a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a>            (fail closed: an empty list admits nobody, never &quot;any Google account&quot;)
+<a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a>6. API    → upsert User on google_sub (stable, unlike the email)
+<a id="__codelineno-0-8" name="__codelineno-0-8" href="#__codelineno-0-8"></a>7. API    → session: access JWT 15 min (front memory, never in browser storage)
+<a id="__codelineno-0-9" name="__codelineno-0-9" href="#__codelineno-0-9"></a>            + refresh httpOnly 14 d, persisted in `refresh_tokens` (§2.5) with
+<a id="__codelineno-0-10" name="__codelineno-0-10" href="#__codelineno-0-10"></a>            rotation and reuse detection → family revocation
+<a id="__codelineno-0-11" name="__codelineno-0-11" href="#__codelineno-0-11"></a>8. Front  → POST /api/v1/auth/refresh (the callback only sets the cookies and redirects to the
+<a id="__codelineno-0-12" name="__codelineno-0-12" href="#__codelineno-0-12"></a>            SPA: the access token comes from this first refresh), then GET /api/v1/auth/me
 </code></pre></div>
 <p><strong>CSRF</strong>: the access token travels in the <code>Authorization: Bearer</code> header (no CSRF risk on API calls). The refresh relies on an httpOnly cookie → <code>/auth/refresh</code> and <code>/auth/logout</code> require <code>SameSite=Strict</code> <strong>and</strong> a double-submit CSRF token (the only pair of cookie-bound endpoints). Refresh cookie <code>stackd_refresh</code>: httpOnly, <code>Path=/api/v1/auth</code>; CSRF cookie <code>stackd_csrf</code>: readable by JS (<code>Path=/</code>, so the SPA can echo it in <code>X-CSRF-Token</code> on boot); both <code>SameSite=Strict</code>, <code>Secure</code> when <code>STACKD_ENV=production</code>.</p>
+<p><strong>Allowlist required</strong>: <code>STACKD_ALLOWED_DOMAINS</code> (comma-separated Workspace domains) is the only
+admission gate, so an empty list admits no Google login, and a production API refuses to start
+without at least one domain (§13). There is no "any Google account" mode: a personal account has no
+<code>hd</code> claim and is never admitted. Dev login (<code>STACKD_DEV_AUTH</code>, never in production) ignores it.</p>
 <p>Bootstrap: the first user of an allowed domain = <code>admin</code>, subsequent ones = <code>reader</code>. No local auth; internal <code>AuthProvider</code> interface for other IdPs later. Login/logout/denial → <code>audit_events</code>.</p>
 <h3 id="22-table-users">2.2 Table <code>users</code><a class="headerlink" href="#22-table-users" title="Permanent link">&para;</a></h3>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>id uuid PK, google_sub text unique, email text, display_name, avatar_url,
@@ -4478,6 +4483,9 @@ application code. A chunk ingested after its run was archived is not re-archived
 <a id="__codelineno-22-49" name="__codelineno-22-49" href="#__codelineno-22-49"></a>environment.cloned                                                   # §21.2
 <a id="__codelineno-22-50" name="__codelineno-22-50" href="#__codelineno-22-50"></a>rollout.created / rollout.approved / rollout.paused / rollout.resumed    # §21.8
 <a id="__codelineno-22-51" name="__codelineno-22-51" href="#__codelineno-22-51"></a>rollout.retried / rollout.canceled / rollout.succeeded / rollout.failed  # §21.8
+<a id="__codelineno-22-52" name="__codelineno-22-52" href="#__codelineno-22-52"></a>comment.created / comment.updated / comment.resolved / comment.reopened / comment.deleted
+<a id="__codelineno-22-53" name="__codelineno-22-53" href="#__codelineno-22-53"></a>                                  # plan-review comments (§16.3) — target the comment; context
+<a id="__codelineno-22-54" name="__codelineno-22-54" href="#__codelineno-22-54"></a>                                  #   run_id (+ parent_id, anchor_kind) — NEVER the body
 </code></pre></div>
 <p>Not audited by a dedicated action: a run failed because an external secret could not resolve is
 <code>run.apply_failed</code> with <code>reason: secret</code> (§15.6); a pool token is not rotatable through the API
@@ -4814,7 +4822,7 @@ name and hour: the agent keeps retrying, slowly — every 5 min — after a 403,
 <tr>
 <td>Retention purge</td>
 <td>daily</td>
-<td>hot <code>run_logs</code> rows 7 d after archiving (§5.2); refresh-token families whose every token has expired (§2.5); audit events older than <code>audit_retention_days</code> (730) through the distinct <code>stackd_audit_purge</code> role (§6.1), only if <code>STACKD_AUDIT_PURGE_DATABASE_URL</code> is set</td>
+<td>hot <code>run_logs</code> rows 7 d after archiving (§5.2); refresh-token families whose every token has expired (§2.5); webhook delivery ids past the 5 min anti-replay window (§13); audit events older than <code>audit_retention_days</code> (730) through the distinct <code>stackd_audit_purge</code> role (§6.1), only if <code>STACKD_AUDIT_PURGE_DATABASE_URL</code> is set</td>
 </tr>
 </tbody>
 </table>
@@ -4900,14 +4908,16 @@ name and hour: the agent keeps retrying, slowly — every 5 min — after a 403,
 <div class="highlight"><pre><span></span><code><a id="__codelineno-31-1" name="__codelineno-31-1" href="#__codelineno-31-1"></a>1. outgoing edges of run.environment
 <a id="__codelineno-31-2" name="__codelineno-31-2" href="#__codelineno-31-2"></a>2. policy: never → skip; always → trigger;
 <a id="__codelineno-31-3" name="__codelineno-31-3" href="#__codelineno-31-3"></a>   on_output_change → trigger if a referenced output&#39;s current value ≠ the one in
-<a id="__codelineno-31-4" name="__codelineno-31-4" href="#__codelineno-31-4"></a>   resolved_inputs of the last finished run of the downstream env (no such run → trigger)
-<a id="__codelineno-31-5" name="__codelineno-31-5" href="#__codelineno-31-5"></a>3. run created: type=tracked, triggered_by=dependency, parent_run_id, run_group_id
-<a id="__codelineno-31-6" name="__codelineno-31-6" href="#__codelineno-31-6"></a>4. multi-parents: downstream triggered when ALL its parents of the run group are finished
-<a id="__codelineno-31-7" name="__codelineno-31-7" href="#__codelineno-31-7"></a>5. parent failed → branch stopped, run group = partial_failure
-<a id="__codelineno-31-8" name="__codelineno-31-8" href="#__codelineno-31-8"></a>6. downstream env protected → stops at unconfirmed (never bypassed: the cascade confirms nothing
-<a id="__codelineno-31-9" name="__codelineno-31-9" href="#__codelineno-31-9"></a>   on a protected env — only a human, or a rollout&#39;s approval, §2.4/§21.5)
-<a id="__codelineno-31-10" name="__codelineno-31-10" href="#__codelineno-31-10"></a>7. a rollout&#39;s runs (rollout_id set) never cascade, the rollout being over or not; and no run is
-<a id="__codelineno-31-11" name="__codelineno-31-11" href="#__codelineno-31-11"></a>   created on a member of an active rollout (§21.4)
+<a id="__codelineno-31-4" name="__codelineno-31-4" href="#__codelineno-31-4"></a>   resolved_inputs of the last applied run of the downstream env (a finished tracked/
+<a id="__codelineno-31-5" name="__codelineno-31-5" href="#__codelineno-31-5"></a>   destroy run with confirmed_at set — never a proposed/drift plan, a command or an
+<a id="__codelineno-31-6" name="__codelineno-31-6" href="#__codelineno-31-6"></a>   empty-diff plan, which deployed nothing; no such run → trigger)
+<a id="__codelineno-31-7" name="__codelineno-31-7" href="#__codelineno-31-7"></a>3. run created: type=tracked, triggered_by=dependency, parent_run_id, run_group_id
+<a id="__codelineno-31-8" name="__codelineno-31-8" href="#__codelineno-31-8"></a>4. multi-parents: downstream triggered when ALL its parents of the run group are finished
+<a id="__codelineno-31-9" name="__codelineno-31-9" href="#__codelineno-31-9"></a>5. parent failed → branch stopped, run group = partial_failure
+<a id="__codelineno-31-10" name="__codelineno-31-10" href="#__codelineno-31-10"></a>6. downstream env protected → stops at unconfirmed (never bypassed: the cascade confirms nothing
+<a id="__codelineno-31-11" name="__codelineno-31-11" href="#__codelineno-31-11"></a>   on a protected env — only a human, or a rollout&#39;s approval, §2.4/§21.5)
+<a id="__codelineno-31-12" name="__codelineno-31-12" href="#__codelineno-31-12"></a>7. a rollout&#39;s runs (rollout_id set) never cascade, the rollout being over or not; and no run is
+<a id="__codelineno-31-13" name="__codelineno-31-13" href="#__codelineno-31-13"></a>   created on a member of an active rollout (§21.4)
 </code></pre></div>
 <p>Steps 4–5, as implemented (<code>cascade()</code>, called when a tracked run ends <code>finished</code>: after any
 tracked apply — a run without a group roots its own, the runs it triggers carry its id as
@@ -5310,7 +5320,7 @@ second backend block fails <code>init</code>. For stacks that should keep their 
 <a id="__codelineno-40-109" name="__codelineno-40-109" href="#__codelineno-40-109"></a>DELETE /api/v1/environments/{id}/state/lock              # force-unlock (admin, audited)
 <a id="__codelineno-40-110" name="__codelineno-40-110" href="#__codelineno-40-110"></a>
 <a id="__codelineno-40-111" name="__codelineno-40-111" href="#__codelineno-40-111"></a># Webhooks
-<a id="__codelineno-40-112" name="__codelineno-40-112" href="#__codelineno-40-112"></a>POST /api/v1/webhooks/github                             # HMAC
+<a id="__codelineno-40-112" name="__codelineno-40-112" href="#__codelineno-40-112"></a>POST /api/v1/webhooks/github                             # HMAC + X-GitHub-Delivery anti-replay (§13)
 <a id="__codelineno-40-113" name="__codelineno-40-113" href="#__codelineno-40-113"></a>
 <a id="__codelineno-40-114" name="__codelineno-40-114" href="#__codelineno-40-114"></a># Worker API (agents — detail §7)
 <a id="__codelineno-40-115" name="__codelineno-40-115" href="#__codelineno-40-115"></a>POST /worker/v1/register | /heartbeat | /jobs/claim
@@ -5335,7 +5345,7 @@ second backend block fails <code>init</code>. For stacks that should keep their 
 <tbody>
 <tr>
 <td>Human auth</td>
-<td>Google OIDC + PKCE, JWKS/nonce, <code>hd</code> restriction, rotating refresh</td>
+<td>Google OIDC + PKCE, JWKS/nonce, <code>hd</code> restriction (fail closed: an empty <code>STACKD_ALLOWED_DOMAINS</code> admits nobody, and a production API refuses to start without one, §2.1), rotating refresh</td>
 </tr>
 <tr>
 <td>Cloud credentials</td>
@@ -5359,7 +5369,7 @@ second backend block fails <code>init</code>. For stacks that should keep their 
 </tr>
 <tr>
 <td>External secrets</td>
-<td>provider bootstrap credential AES-256-GCM write-only (<code>secret_sources.bootstrap_secret_encrypted</code> §15.1); live values fetched at claim, never persisted, masked; <strong>fallback value (static or break-glass override) forbids apply by default</strong> (<code>allow_fallback_apply=false</code>), badge, audit <code>secret.fallback_used</code> (§15)</td>
+<td>provider bootstrap credential AES-256-GCM write-only (<code>secret_sources.bootstrap_secret_encrypted</code> §15.1); live values fetched at claim, never persisted, masked; <strong>fallback value (static or break-glass override) forbids apply by default</strong> (<code>allow_fallback_apply=false</code>), badge, audit <code>secret.fallback_used</code> (§15); a break-glass override only for a <code>break_glass</code> reference (else 422), sealed on its run and wiped at the run's terminal state (§15.4)</td>
 </tr>
 <tr>
 <td>Workers</td>
@@ -5391,7 +5401,7 @@ second backend block fails <code>init</code>. For stacks that should keep their 
 </tr>
 <tr>
 <td>Webhooks</td>
-<td>HMAC SHA-256 (secret per stack, <code>stacks.webhook_secret_encrypted</code> §3.1 — the stacks fed by one repo webhook share its value); anti-replay 5 min — <strong>not implemented yet</strong> (HMAC only, no delivery-id/timestamp check)</td>
+<td>HMAC SHA-256 (secret per stack, <code>stacks.webhook_secret_encrypted</code> §3.1 — the stacks fed by one repo webhook share its value); anti-replay 5 min on the <code>X-GitHub-Delivery</code> id (below)</td>
 </tr>
 <tr>
 <td>Sessions</td>
@@ -5411,6 +5421,25 @@ second backend block fails <code>init</code>. For stacks that should keep their 
 </tr>
 </tbody>
 </table>
+<p><strong>Webhook anti-replay</strong> (<code>POST /api/v1/webhooks/github</code>). Once the HMAC verifies, the delivery's
+<code>X-GitHub-Delivery</code> id is recorded in <code>webhook_deliveries (delivery_id text PK, received_at)</code>, in
+the request's transaction:</p>
+<ul>
+<li><strong>Same id within 5 min → <code>200 {"matched": n, "triggered": 0, "duplicate": true}</code></strong>, nothing done.
+  A 2xx, not a 409: the delivery was already handled, so the receiver is idempotent, and GitHub (or a
+  proxy retry) does not show a handled event as a failed one; the body says why nothing happened.
+  GitHub's <strong>Redeliver</strong> reuses the id: within the window it is this no-op, past it the delivery is
+  processed again (a deliberate operator action). A delivery that failed (5xx) rolled its record
+  back, so its redelivery is processed.</li>
+<li><strong>No <code>X-GitHub-Delivery</code> (or one over 128 chars) → 400</strong> — GitHub always sends one, so a request
+  without it is not GitHub's; accepting it would make the check optional for a replayer.</li>
+<li>Recorded only <strong>after</strong> the HMAC check: an unauthenticated caller can't burn a real delivery's id
+  (a bad signature stays a 401). Concurrent copies of one id serialize on its row.</li>
+<li>Ids past the window are purged by the daily retention task (§7.5).</li>
+<li><strong>Limit</strong>: GitHub signs the body only — neither the delivery id nor a timestamp — so this stops
+  duplicate and replayed deliveries carrying their id, not an attacker who holds a captured,
+  signed body and forges a new id. The per-stack HMAC secret (and TLS) remains the control.</li>
+</ul>
 <hr />
 <h2 id="14-tests-minimal-strategy">14. Tests — minimal strategy<a class="headerlink" href="#14-tests-minimal-strategy" title="Permanent link">&para;</a></h2>
 <ul>
@@ -5516,7 +5545,12 @@ override, used for that run only: it is sealed AES-256-GCM on the run
 <ul>
 <li><strong>Permission</strong>: supplying an override is an apply-affecting bypass → requires
   <code>can_apply(user, env)</code> (§2.4). It is rejected unless the targeted variable's
-  <code>secret_fallback_mode = break_glass</code> (a source must opt in to being overridable).</li>
+  <code>secret_fallback_mode = break_glass</code> (a source must opt in to being overridable): every name in
+  <code>secret_overrides</code> must be a secret reference resolved for the env with that mode, else <strong>422</strong>
+  (after the 403 permission check; the error lists the names, never a value) and no run is created.</li>
+<li><strong>Lifetime</strong>: the sealed overrides stay on the run only while a job may still claim them;
+  <code>transition()</code> wipes <code>runs.secret_overrides_encrypted</code> when the run reaches a terminal state,
+  alongside the saved plan (§11.3).</li>
 <li>The override value is injected like a sensitive variable, added to <code>mask_values</code>, and sets
   <code>run.used_secret_fallback = true</code>, provenance <code>secret_override:{source_name}</code>.</li>
 <li>Audit <code>secret.fallback_overridden</code> (target: the run), <code>context = {variable, source}</code> — <strong>the value itself
@@ -5649,6 +5683,12 @@ author or <code>role ∈ {approver, admin}</code>; deleting needs the author or 
 </table>
 <p>Every create/edit/delete/resolve emits a light <code>pg_notify('run_&lt;id&gt;', …)</code> (§5.3) so the run page's
 existing WS subscription invalidates <code>["run-comments", run_id]</code> and the thread updates live.</p>
+<p>Each of them is also audited in the same transaction (§6.3): <code>comment.created</code>, <code>comment.updated</code>
+(a body edit), <code>comment.resolved</code> / <code>comment.reopened</code> (<code>resolved</code> set true / false), and
+<code>comment.deleted</code> — <code>target_kind = comment</code>, <code>target_id</code> = the comment, context <code>run_id</code>, plus
+<code>parent_id</code> for a reply and <code>anchor_kind</code> for an anchored comment. <strong>Never the body</strong>: it is free
+text a reviewer may have pasted anything into. A PATCH changing both body and <code>resolved</code> writes
+both events. Deleting a root records its own <code>comment.deleted</code> only (its replies go with it).</p>
 <h3 id="164-interaction-with-the-gate">16.4 Interaction with the gate<a class="headerlink" href="#164-interaction-with-the-gate" title="Permanent link">&para;</a></h3>
 <p><strong>Advisory</strong> at v1: the run page shows the count of open (unresolved) threads next to the Confirm
 button; it does <strong>not</strong> block. (<code>can_apply</code> and the §9.3/§15.5 gates are untouched.) A future opt-in
@@ -5658,6 +5698,8 @@ env flag could make confirm require all threads resolved — deliberately deferr
 <li>No run-state change — comments are a side record; <code>transition()</code> (invariant §4.2) is untouched.</li>
 <li>Snippets come from already-masked log lines, so no secret leaks (invariant §13.3).</li>
 <li>Live updates reuse <code>LISTEN/NOTIFY</code> (§5.3) — no new transport.</li>
+<li>Every mutation writes its <code>comment.*</code> audit event in the same transaction (§6.3), without the
+   body.</li>
 </ol>
 <hr />
 <h2 id="17-in-app-notification-center-post-mvp">17. In-app notification center (post-MVP)<a class="headerlink" href="#17-in-app-notification-center-post-mvp" title="Permanent link">&para;</a></h2>
@@ -5679,7 +5721,9 @@ rollout_upstream_changed</code> (<code>drift_detected</code>: §19.4; the <code>
   requires <code>can_destroy</code>; excluding the triggerer. <code>→ finished</code> / <code>→ failed</code> notify the run's human
   triggerer (<code>run_finished</code> / <code>run_failed</code>); <code>canceled</code> and <code>discarded</code> notify nobody.</li>
 <li><strong>comment create</strong> (§16): a reply notifies the root author; <code>@mention</code> tokens (matched against a
-  user's email local-part or full email) notify the mentioned users. Never the author. The composer
+  user's email local-part or full email) notify the mentioned users. Never the author, and only a
+  user who can read the run — an enabled member of its space or an instance admin (§2.4): a reply
+  or a mention of anyone else notifies no one (the notification would leak the run). The composer
   offers <code>@</code> autocomplete from <code>GET /users/mentionable</code> (a minimal directory readable by any auth),
   inserting <code>@&lt;email-local-part&gt;</code> so it resolves against the parser.</li>
 <li><strong>rollouts</strong> (§21.7): <code>advance_rollout()</code> notifies the rollout's creator and approver of a pause or

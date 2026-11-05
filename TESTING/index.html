@@ -1655,8 +1655,8 @@ all. Counts in parentheses include parametrized cases and drift as tests are add
 </thead>
 <tbody>
 <tr>
-<td><code>test_auth.py</code> (5)</td>
-<td>Dev-login personas; <code>/refresh</code> CSRF double-submit; refresh rotation and reuse detection (the family is revoked); onboarding flag; unauthenticated <code>/me</code> → 401 problem+json.</td>
+<td><code>test_auth.py</code> (6)</td>
+<td>Dev-login personas; <code>/refresh</code> CSRF double-submit; refresh rotation and reuse detection (the family is revoked); onboarding flag; unauthenticated <code>/me</code> → 401 problem+json; Google admission fails closed (no allowlist → nobody).</td>
 </tr>
 <tr>
 <td><code>test_permissions.py</code> (9)</td>
@@ -1715,16 +1715,16 @@ all. Counts in parentheses include parametrized cases and drift as tests are add
 <td><code>hcl</code> variables routed to the generated <code>.auto.tfvars</code>, everything else to JSON.</td>
 </tr>
 <tr>
-<td><code>test_secret_sources.py</code> (10)</td>
-<td>External secret references: live value masked, static fallback + apply gate, <code>error</code> mode fails closed, break-glass override (needs apply right), source CRUD hides the bootstrap secret, in-use source can't be deleted, a fallback appearing at the apply claim is gated; a variable can't reference another space's source, and one written before that check fails the run closed.</td>
+<td><code>test_secret_sources.py</code> (11)</td>
+<td>External secret references: live value masked, static fallback + apply gate, <code>error</code> mode fails closed, break-glass override (needs apply right, only for a <code>break_glass</code> reference — else 422 —, wiped at the terminal state), source CRUD hides the bootstrap secret, in-use source can't be deleted, a fallback appearing at the apply claim is gated; a variable can't reference another space's source, and one written before that check fails the run closed.</td>
 </tr>
 <tr>
 <td><code>test_proposed_secrets.py</code> (3)</td>
 <td>A proposed run's claim carries no secret — no sensitive variable of either kind, no external reference (not fetched), nothing in <code>mask_values</code> or the provenance — and keeps the plan role and the repo token; a tracked run and a drift run still get every secret.</td>
 </tr>
 <tr>
-<td><code>test_dependencies.py</code> (24)</td>
-<td>Mocks (used, block apply, real value wins, missing → fail), anti-cycle, cascade; <code>link-by-name</code> idempotent, skips hand-made and racing edges and in-request cycles; <code>/graph</code> hides edges outside the caller's spaces; multi-parent cascade (SPECS §9.2): a downstream waits for all its parents, direct or indirect, and is triggered once; a failed, discarded or canceled parent stops its branch and everything reachable; an empty plan releases a waiting downstream and is never the parent; <code>never</code> / <code>on_output_change</code> policies in a multi-parent graph; a skipped downstream stays skipped; a protected downstream stops at <code>unconfirmed</code>; the group status counts only the runs the caller can read.</td>
+<td><code>test_dependencies.py</code> (25)</td>
+<td>Mocks (used, block apply, real value wins, missing → fail), anti-cycle, cascade (<code>on_output_change</code> compares with the downstream's last apply, not a plan-only run); <code>link-by-name</code> idempotent, skips hand-made and racing edges and in-request cycles; <code>/graph</code> hides edges outside the caller's spaces; multi-parent cascade (SPECS §9.2): a downstream waits for all its parents, direct or indirect, and is triggered once; a failed, discarded or canceled parent stops its branch and everything reachable; an empty plan releases a waiting downstream and is never the parent; <code>never</code> / <code>on_output_change</code> policies in a multi-parent graph; a skipped downstream stays skipped; a protected downstream stops at <code>unconfirmed</code>; the group status counts only the runs the caller can read.</td>
 </tr>
 <tr>
 <td><code>test_hooks.py</code> (2)</td>
@@ -1771,8 +1771,8 @@ all. Counts in parentheses include parametrized cases and drift as tests are add
 <td><code>stale</code> on the env API; head polling once per (repo, branch, credentials), surviving a failing repo, respecting the interval, bounded concurrency, never blocking the other scheduler tasks; refresh-head holds no transaction across git and is audited; a branch change resets the head.</td>
 </tr>
 <tr>
-<td><code>test_webhooks.py</code> (5)</td>
-<td>Push updates the head and triggers; bad signature → 401; PR → proposed run; a branch-deletion push clears the head and triggers nothing; an env re-pointed meanwhile is skipped.</td>
+<td><code>test_webhooks.py</code> (9)</td>
+<td>Push updates the head and triggers; bad signature → 401; PR → proposed run; a branch-deletion push clears the head and triggers nothing; an env re-pointed meanwhile is skipped; anti-replay: a repeated <code>X-GitHub-Delivery</code> within 5 min is a <code>200</code> no-op, processed again past the window, a missing id → 400 (a forged signature doesn't burn the id), old ids purged.</td>
 </tr>
 <tr>
 <td><code>test_vcs.py</code> (6)</td>
@@ -1799,12 +1799,12 @@ all. Counts in parentheses include parametrized cases and drift as tests are add
 <td>Target CRUD + audit, test delivery, unsupported states, outbox enqueue and dispatch; SSRF: delivery pinned to the vetted IP (DNS rebinding), private IPs refused at create and at delivery, no redirects, body validation does no DNS.</td>
 </tr>
 <tr>
-<td><code>test_inbox.py</code> (6)</td>
-<td>In-app notifications: approval requests to eligible approvers by space membership, terminal notifies the triggerer, replies and mentions, per-user feed, mark read, delete and clear.</td>
+<td><code>test_inbox.py</code> (7)</td>
+<td>In-app notifications: approval requests to eligible approvers by space membership, terminal notifies the triggerer, replies and mentions (only to users who can read the run), per-user feed, mark read, delete and clear.</td>
 </tr>
 <tr>
-<td><code>test_comments.py</code> (6)</td>
-<td>Plan-review threads: anchors, one level of replies, edit/resolve/delete permissions.</td>
+<td><code>test_comments.py</code> (7)</td>
+<td>Plan-review threads: anchors, one level of replies, edit/resolve/delete permissions; every mutation audited (<code>comment.*</code>, never the body).</td>
 </tr>
 <tr>
 <td><code>test_metrics_ratelimit.py</code> (8)</td>

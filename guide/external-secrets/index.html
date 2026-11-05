@@ -1402,6 +1402,10 @@
 <a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a><span class="w">  </span>-H<span class="w"> </span><span class="s2">&quot;Authorization: Bearer </span><span class="nv">$TOKEN</span><span class="s2">&quot;</span><span class="w"> </span>-H<span class="w"> </span><span class="s1">&#39;content-type: application/json&#39;</span><span class="w"> </span><span class="se">\</span>
 <a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a><span class="w">  </span>-d<span class="w"> </span><span class="s1">&#39;{ &quot;secret_overrides&quot;: { &quot;db_password&quot;: &quot;manual-value&quot; } }&#39;</span>
 </code></pre></div>
+<p>Every name in <code>secret_overrides</code> must be a secret reference of the environment whose mode is
+<code>break_glass</code>; any other name (an <code>error</code> or <code>static</code> reference, a plain variable, an unknown name)
+gets a <strong>422</strong> and no run is created. The sealed values are wiped from the run as soon as it ends
+(finished, failed, canceled or discarded).</p>
 <h2 id="fallback-blocks-apply-by-default">Fallback blocks apply by default<a class="headerlink" href="#fallback-blocks-apply-by-default" title="Permanent link">&para;</a></h2>
 <p>A fallback value is <strong>not the real secret</strong> — it may be stale or operator-chosen. So a run that resolved any reference via fallback is flagged <code>used_secret_fallback</code> and <strong>cannot be applied</strong> unless the environment opts in:</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a>curl<span class="w"> </span>-s<span class="w"> </span>-X<span class="w"> </span>PATCH<span class="w"> </span>localhost:8000/api/v1/environments/<span class="nv">$ENV</span><span class="w"> </span><span class="se">\</span>
