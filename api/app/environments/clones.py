@@ -16,7 +16,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.audit import record_audit
-from app.auth.deps import CurrentUser, require_role
+from app.auth.deps import CurrentUser
 from app.db import get_session
 from app.dependencies.router import _create_edge
 from app.enums import AttachmentTarget, AuditActorKind, Role, SecretFallback, VariableKind
@@ -319,12 +319,7 @@ def _integrity_problem(exc: IntegrityError, body: CloneIn) -> ProblemException:
     )
 
 
-@router.post(
-    "/spaces/{space_id}/environment-clones",
-    status_code=201,
-    # Global role, like every route that creates environments, hooks or edges.
-    dependencies=[Depends(require_role(Role.writer))],
-)
+@router.post("/spaces/{space_id}/environment-clones", status_code=201)
 async def clone_environments(
     space_id: uuid.UUID, body: CloneIn, user: CurrentUser, session: DbSession
 ) -> dict[str, Any]:
