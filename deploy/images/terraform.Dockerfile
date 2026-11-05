@@ -7,10 +7,10 @@
 # user explicitly opts into Terraform and accepts the BUSL terms.
 #
 #   docker buildx build -f deploy/images/terraform.Dockerfile \
-#     --build-arg TERRAFORM_VERSION=1.9.8 \
-#     --platform linux/amd64,linux/arm64 -t stackd/terraform:1.9.8 .
+#     --build-arg TERRAFORM_VERSION=1.14.9 \
+#     --platform linux/amd64,linux/arm64 -t stackd/terraform:1.14.9 .
 
-ARG TERRAFORM_VERSION=1.9.8
+ARG TERRAFORM_VERSION=1.14.9
 ARG JQ_VERSION=1.7.1
 # HashiCorp's release signing key (https://www.hashicorp.com/security). The fetched key must have
 # exactly this fingerprint, so a tampered key file fails the build instead of verifying anything.

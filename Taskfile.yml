@@ -157,7 +157,7 @@ tasks:
     desc: Build the OpenTofu + Terraform runner images (host arch, loaded locally)
     cmds:
       - docker build -f deploy/images/opentofu.Dockerfile -t stackd/opentofu:1.12.2 .
-      - docker build -f deploy/images/terraform.Dockerfile -t stackd/terraform:1.9.8 .
+      - docker build -f deploy/images/terraform.Dockerfile -t stackd/terraform:1.14.9 .
 
   lint:
     desc: ruff check + ruff format --check (api; mypy runs in CI only)
