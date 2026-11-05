@@ -59,8 +59,7 @@ export function fourEyesOf(
   if (env.require_second_pair_of_eyes) because.push("environment requires a second pair of eyes");
   // A human triggerer: a manual run's, or a rollout member's — the rollout's creator, whom the API
   // also holds to four-eyes (api/app/runs/service.py `confirm_run`, SPECS §2.4).
-  const human =
-    run.triggered_by === "manual" || run.triggered_by === "rollout" ? run.trigger_user_id : null;
+  const human = run.triggered_by === "manual" || run.triggered_by === "rollout" ? run.trigger_user_id : null;
   return { required: because.length > 0, because, triggererId: human };
 }
 
