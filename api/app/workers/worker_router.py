@@ -135,7 +135,11 @@ async def register(body: RegisterIn, request: Request, session: DbSession) -> Re
     if worker is None:
         worker = Worker(pool_id=pool.id, name=body.name)
         session.add(worker)
-    worker.labels = body.labels
+    # Effective labels, what the claim matches an environment's labels against (§3.7/§7.2): the
+    # pool's, then the worker's own on top (the worker wins on a key both set). Computed at each
+    # registration — a pool's labels never change after creation.
+    labels = {**(pool.labels or {}), **(body.labels or {})}
+    worker.labels = labels or None
     worker.version = body.version
     worker.runner = body.runner
     worker.tools = body.tools

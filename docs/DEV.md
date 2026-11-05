@@ -166,6 +166,7 @@ Safeguard: the API refuses to start with `STACKD_DEV_AUTH=true` and `STACKD_ENV=
 - Tool binaries: **OpenTofu and Terraform** pre-installed in the dev image (no download on first run). A stack's `tool` picks which one runs — no separate "terraform worker", any dev worker handles both.
 - Agent hot reload (watchfiles): modifying `worker/` restarts the agent process — watchfiles sends SIGINT, then SIGKILL after 5 s — so a job still running is cut off, not drained.
 - Multi-workers to test concurrency and affinity: `docker compose -f deploy/docker-compose.dev.yml up -d --scale worker=3`, or `STACKD_MAX_CONCURRENT_JOBS` for several jobs per worker.
+- The dev worker registers with no labels (its `local` pool has none either), so it takes runs of unlabelled environments only. To try label routing, give the `worker` service `STACKD_WORKER_LABELS: "tier=prod"` (comma-separated `key=value`, SPECS §7.1) and the environment the same labels.
 - The worker reads its pool token from `.dev/pool.token` (`STACKD_POOL_TOKEN_FILE`), written by the seed: it waits for the file and re-reads it on a failed registration.
 
 ---

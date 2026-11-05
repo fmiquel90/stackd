@@ -974,6 +974,7 @@ def run() -> None:
             client.register(
                 settings.pool_token,
                 settings.worker_name,
+                labels=settings.labels or None,
                 runner=settings.runner,
                 tools=settings.available_tools(),
             )
