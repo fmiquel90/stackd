@@ -5,7 +5,7 @@ A sensitive variable can carry its value **by reference** to an external secrets
 This is a security upgrade over a stored secret: no secret at rest in Stackd's database, automatic rotation (you rotate in the manager, not here), and a single revocable bootstrap credential per source.
 
 !!! info "Provider support"
-    **Proton Pass** is the first provider, via its [CLI](https://proton.me/blog/proton-pass-cli) and scoped Personal Access / AI Access Tokens. The model is provider-agnostic — Vault, AWS Secrets Manager, 1Password and others plug into the same interface.
+    **Proton Pass** is the only provider today (`"provider": "proton_pass"`), via its [CLI](https://proton.me/blog/proton-pass-cli) and scoped Personal Access / AI Access Tokens. The model is provider-agnostic — Vault, AWS Secrets Manager, 1Password and others can plug into the same interface later.
 
 ## How it fits together
 

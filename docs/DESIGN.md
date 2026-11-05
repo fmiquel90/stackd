@@ -592,8 +592,8 @@ horizontal strip above the tabs (§2.2). A condensed two-line header is **[not b
 ### 5.4 `/s/:space/graph` and run groups
 
 - react-flow, dagre left→right. **Filter** by env name and tier (URL), applied to the graph and the list alike.
-- **Node** = `EnvCell` content (stack/env, mini rail, outcome, modifiers) inside a 220 px card. Nodes are focusable in topological order with `aria-label` = env name + summary. Click / Enter opens the **node drawer** (non-modal sheet): env summary, last run (link), published outputs (sensitive masked), dependencies in and out, actions (Open env, Plan).
-- **Edge label** = the output names it carries (`network_name`, `+2` when more), from the downstream env's dependency references (fetched lazily per visible edge). Edge style: solid `text-secondary`; **dashed magenta only when the downstream env's primary run consumed a mock for one of the edge's inputs** (`variable_provenance[input] = "mock"`); a reference with a mock *defined* but unused shows a small neutral `◇ mock` marker. Policy shown on hover (`on_output_change`).
+- **Node** = `EnvCell` content (stack/env, mini rail, outcome, modifiers) inside a 230 px card. Nodes are focusable in topological order with `aria-label` = env name + summary. Click / Enter opens the **node drawer** (non-modal sheet): env summary, last run (link), published outputs (sensitive masked), dependencies in and out, actions (Open env, Plan).
+- **Edge label** = the output names it carries (the first two, then `+n`), from the downstream env's dependency references (fetched lazily per visible edge). Edge style: solid `text-secondary`; **dashed magenta, labelled `◆ mock`, only when the downstream env's primary run consumed a mock for one of the edge's inputs** (`variable_provenance[input] = "mock"`); a reference with a mock *defined* but unused adds a small neutral `◇` to the label. The policy (`on_output_change`) is shown in the list view and the node drawer.
 - React Flow's controls, labels and background are re-skinned onto tokens (no library default colour).
 - **List view** (`?view=list`): the full equivalent — an adjacency table `upstream → downstream · outputs · policy · mock used?` with the same filter, sortable, every row expandable to its references.
 - **Run groups**: the API now exposes `run_group_id`, `parent_run_id` and `run_group {id, status}` on `GET /runs/{id}` (SPECS §9.2, AUDIT A5); the front does not use them yet. **[today]** a run page's cascade preview and the graph highlight "runs started via dependency after this apply" (downstream env runs with `triggered_by=dependency` created after the upstream's `finished_at`), labelled as such. **[with A5]** the real group view: same graph, nodes colouring live, a group header with progress.
@@ -604,7 +604,8 @@ horizontal strip above the tabs (§2.2). A condensed two-line header is **[not b
 The visual answer to "why isn't my run starting?". In the nav, with a count badge when a run has
 waited more than 2 minutes.
 
-- Three groups: **Executing** (`preparing`, `planning`, `checking`, `applying` — worker name, phase, duration), **Waiting for a worker** (`queued`, `confirmed` — age, blocking reason), and a one-line link "**N runs await a human decision** → Overview" (unconfirmed runs are not in the machine queue).
+- Three groups: **Executing** (`preparing`, `planning`, `checking`, `applying`, `running` — worker name, phase, duration), **Waiting for a worker** (`queued`, `confirmed` — age, blocking reason), and a one-line link "**N runs await a human decision** → Overview" (unconfirmed runs are not in the machine queue).
+- No WebSocket channel carries the queue: the page polls `GET /queue` every 3 s (the nav badge every 15 s).
 - Every row resolves names: `stack / env`, run short ID, type, worker name. Ages come from each run's `created_at` (**[today]** one `runs.get` per row; the queue rarely exceeds a few dozen).
 - Blocking reasons in words with a link: `another run is active on this environment → run 01a1276c`, `environment locked`, `no worker compatible with labels {…}`, `apply affinity reservation (worker vm, 38 s left)`.
 - Filter by stack/env/pool (URL).
@@ -616,7 +617,7 @@ waited more than 2 minutes.
 - **Admin only** (SPECS §2.4 residual): hidden from the nav for other roles; a direct visit says "The audit journal is restricted to administrators" (AUDIT A9).
 - Dense chronological table: mono ISO timestamp (local, with relative on hover), actor (email), action as a neutral badge, **target as a link** (`run 01a1276c · demo-network/prod`, resolved from `target_kind`/`target_id`), context summarised (`+4 ~0 −0`, `tier prod`, `commit 2af0351`). A system `run.confirmed` under a rollout's approval reads "auto-confirmed under the rollout approval of alice@…" (SPECS §21.5) — never as alice's confirm. The CSV export carries the context as a JSON column.
 - `run.confirmed`, `run.applied` and destroys have a slightly contrasted row (`bg-raised`).
-- `auth.login` / `auth.refresh` hidden by default ("Show sign-ins" toggle) — they are 90 % of the volume.
+- `auth.login` / `auth.refresh` / `auth.logout` hidden by default ("Show sign-ins" toggle) — they are 90 % of the volume. Older events load on demand ("Load older events").
 - Filters (all in the URL, mapped to the API's `actor`, `action`, `target_kind`, `target_id`, `from_`, `to`): actor, action (grouped select by domain), target (picker: stack, env, run), period. CSV export on the right with the same filters.
 
 ### 5.7 Forms, configuration and dangerous switches
@@ -629,41 +630,42 @@ waited more than 2 minutes.
 | Action | Confirmation |
 |---|---|
 | Delete a stack, an environment, a worker pool, a variable set, a tier | type the name (dialog) |
-| **Turn off** `requires_four_eyes` on a tier, `protected` or `require_second_pair_of_eyes` on an env; turn **on** `allow_mock_apply` / `allow_fallback_apply` | type the tier / env name (dialog that states the consequence: "Members who trigger a prod run will be able to confirm it themselves") |
+| **Turn off** `requires_four_eyes` on a tier, `protected` or `require_second_pair_of_eyes` on an env; turn **on** `allow_mock_apply` / `allow_fallback_apply` on an env or `repo_hooks_at_apply` on a tier | type the tier / env name (dialog that states the consequence: "Members who trigger a prod run will be able to confirm it themselves"); its submit is the amber `decision` button |
 | Force-unlock a state (admin only; hidden for others) | type the env name; the dialog shows who holds the lock and since when if known |
 | Change a user's role, allowed tiers or `can_destroy` | staged edit + "Save" with a summary of the change ("bob: + prod in allowed tiers") |
 | Delete a variable, a hook, a notification target, an attachment | confirmation popover anchored to the Delete button, button labelled "Delete variable region" |
 | Approve a rollout (SPECS §21.6) | dialog listing every member env with its tier and the gate ("creates-only plans will be applied without asking again, for 24 h"); type the rollout's environment name |
-| Turning a safety switch **on** (four-eyes on, protected on) | none (one click; reducing risk has no friction) |
+| Turning a safety switch **on** (four-eyes on, protected on, repo hooks at apply forbidden) | none (one click; reducing risk has no friction) |
 
 - Wizard (new stack): numbered steps; each step independently validatable (the repo check runs at step 1).
 
 ### 5.8 Stack page and environment page
 
-**Stack page** `/s/:space/stacks/:stack` — tabs **Environments** and **Settings** (general, variables,
-hooks, notifications, secret sources; URL `?tab=`).
+**Stack page** `/s/:space/stacks/:stack` — tabs **Environments** and **Settings** (sections general,
+variables, hooks, notifications, secret sources; URL `?tab=settings&sub=`).
 
-- Environments = a table, one row per env: `EnvCell` content, tier, branch, deployed commit, protections (badges: `four-eyes`, `protected`, `autodeploy`, `managed state`), and row actions (Plan, Open). The row opens the env page. "Add environment" (writer+) opens a dialog.
+- Environments = a table, one row per env: the env name (link to the env page), `EnvCell`, tier, branch, deployed commit, protections (badges: `four-eyes`, `protected`, `2nd eyes`, `autodeploy`); branch, deployed commit and protections are hidden below 768 px. Row actions (Plan, Open) are **[not built yet]**. "Add environment" (writer+) opens a dialog.
 
 **Environment page** `/s/:space/stacks/:stack/envs/:env` (new in v2):
 
-- **Header**: `stack / env`, tier, branch, deployed commit vs head (`2af0351 → 125304e ↑`, refresh-head button), drift (`≈ drifted, checked 1h ago → drift run`), lock, protection badges.
-- **Primary actions** (writer+): **Plan** (primary button), and a "More" menu: Plan with downstream (`with_downstream`), Destroy… (shown only with `can_destroy`; opens a dialog explaining the run will need typed confirmation at apply), Promote from… (sibling env, SPECS §9.7), Run command… (allowlist, SPECS §4.3), New environment from… (this env preselected as the model) and Roll out every “<name>” environment… (SPECS §21, DESIGN §5.11).
-- **Tabs** (URL): **Runs** (default) — history table: run short ID, type (`tracked`, `destroy`, `PR`, `drift`, `command`), trigger (who/how), outcome badge, plan summary, commit, age, duration; filter by type; paginated client-side **[today]**. **Inputs** (Resolved with provenance / Environment overrides / Discover inputs), **Outputs**, **Dependencies**, **State** (versions; force-unlock admin-only per §5.7), **Settings** (name, tier, branch, flags with the §5.7 friction, backend config, labels, hooks, notifications, cloud integration), and a **Danger zone** at the bottom of Settings (delete environment, typed name).
+- **Header**: `stack / env`, badges (tier, `four-eyes`, `protected`, `second pair of eyes`, `autodeploy`, `managed state`); a summary strip with the env's `EnvCell` (active run or last outcome), branch, deployed commit and head (`↑` when ahead; a Refresh button, writer+), drift (`≈ DRIFT` + "see the drift" → drift run, or "No drift detected · checked 1h ago" / "Drift detection off"), lock.
+- **Primary actions** (writer+): **Plan** (primary button), and a "More" menu: Plan with downstream (`with_downstream`), Promote from a sibling… (SPECS §9.7), Run a command… (allowlist, SPECS §4.3), New environment from… (this env preselected as the model), Roll out every “<name>” environment… (SPECS §21, DESIGN §5.11) and Plan a destroy… (shown only with `can_destroy`; opens a dialog explaining the run will need typed confirmation at apply).
+- **Tabs** (URL): **Runs** (default) — history table: run short ID, kind (`tracked`, `destroy`, `PR`, `drift`, `command`), outcome badge, mini rail, commit, trigger (who/how), start, duration; filter by kind (`?kind=`); paginated client-side, 50 at a time **[today]**. **Inputs** (Resolved with provenance / Environment overrides / Discover inputs), **Outputs**, **Dependencies**, **State** (versions; force-unlock admin-only per §5.7), **Settings** (name, tier, branch, flags with the §5.7 friction, backend config, labels, hooks, notifications, cloud integration), and a **Danger zone** at the bottom of Settings (delete environment, typed name).
 
 ### 5.9 `/workers` — workers & pools
 
 - Health strip: API status, database, workers online/total, runs active/queued, recent warnings — values in `text-primary`; only a failing check is red. No green for "ok" (telemetry is neutral, §3.6).
-- Workers grouped by pool: name, labels, status (`online` / `offline` as text + `●` / `○`), last heartbeat (relative), agent version, Diagnostics / Logs actions (admin).
+- Workers grouped by pool (`n/m online`, pool labels): name, status (`● online` neutral, `✕ offline` in red — an error), last heartbeat (relative), labels, runner (`docker` / `local`), agent version, Diagnostics / Logs actions (admin).
 - Pool management (admin): create (token shown **once** in a banner with a copy action, hashed at rest), delete (typed name, §5.7).
-- Platform logs: HTTP status and level neutral; `ERROR` / `CRITICAL` and 5xx in red; the worker long-poll on `/worker/v1/jobs/claim` is labelled "long-poll" and excluded from the "slow" highlight.
+- Platform logs (admin): HTTP status and level neutral; `ERROR` / `CRITICAL` and 5xx in red; the worker long-poll on `/worker/v1/jobs/claim` is labelled "long-poll" and excluded from the "slow" highlight.
 
 ### 5.10 Variable sets, settings, login, notifications (new section in v2)
 
-- **Variable sets** (`/s/:space/variable-sets`): one row per set with how it reaches envs (`auto-attach`, `rule: team=payments`, `3 attachments`); the row opens a page with tabs Variables / Attachments / Settings. Delete per §5.7.
-- **Settings** (`/settings`): **Preferences** for everyone (theme: system / dark / light; single-key shortcuts on/off — in memory, for the tab only, until A8). Admin only: **Tiers** (name, `requires_four_eyes` with §5.7 friction, position, envs using it, delete per §5.7), **Users & roles** (staged edits, §5.7), **Spaces** (members, per-space role and tiers), **Deployment** (version, environment).
+- **Variable sets** (`/s/:space/variable-sets`): one row per set with how it reaches envs (`auto-attach · whole space`, `rule: team=payments`, `3 attachments`); the set opens its page (`/s/:space/variable-sets/:set`) with tabs Variables / Attachments / Settings (`?tab=`). Delete per §5.7.
+- **Settings** (`/settings`): **Preferences** for everyone (theme: follow the system / dark / light; single-key shortcuts on/off — in memory, for the tab only, until A8) and **Deployment** for everyone (environment, version, database status). Admin only: **Tiers** (name, `requires_four_eyes` and `repo_hooks_at_apply` with §5.7 friction, display order, envs using it, delete per §5.7), **Users** (role, allowed tiers, `can_destroy`, disabled — staged edits, §5.7), **Spaces** (members, per-space role and tiers).
 - **Login**: brand mark, "Sign in with Google"; in dev, the personas show email and role, and their allowed tiers once the dev endpoint returns them (needs API work A12).
-- **Notifications** (bell popover, Radix): each item names what and where ("Run failed · demo-dns/dev · 6m"), links to the run (Logs at first error for failures) — a rollout notification (`rollout_paused`, `rollout_succeeded`, `rollout_failed`, `rollout_upstream_changed` "Upstream applied under a rollout", SPECS §21.7) to the rollout page —, mark read on open; "Mark all read" / "Clear read". The bell badge counts unread, neutral (not violet, not amber).
+- **First-login walkthrough**: a short dialog tour (overview, stacks and environments, runs, permissions, dependencies…) shown until the user completes it; closing it in any way completes it, persisted server-side (no browser storage).
+- **Notifications** (bell popover, Radix): each item names what and where ("Run failed · demo-dns/dev · 6m"), links to the run (Logs at first error for failures) — a rollout notification (`rollout_paused`, `rollout_succeeded`, `rollout_failed`, `rollout_upstream_changed` "Upstream applied under a rollout", SPECS §21.7) to the rollout page. Opening the popover marks every item read (items that were unread keep a "new" mark while it stays open); "Clear read" removes the read ones. The bell badge counts unread, neutral (not violet, not amber).
 
 ### 5.11 Environment clones and rollouts (SPECS §21)
 

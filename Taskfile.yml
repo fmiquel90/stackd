@@ -160,7 +160,7 @@ tasks:
       - docker build -f deploy/images/terraform.Dockerfile -t stackd/terraform:1.9.8 .
 
   lint:
-    desc: ruff + mypy
+    desc: ruff check + ruff format --check (api; mypy runs in CI only)
     cmds:
       - "{{.COMPOSE}} exec -T api uv run ruff check ."
       - "{{.COMPOSE}} exec -T api uv run ruff format --check ."

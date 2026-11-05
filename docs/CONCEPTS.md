@@ -403,7 +403,7 @@ cd worker && STACKD_POOL_TOKEN=$POOL STACKD_API_URL=http://localhost:8000 uv run
 The tfstate bytes live in **S3**, but Terraform talks to **Stackd's HTTP backend**, not S3 directly.
 
 ```
-terraform ──backend "http"──▶ Stackd API ──(SSE-KMS)──▶ S3
+terraform ──backend "http"──▶ Stackd API ──(bucket encryption)──▶ S3
                                   └─▶ Postgres: versions, locks, audit
 ```
 
