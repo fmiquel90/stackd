@@ -63,7 +63,7 @@ curl -s -X POST localhost:8000/api/v1/stacks/$STACK/environments \
 - **`allow_mock_apply`** — allow applying a run that consumed mock outputs (default `false`). See [Dependencies & mocks](dependencies-and-mocks.md).
 - **`allow_fallback_apply`** — allow applying a run whose external secret came from a fallback (default `false`). See [External secret sources](external-secrets.md#fallback-blocks-apply-by-default).
 - **`drift_check_enabled`** — include the environment in the periodic drift check (default `true`).
-- **`labels`** — JSON tags: a run is only claimed by a worker whose labels contain all of them (see [Workers & scaling](workers-and-scaling.md#dedicate-a-pool-with-labels)); with the stack's labels they also select variable sets (see [Variables](variables.md)).
+- **`labels`** — JSON tags: a run is only claimed by a worker whose labels contain all of them (see [Workers & scaling](workers-and-scaling.md#dedicate-a-pool-with-labels) — the bundled agent registers without labels for now, so a labelled environment's runs stay queued); with the stack's labels they also select variable sets (see [Variables](variables.md)).
 
 !!! warning "Why not Terraform workspaces"
     Workspaces share code, backend and credentials and only suffix the state key — easy to target the wrong one. A Stackd environment is **physically isolated**: its own state, variables, protections and worker pool.
