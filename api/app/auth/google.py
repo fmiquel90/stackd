@@ -91,10 +91,12 @@ def validate_id_token(id_token: str, expected_nonce: str) -> dict:
 
 
 def admit(claims: dict) -> None:
-    """Admission policy (SPECS §2.1 step 5): verified email + allowed `hd` domain."""
+    """Admission policy (SPECS §2.1 step 5): verified email + allowed `hd` domain. Fails closed: an
+    empty STACKD_ALLOWED_DOMAINS admits nobody (never "any Google account")."""
     settings = get_settings()
     if not claims.get("email_verified"):
         raise ProblemException(403, "Access denied", "Email not verified.")
-    hd = claims.get("hd")
-    if settings.allowed_domains and hd not in settings.allowed_domains:
+    if not settings.allowed_domains:
+        raise ProblemException(403, "Access denied", "No allowed domain is configured.")
+    if claims.get("hd") not in settings.allowed_domains:
         raise ProblemException(403, "Access denied", "Domain not allowed.")

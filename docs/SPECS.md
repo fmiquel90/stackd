@@ -26,6 +26,7 @@ Authorization Code + PKCE, the API is the confidential client:
 3. Google → /api/v1/auth/google/callback?code&state
 4. API    → exchange code+verifier, validate the id_token (JWKS, iss, aud, exp, nonce)
 5. API    → admission: email_verified == true, hd ∈ STACKD_ALLOWED_DOMAINS → otherwise 403
+            (fail closed: an empty list admits nobody, never "any Google account")
 6. API    → upsert User on google_sub (stable, unlike the email)
 7. API    → session: access JWT 15 min (front memory, never in browser storage)
             + refresh httpOnly 14 d, persisted in `refresh_tokens` (§2.5) with
@@ -35,6 +36,11 @@ Authorization Code + PKCE, the API is the confidential client:
 ```
 
 **CSRF**: the access token travels in the `Authorization: Bearer` header (no CSRF risk on API calls). The refresh relies on an httpOnly cookie → `/auth/refresh` and `/auth/logout` require `SameSite=Strict` **and** a double-submit CSRF token (the only pair of cookie-bound endpoints). Refresh cookie `stackd_refresh`: httpOnly, `Path=/api/v1/auth`; CSRF cookie `stackd_csrf`: readable by JS (`Path=/`, so the SPA can echo it in `X-CSRF-Token` on boot); both `SameSite=Strict`, `Secure` when `STACKD_ENV=production`.
+
+**Allowlist required**: `STACKD_ALLOWED_DOMAINS` (comma-separated Workspace domains) is the only
+admission gate, so an empty list admits no Google login, and a production API refuses to start
+without at least one domain (§13). There is no "any Google account" mode: a personal account has no
+`hd` claim and is never admitted. Dev login (`STACKD_DEV_AUTH`, never in production) ignores it.
 
 Bootstrap: the first user of an allowed domain = `admin`, subsequent ones = `reader`. No local auth; internal `AuthProvider` interface for other IdPs later. Login/logout/denial → `audit_events`.
 
@@ -1508,7 +1514,7 @@ Specified but **not served yet**: `GET /api/v1/run-groups/{id}` (§9.4).
 
 | Surface | Measure |
 |---|---|
-| Human auth | Google OIDC + PKCE, JWKS/nonce, `hd` restriction, rotating refresh |
+| Human auth | Google OIDC + PKCE, JWKS/nonce, `hd` restriction (fail closed: an empty `STACKD_ALLOWED_DOMAINS` admits nobody, and a production API refuses to start without one, §2.1), rotating refresh |
 | Cloud credentials | **OIDC workload by default**: tokens signed per run/phase, trust policies on claims, session name = run_id (CloudTrail ↔ Stackd audit). Static = fallback |
 | OIDC signing key | KMS (`kms:Sign`, required in production unless explicitly acknowledged) or AES-GCM in the DB (`oidc_signing_keys` §3.11), rotation with overlap and automatic retirement, short token TTL. `sub` wildcard allowed **only** on the stack segment; never on `tier` nor `phase` (§10.3) |
 | Static secrets | AES-256-GCM, write-only, decrypted at claim, masked in the logs |

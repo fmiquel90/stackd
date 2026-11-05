@@ -3,6 +3,7 @@ from __future__ import annotations
 import re
 
 import httpx
+import pytest
 
 
 def _set_cookies(resp: httpx.Response) -> dict[str, str]:
@@ -85,3 +86,28 @@ async def test_unauthenticated_me(client: httpx.AsyncClient) -> None:
     r = await client.get("/api/v1/auth/me")
     assert r.status_code == 401
     assert r.headers["content-type"].startswith("application/problem+json")
+
+
+def test_google_admission_fails_closed(monkeypatch: pytest.MonkeyPatch) -> None:
+    """§2.1 step 5: a verified email of an allowed `hd` only. An empty allowlist admits nobody —
+    never "any verified Google account" (a personal account has no `hd` at all)."""
+    from app.auth import google
+    from app.config import Settings
+    from app.errors import ProblemException
+
+    def _admit(domains: str, **claims: object) -> bool:
+        settings = Settings(stackd_allowed_domains=domains)  # type: ignore[call-arg]
+        monkeypatch.setattr(google, "get_settings", lambda: settings)
+        try:
+            google.admit({"email_verified": True, **claims})
+        except ProblemException as exc:
+            assert exc.status == 403
+            return False
+        return True
+
+    assert _admit("acme.com, other.org", hd="acme.com")
+    assert not _admit("acme.com", hd="evil.com")
+    assert not _admit("acme.com")  # a personal account (no hd)
+    assert not _admit("", hd="acme.com")  # nothing configured → nobody
+    assert not _admit("")
+    assert not _admit("acme.com", hd="acme.com", email_verified=False)

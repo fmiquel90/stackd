@@ -135,7 +135,7 @@ all. Counts in parentheses include parametrized cases and drift as tests are add
 
 | File | Covers |
 |---|---|
-| `test_auth.py` (5) | Dev-login personas; `/refresh` CSRF double-submit; refresh rotation and reuse detection (the family is revoked); onboarding flag; unauthenticated `/me` → 401 problem+json. |
+| `test_auth.py` (6) | Dev-login personas; `/refresh` CSRF double-submit; refresh rotation and reuse detection (the family is revoked); onboarding flag; unauthenticated `/me` → 401 problem+json; Google admission fails closed (no allowlist → nobody). |
 | `test_permissions.py` (9) | `can_apply` (pure): approver + tier set, writer refused, non-contiguous sets, empty set, custom tier, `can_destroy`; a space membership overrides the instance tiers, role and destroy right. |
 | `test_spaces.py` (8) | Per-space RBAC: non-members blocked on env-scoped reads, `/graph` and space listing scoped to memberships, grant then revoke, create = instance admin, members listing = space admin, create in an unknown space → 404. |
 | `test_tiers.py` (6) | Tier catalog: name charset (OIDC `sub` safety), `allowed_tiers` validated, deleting a tier strips grants, a tier in use can't be deleted; `repo_hooks_at_apply` reaches the claim only from a tier that allows it, off on the default catalog. |
