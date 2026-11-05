@@ -25,6 +25,7 @@ from app.runs.logs_archive import archive_run_logs, purge_hot_logs
 from app.runs.transition import transition
 from app.stacks.git import ls_remote_sha
 from app.vcs.dispatcher import dispatch_vcs
+from app.webhooks.replay import purge_webhook_deliveries
 from app.workers.claim import holds_apply_credentials
 
 # Distinct advisory-lock keys so each periodic task runs once across replicas (§7.5).
@@ -273,8 +274,9 @@ async def purge_audit_events(now: datetime) -> int:
 
 async def purge_retention(session: AsyncSession, now: datetime) -> None:
     """The daily retention task (§7.5): hot log rows past their window, expired refresh-token
-    families, audit events past retention. Each step is independent and idempotent."""
-    for step in (purge_hot_logs, purge_refresh_tokens):
+    families, webhook delivery ids past the replay window (§13), audit events past retention. Each
+    step is independent and idempotent."""
+    for step in (purge_hot_logs, purge_refresh_tokens, purge_webhook_deliveries):
         try:
             count = await step(session, now)
         except Exception as exc:

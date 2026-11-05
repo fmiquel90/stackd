@@ -42,7 +42,7 @@ VCS_POST_STATES: frozenset[RunState] = frozenset(
 # Legal state-machine edges (SPECS §4.1). `checking` is skipped when there are no after_plan hooks,
 # so planning has the same outgoing edges as checking.
 ALLOWED: dict[RunState, set[RunState]] = {
-    RunState.queued: {RunState.preparing, RunState.canceled, RunState.discarded},
+    RunState.queued: {RunState.preparing, RunState.canceled},
     # `running` is reached only by a RunType.command run (a one-off subcommand, no plan/apply).
     RunState.preparing: {RunState.planning, RunState.running, RunState.failed, RunState.canceled},
     RunState.running: {RunState.finished, RunState.failed, RunState.canceled},
@@ -61,13 +61,10 @@ ALLOWED: dict[RunState, set[RunState]] = {
         RunState.failed,
         RunState.canceled,
     },
-    RunState.unconfirmed: {
-        RunState.confirmed,
-        RunState.discarded,
-        RunState.canceled,
-        RunState.failed,
-    },
-    RunState.confirmed: {RunState.applying, RunState.failed, RunState.canceled},
+    # No `failed` from the two waiting states: no worker executes them, so no failure report can
+    # end them (§7.3) — an apply claim that fails closed fails the run from `applying`.
+    RunState.unconfirmed: {RunState.confirmed, RunState.discarded, RunState.canceled},
+    RunState.confirmed: {RunState.applying, RunState.canceled},
     RunState.applying: {RunState.finished, RunState.failed},
 }
 
@@ -140,6 +137,9 @@ async def transition(
         # Saved-plan retention (§11.3): a terminal run is never applied, and its plan file holds
         # secrets — drop it (pointer now, S3 object once this transaction commits).
         discard_saved_plan(session, locked)
+        # Break-glass overrides (§15.4) are for this run only: no job reads them once it is
+        # terminal, so the sealed values don't outlive it.
+        locked.secret_overrides_encrypted = None
 
     session.add(
         RunEvent(

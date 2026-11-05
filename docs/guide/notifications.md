@@ -129,7 +129,7 @@ Notifications are not a fire-and-forget side effect. When a run transitions to a
 
 ## In-app notifications
 
-Separately from these outbound targets, every user has an in-app inbox (the bell in the topbar), filled in the same transaction as its trigger: an `approval_request` to every user who may confirm a plan waiting on `unconfirmed`, `run_finished` / `run_failed` to the human who triggered a run by hand, `comment_reply` and `mention` on run comments, `drift_detected` to the users who may apply on a drifted environment, and the rollout notifications (`rollout_paused`, `rollout_succeeded`, `rollout_failed`, `rollout_upstream_changed`) to a rollout's creator and approver. It needs no setup; `GET /api/v1/notifications` lists the current user's, `POST /api/v1/notifications/read` marks them read.
+Separately from these outbound targets, every user has an in-app inbox (the bell in the topbar), filled in the same transaction as its trigger: an `approval_request` to every user who may confirm a plan waiting on `unconfirmed`, `run_finished` / `run_failed` to the human who triggered a run by hand (for a rollout's run, the rollout's creator), `comment_reply` and `mention` on run comments, `drift_detected` to the users who may apply on a drifted environment, and the rollout notifications (`rollout_paused`, `rollout_succeeded`, `rollout_failed`, `rollout_upstream_changed`) to a rollout's creator and approver. It needs no setup; `GET /api/v1/notifications` lists the current user's, `POST /api/v1/notifications/read` marks them read.
 
 ## See also
 

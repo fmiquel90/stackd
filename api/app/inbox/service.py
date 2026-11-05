@@ -4,14 +4,13 @@ import json
 import re
 import uuid
 
-from sqlalchemy import select, text
+from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.enums import RunState, RunType, TriggeredBy
 from app.models.environment import Environment
 from app.models.run import Run
 from app.models.stack import Stack
-from app.models.user import User
 from app.models.user_notification import UserNotification
 from app.permissions import can_apply
 from app.spaces.service import users_with_space_access
@@ -78,10 +77,22 @@ async def enqueue_for_transition(session: AsyncSession, run: Run, to_state: RunS
         return
 
     if to_state in (RunState.finished, RunState.failed) and run.trigger_user_id is not None:
-        if run.triggered_by != TriggeredBy.manual:
+        # A human triggerer: a manual run's, or a rollout member's — its rollout's creator (§17.1).
+        if run.triggered_by not in (TriggeredBy.manual, TriggeredBy.rollout):
             return
         kind = "run_finished" if to_state == RunState.finished else "run_failed"
         await notify(session, run.trigger_user_id, kind, run_id=run.id)
+
+
+async def _run_readers(session: AsyncSession, run: Run) -> dict[uuid.UUID, str]:
+    """Who may read `run` (id → email): the enabled members of its space and the instance admins —
+    the reader floor `guard_run_id` enforces (§2.4). Fails closed: no env/stack → nobody."""
+    env = await session.get(Environment, run.environment_id)
+    stack = await session.get(Stack, env.stack_id) if env is not None else None
+    if stack is None:
+        return {}
+    readers = await users_with_space_access(session, stack.space_id)
+    return {user.id: user.email for user, _ in readers}
 
 
 async def enqueue_for_comment(
@@ -94,11 +105,18 @@ async def enqueue_for_comment(
     parent_author_id: uuid.UUID | None,
 ) -> None:
     """A new comment notifies the parent thread's author (a reply) and any @mentioned users
-    (§16/§17), never the author themselves."""
+    (§16/§17), never the author themselves — and only users who may read the run: a member of the
+    run's space or an instance admin, enabled (§2.4). A mention of anyone else is dropped, so a
+    comment can't leak a run (its link, its env) to a user outside the space."""
     ctx = {"run_id": str(run.id)}
     notified: set[uuid.UUID] = {author_id}
+    audience = await _run_readers(session, run)
 
-    if parent_author_id is not None and parent_author_id not in notified:
+    if (
+        parent_author_id is not None
+        and parent_author_id not in notified
+        and parent_author_id in audience
+    ):
         await notify(session, parent_author_id, "comment_reply", run_id=run.id, context=ctx)
         notified.add(parent_author_id)
 
@@ -106,8 +124,7 @@ async def enqueue_for_comment(
     if not tokens:
         return
     # Match a mention token against the user's email local-part (before '@') or the full email.
-    candidates = (await session.execute(select(User.id, User.email))).all()
-    for uid, email in candidates:
+    for uid, email in audience.items():
         if uid in notified:
             continue
         local = email.split("@", 1)[0].lower()

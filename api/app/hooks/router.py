@@ -8,7 +8,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.audit import record_audit
-from app.auth.deps import CurrentUser, require_role
+from app.auth.deps import CurrentUser
 from app.db import get_session
 from app.enums import AttachmentTarget, AuditActorKind, Role
 from app.environments.router import lock_attach_target
@@ -21,7 +21,6 @@ from app.spaces import guard_env_id, guard_stack_id
 # them ahead of repo (.stackd.yml) hooks at claim time (see app/workers/hooks.py).
 router = APIRouter(prefix="/api/v1", tags=["hooks"])
 DbSession = Annotated[AsyncSession, Depends(get_session)]
-Writer = Depends(require_role(Role.writer))
 
 
 async def _list(
@@ -127,9 +126,7 @@ async def list_stack_hooks(
     return [HookOut.of(h) for h in await _list(session, AttachmentTarget.stack, stack_id)]
 
 
-@router.post(
-    "/stacks/{stack_id}/hooks", response_model=HookOut, status_code=201, dependencies=[Writer]
-)
+@router.post("/stacks/{stack_id}/hooks", response_model=HookOut, status_code=201)
 async def create_stack_hook(
     stack_id: uuid.UUID, body: HookCreate, user: CurrentUser, session: DbSession
 ) -> HookOut:
@@ -137,7 +134,7 @@ async def create_stack_hook(
     return HookOut.of(await _create(session, user, AttachmentTarget.stack, stack_id, body))
 
 
-@router.patch("/stacks/{stack_id}/hooks/{hook_id}", response_model=HookOut, dependencies=[Writer])
+@router.patch("/stacks/{stack_id}/hooks/{hook_id}", response_model=HookOut)
 async def update_stack_hook(
     stack_id: uuid.UUID, hook_id: uuid.UUID, body: HookUpdate, user: CurrentUser, session: DbSession
 ) -> HookOut:
@@ -146,7 +143,7 @@ async def update_stack_hook(
     return HookOut.of(await _update(session, user, hook, body))
 
 
-@router.delete("/stacks/{stack_id}/hooks/{hook_id}", status_code=204, dependencies=[Writer])
+@router.delete("/stacks/{stack_id}/hooks/{hook_id}", status_code=204)
 async def delete_stack_hook(
     stack_id: uuid.UUID, hook_id: uuid.UUID, user: CurrentUser, session: DbSession
 ) -> None:
@@ -165,9 +162,7 @@ async def list_env_hooks(env_id: uuid.UUID, user: CurrentUser, session: DbSessio
     return [HookOut.of(h) for h in await _list(session, AttachmentTarget.environment, env_id)]
 
 
-@router.post(
-    "/environments/{env_id}/hooks", response_model=HookOut, status_code=201, dependencies=[Writer]
-)
+@router.post("/environments/{env_id}/hooks", response_model=HookOut, status_code=201)
 async def create_env_hook(
     env_id: uuid.UUID, body: HookCreate, user: CurrentUser, session: DbSession
 ) -> HookOut:
@@ -175,9 +170,7 @@ async def create_env_hook(
     return HookOut.of(await _create(session, user, AttachmentTarget.environment, env_id, body))
 
 
-@router.patch(
-    "/environments/{env_id}/hooks/{hook_id}", response_model=HookOut, dependencies=[Writer]
-)
+@router.patch("/environments/{env_id}/hooks/{hook_id}", response_model=HookOut)
 async def update_env_hook(
     env_id: uuid.UUID, hook_id: uuid.UUID, body: HookUpdate, user: CurrentUser, session: DbSession
 ) -> HookOut:
@@ -186,7 +179,7 @@ async def update_env_hook(
     return HookOut.of(await _update(session, user, hook, body))
 
 
-@router.delete("/environments/{env_id}/hooks/{hook_id}", status_code=204, dependencies=[Writer])
+@router.delete("/environments/{env_id}/hooks/{hook_id}", status_code=204)
 async def delete_env_hook(
     env_id: uuid.UUID, hook_id: uuid.UUID, user: CurrentUser, session: DbSession
 ) -> None:

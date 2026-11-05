@@ -215,3 +215,60 @@ async def test_member_tiers_validated_and_audited(client: httpx.AsyncClient) -> 
         "allowed_tiers": ["dev", "prod"],
         "can_destroy": True,
     }
+
+
+async def test_a_space_writer_writes_there_whatever_their_instance_role(
+    client: httpx.AsyncClient,
+) -> None:
+    # The effective role is the space membership's (§2.4, #28): an instance *reader* made writer in
+    # a space triggers, cancels and discards runs and edits configuration there — and nowhere else.
+    from app.db import SessionLocal
+    from app.enums import Role
+    from app.models.user import User
+    from app.security import create_access_token
+    from tests.conftest_phase2 import event, register_worker
+
+    admin = await login(client, "admin")
+    async with SessionLocal() as s:
+        user = User(google_sub=f"reader-{uuid.uuid4()}", email="carol@dev.local", role=Role.reader)
+        s.add(user)
+        await s.commit()
+        carol = {"Authorization": f"Bearer {create_access_token(user)}"}
+        carol_id = str(user.id)
+    space_id = await _create_space(client, admin, "carol-space")
+    grant = await client.put(
+        f"/api/v1/spaces/{space_id}/members",
+        headers=admin,
+        json={"user_id": carol_id, "role": "writer", "allowed_tiers": []},
+    )
+    assert grant.status_code == 200, grant.text
+    stack_id = await _stack_in(client, admin, space_id, "carol-stack")
+    env_id = await _env_in(client, admin, stack_id, "dev")
+    wh = await register_worker(client, admin, "pool-carol")
+
+    var = await client.post(
+        f"/api/v1/environments/{env_id}/variables",
+        headers=carol,
+        json={"kind": "terraform", "name": "size", "value": "small"},
+    )
+    assert var.status_code == 201, var.text
+    queued = await client.post(f"/api/v1/environments/{env_id}/runs", headers=carol, json={})
+    assert queued.status_code == 201, queued.text
+    cancel = await client.post(f"/api/v1/runs/{queued.json()['id']}/cancel", headers=carol)
+    assert cancel.status_code == 200, cancel.text
+
+    run = (await client.post(f"/api/v1/environments/{env_id}/runs", headers=carol, json={})).json()
+    assert (await client.post("/worker/v1/jobs/claim", headers=wh)).status_code == 200
+    await event(client, wh, run["id"], "phase_started", phase="planning")
+    changes = {"has_changes": True, "summary": {"add": 1, "change": 0, "destroy": 0}}
+    await event(client, wh, run["id"], "phase_finished", result=changes)
+    discard = await client.post(f"/api/v1/runs/{run['id']}/discard", headers=carol)
+    assert discard.status_code == 200, discard.text
+
+    # Elsewhere (the default space) she is no member: refused.
+    stray = await client.post(
+        "/api/v1/stacks",
+        headers=carol,
+        json={"name": "carol-stray", "repo_url": "file:///x", "tool_version": "1.12.0"},
+    )
+    assert stray.status_code == 403

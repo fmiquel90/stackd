@@ -26,6 +26,7 @@ Authorization Code + PKCE, the API is the confidential client:
 3. Google → /api/v1/auth/google/callback?code&state
 4. API    → exchange code+verifier, validate the id_token (JWKS, iss, aud, exp, nonce)
 5. API    → admission: email_verified == true, hd ∈ STACKD_ALLOWED_DOMAINS → otherwise 403
+            (fail closed: an empty list admits nobody, never "any Google account")
 6. API    → upsert User on google_sub (stable, unlike the email)
 7. API    → session: access JWT 15 min (front memory, never in browser storage)
             + refresh httpOnly 14 d, persisted in `refresh_tokens` (§2.5) with
@@ -35,6 +36,11 @@ Authorization Code + PKCE, the API is the confidential client:
 ```
 
 **CSRF**: the access token travels in the `Authorization: Bearer` header (no CSRF risk on API calls). The refresh relies on an httpOnly cookie → `/auth/refresh` and `/auth/logout` require `SameSite=Strict` **and** a double-submit CSRF token (the only pair of cookie-bound endpoints). Refresh cookie `stackd_refresh`: httpOnly, `Path=/api/v1/auth`; CSRF cookie `stackd_csrf`: readable by JS (`Path=/`, so the SPA can echo it in `X-CSRF-Token` on boot); both `SameSite=Strict`, `Secure` when `STACKD_ENV=production`.
+
+**Allowlist required**: `STACKD_ALLOWED_DOMAINS` (comma-separated Workspace domains) is the only
+admission gate, so an empty list admits no Google login, and a production API refuses to start
+without at least one domain (§13). There is no "any Google account" mode: a personal account has no
+`hd` claim and is never admitted. Dev login (`STACKD_DEV_AUTH`, never in production) ignores it.
 
 Bootstrap: the first user of an allowed domain = `admin`, subsequent ones = `reader`. No local auth; internal `AuthProvider` interface for other IdPs later. Login/logout/denial → `audit_events`.
 
@@ -478,7 +484,7 @@ context kid, backend, ARN, previous kid, `reactivated`, and for a reactivation `
       └──────────────────┘
 ```
 
-Terminal: `finished`, `failed`, `discarded`, `canceled`. `canceled`: user on `queued`/`confirmed`/`unconfirmed` (not claimed yet, or waiting on a human), the system when a PR closes (its in-flight proposed runs, §18.3), or a rollout's cancel on its member runs that are `queued`, `unconfirmed` or `confirmed` and not claimed yet (§21.4 step 8 — `confirmed → canceled` is that edge). **Cancelling a run a worker is executing** is a request, not a transition: `POST /runs/{id}/cancel` records `runs.cancel_requested_at`, audits `run.cancel_requested` and queues a `cancel_job` command for the worker's next heartbeat (§7.1) — one transaction. The worker interrupts its tool (SIGINT, a graceful stop: tofu finishes the operation in flight, releases the state lock, exits; SIGKILL only after `STACKD_CANCEL_GRACE_SECONDS`, default 120) and reports `job_canceled`; only then does `transition()` end the run. A job that holds **no apply credentials** (preparing, planning, checking, a read-only command) ends `canceled`; one that does (`applying`, a mutating command, §4.3) ends **`failed` with `error=canceled_during_apply`** — `applying` is never `canceled`, since the infrastructure may be partly changed — and nothing cascades. Stopping a job that holds apply credentials needs `can_apply` (the gate of starting it); any other needs `writer`. Idempotent: asking again re-queues the command (the first may have been lost) without a second audit. If the plan finishes before the stop reaches it, the run ends `canceled` instead of going to `unconfirmed`/`confirmed` — a stopped plan is never auto-confirmed. Once an apply has succeeded the worker ignores a later stop (what is left — recording the outputs — must finish). A worker that is offline never reports: `worker_lost` (§3.7) ends the run. Any terminal state drops the run's saved plan (§11.3).
+Terminal: `finished`, `failed`, `discarded`, `canceled`. `canceled`: user on `queued`/`confirmed`/`unconfirmed` (not claimed yet, or waiting on a human), the system when a PR closes (its proposed runs not claimed yet; one a worker executes gets the stop request below, §18.3), or a rollout's cancel on its member runs that are `queued`, `unconfirmed` or `confirmed` and not claimed yet (§21.4 step 8 — `confirmed → canceled` is that edge). **Cancelling a run a worker is executing** is a request, not a transition: `POST /runs/{id}/cancel` records `runs.cancel_requested_at`, audits `run.cancel_requested` and queues a `cancel_job` command for the worker's next heartbeat (§7.1) — one transaction. The worker interrupts its tool (SIGINT, a graceful stop: tofu finishes the operation in flight, releases the state lock, exits; SIGKILL only after `STACKD_CANCEL_GRACE_SECONDS`, default 120) and reports `job_canceled`; only then does `transition()` end the run. A job that holds **no apply credentials** (preparing, planning, checking, a read-only command) ends `canceled`; one that does (`applying`, a mutating command, §4.3) ends **`failed` with `error=canceled_during_apply`** — `applying` is never `canceled`, since the infrastructure may be partly changed — and nothing cascades. Stopping a job that holds apply credentials needs `can_apply` (the gate of starting it); any other needs `writer`. Idempotent: asking again re-queues the command (the first may have been lost) without a second audit. If the plan finishes before the stop reaches it, the run ends `canceled` instead of going to `unconfirmed`/`confirmed` — a stopped plan is never auto-confirmed. Once an apply has succeeded the worker ignores a later stop (what is left — recording the outputs — must finish). A worker that is offline never reports: `worker_lost` (§3.7) ends the run. Any terminal state drops the run's saved plan (§11.3).
 
 Command runs (§4.3) take a shorter path: `queued → preparing → running → finished | failed` (or, on a stop request, `canceled` — a read-only command — or `failed` — a mutating one, as above).
 
@@ -489,16 +495,16 @@ Command runs (§4.3) take a shorter path: `queued → preparing → running → 
 | `queued → preparing` | worker (claim) | no active run on the env, env not locked, compatible labels |
 | `planning → checking` | worker | plan OK **and ≥ 1 after_plan hook**. Without an after_plan hook, `checking` is skipped: the transitions `planning → unconfirmed / confirmed / finished` exist, with exactly the same conditions as their equivalents from `checking` |
 | `checking → unconfirmed` | worker | checks OK or warn; non-empty diff. A warn **forces** confirmation even if autodeploy |
-| `checking → confirmed` | system | all checks OK, non-empty diff, `autodeploy=true`, env not protected, `used_mocks=false`, the run belongs to no rollout — **or** the run belongs to a started rollout whose gate is open and passes its gate (§21.5) |
+| `checking → confirmed` | system | all checks OK, non-empty diff, `autodeploy=true`, env not protected, a `tracked` run (a `destroy` never autodeploys: only an approver passing `can_apply` + `can_destroy` confirms it), `used_mocks=false`, `used_secret_fallback=false` (§15.5 — such a plan stops at `unconfirmed`, never fails at the apply claim; `allow_fallback_apply` lets an approver confirm it, never autodeploy), the run belongs to no rollout — **or** the run belongs to a started rollout whose gate is open and passes its gate (§21.5) |
 | `planning/checking → finished` | worker | empty diff, or a `proposed` run whatever its diff (plan-only). No outputs are captured here: only `applying → finished` records them (§9.1) |
-| `unconfirmed → discarded` | user (`writer`) | `POST /runs/{id}/discard` — the plan is dropped, never applied. `queued → discarded` is also a legal edge of `transition()` and the endpoint does not restrict the state |
-| `queued / confirmed / unconfirmed → canceled` | user, or system | a user's cancel (a `confirmed` run is not claimed yet); the system when a PR closes (its proposed runs, §18.3) or a rollout is canceled (its member runs not claimed yet, §21.4 step 8) |
-| `preparing / planning / checking / running → canceled` | worker | `job_canceled` after a user's stop request (§4.1), the job holding no apply credentials |
+| `unconfirmed → discarded` | user (`writer`) | `POST /runs/{id}/discard` — the plan is dropped, never applied. Only from `unconfirmed` (409 otherwise): a run in any other state is canceled or stopped instead |
+| `queued / confirmed / unconfirmed → canceled` | user, or system | a user's cancel (a `confirmed` run is not claimed yet); the system when a PR closes (its proposed runs not claimed yet, §18.3) or a rollout is canceled (its member runs not claimed yet, §21.4 step 8) |
+| `preparing / planning / checking / running → canceled` | worker | `job_canceled` after a stop request (§4.1) — a user's, or the system's for a closed PR's proposed run (§18.3) — the job holding no apply credentials |
 | `applying → failed` (`canceled_during_apply`) | worker | `job_canceled` after a stop request on a job holding apply credentials; a run already `applying` is never `canceled` |
 | `unconfirmed → confirmed` | user (or system: a rollout re-approval, §21.6) | `can_apply(user, env)` = role∈{approver,admin} AND `env.tier ∈ allowed_tiers` (§2.4); ≠ triggerer if the tier requires four-eyes, the env is `protected` or sets `require_second_pair_of_eyes`; for a `destroy` run: `can_destroy` required; **blocked if `used_mocks` and `allow_mock_apply=false`** (likewise `used_secret_fallback` and `allow_fallback_apply=false`, §15.5) |
 | `confirmed → applying` | worker (claim) | the plan's worker within the affinity window, then any compatible worker (§7.2); re-checks `allow_mock_apply` and the secret-fallback gate against the apply-time resolution (§9.3/§15.5). The apply job clones the pinned commit and applies the run's **saved plan** (§7.3); a missing or unreadable plan fails the run — it never re-plans |
 | `applying → finished` | worker | apply exit 0 + outputs uploaded + no failing `after_apply` check (one that fails → `failed`, the outputs still recorded, nothing cascades, §8.3) |
-| `* → failed` | worker/system | a tofu command failing (a plan fails on any exit but 0 or 2, an apply or a command on any non-zero exit), the plan JSON unavailable (§8.3), a hook `fail` at any stage (§8.3), timeouts — the worker hard-kills the process group past its budget: the apply (and a mutating command run, §4.3) past `stackd_apply_timeout_seconds` (default 15 min, sent as `apply_timeout_seconds`), a hook past the hook timeout (10 min, `STACKD_HOOK_TIMEOUT_SECONDS`, then it fails by its `on_failure`), any other subprocess past the agent's 2 h cap (separate prepare/plan budgets are not enforced yet); `worker_lost` (§3.7); `commit_mismatch` (§7.3); an unresolvable dependency, secret or workload token at claim — plan or apply claim, hence also `confirmed → failed` (§9.3, §15.2, §3.11) |
+| `* → failed` | worker/system | a tofu command failing (a plan fails on any exit but 0 or 2, an apply or a command on any non-zero exit), the plan JSON unavailable (§8.3), a hook `fail` at any stage (§8.3), timeouts — the worker hard-kills the process group past its budget: the apply (and a mutating command run, §4.3) past `stackd_apply_timeout_seconds` (default 15 min, sent as `apply_timeout_seconds`), a hook past the hook timeout (10 min, `STACKD_HOOK_TIMEOUT_SECONDS`, then it fails by its `on_failure`), any other subprocess past the agent's 2 h cap (separate prepare/plan budgets are not enforced yet); `worker_lost` (§3.7); `commit_mismatch` (§7.3); an unresolvable dependency, secret or workload token at claim — plan or apply claim, the claim having moved the run to `preparing`/`applying` first (§9.3, §15.2, §3.11). A worker-executed state only: `unconfirmed` and `confirmed` have no `→ failed` edge, and a `job_failed` report on a run its worker no longer executes is refused (409, §7.3) |
 
 Single function `transition(run, to_state, actor, payload)` (`app/runs/transition.py`): legality (its `ALLOWED` edge table), atomic update guarded on `from_state` — the row re-read `FOR UPDATE` where `state = from_state` (409 `Concurrent modification` if it moved), a rollout member's rollout locked first (§21.3) — `run_event`, audit event when the caller passes one (human or terminal actions), the notification / VCS / in-app outboxes and the rollout's progress (§17, §18, §21), WS publication (`NOTIFY`, §5.3). A terminal state also stamps `finished_at` and drops the saved plan (§11.3). Everything in the caller's transaction: `transition()` never commits. The cascade (§9.2) is run by the caller, after the transition to `finished`.
 
@@ -612,7 +618,8 @@ run.triggered / run.destroy_triggered / run.command_triggered / run.promoted   #
 run.confirmed ⭐                  # a human confirm, or the system: on autodeploy (context
                                   #   autodeploy), or under a rollout's approval (context via =
                                   #   rollout, rollout_id, approved_by, approved_by_email, §21.5)
-run.cancel_requested              # a user asked the worker to stop an executing run (§4.1) — once per run
+run.cancel_requested              # a user asked the worker to stop an executing run (§4.1) — once per run;
+                                  #   or the system, for a closed PR's proposed run (reason pr_closed, §18.3)
 run.discarded / run.canceled      # canceled: also the worker, on `job_canceled` (context reason cancel_requested); a user, or the system when a PR closes (reason pr_closed);
                                   #   a rollout's cancel: the canceller, context via = rollout (§21.8)
 run.plan_finished                 # plan-only terminal: empty diff, or a proposed/drift run
@@ -640,6 +647,9 @@ secret.fallback_used / secret.fallback_overridden                    # §15
 environment.cloned                                                   # §21.2
 rollout.created / rollout.approved / rollout.paused / rollout.resumed    # §21.8
 rollout.retried / rollout.canceled / rollout.succeeded / rollout.failed  # §21.8
+comment.created / comment.updated / comment.resolved / comment.reopened / comment.deleted
+                                  # plan-review comments (§16.3) — target the comment; context
+                                  #   run_id (+ parent_id, anchor_kind) — NEVER the body
 ```
 
 Not audited by a dedicated action: a run failed because an external secret could not resolve is
@@ -809,13 +819,15 @@ POST /worker/v1/jobs/{id}/events
   job_failed carries "result": {"error": "<masked reason>", "checks": [...]} — the checks of the
       stages that ran (§8.3); "phase" = where it failed (a stage, init, plan, apply, command);
       no "error" for a failing check (the run's error is then the phase); a command job, which
-      runs no hook, sends only "error"
+      runs no hook, sends only "error"; 409 unless the run is in a state a worker executes
+      (preparing, planning, checking, running, applying) — a late or duplicate report on a plan
+      awaiting a human, a confirmed or a terminal run is stale
   phase_finished of a command job carries "result": {"command": "<name>"}
   job_failed(after_apply) carries "result": {"checks": [...], "outputs": {...}}   # §8.3: the
       # apply went through, an after_apply hook failed → outputs recorded (§9.1), drift
       # cleared (§19), no cascade
-  job_canceled carries "result": {"checks": [...]} — the job stopped on a user's request
-      (§4.1); 409 unless `runs.cancel_requested_at` is set
+  job_canceled carries "result": {"checks": [...]} — the job stopped on a stop request (a
+      user's, or a closed PR's, §4.1/§18.3); 409 unless `runs.cancel_requested_at` is set
 
 PUT /worker/v1/jobs/{id}/artifacts/plan.tfplan | plan.json | outputs.json
 GET /worker/v1/jobs/{id}/artifacts/plan.tfplan          # the apply job's saved plan
@@ -974,7 +986,7 @@ The loop ticks every 10 s.
 | Cold log archiving | every tick | runs terminal for ≥ 60 s (the agent's last buffered chunks, §5.1) with `logs_archived_at IS NULL` (20 per tick) → S3 `logs/{run_id}/{phase}.log.gz` (§5.2) |
 | OIDC key retirement | every tick | `retiring` keys past the longest token TTL → `retired`, out of the JWKS (§3.11) |
 | Rollout approval expiry | every tick | a started rollout whose approval has expired is advanced under its lock → `paused (approval_expired)` (§21.4), without waiting for its next event |
-| Retention purge | daily | hot `run_logs` rows 7 d after archiving (§5.2); refresh-token families whose every token has expired (§2.5); audit events older than `audit_retention_days` (730) through the distinct `stackd_audit_purge` role (§6.1), only if `STACKD_AUDIT_PURGE_DATABASE_URL` is set |
+| Retention purge | daily | hot `run_logs` rows 7 d after archiving (§5.2); refresh-token families whose every token has expired (§2.5); webhook delivery ids past the 5 min anti-replay window (§13); audit events older than `audit_retention_days` (730) through the distinct `stackd_audit_purge` role (§6.1), only if `STACKD_AUDIT_PURGE_DATABASE_URL` is set |
 
 **Single-execution guarantee**: each task takes a dedicated **PG advisory lock** (`pg_try_advisory_lock(<task_key>)`) before running; a replica that does not obtain the lock skips its tick. The lock is session-level, so it is taken and released on a **dedicated connection** held for the task's whole run, separate from the task's own DB session — the tasks commit mid-way, which returns the session's connection to the pool, and an unlock through it could land on another connection and leak the lock. No permanently elected leader (no external dependency), no double execution. The tasks are **idempotent** anyway (re-running a staleness computation or an archive breaks nothing) — the advisory lock mainly avoids redundant work and races on the `worker_lost` transitions.
 
@@ -1056,7 +1068,9 @@ At `applying → finished`, parsing of `outputs.json`:
 1. outgoing edges of run.environment
 2. policy: never → skip; always → trigger;
    on_output_change → trigger if a referenced output's current value ≠ the one in
-   resolved_inputs of the last finished run of the downstream env (no such run → trigger)
+   resolved_inputs of the last applied run of the downstream env (a finished tracked/
+   destroy run with confirmed_at set — never a proposed/drift plan, a command or an
+   empty-diff plan, which deployed nothing; no such run → trigger)
 3. run created: type=tracked, triggered_by=dependency, parent_run_id, run_group_id
 4. multi-parents: downstream triggered when ALL its parents of the run group are finished
 5. parent failed → branch stopped, run group = partial_failure
@@ -1232,8 +1246,10 @@ Changing an environment's `branch` (`PATCH`) clears `head_sha`, `head_updated_at
 ### 9.7 Environment promotion (trunk-based)
 
 `POST /api/v1/environments/{target_id}/promote` `{from_environment_id}` re-deploys the **exact commit
-currently applied** on a sibling environment (same stack) to the target: it takes the source's last
-`finished` run `commit_sha` and creates a **tracked** run on the target pinned to that commit. This
+currently applied** on a sibling environment (same stack) to the target: it takes the `commit_sha` of
+the source's last **applied** run — a confirmed `tracked` run that finished, never a PR or drift plan
+(`proposed`), a command run or an empty plan — and creates a **tracked** run on the target pinned to
+that commit (409 if that last apply was a `destroy`: nothing is applied any more). This
 is the trunk-based promotion primitive (dev → staging → prod of the *same* stack, as opposed to the
 cross-stack §9.2 cascade). Triggering needs `writer`; the apply is gated as usual at confirm
 (`can_apply` + 4-eyes). 400 on a cross-stack pair, 409 if the source has no applied commit yet.
@@ -1437,6 +1453,7 @@ POST /api/v1/environments/{id}/cloud-integration/test    # admin; verification A
 
 # Runs
 POST /api/v1/environments/{id}/runs      { type?, with_downstream?, commit_sha?, secret_overrides? }
+                                         # type: tracked (default) | destroy — 422 otherwise
 POST /api/v1/environments/{id}/commands  { command, args, commit_sha? }     # §4.3
 POST /api/v1/environments/{id}/promote   { from_environment_id }           # §9.7
 GET  /api/v1/environments/{id}/runs ; GET /api/v1/runs/{id}   # the latter adds run_group (§9.2) and
@@ -1494,7 +1511,7 @@ POST /api/v1/environments/{id}/state/import-session      # admin, audited (§11.
 DELETE /api/v1/environments/{id}/state/lock              # force-unlock (admin, audited)
 
 # Webhooks
-POST /api/v1/webhooks/github                             # HMAC
+POST /api/v1/webhooks/github                             # HMAC + X-GitHub-Delivery anti-replay (§13)
 
 # Worker API (agents — detail §7)
 POST /worker/v1/register | /heartbeat | /jobs/claim
@@ -1515,13 +1532,13 @@ Specified but **not served yet**: `GET /api/v1/run-groups/{id}` (§9.4).
 
 | Surface | Measure |
 |---|---|
-| Human auth | Google OIDC + PKCE, JWKS/nonce, `hd` restriction, rotating refresh |
+| Human auth | Google OIDC + PKCE, JWKS/nonce, `hd` restriction (fail closed: an empty `STACKD_ALLOWED_DOMAINS` admits nobody, and a production API refuses to start without one, §2.1), rotating refresh |
 | Cloud credentials | **OIDC workload by default**: tokens signed per run/phase, trust policies on claims, session name = run_id (CloudTrail ↔ Stackd audit). Static = fallback |
 | OIDC signing key | KMS (`kms:Sign`, required in production unless explicitly acknowledged) or AES-GCM in the DB (`oidc_signing_keys` §3.11), rotation with overlap and automatic retirement, short token TTL. `sub` wildcard allowed **only** on the stack segment; never on `tier` nor `phase` (§10.3) |
 | Static secrets | AES-256-GCM, write-only, decrypted at claim, masked in the logs |
 | Hooks | platform hooks not bypassable by PR; repo hooks without `sensitive_env` **nor cloud credentials**, with an allowlisted env, a masked `plan.json`, and no saved plan, tfvars, OIDC token file or repo token on disk while they run; the agent's `STACKD_*` settings reach no hook nor tofu; masking of sensitive values in their stdout; the process group killed when the hook exits, or past its 10 min timeout; a failing `fail` check stops the job at any stage (§8.3); on the `docker` runner each hook in its own container, a repo hook seeing the checkout only (§7.4). repo hooks at the `*_apply` stages only on a tier that allows them (`repo_hooks_at_apply`, off by default) |
 | Mocks | apply forbidden by default (`allow_mock_apply=false`), badge, audit `mock_consumed` |
-| External secrets | provider bootstrap credential AES-256-GCM write-only (`secret_sources.bootstrap_secret_encrypted` §15.1); live values fetched at claim, never persisted, masked; **fallback value (static or break-glass override) forbids apply by default** (`allow_fallback_apply=false`), badge, audit `secret.fallback_used` (§15) |
+| External secrets | provider bootstrap credential AES-256-GCM write-only (`secret_sources.bootstrap_secret_encrypted` §15.1); live values fetched at claim, never persisted, masked; **fallback value (static or break-glass override) forbids apply by default** (`allow_fallback_apply=false`), badge, audit `secret.fallback_used` (§15); a break-glass override only for a `break_glass` reference (else 422), sealed on its run and wiped at the run's terminal state (§15.4) |
 | Workers | revocable tokens, no incoming port, labels (isolated prod pool); production accepts the `docker` runner only (§7.4); tool binaries verified by signature then checksum when the runner images are built, and those images run only by digest (§7.4, supply-chain). The `local` runner (dev) runs the binary on its PATH, at the stack's version |
 | State | S3 SSE-KMS via API only; per-job state tokens scoped `ro` (proposed runs, read-only commands) / `plan` (lock, never write) / `rw` (apply, mutating command, import session), refused once their run is terminal; handed to tofu only, as `TF_HTTP_*` env (§11.2); audited force-unlock |
 | Saved plans | the reviewed `plan.tfplan` is AES-256-GCM-encrypted by the API (AAD bound to its S3 key), served only to the run's apply job, applied as-is (never re-planned), deleted on any terminal state (§7.3, §11.3) |
@@ -1529,11 +1546,30 @@ Specified but **not served yet**: `GET /api/v1/run-groups/{id}` (§9.4).
 | Apply permissions | tier per env × `allowed_tiers` set per user (§2.4, configurable catalog, non-linear); distinct `can_destroy`; double lock with the OIDC trust policy on the tier name |
 | Protected envs | autodeploy forbidden and 4-eyes (also automatic on a tier flagged `requires_four_eyes`, e.g. `prod`), never bypassed (cascade included); the *right* to apply comes from the tier, not from `protected`. A rollout's approval (§21.5) counts as the human decision only for creates-only plans in an environment never applied, approved under four-eyes, and only while the environment's tier, `protected` and four-eyes are what the approver saw |
 | Proposed runs | plan-only, state RO, mocks allowed; **secrets not injected**: repo code runs inside tofu (§7.4), and a pull request's has not been reviewed. The claim drops every sensitive variable, of either kind, and every external secret reference (§15, not even fetched) — so nothing of them is in `sensitive_env`, the tfvars, `mask_values` or the run's `variable_provenance`. One the plan needs gets no value, never a stand-in: tofu uses the variable's default in the repo, or fails with `No value for required variable`. Kept, as a plan needs them: the **plan role**'s OIDC credentials (read-only by design, §10.3 — scope it so), the `ro` state token (the state itself is readable: it can hold secrets of its own), the repo token to clone (it reaches neither tofu nor a hook, §8.3). A drift run (§19), a proposed run of the env's last applied commit, keeps the secrets. **Decided: no opt-in.** A per-environment opt-in giving proposed runs the secrets was specified and is rejected: it would hand them to unreviewed code |
-| Webhooks | HMAC SHA-256 (secret per stack, `stacks.webhook_secret_encrypted` §3.1 — the stacks fed by one repo webhook share its value); anti-replay 5 min — **not implemented yet** (HMAC only, no delivery-id/timestamp check) |
+| Webhooks | HMAC SHA-256 (secret per stack, `stacks.webhook_secret_encrypted` §3.1 — the stacks fed by one repo webhook share its value); anti-replay 5 min on the `X-GitHub-Delivery` id (below) |
 | Sessions | access JWT 15 min in Bearer header; refresh httpOnly `SameSite=Strict` + CSRF double-submit, rotation with reuse detection → family revocation (§2.5) |
 | Encryption at rest | AES-256-GCM, random 96-bit nonce per value, never reused (§1) |
 | Rate limiting | Google callback + `/auth/refresh`, `/webhooks/github`, `discover-inputs`: per-IP token buckets, per replica (§20.3). Worker register/claim are not throttled yet; hardening Phase 7 |
 | Audit | append-only **at the DB level** (INSERT-only role + anti-update/delete trigger §6.1), denormalized, transactional, 2 years |
+
+**Webhook anti-replay** (`POST /api/v1/webhooks/github`). Once the HMAC verifies, the delivery's
+`X-GitHub-Delivery` id is recorded in `webhook_deliveries (delivery_id text PK, received_at)`, in
+the request's transaction:
+
+- **Same id within 5 min → `200 {"matched": n, "triggered": 0, "duplicate": true}`**, nothing done.
+  A 2xx, not a 409: the delivery was already handled, so the receiver is idempotent, and GitHub (or a
+  proxy retry) does not show a handled event as a failed one; the body says why nothing happened.
+  GitHub's **Redeliver** reuses the id: within the window it is this no-op, past it the delivery is
+  processed again (a deliberate operator action). A delivery that failed (5xx) rolled its record
+  back, so its redelivery is processed.
+- **No `X-GitHub-Delivery` (or one over 128 chars) → 400** — GitHub always sends one, so a request
+  without it is not GitHub's; accepting it would make the check optional for a replayer.
+- Recorded only **after** the HMAC check: an unauthenticated caller can't burn a real delivery's id
+  (a bad signature stays a 401). Concurrent copies of one id serialize on its row.
+- Ids past the window are purged by the daily retention task (§7.5).
+- **Limit**: GitHub signs the body only — neither the delivery id nor a timestamp — so this stops
+  duplicate and replayed deliveries carrying their id, not an attacker who holds a captured,
+  signed body and forges a new id. The per-stack HMAC secret (and TLS) remains the control.
 
 ---
 
@@ -1663,7 +1699,12 @@ POST /api/v1/environments/{id}/runs
 
 - **Permission**: supplying an override is an apply-affecting bypass → requires
   `can_apply(user, env)` (§2.4). It is rejected unless the targeted variable's
-  `secret_fallback_mode = break_glass` (a source must opt in to being overridable).
+  `secret_fallback_mode = break_glass` (a source must opt in to being overridable): every name in
+  `secret_overrides` must be a secret reference resolved for the env with that mode, else **422**
+  (after the 403 permission check; the error lists the names, never a value) and no run is created.
+- **Lifetime**: the sealed overrides stay on the run only while a job may still claim them;
+  `transition()` wipes `runs.secret_overrides_encrypted` when the run reaches a terminal state,
+  alongside the saved plan (§11.3).
 - The override value is injected like a sensitive variable, added to `mask_values`, and sets
   `run.used_secret_fallback = true`, provenance `secret_override:{source_name}`.
 - Audit `secret.fallback_overridden` (target: the run), `context = {variable, source}` — **the value itself
@@ -1795,6 +1836,13 @@ author or `role ∈ {approver, admin}`; deleting needs the author or admin.
 Every create/edit/delete/resolve emits a light `pg_notify('run_<id>', …)` (§5.3) so the run page's
 existing WS subscription invalidates `["run-comments", run_id]` and the thread updates live.
 
+Each of them is also audited in the same transaction (§6.3): `comment.created`, `comment.updated`
+(a body edit), `comment.resolved` / `comment.reopened` (`resolved` set true / false), and
+`comment.deleted` — `target_kind = comment`, `target_id` = the comment, context `run_id`, plus
+`parent_id` for a reply and `anchor_kind` for an anchored comment. **Never the body**: it is free
+text a reviewer may have pasted anything into. A PATCH changing both body and `resolved` writes
+both events. Deleting a root records its own `comment.deleted` only (its replies go with it).
+
 ### 16.4 Interaction with the gate
 
 **Advisory** at v1: the run page shows the count of open (unresolved) threads next to the Confirm
@@ -1806,6 +1854,8 @@ env flag could make confirm require all threads resolved — deliberately deferr
 1. No run-state change — comments are a side record; `transition()` (invariant §4.2) is untouched.
 2. Snippets come from already-masked log lines, so no secret leaks (invariant §13.3).
 3. Live updates reuse `LISTEN/NOTIFY` (§5.3) — no new transport.
+4. Every mutation writes its `comment.*` audit event in the same transaction (§6.3), without the
+   body.
 
 ---
 
@@ -1829,7 +1879,9 @@ rollout_upstream_changed` (`drift_detected`: §19.4; the `rollout_*` ones: §21.
   requires `can_destroy`; excluding the triggerer. `→ finished` / `→ failed` notify the run's human
   triggerer (`run_finished` / `run_failed`); `canceled` and `discarded` notify nobody.
 - **comment create** (§16): a reply notifies the root author; `@mention` tokens (matched against a
-  user's email local-part or full email) notify the mentioned users. Never the author. The composer
+  user's email local-part or full email) notify the mentioned users. Never the author, and only a
+  user who can read the run — an enabled member of its space or an instance admin (§2.4): a reply
+  or a mention of anyone else notifies no one (the notification would leak the run). The composer
   offers `@` autocomplete from `GET /users/mentionable` (a minimal directory readable by any auth),
   inserting `@<email-local-part>` so it resolves against the parser.
 - **rollouts** (§21.7): `advance_rollout()` notifies the rollout's creator and approver of a pause or
@@ -1885,7 +1937,9 @@ user. A `repo_secret` without write scope → post-back fails soft (run unaffect
 
 On `pull_request` (`opened`/`synchronize`/`reopened`): create the `proposed` run as today **and**
 persist `pr_number`, `vcs_provider='github'`, `vcs_head_sha = pr.head.sha`. On `closed`: best-effort
-`transition()` of the still-in-flight proposed runs for that PR to `canceled` (reason `pr_closed`).
+end of the still-in-flight proposed runs for that PR (reason `pr_closed`): a `queued` one is
+`transition()`ed to `canceled`; one a worker is executing gets the stop request of §4.1 (system actor,
+`run.cancel_requested`, a `cancel_job` for its worker) and ends `canceled` when the worker reports.
 
 ### 18.4 Post-back (`app/vcs/` — transactional outbox)
 
@@ -2061,8 +2115,8 @@ POST /api/v1/spaces/{space_id}/environment-clones
 }
 ```
 
-All or nothing, in **one transaction**. Permission: the global `writer` role and `writer` in the
-space (what creating environments takes), plus the **instance** `admin` role when
+All or nothing, in **one transaction**. Permission: `writer` in the space — the effective role,
+§2.4 (what creating environments takes), plus the **instance** `admin` role when
 `copy_cloud_integration` is true (as `PUT …/cloud-integration`), and `writer` on the space of every
 shared upstream an edge is re-created from (as creating that edge by hand, §3.8) — else 403. Validation first: a target stack
 without a `reference_name` env, or already holding a `name` env → **422** listing the stacks; the tier

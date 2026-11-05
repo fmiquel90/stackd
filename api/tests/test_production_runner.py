@@ -124,6 +124,7 @@ def test_production_settings_refuse_dev_grade_values() -> None:
         "stackd_public_url": "https://stackd.example.com",
         "stackd_oidc_signer": "kms",
         "stackd_oidc_kms_key_arn": "arn:aws:kms:eu-west-1:123456789012:key/abc",
+        "stackd_allowed_domains": "example.com",
     }
     Settings(**good)  # type: ignore[arg-type]
     for field, bad in (
@@ -131,6 +132,8 @@ def test_production_settings_refuse_dev_grade_values() -> None:
         ("stackd_jwt_secret", "short"),
         ("stackd_public_url", "http://stackd.example.com"),
         ("stackd_oidc_signer", "local"),  # a signing key in the DB: only with an acknowledgement
+        ("stackd_allowed_domains", ""),  # no Google allowlist: the login would admit nobody
+        ("stackd_allowed_domains", " , "),
     ):
         with pytest.raises(ValueError, match="STACKD_ENV=production"):
             Settings(**{**good, field: bad})  # type: ignore[arg-type]

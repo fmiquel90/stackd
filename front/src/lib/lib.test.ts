@@ -217,6 +217,16 @@ describe("permissions (mirrors the API gates)", () => {
       [],
     );
   });
+  it("holds a rollout's creator to four-eyes on its member runs, as the API does", () => {
+    const member = makeRun({ triggered_by: "rollout", trigger_user_id: ALICE.id });
+    expect(fourEyesOf(member, prodEnv, prodTier).triggererId).toBe(ALICE.id);
+    const r = runRights(member, prodEnv, prodTier, ALICE);
+    expect(r.confirm.reasons).toEqual(["you triggered this run; four-eyes requires someone else to confirm"]);
+    expect(r.needsYou).toBe(false);
+    // a run with no human at its origin has no triggerer to oppose
+    const cascaded = makeRun({ triggered_by: "dependency", trigger_user_id: null });
+    expect(runRights(cascaded, prodEnv, prodTier, ALICE).confirm.reasons).toEqual([]);
+  });
   it("fails closed on a tier missing from the catalog", () => {
     const fe = fourEyesOf(run, makeEnv({ tier: "ghost" }), undefined);
     expect(fe.required).toBe(true);

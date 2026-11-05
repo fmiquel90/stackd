@@ -9,7 +9,14 @@ import pytest
 from botocore.exceptions import ClientError
 from moto import mock_aws
 
-from tests.conftest_phase2 import event, login, make_env, make_stack, register_worker
+from tests.conftest_phase2 import (
+    event,
+    login,
+    make_env,
+    make_proposed_run,
+    make_stack,
+    register_worker,
+)
 
 
 def _basic(token: str) -> dict[str, str]:
@@ -323,11 +330,7 @@ async def test_proposed_run_token_is_read_only_and_never_locks(client: httpx.Asy
     wh = await register_worker(client, admin, "state-proposed-pool")
     stack = await make_stack(client, admin, "state-proposed-stack")
     env_id = await make_env(client, admin, stack, "dev", "dev")
-    run = (
-        await client.post(
-            f"/api/v1/environments/{env_id}/runs", headers=admin, json={"type": "proposed"}
-        )
-    ).json()
+    run = {"id": await make_proposed_run(env_id)}
     job = (await client.post("/worker/v1/jobs/claim", headers=wh)).json()
     assert job["job_id"] == run["id"] and job["phase"] == "plan"
     backend = job["backend"]

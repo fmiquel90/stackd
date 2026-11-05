@@ -137,7 +137,7 @@ STACKD_DEV_AUTH=true        # rejected if STACKD_ENV=production (assert at start
 - The login page displays, below the Google button, a "Dev login" panel with **three personas** covering the permissions in SPECS §2.4: `admin@dev.local` (admin, tiers dev/staging/prod, destroy), `alice@dev.local` (approver, tiers dev/staging/prod), `bob@dev.local` (writer, tiers dev/staging — a writer **cannot confirm any apply**). One click = session.
 - Three personas: essential for testing the role gate (bob triggers, but is refused at confirm everywhere), prod 4-eyes (bob triggers, alice confirms) and audit ("who applied what" only makes sense with several people). No persona is an approver *without* prod, so the "apply everywhere except prod" tier gate needs a space membership (`PUT /api/v1/spaces/{id}/members`) giving an approver `{dev, staging}`.
 - Sessions, roles and audit events are strictly the same as with Google — only the `google_sub` is synthetic (`dev:admin`).
-- The real Google flow remains testable in dev by setting `GOOGLE_CLIENT_ID/SECRET` (the two coexist).
+- The real Google flow remains testable in dev by setting `GOOGLE_CLIENT_ID/SECRET` (the two coexist), with `STACKD_ALLOWED_DOMAINS` listing the account's Workspace domain: an empty list admits no Google login (SPECS §2.1), and dev login does not read it.
 
 Safeguard: the API refuses to start with `STACKD_DEV_AUTH=true` and `STACKD_ENV=production` (settings validator), and never mounts the dev-login router in production (`app/main.py`, plus a runtime check in `app/auth/dev.py`). The target is for the prod build of the API image to **remove the dev_auth module** (not just the flag); the repo has no production API image yet (only `api/Dockerfile.dev`).
 

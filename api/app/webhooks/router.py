@@ -22,6 +22,7 @@ from app.observability import metrics
 from app.ratelimit import rate_limit
 from app.runs.service import trigger_run
 from app.runs.transition import transition
+from app.webhooks.replay import MAX_DELIVERY_ID_LENGTH, record_delivery
 
 router = APIRouter(prefix="/api/v1/webhooks", tags=["webhooks"])
 DbSession = Annotated[AsyncSession, Depends(get_session)]
@@ -78,6 +79,7 @@ async def github_webhook(
     session: DbSession,
     x_github_event: Annotated[str | None, Header()] = None,
     x_hub_signature_256: Annotated[str | None, Header()] = None,
+    x_github_delivery: Annotated[str | None, Header()] = None,
 ) -> dict:
     body = await request.body()
     try:
@@ -105,6 +107,22 @@ async def github_webhook(
         raise ProblemException(
             401, "Webhook rejected", "Invalid HMAC signature. Check the secret in Settings."
         )
+
+    # Anti-replay (§13): an authenticated delivery is acted on once per `X-GitHub-Delivery` id
+    # within the replay window. Recorded only once the HMAC passed (an unauthenticated caller can't
+    # burn an id), in this request's transaction (a delivery that fails is not recorded).
+    if not x_github_delivery or len(x_github_delivery) > MAX_DELIVERY_ID_LENGTH:
+        metrics.webhook_total.labels(result="rejected").inc()
+        raise ProblemException(
+            400, "Webhook rejected", "Missing or invalid X-GitHub-Delivery header."
+        )
+    if not await record_delivery(session, x_github_delivery):
+        metrics.webhook_total.labels(result="duplicate").inc()
+        _log.warning(
+            "webhook duplicate ignored",
+            extra={"event": "webhook.duplicate", "delivery": x_github_delivery},
+        )
+        return {"matched": len(stacks), "triggered": 0, "duplicate": True}
 
     triggered = 0
     if x_github_event == "push":
@@ -204,8 +222,16 @@ async def github_webhook(
                 .scalars()
                 .all()
             )
+            from app.enums import WORKER_EXECUTING_STATES
+            from app.runs.service import request_cancel
+
             for run in stale:
                 try:
+                    if run.state in WORKER_EXECUTING_STATES:
+                        # A worker is planning it: ask that worker to stop (§4.1) — the run ends
+                        # `canceled` when it reports, never under its feet.
+                        await request_cancel(session, run, None, reason="pr_closed")
+                        continue
                     await transition(
                         session,
                         run,
@@ -218,6 +244,7 @@ async def github_webhook(
                     pass  # raced to terminal — fine
             await session.commit()
 
+    await session.commit()  # the delivery id, for an event that changed nothing else (anti-replay)
     metrics.webhook_total.labels(result="accepted").inc()
     _log.info(
         "webhook processed",

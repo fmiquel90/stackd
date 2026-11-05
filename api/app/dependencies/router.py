@@ -9,7 +9,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.audit import record_audit
-from app.auth.deps import CurrentUser, require_role
+from app.auth.deps import CurrentUser
 from app.db import get_session
 from app.dependencies.schemas import DependencyCreate, LinkByNameIn
 from app.enums import AuditActorKind, Role
@@ -21,7 +21,6 @@ from app.spaces import accessible_space_ids, guard_env_id, guard_stack_id
 
 router = APIRouter(prefix="/api/v1", tags=["dependencies"])
 DbSession = Annotated[AsyncSession, Depends(get_session)]
-Writer = Depends(require_role(Role.writer))
 
 
 Adjacency = dict[uuid.UUID, set[uuid.UUID]]
@@ -80,7 +79,7 @@ async def _create_edge(
     return dep
 
 
-@router.post("/environments/{env_id}/dependencies", status_code=201, dependencies=[Writer])
+@router.post("/environments/{env_id}/dependencies", status_code=201)
 async def create_dependency(
     env_id: uuid.UUID, body: DependencyCreate, user: CurrentUser, session: DbSession
 ) -> dict:
@@ -145,7 +144,7 @@ async def list_dependencies(env_id: uuid.UUID, user: CurrentUser, session: DbSes
     return out
 
 
-@router.delete("/dependencies/{dep_id}", status_code=204, dependencies=[Writer])
+@router.delete("/dependencies/{dep_id}", status_code=204)
 async def delete_dependency(dep_id: uuid.UUID, user: CurrentUser, session: DbSession) -> None:
     dep = await session.get(EnvDependency, dep_id)
     if dep is None:
@@ -164,7 +163,7 @@ async def delete_dependency(dep_id: uuid.UUID, user: CurrentUser, session: DbSes
     await session.commit()
 
 
-@router.post("/stacks/{stack_id}/dependencies/link-by-name", dependencies=[Writer])
+@router.post("/stacks/{stack_id}/dependencies/link-by-name")
 async def link_by_name(
     stack_id: uuid.UUID, body: LinkByNameIn, user: CurrentUser, session: DbSession
 ) -> dict:

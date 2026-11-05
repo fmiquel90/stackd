@@ -14,7 +14,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.audit import record_audit
-from app.auth.deps import CurrentUser, require_role
+from app.auth.deps import CurrentUser
 from app.config import get_settings
 from app.crypto import decrypt
 from app.db import get_session
@@ -51,7 +51,6 @@ from app.variables.schemas import (
 )
 
 router = APIRouter(prefix="/api/v1", tags=["environments"])
-Writer = Depends(require_role(Role.writer))
 DbSession = Annotated[AsyncSession, Depends(get_session)]
 
 
@@ -300,7 +299,6 @@ async def list_environments(
     "/stacks/{stack_id}/environments",
     response_model=EnvironmentOut,
     status_code=201,
-    dependencies=[Writer],
 )
 async def create_environment(
     stack_id: uuid.UUID, body: EnvironmentCreate, user: CurrentUser, session: DbSession
@@ -339,7 +337,7 @@ async def get_environment(
     return await _env_out(session, await guard_env_id(session, user, env_id))
 
 
-@router.patch("/environments/{env_id}", response_model=EnvironmentOut, dependencies=[Writer])
+@router.patch("/environments/{env_id}", response_model=EnvironmentOut)
 async def update_environment(
     env_id: uuid.UUID, body: EnvironmentUpdate, user: CurrentUser, session: DbSession
 ) -> EnvironmentOut:
@@ -373,7 +371,7 @@ async def update_environment(
     return await _env_out(session, env)
 
 
-@router.delete("/environments/{env_id}", status_code=204, dependencies=[Writer])
+@router.delete("/environments/{env_id}", status_code=204)
 async def delete_environment(env_id: uuid.UUID, user: CurrentUser, session: DbSession) -> None:
     env = await guard_env_id(session, user, env_id, min_role=Role.writer)
     await lock_envs_for_deletion(session, Environment.id == env.id)
@@ -393,9 +391,7 @@ async def delete_environment(env_id: uuid.UUID, user: CurrentUser, session: DbSe
     await session.commit()
 
 
-@router.post(
-    "/environments/{env_id}/refresh-head", response_model=EnvironmentOut, dependencies=[Writer]
-)
+@router.post("/environments/{env_id}/refresh-head", response_model=EnvironmentOut)
 async def refresh_head(env_id: uuid.UUID, user: CurrentUser, session: DbSession) -> EnvironmentOut:
     env = await guard_env_id(session, user, env_id, min_role=Role.writer)
     stack = await session.get(Stack, env.stack_id)
@@ -458,7 +454,6 @@ async def list_env_variables(
     "/environments/{env_id}/variables",
     response_model=VariableOut,
     status_code=201,
-    dependencies=[Writer],
 )
 async def create_env_variable(
     env_id: uuid.UUID, body: VariableCreate, user: CurrentUser, session: DbSession
@@ -485,9 +480,7 @@ async def create_env_variable(
     return VariableOut.of(var)
 
 
-@router.patch(
-    "/environments/{env_id}/variables/{var_id}", response_model=VariableOut, dependencies=[Writer]
-)
+@router.patch("/environments/{env_id}/variables/{var_id}", response_model=VariableOut)
 async def update_env_variable(
     env_id: uuid.UUID,
     var_id: uuid.UUID,
@@ -520,7 +513,7 @@ async def update_env_variable(
     return VariableOut.of(var)
 
 
-@router.delete("/environments/{env_id}/variables/{var_id}", status_code=204, dependencies=[Writer])
+@router.delete("/environments/{env_id}/variables/{var_id}", status_code=204)
 async def delete_env_variable(
     env_id: uuid.UUID, var_id: uuid.UUID, user: CurrentUser, session: DbSession
 ) -> None:
@@ -554,7 +547,7 @@ async def resolved_variables(
 
 @router.post(
     "/environments/{env_id}/discover-inputs",
-    dependencies=[Writer, Depends(rate_limit("discover", per_minute=10, burst=5))],
+    dependencies=[Depends(rate_limit("discover", per_minute=10, burst=5))],
 )
 async def discover_inputs(env_id: uuid.UUID, user: CurrentUser, session: DbSession) -> dict:
     """Introspect the repo (shallow clone + HCL parse, no terraform run) and create the REQUIRED

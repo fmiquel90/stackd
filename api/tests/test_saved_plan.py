@@ -7,7 +7,14 @@ from __future__ import annotations
 import httpx
 from moto import mock_aws
 
-from tests.conftest_phase2 import event, login, make_env, make_stack, register_worker
+from tests.conftest_phase2 import (
+    event,
+    login,
+    make_env,
+    make_proposed_run,
+    make_stack,
+    register_worker,
+)
 
 CHANGES = {"has_changes": True, "summary": {"add": 1, "change": 0, "destroy": 0}}
 SHA = "c0ffee" + "0" * 34
@@ -153,14 +160,11 @@ async def test_a_plan_moved_to_another_run_does_not_decrypt(client: httpx.AsyncC
 
 
 async def test_proposed_run_saves_no_plan(client: httpx.AsyncClient) -> None:
-    admin, wh, env_id = await _setup(client, "sp-proposed")
+    _admin, wh, env_id = await _setup(client, "sp-proposed")
     with mock_aws():
-        run = await client.post(
-            f"/api/v1/environments/{env_id}/runs", headers=admin, json={"type": "proposed"}
-        )
+        run_id = await make_proposed_run(env_id)
         job = (await client.post("/worker/v1/jobs/claim", headers=wh)).json()
         assert job["save_plan"] is False
-        run_id = run.json()["id"]
         await event(client, wh, run_id, "phase_started", phase="planning")
         put = await client.put(_url(run_id), headers=wh, content=PLAN)
         assert put.status_code == 409, put.text

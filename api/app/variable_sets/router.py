@@ -9,7 +9,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.audit import record_audit
-from app.auth.deps import CurrentUser, require_role
+from app.auth.deps import CurrentUser
 from app.db import get_session
 from app.enums import AttachmentTarget, AuditActorKind, Role
 from app.environments.router import lock_attach_target
@@ -37,7 +37,6 @@ from app.variables.crud import create_variable, get_variable, update_variable, v
 from app.variables.schemas import VariableCreate, VariableOut, VariableUpdate
 
 router = APIRouter(prefix="/api/v1/variable-sets", tags=["variable-sets"])
-Writer = Depends(require_role(Role.writer))
 DbSession = Annotated[AsyncSession, Depends(get_session)]
 
 
@@ -60,7 +59,7 @@ async def list_sets(user: CurrentUser, session: DbSession) -> list[VariableSet]:
     return list((await session.execute(q)).scalars().all())
 
 
-@router.post("", response_model=VariableSetOut, status_code=201, dependencies=[Writer])
+@router.post("", response_model=VariableSetOut, status_code=201)
 async def create_set(body: VariableSetCreate, user: CurrentUser, session: DbSession) -> VariableSet:
     payload = body.model_dump()
     space_id = await resolve_target_space(
@@ -94,7 +93,7 @@ async def get_set(set_id: uuid.UUID, user: CurrentUser, session: DbSession) -> V
     return await _get_set(session, user, set_id)
 
 
-@router.patch("/{set_id}", response_model=VariableSetOut, dependencies=[Writer])
+@router.patch("/{set_id}", response_model=VariableSetOut)
 async def update_set(
     set_id: uuid.UUID, body: VariableSetUpdate, user: CurrentUser, session: DbSession
 ) -> VariableSet:
@@ -117,7 +116,7 @@ async def update_set(
     return vset
 
 
-@router.delete("/{set_id}", status_code=204, dependencies=[Writer])
+@router.delete("/{set_id}", status_code=204)
 async def delete_set(set_id: uuid.UUID, user: CurrentUser, session: DbSession) -> None:
     vset = await _get_set(session, user, set_id, min_role=Role.writer)
     attachments = (
@@ -167,9 +166,7 @@ async def list_set_variables(
     return [VariableOut.of(v) for v in await variables_for(session, variable_set_id=set_id)]
 
 
-@router.post(
-    "/{set_id}/variables", response_model=VariableOut, status_code=201, dependencies=[Writer]
-)
+@router.post("/{set_id}/variables", response_model=VariableOut, status_code=201)
 async def create_set_variable(
     set_id: uuid.UUID, body: VariableCreate, user: CurrentUser, session: DbSession
 ) -> VariableOut:
@@ -195,7 +192,7 @@ async def create_set_variable(
     return VariableOut.of(var)
 
 
-@router.patch("/{set_id}/variables/{var_id}", response_model=VariableOut, dependencies=[Writer])
+@router.patch("/{set_id}/variables/{var_id}", response_model=VariableOut)
 async def update_set_variable(
     set_id: uuid.UUID,
     var_id: uuid.UUID,
@@ -223,7 +220,7 @@ async def update_set_variable(
     return VariableOut.of(var)
 
 
-@router.delete("/{set_id}/variables/{var_id}", status_code=204, dependencies=[Writer])
+@router.delete("/{set_id}/variables/{var_id}", status_code=204)
 async def delete_set_variable(
     set_id: uuid.UUID, var_id: uuid.UUID, user: CurrentUser, session: DbSession
 ) -> None:
@@ -265,9 +262,7 @@ async def list_attachments(
     )
 
 
-@router.post(
-    "/{set_id}/attachments", response_model=AttachmentOut, status_code=201, dependencies=[Writer]
-)
+@router.post("/{set_id}/attachments", response_model=AttachmentOut, status_code=201)
 async def attach(
     set_id: uuid.UUID, body: AttachmentCreate, user: CurrentUser, session: DbSession
 ) -> VariableSetAttachment:
@@ -333,7 +328,7 @@ async def attach(
     return attachment
 
 
-@router.delete("/{set_id}/attachments/{attachment_id}", status_code=204, dependencies=[Writer])
+@router.delete("/{set_id}/attachments/{attachment_id}", status_code=204)
 async def detach(
     set_id: uuid.UUID, attachment_id: uuid.UUID, user: CurrentUser, session: DbSession
 ) -> None:

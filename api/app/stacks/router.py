@@ -9,7 +9,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.audit import record_audit
-from app.auth.deps import CurrentUser, require_role
+from app.auth.deps import CurrentUser
 from app.crypto import decrypt, encrypt
 from app.db import get_session
 from app.enums import AuditActorKind, RepoAuthKind, Role
@@ -29,7 +29,6 @@ from app.variables.crud import (
 from app.variables.schemas import VariableCreate, VariableOut, VariableUpdate
 
 router = APIRouter(prefix="/api/v1/stacks", tags=["stacks"])
-Writer = Depends(require_role(Role.writer))
 DbSession = Annotated[AsyncSession, Depends(get_session)]
 
 
@@ -50,7 +49,7 @@ async def list_stacks(user: CurrentUser, session: DbSession) -> list[StackOut]:
     return [StackOut.of(s) for s in rows]
 
 
-@router.post("", response_model=StackOut, status_code=201, dependencies=[Writer])
+@router.post("", response_model=StackOut, status_code=201)
 async def create_stack(
     body: StackCreate, user: CurrentUser, session: DbSession, request: Request
 ) -> StackOut:
@@ -97,7 +96,7 @@ async def get_stack(stack_id: uuid.UUID, user: CurrentUser, session: DbSession) 
     return StackOut.of(await guard_stack_id(session, user, stack_id))
 
 
-@router.patch("/{stack_id}", response_model=StackOut, dependencies=[Writer])
+@router.patch("/{stack_id}", response_model=StackOut)
 async def update_stack(
     stack_id: uuid.UUID, body: StackUpdate, user: CurrentUser, session: DbSession
 ) -> StackOut:
@@ -126,7 +125,7 @@ async def update_stack(
     return StackOut.of(stack)
 
 
-@router.delete("/{stack_id}", status_code=204, dependencies=[Writer])
+@router.delete("/{stack_id}", status_code=204)
 async def delete_stack(stack_id: uuid.UUID, user: CurrentUser, session: DbSession) -> None:
     stack = await guard_stack_id(session, user, stack_id, min_role=Role.writer)
     # Lock the stack first, so no env is added to it meanwhile, then its envs: 409 while one runs.
@@ -148,7 +147,7 @@ async def delete_stack(stack_id: uuid.UUID, user: CurrentUser, session: DbSessio
     await session.commit()
 
 
-@router.post("/{stack_id}/check-repo", response_model=CheckRepoResult, dependencies=[Writer])
+@router.post("/{stack_id}/check-repo", response_model=CheckRepoResult)
 async def check_stack_repo(
     stack_id: uuid.UUID, user: CurrentUser, session: DbSession
 ) -> CheckRepoResult:
@@ -169,9 +168,7 @@ async def list_stack_variables(
     return [VariableOut.of(v) for v in await variables_for(session, stack_id=stack_id)]
 
 
-@router.post(
-    "/{stack_id}/variables", response_model=VariableOut, status_code=201, dependencies=[Writer]
-)
+@router.post("/{stack_id}/variables", response_model=VariableOut, status_code=201)
 async def create_stack_variable(
     stack_id: uuid.UUID, body: VariableCreate, user: CurrentUser, session: DbSession
 ) -> VariableOut:
@@ -197,7 +194,7 @@ async def create_stack_variable(
     return VariableOut.of(var)
 
 
-@router.patch("/{stack_id}/variables/{var_id}", response_model=VariableOut, dependencies=[Writer])
+@router.patch("/{stack_id}/variables/{var_id}", response_model=VariableOut)
 async def update_stack_variable(
     stack_id: uuid.UUID,
     var_id: uuid.UUID,
@@ -225,7 +222,7 @@ async def update_stack_variable(
     return VariableOut.of(var)
 
 
-@router.delete("/{stack_id}/variables/{var_id}", status_code=204, dependencies=[Writer])
+@router.delete("/{stack_id}/variables/{var_id}", status_code=204)
 async def delete_stack_variable(
     stack_id: uuid.UUID, var_id: uuid.UUID, user: CurrentUser, session: DbSession
 ) -> None:

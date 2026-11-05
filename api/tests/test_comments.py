@@ -125,3 +125,47 @@ async def test_delete_thread_with_replies_guarded(client: httpx.AsyncClient) -> 
     assert (await client.delete(f"{base}/{root}", headers=bob)).status_code == 409
     # … but an admin can.
     assert (await client.delete(f"{base}/{root}", headers=admin)).status_code == 204
+
+
+async def test_every_comment_mutation_is_audited(client: httpx.AsyncClient) -> None:
+    """Create / edit / resolve / reopen / delete each write one audit event, targeting the comment,
+    with the run (and thread) in the context — never the body (§6.2, §16.5)."""
+    bob = await login(client, "bob")
+    alice = await login(client, "alice")
+    admin = await login(client, "admin")
+    run_id = await _make_run(client, admin, "AUDIT")
+    base = f"/api/v1/runs/{run_id}/comments"
+
+    root = (await client.post(base, headers=bob, json={"body": "root body"})).json()
+    reply = (
+        await client.post(base, headers=alice, json={"body": "reply body", "parent_id": root["id"]})
+    ).json()
+    await client.patch(f"{base}/{root['id']}", headers=bob, json={"body": "edited body"})
+    await client.patch(f"{base}/{root['id']}", headers=alice, json={"resolved": True})
+    await client.patch(f"{base}/{root['id']}", headers=bob, json={"resolved": False})
+    assert (await client.delete(f"{base}/{reply['id']}", headers=alice)).status_code == 204
+
+    async def _events(target: str) -> list[dict]:
+        r = await client.get(
+            "/api/v1/audit", headers=admin, params={"target_kind": "comment", "target_id": target}
+        )
+        assert r.status_code == 200, r.text
+        return sorted(r.json(), key=lambda e: e["created_at"])
+
+    on_root = await _events(root["id"])
+    assert [(e["action"], e["actor_email"]) for e in on_root] == [
+        ("comment.created", "bob@dev.local"),
+        ("comment.updated", "bob@dev.local"),
+        ("comment.resolved", "alice@dev.local"),
+        ("comment.reopened", "bob@dev.local"),
+    ]
+    on_reply = await _events(reply["id"])
+    assert [e["action"] for e in on_reply] == ["comment.created", "comment.deleted"]
+    assert on_reply[1]["context"] == {"run_id": run_id, "parent_id": root["id"]}
+    for e in on_root + on_reply:
+        assert e["context"]["run_id"] == run_id
+        assert "body" not in str(e["context"])  # neither the key nor any of the bodies
+
+    # A refused mutation writes nothing.
+    assert (await client.delete(f"{base}/{root['id']}", headers=alice)).status_code == 403
+    assert len(await _events(root["id"])) == 4
