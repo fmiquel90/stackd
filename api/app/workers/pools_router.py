@@ -140,18 +140,25 @@ async def latest_diagnostics(worker_id: uuid.UUID, session: DbSession) -> dict:
 
 def _blocking_reason(
     run: Run,
-    active_by_env: dict[uuid.UUID, int],
+    active_by_env: dict[uuid.UUID, set[uuid.UUID]],
     env_locked: bool,
     compatible: bool = True,
+    affinity_seconds: int = 0,
+    now: datetime | None = None,
 ) -> str | None:
+    """Why a waiting run is not claimed yet (§12) — the claim's own filters (§7.2), in order."""
     if run.state not in (RunState.queued, RunState.confirmed):
         return None
     if env_locked:
         return "env_locked"
-    if active_by_env.get(run.environment_id, 0) > 0:
+    if active_by_env.get(run.environment_id, set()) - {run.id}:
         return "active_run"
-    if run.state == RunState.confirmed:
-        return "apply_affinity_hold"
+    if run.state == RunState.confirmed and run.confirmed_at is not None:
+        # Reserved for the plan's worker until the affinity window ends — whether that worker is
+        # still online or not, as the claim does (§7.2): past it, any compatible worker takes it.
+        held_until = run.confirmed_at + timedelta(seconds=affinity_seconds)
+        if (now or datetime.now(UTC)) < held_until:
+            return "apply_affinity_hold"
     if not compatible:
         return "no_compatible_worker"
     return None
@@ -196,15 +203,18 @@ async def queue(user: CurrentUser, session: DbSession) -> list[QueueEntry]:
         )
     runs = (await session.execute(q)).scalars().all()
 
-    # Count OTHER active runs per env (to flag a waiting run blocked by an active one).
-    active_by_env: dict[uuid.UUID, int] = {}
+    # Active runs per env (to flag a waiting run blocked by ANOTHER active one; a `confirmed` run
+    # is itself in ACTIVE_STATES and keeps its plan worker's id, so it must not block itself).
+    active_by_env: dict[uuid.UUID, set[uuid.UUID]] = {}
     for r in runs:
         if r.state in ACTIVE_STATES and r.worker_id is not None:
-            active_by_env[r.environment_id] = active_by_env.get(r.environment_id, 0) + 1
+            active_by_env.setdefault(r.environment_id, set()).add(r.id)
 
-    # Online workers, and each waiting run's env + stack, for `no_compatible_worker`.
+    # Online workers, and each waiting run's env + stack, for `env_locked`/`no_compatible_worker`.
     online = await online_workers(session)
-    waiting_envs = {r.environment_id for r in runs if r.state == RunState.queued}
+    waiting_envs = {
+        r.environment_id for r in runs if r.state in (RunState.queued, RunState.confirmed)
+    }
     env_stack = {
         env.id: (env, stack)
         for env, stack in (
@@ -216,10 +226,13 @@ async def queue(user: CurrentUser, session: DbSession) -> list[QueueEntry]:
         ).all()
     }
 
+    affinity = get_settings().stackd_apply_affinity_seconds
+    now = datetime.now(UTC)
     out: list[QueueEntry] = []
     for r in runs:
         pair = env_stack.get(r.environment_id)
         can_take = pair is None or compatible(pair[0], pair[1], online)
+        locked = pair is not None and pair[0].locked
         out.append(
             QueueEntry(
                 run_id=r.id,
@@ -227,7 +240,12 @@ async def queue(user: CurrentUser, session: DbSession) -> list[QueueEntry]:
                 state=r.state.value,
                 worker_id=r.worker_id,
                 blocking_reason=_blocking_reason(
-                    r, active_by_env, env_locked=False, compatible=can_take
+                    r,
+                    active_by_env,
+                    env_locked=locked,
+                    compatible=can_take,
+                    affinity_seconds=affinity,
+                    now=now,
                 ),
             )
         )

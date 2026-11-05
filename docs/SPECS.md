@@ -1973,7 +1973,9 @@ Unauthenticated scrape endpoint (restrict at the network layer — it exposes on
 result only, never a run id.
 - `stackd_runs_total{state}`, `stackd_queue_depth`, `stackd_workers_online` — gauges refreshed from
   the DB at scrape time (cheap aggregate queries).
-- `stackd_claim_latency_seconds` — histogram, observed in `claim_one` (queue wait = now − created_at).
+- `stackd_claim_latency_seconds` — histogram, observed in `claim_one`: how long the run waited
+  claimable — now − `confirmed_at` for an apply claim (the plan and the human wait before it are not
+  queue time), now − `created_at` for a plan or command claim.
 - `stackd_run_duration_seconds{phase}` — histogram, observed at the terminal `transition()` (claim →
   terminal); `phase` = `apply` if the run was confirmed, else `plan`.
 - `stackd_webhook_total{result}` — counter (`accepted`/`rejected`/`no_match`) in the webhook handler.

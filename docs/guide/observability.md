@@ -58,7 +58,7 @@ the network layer.
 | `stackd_runs_total{state}` | gauge | runs per state, read from the database at scrape |
 | `stackd_queue_depth` | gauge | runs waiting for a claim (`queued` + `confirmed`) |
 | `stackd_workers_online` | gauge | workers that heartbeated within the offline window (60 s) |
-| `stackd_claim_latency_seconds` | histogram | from a run's creation to each claim of it (plan and apply claims) |
+| `stackd_claim_latency_seconds` | histogram | how long a run waited claimable: from its creation to a plan (or command) claim, from its confirmation to an apply claim |
 | `stackd_run_duration_seconds{phase}` | histogram | from the last claim to the terminal state; `phase="apply"` if the run was confirmed, else `"plan"` |
 | `stackd_webhook_total{result}` | counter | VCS webhooks received: `accepted`, `rejected`, `no_match` |
 

@@ -12,7 +12,7 @@ workers_online = Gauge("stackd_workers_online", "Workers seen within the offline
 
 claim_latency = Histogram(
     "stackd_claim_latency_seconds",
-    "Time a run waited in queue before a worker claimed it",
+    "Time a run waited claimable (since creation; an apply since confirmation) before a claim",
     buckets=(0.5, 1, 2, 5, 10, 30, 60, 300),
 )
 run_duration = Histogram(
