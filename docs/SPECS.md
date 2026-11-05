@@ -1831,7 +1831,9 @@ rollout_upstream_changed` (`drift_detected`: §19.4; the `rollout_*` ones: §21.
   requires `can_destroy`; excluding the triggerer. `→ finished` / `→ failed` notify the run's human
   triggerer (`run_finished` / `run_failed`); `canceled` and `discarded` notify nobody.
 - **comment create** (§16): a reply notifies the root author; `@mention` tokens (matched against a
-  user's email local-part or full email) notify the mentioned users. Never the author. The composer
+  user's email local-part or full email) notify the mentioned users. Never the author, and only a
+  user who can read the run — an enabled member of its space or an instance admin (§2.4): a reply
+  or a mention of anyone else notifies no one (the notification would leak the run). The composer
   offers `@` autocomplete from `GET /users/mentionable` (a minimal directory readable by any auth),
   inserting `@<email-local-part>` so it resolves against the parser.
 - **rollouts** (§21.7): `advance_rollout()` notifies the rollout's creator and approver of a pause or

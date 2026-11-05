@@ -122,6 +122,53 @@ async def test_comment_reply_and_mention_notify(client: httpx.AsyncClient) -> No
     assert any(n["kind"] == "mention" for n in await _bell(client, bob))
 
 
+async def test_comment_notifies_only_users_who_can_read_the_run(client: httpx.AsyncClient) -> None:
+    """A mention (or a reply) never reaches a user outside the run's space: the notification would
+    leak the run to someone who can't open it (§2.4, §17)."""
+    admin = await login(client, "admin")
+    alice = await login(client, "alice")
+    bob = await login(client, "bob")
+    space = await client.post("/api/v1/spaces", headers=admin, json={"name": "mention-space"})
+    assert space.status_code == 201, space.text
+    space_id = space.json()["id"]
+    ids = {u["email"]: u["id"] for u in (await client.get("/api/v1/users", headers=admin)).json()}
+    for who in ("alice", "bob"):  # both members, whatever the provisioning order
+        grant = await client.put(
+            f"/api/v1/spaces/{space_id}/members",
+            headers=admin,
+            json={"user_id": ids[f"{who}@dev.local"], "role": "writer", "allowed_tiers": []},
+        )
+        assert grant.status_code == 200, grant.text
+    stack = await client.post(
+        "/api/v1/stacks",
+        headers=admin,
+        json={
+            "space_id": space_id,
+            "name": "mention-space-stack",
+            "repo_url": "file:///repos/x",
+            "tool_version": "1.12.0",
+        },
+    )
+    env_id = await make_env(client, admin, stack.json()["id"], "dev", "dev")
+    run = (await client.post(f"/api/v1/environments/{env_id}/runs", headers=admin, json={})).json()
+    base = f"/api/v1/runs/{run['id']}/comments"
+
+    # alice starts a thread while a member, then loses access to the space.
+    root = (await client.post(base, headers=alice, json={"body": "root"})).json()
+    removed = await client.delete(
+        f"/api/v1/spaces/{space_id}/members/{ids['alice@dev.local']}", headers=admin
+    )
+    assert removed.status_code == 204, removed.text
+
+    # bob replies and mentions both: bob is the author, alice can't read the run any more.
+    await client.post(base, headers=bob, json={"body": "cc @alice @admin", "parent_id": root["id"]})
+    assert all(n["run_id"] != run["id"] for n in await _bell(client, alice))
+    # An instance admin reads every space: the mention reaches them.
+    assert any(
+        n["kind"] == "mention" and n["run_id"] == run["id"] for n in await _bell(client, admin)
+    )
+
+
 async def test_feed_is_per_user_and_mark_read(client: httpx.AsyncClient) -> None:
     admin = await login(client, "admin")
     alice = await login(client, "alice")
