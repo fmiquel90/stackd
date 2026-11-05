@@ -26,6 +26,10 @@ describe("runOutcome", () => {
     expect(outcomeOf(makeRun({ state: "finished", type: "destroy", confirmed_at: "x" }))).toBe("destroyed");
     expect(outcomeOf(makeRun({ state: "failed", confirmed_at: "x" }))).toBe("failed_during_apply");
     expect(outcomeOf(makeRun({ state: "failed" }))).toBe("failed");
+    // A stopped mutating command is never confirmed, yet may have changed the state (SPECS §4.1).
+    expect(outcomeOf(makeRun({ state: "failed", type: "command", error: "canceled_during_apply" }))).toBe(
+      "failed_during_apply",
+    );
     expect(outcomeOf(makeRun({ state: "planning" }))).toBeNull();
   });
   it("formats counts with a true minus", () => {

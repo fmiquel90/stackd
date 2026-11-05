@@ -168,7 +168,7 @@ async def heartbeat(
     elif worker.status == WorkerStatus.offline:
         worker.status = WorkerStatus.idle
 
-    # Deliver pending downward commands (diagnostics today; cancel_job later) and mark them sent.
+    # Deliver pending downward commands (diagnostics, cancel_job) and mark them sent.
     pending = (
         (
             await session.execute(

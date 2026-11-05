@@ -188,7 +188,11 @@ def _stream_proc(
 
     rc, timed_out = runner.stream(cmd, cwd, env, timeout=timeout, on_line=on_line)
     streamer.emit(phase, buffer, section=section)
-    if token is not None and token.interrupted:
+    # A command that exited 0 completed whatever the signal: the stop raced its end (it reached the
+    # process as it exited). An apply that went through must not be reported as interrupted — the
+    # job carries on, and a stop still in force ends it before the next command (above). Once
+    # disarmed (the apply succeeded), a later failure is a failure, not a stop.
+    if token is not None and token.interrupted and token.should_stop and rc != 0:
         streamer.emit(phase, ["[stackd] stopped on request"], section=section)
         raise JobCanceled
     if timed_out:

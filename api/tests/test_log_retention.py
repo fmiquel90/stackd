@@ -6,6 +6,7 @@ import uuid
 from datetime import UTC, datetime, timedelta
 
 import httpx
+import pytest
 from moto import mock_aws
 from sqlalchemy import text
 
@@ -93,6 +94,32 @@ async def test_logs_archived_then_hot_purged_and_served_from_s3(client: httpx.As
             )
         ).json()
         assert len(one) == 2
+
+
+async def test_archived_run_with_hot_rows_never_reads_s3(
+    client: httpx.AsyncClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Archived but not purged yet: the hot tier answers, even an empty page (a poll past the last
+    seq, a phase with no lines) — the tier is chosen on the run, not on the filtered rows."""
+    from app.db import SessionLocal
+    from app.runs import logs_archive
+
+    with mock_aws():
+        run_id, admin = await _finished_run_with_logs(client, "logtier")
+        async with SessionLocal() as session:
+            await logs_archive.archive_run_logs(session, datetime.now(UTC) + timedelta(minutes=2))
+
+        async def no_s3(*_a: object, **_k: object) -> None:
+            raise AssertionError("S3 read while hot rows remain")
+
+        monkeypatch.setattr(logs_archive, "list_keys", no_s3)
+        monkeypatch.setattr(logs_archive, "get_object", no_s3)
+        url = f"/api/v1/runs/{run_id}/logs"
+        past = await client.get(url, headers=admin, params={"after_seq": 99})
+        assert past.status_code == 200 and past.json() == []
+        other = await client.get(url, headers=admin, params={"phase": "applying"})
+        assert other.status_code == 200 and other.json() == []
+        assert len((await client.get(url, headers=admin)).json()) == 2
 
 
 async def test_download_hot_and_cold(client: httpx.AsyncClient) -> None:

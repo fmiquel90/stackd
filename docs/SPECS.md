@@ -455,7 +455,7 @@ context kid, backend, ARN, previous kid, `reactivated`, and for a reactivation `
       └──────────────────┘
 ```
 
-Terminal: `finished`, `failed`, `discarded`, `canceled`. `canceled`: user on `queued`/`unconfirmed`, the system when a PR closes (its in-flight proposed runs, §18.3), or a rollout's cancel on its member runs that are `queued`, `unconfirmed` or `confirmed` and not claimed yet (§21.4 step 8 — `confirmed → canceled` is that edge). **Cancelling a run a worker is executing** is a request, not a transition: `POST /runs/{id}/cancel` records `runs.cancel_requested_at`, audits `run.cancel_requested` and queues a `cancel_job` command for the worker's next heartbeat (§7.1) — one transaction. The worker interrupts its tool (SIGINT, a graceful stop: tofu finishes the operation in flight, releases the state lock, exits; SIGKILL only after `STACKD_CANCEL_GRACE_SECONDS`, default 120) and reports `job_canceled`; only then does `transition()` end the run. A job that holds **no apply credentials** (preparing, planning, checking, a read-only command) ends `canceled`; one that does (`applying`, a mutating command, §4.3) ends **`failed` with `error=canceled_during_apply`** — `applying` is never `canceled`, since the infrastructure may be partly changed — and nothing cascades. Stopping a job that holds apply credentials needs `can_apply` (the gate of starting it); any other needs `writer`. Idempotent: asking again re-queues the command (the first may have been lost) without a second audit. If the plan finishes before the stop reaches it, the run ends `canceled` instead of going to `unconfirmed`/`confirmed` — a stopped plan is never auto-confirmed. Once an apply has succeeded the worker ignores a later stop (what is left — recording the outputs — must finish). A worker that is offline never reports: `worker_lost` (§3.7) ends the run. Any terminal state drops the run's saved plan (§11.3).
+Terminal: `finished`, `failed`, `discarded`, `canceled`. `canceled`: user on `queued`/`confirmed`/`unconfirmed` (not claimed yet, or waiting on a human), the system when a PR closes (its in-flight proposed runs, §18.3), or a rollout's cancel on its member runs that are `queued`, `unconfirmed` or `confirmed` and not claimed yet (§21.4 step 8 — `confirmed → canceled` is that edge). **Cancelling a run a worker is executing** is a request, not a transition: `POST /runs/{id}/cancel` records `runs.cancel_requested_at`, audits `run.cancel_requested` and queues a `cancel_job` command for the worker's next heartbeat (§7.1) — one transaction. The worker interrupts its tool (SIGINT, a graceful stop: tofu finishes the operation in flight, releases the state lock, exits; SIGKILL only after `STACKD_CANCEL_GRACE_SECONDS`, default 120) and reports `job_canceled`; only then does `transition()` end the run. A job that holds **no apply credentials** (preparing, planning, checking, a read-only command) ends `canceled`; one that does (`applying`, a mutating command, §4.3) ends **`failed` with `error=canceled_during_apply`** — `applying` is never `canceled`, since the infrastructure may be partly changed — and nothing cascades. Stopping a job that holds apply credentials needs `can_apply` (the gate of starting it); any other needs `writer`. Idempotent: asking again re-queues the command (the first may have been lost) without a second audit. If the plan finishes before the stop reaches it, the run ends `canceled` instead of going to `unconfirmed`/`confirmed` — a stopped plan is never auto-confirmed. Once an apply has succeeded the worker ignores a later stop (what is left — recording the outputs — must finish). A worker that is offline never reports: `worker_lost` (§3.7) ends the run. Any terminal state drops the run's saved plan (§11.3).
 
 Command runs (§4.3) take a shorter path: `queued → preparing → running → finished | failed`.
 
@@ -468,10 +468,9 @@ Command runs (§4.3) take a shorter path: `queued → preparing → running → 
 | `checking → unconfirmed` | worker | checks OK or warn; non-empty diff. A warn **forces** confirmation even if autodeploy |
 | `checking → confirmed` | system | all checks OK, non-empty diff, `autodeploy=true`, env not protected, `used_mocks=false`, the run belongs to no rollout — **or** the run belongs to a started rollout whose gate is open and passes its gate (§21.5) |
 | `planning/checking → finished` | worker | empty diff (outputs captured after refresh) |
-| `queued / confirmed / unconfirmed → canceled` | user, or system | a user's cancel (a `confirmed` run is not claimed yet); the system when a PR closes (its proposed runs, §18.3) or a rollout is canceled (its member runs, §21.4 step 8) |
+| `queued / confirmed / unconfirmed → canceled` | user, or system | a user's cancel (a `confirmed` run is not claimed yet); the system when a PR closes (its proposed runs, §18.3) or a rollout is canceled (its member runs not claimed yet, §21.4 step 8) |
 | `preparing / planning / checking / running → canceled` | worker | `job_canceled` after a user's stop request (§4.1), the job holding no apply credentials |
 | `applying → failed` (`canceled_during_apply`) | worker | `job_canceled` after a stop request on a job holding apply credentials; a run already `applying` is never `canceled` |
-| `confirmed → canceled` | user, or system | a user's cancel, or a rollout's (§21.4 step 8): the run is not claimed yet |
 | `unconfirmed → confirmed` | user (or system: a rollout re-approval, §21.6) | `can_apply(user, env)` = role∈{approver,admin} AND `env.tier ∈ allowed_tiers` (§2.4); ≠ triggerer if the tier requires four-eyes, the env is `protected` or sets `require_second_pair_of_eyes`; for a `destroy` run: `can_destroy` required; **blocked if `used_mocks` and `allow_mock_apply=false`** |
 | `confirmed → applying` | worker (claim) | the plan's worker within the affinity window, then any compatible worker (§7.2); re-checks `allow_mock_apply` and the secret-fallback gate against the apply-time resolution (§9.3/§15.5). The apply job clones the pinned commit and applies the run's **saved plan** (§7.3); a missing or unreadable plan fails the run — it never re-plans |
 | `applying → finished` | worker | apply exit 0 + outputs uploaded + no failing `after_apply` check (one that fails → `failed`, the outputs still recorded, nothing cascades, §8.3) |
@@ -758,7 +757,7 @@ Apply affinity: a `confirmed` run is reserved for its originating worker for **6
 
 ```
 POST /worker/v1/jobs/{id}/events
-  { "event": "phase_started"|"phase_finished"|"job_failed",
+  { "event": "phase_started"|"phase_finished"|"job_failed"|"job_canceled",
     "phase": "...", "exit_code": 0,
     "result": { "has_changes": true,
                 "summary": {"add": 2, "change": 0, "destroy": 0, "import": 0, "forget": 0, …},
@@ -773,6 +772,8 @@ POST /worker/v1/jobs/{id}/events
   job_failed(after_apply) carries "result": {"checks": [...], "outputs": {...}}   # §8.3: the
       # apply went through, an after_apply hook failed → outputs recorded (§9.1), drift
       # cleared (§19), no cascade
+  job_canceled carries "result": {"checks": [...]} — the job stopped on a user's request
+      (§4.1); 409 unless `runs.cancel_requested_at` is set
 
 PUT /worker/v1/jobs/{id}/artifacts/plan.tfplan | plan.json | outputs.json
 GET /worker/v1/jobs/{id}/artifacts/plan.tfplan          # the apply job's saved plan

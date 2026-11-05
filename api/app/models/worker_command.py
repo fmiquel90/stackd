@@ -14,8 +14,8 @@ from app.db import Base, created_at_col, pk_uuid
 class WorkerCommand(Base):
     """Downward command for a worker, delivered on its next heartbeat (SPECS §7.1 — no inbound).
 
-    Generic queue; today carries `diagnostics` (a read-only debug bundle), reusable later for
-    `cancel_job`. Status: pending → sent (delivered) → done | failed.
+    Generic queue: `diagnostics` (a read-only debug bundle) and `cancel_job` (stop an executing
+    job, §4.1). Status: pending → sent (delivered) → done | failed.
     """
 
     __tablename__ = "worker_commands"

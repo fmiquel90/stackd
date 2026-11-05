@@ -197,12 +197,12 @@ The platform becomes an **OIDC issuer** (the same mechanism as GitHub Actions OI
 ### Phase 3 — S3 states via HTTP backend + Audit trail UI (2 weeks)
 
 #### 3a. Managed state
-- [x] Complete HTTP backend protocol (GET/POST/LOCK/UNLOCK/423), S3 SSE-KMS storage
+- [ ] Complete HTTP backend protocol (GET/POST/LOCK/UNLOCK/423), S3 SSE-KMS storage — *status: the protocol is done; the API does not request SSE-KMS on its S3 writes yet (bucket default encryption only)*
 - [x] Application versioning linked to runs, Postgres locking visible in UI, audited force-unlock
 - [x] Per-job scoped tokens (`ro`/`plan`/`rw`), backend settings injected automatically — *status: done, as `TF_HTTP_*` environment variables for tofu only (not `-backend-config`, which tofu persists), SPECS §11.2*
 - [x] Saved plans in S3: the reviewed `plan.tfplan`, encrypted by the API, kept until the run ends — *status: done (SPECS §7.3, §11.3); `plan.json`/`outputs.json` artifacts are accepted but not archived yet*
 - [x] "Bring your own S3 backend" mode
-- [x] Front: State tab per env (versions, lock, admin download)
+- [ ] Front: State tab per env (versions, lock, admin download) — *status: versions, lock and the admin force-unlock; no state download yet (neither API nor UI)*
 
 #### 3b. Audit: "who applied what"
 - [x] `audit_events` completed: trigger, confirm (Google identity), discard, apply, force-unlock, rotations, roles
@@ -246,7 +246,7 @@ The platform becomes an **OIDC issuer** (the same mechanism as GitHub Actions OI
 - [x] **OIDC issuer**: `/.well-known/openid-configuration`, JWKS (RS256 keys, rotation), signing of workload tokens at claim time
 - [x] `CloudIntegration` model per environment: provider `aws`, `plan_role_arn`, `apply_role_arn` (see SPECS §10)
 - [x] Agent: token writing, export of `AWS_WEB_IDENTITY_TOKEN_FILE`/`AWS_ROLE_ARN` (or explicit AssumeRoleWithWebIdentity + export of the 3 variables if compatibility is needed)
-- [x] Documentation + provided Terraform module: create the AWS Identity Provider + example roles with trust policies filtered on the claims
+- [ ] Documentation + provided Terraform module: create the AWS Identity Provider + example roles with trust policies filtered on the claims — *status: documentation done (docs/guide/cloud-credentials.md); the Terraform module is not in the repo yet*
 - [x] UI: integration config per env, "dynamic credentials" vs "static variables" indicator, AssumeRole test
 - [x] Audit: `cloud_integration.created/updated`, assumed role traced in the run context
 

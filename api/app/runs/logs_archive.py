@@ -15,7 +15,7 @@ import uuid
 from collections import defaultdict
 from datetime import datetime, timedelta
 
-from sqlalchemy import delete, select
+from sqlalchemy import delete, exists, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import get_settings
@@ -121,14 +121,20 @@ async def load_chunks(
     after_seq: int | None = None,
 ) -> list[dict]:
     """Chunks `{phase, section, seq, lines}` ordered by (phase, seq), from the hot table if the run
-    still has rows there, otherwise from the S3 archive."""
-    stmt = select(RunLog).where(RunLog.run_id == run.id)
-    if phase:
-        stmt = stmt.where(RunLog.phase == phase)
-    if after_seq is not None:
-        stmt = stmt.where(RunLog.seq > after_seq)
-    rows = (await session.execute(stmt.order_by(RunLog.phase, RunLog.seq))).scalars().all()
-    if rows or run.logs_archived_at is None:
+    still has rows there, otherwise from the S3 archive.
+
+    The tier is chosen on the run as a whole, not on the filtered result: a poll past the last
+    `seq`, or a phase with no lines, answers empty from the hot tier instead of reading S3."""
+    hot = run.logs_archived_at is None or (
+        await session.scalar(select(exists().where(RunLog.run_id == run.id)))
+    )
+    if hot:
+        stmt = select(RunLog).where(RunLog.run_id == run.id)
+        if phase:
+            stmt = stmt.where(RunLog.phase == phase)
+        if after_seq is not None:
+            stmt = stmt.where(RunLog.seq > after_seq)
+        rows = (await session.execute(stmt.order_by(RunLog.phase, RunLog.seq))).scalars().all()
         return [
             {"phase": r.phase, "section": r.section, "seq": r.seq, "lines": r.lines} for r in rows
         ]

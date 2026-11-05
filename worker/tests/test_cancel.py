@@ -115,6 +115,34 @@ def test_after_the_point_of_no_return_a_stop_no_longer_applies(tmp_path: Path) -
     assert "bookkeeping" in streamer.lines
 
 
+COMPLETES = (
+    "import signal, sys, time\n"
+    "def done(*_):\n"
+    "    print('finished anyway', flush=True); sys.exit(0)\n"
+    "signal.signal(signal.SIGINT, done)\n"
+    "time.sleep(60)\n"
+)
+
+
+def test_a_command_that_completes_despite_the_signal_is_not_a_stop(tmp_path: Path) -> None:
+    """The stop raced the end of the apply: exit 0 means it went through — never reported as
+    interrupted (it would read as a partial apply); the next command is not started, unless the
+    job was disarmed first."""
+    token, streamer = cancel.CancelToken(grace=30), Streamer()
+    thread, out = _run_in_thread(COMPLETES, token, streamer, tmp_path)
+    _wait_ready(thread)
+    token.request()
+    thread.join(10)
+    assert out == {"rc": 0}
+    assert "[stackd] stopped on request" not in streamer.lines
+
+    # The apply succeeded → disarmed: a later failing command is a failure, not a stop.
+    token.disarm()
+    thread, out = _run_in_thread("import sys; sys.exit(1)", token, streamer, tmp_path)
+    thread.join(10)
+    assert out == {"rc": 1}
+
+
 def test_registry_finds_the_job_and_remembers_an_early_cancel() -> None:
     jobs = cancel.JobRegistry(grace=5)
     token = jobs.register("run-1")
