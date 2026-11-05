@@ -513,11 +513,13 @@ class _NoBucketSettings:
         raise ClientError({"Error": {"Code": "NotImplemented"}}, "PutBucketEncryption")
 
 
-def test_unsupported_bucket_settings_only_warn(caplog: pytest.LogCaptureFixture) -> None:
-    from app.statebackend.store import _ensure_bucket
+def test_unsupported_bucket_settings_only_warn(monkeypatch: pytest.MonkeyPatch) -> None:
+    from app.statebackend import store
 
+    # Record the warnings directly: Alembic's fileConfig may have disabled the existing loggers.
+    warned: list[str] = []
+    monkeypatch.setattr(store._log, "warning", lambda *_a, extra: warned.append(extra["setting"]))
     client = _NoBucketSettings()
-    with caplog.at_level("WARNING", logger="stackd.statebackend"):
-        _ensure_bucket(client, "garage-bucket")
+    store._ensure_bucket(client, "garage-bucket")
     assert client.created == ["garage-bucket"]
-    assert {getattr(r, "setting", None) for r in caplog.records} == {"versioning", "encryption"}
+    assert warned == ["versioning", "encryption"]
