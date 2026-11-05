@@ -636,6 +636,9 @@ secret.fallback_used / secret.fallback_overridden                    # §15
 environment.cloned                                                   # §21.2
 rollout.created / rollout.approved / rollout.paused / rollout.resumed    # §21.8
 rollout.retried / rollout.canceled / rollout.succeeded / rollout.failed  # §21.8
+comment.created / comment.updated / comment.resolved / comment.reopened / comment.deleted
+                                  # plan-review comments (§16.3) — target the comment; context
+                                  #   run_id (+ parent_id, anchor_kind) — NEVER the body
 ```
 
 Not audited by a dedicated action: a run failed because an external secret could not resolve is
@@ -1785,6 +1788,13 @@ author or `role ∈ {approver, admin}`; deleting needs the author or admin.
 Every create/edit/delete/resolve emits a light `pg_notify('run_<id>', …)` (§5.3) so the run page's
 existing WS subscription invalidates `["run-comments", run_id]` and the thread updates live.
 
+Each of them is also audited in the same transaction (§6.3): `comment.created`, `comment.updated`
+(a body edit), `comment.resolved` / `comment.reopened` (`resolved` set true / false), and
+`comment.deleted` — `target_kind = comment`, `target_id` = the comment, context `run_id`, plus
+`parent_id` for a reply and `anchor_kind` for an anchored comment. **Never the body**: it is free
+text a reviewer may have pasted anything into. A PATCH changing both body and `resolved` writes
+both events. Deleting a root records its own `comment.deleted` only (its replies go with it).
+
 ### 16.4 Interaction with the gate
 
 **Advisory** at v1: the run page shows the count of open (unresolved) threads next to the Confirm
@@ -1796,6 +1806,8 @@ env flag could make confirm require all threads resolved — deliberately deferr
 1. No run-state change — comments are a side record; `transition()` (invariant §4.2) is untouched.
 2. Snippets come from already-masked log lines, so no secret leaks (invariant §13.3).
 3. Live updates reuse `LISTEN/NOTIFY` (§5.3) — no new transport.
+4. Every mutation writes its `comment.*` audit event in the same transaction (§6.3), without the
+   body.
 
 ---
 
