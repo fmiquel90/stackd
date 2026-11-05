@@ -1667,9 +1667,9 @@ POST /api/v1/environments/{id}/runs
   `secret_fallback_mode = break_glass` (a source must opt in to being overridable): every name in
   `secret_overrides` must be a secret reference resolved for the env with that mode, else **422**
   (after the 403 permission check; the error lists the names, never a value) and no run is created.
-- **Lifetime**: the overrides are sealed AES-GCM on the run (`runs.secret_overrides_encrypted`)
-  only while a job may still claim them; `transition()` wipes the column when the run reaches a
-  terminal state, alongside the saved plan (§11.3).
+- **Lifetime**: the sealed overrides stay on the run only while a job may still claim them;
+  `transition()` wipes `runs.secret_overrides_encrypted` when the run reaches a terminal state,
+  alongside the saved plan (§11.3).
 - The override value is injected like a sensitive variable, added to `mask_values`, and sets
   `run.used_secret_fallback = true`, provenance `secret_override:{source_name}`.
 - Audit `secret.fallback_overridden` (target: the run), `context = {variable, source}` — **the value itself
