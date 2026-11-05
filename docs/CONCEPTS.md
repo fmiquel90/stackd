@@ -22,7 +22,7 @@ Space                  a team or project boundary: who can see and do what
 
 | Concept | What it is | Why it matters | § |
 |---|---|---|---|
-| **Space** | A boundary for a team or project, holding its stacks, variable sets and worker pools. | Members get a role and a set of tiers *per space*; nothing crosses from one space to another. | 1 |
+| **Space** | A boundary for a team or project, holding its stacks, variable sets, worker pools and secret sources. | Members get a role and a set of tiers *per space*; nothing crosses from one space to another. | 1 |
 | **Stack** | The code: a Git repository, a folder in it, and the tool (OpenTofu or Terraform). | Written once, deployed many times. A stack never runs on its own. | 2 |
 | **Environment** | One real deployment of a stack (`dev`, `prod`…): its branch, state, variables and protections. | Environments are fully isolated from each other — the opposite of Terraform workspaces. | 2 |
 | **Variables & variable sets** | The code's inputs, set on the environment, the stack, or in sets shared across stacks. | The most specific value wins and the UI shows where each value came from. Secrets are write-only. | 3 |
@@ -145,7 +145,8 @@ the strongest layer wins. From weakest to strongest:
 
 A **variable set** is a named, reusable bundle (e.g. `common-aws`, `datadog`, `region-eu`) you
 attach to many stacks and environments. `auto_attach: true` means "attach to every stack in the
-space"; a `selector` (`{label: value}`) attaches it to every environment whose labels match.
+space"; a `selector` (`{label: value}`) attaches it to every environment whose labels (its stack's,
+overridden by its own) match.
 
 **A set stays in its space.** You can only attach it to a stack or environment of the set's own
 space (`400 Cross-space attachment` otherwise), and a **tier** attachment reaches that tier's
@@ -213,7 +214,14 @@ queued → preparing → planning → [checking] → unconfirmed → confirmed �
 
 - `checking` only appears if there are `after_plan` hooks.
 - `unconfirmed` = **waiting for a human** (the amber state — see DESIGN).
-- If the plan has no changes, the run jumps straight to `finished`.
+- If the plan has no changes, the run jumps straight to `finished` — as does a pull request's (or a
+  drift) run, which is never applied.
+- **Cancel and stop.** A `queued`, `unconfirmed` or `confirmed` run is `canceled` at once. A run a
+  worker is executing is *asked* to stop: the worker gets the request on its next heartbeat,
+  interrupts tofu and reports back, and the run ends `canceled` — or `failed`
+  (`canceled_during_apply`) if the job held apply credentials (an apply, a mutating command), since
+  the infrastructure may be partly changed. Stopping an apply requires the same `can_apply` as
+  confirming it.
 
 **Run and job.** A run is the *change*; a **job** is what a worker executes for it. A run that goes
 all the way has two jobs: the **plan job** (`preparing` → `planning` → `checking`: clone, hooks,
@@ -225,7 +233,8 @@ a pull request's run has only a plan job. Hooks, credentials and state tokens ar
 
 ```bash
 # 1. trigger → run is created 'queued'
-RUN=$(curl -s -X POST localhost:8000/api/v1/environments/$ENV/runs -H "$AUTH" -d '{}' | jq -r .id)
+RUN=$(curl -s -X POST localhost:8000/api/v1/environments/$ENV/runs -H "$AUTH" \
+  -H 'content-type: application/json' -d '{}' | jq -r .id)
 
 # 2. a worker claims it → preparing → planning, then reports a non-empty plan → 'unconfirmed'
 # 3. a human confirms (subject to permissions, §5)
@@ -277,8 +286,9 @@ Extra rules:
 - **Destroy** (`type=destroy`) additionally requires `can_destroy=true` — a separate, explicit right.
 - **Four-eyes**: on a tier flagged `requires_four_eyes` (the seeded `prod`), on a `protected`
   environment, or when the environment sets `require_second_pair_of_eyes`, **someone other than
-  the person who triggered the run must confirm it**. It only bites human-triggered runs — a
-  webhook or cascade run has no human to oppose.
+  the person who triggered the run must confirm it**. It only bites human-triggered runs (a manual
+  run, or a rollout's run, whose triggerer is the rollout's creator — §15) — a webhook or cascade
+  run has no human to oppose.
 - **Mock block**: a run that consumed mock outputs cannot be applied unless `allow_mock_apply=true`
   (see §9).
 
@@ -302,7 +312,9 @@ Hooks run shell commands at lifecycle stages: `before_init`, `after_init`, `befo
 
 Order per stage: **platform (stack) → platform (environment) → repo**. Security-critical checks
 belong on the platform side. The plan job runs the `*_init`, `*_plan` stages; the apply job the
-`*_apply` ones.
+`*_apply` ones — where repo hooks run only on a tier that sets `repo_hooks_at_apply` (off by
+default: each is skipped with a `warn` check, the platform hooks still run). A command run runs no
+hooks.
 
 **`.stackd.yml` example:**
 
@@ -353,7 +365,8 @@ register (pool token) → heartbeat (every ~20s) → claim (long-poll)
 - **Claim** is concurrency-safe: `SELECT … FOR UPDATE OF environment SKIP LOCKED` serialises per
   environment, and the `one_active_run_per_env` unique index is the hard guarantee (a losing racer gets a
   `23505` and simply re-polls).
-- **Labels** target work to pools (e.g. a dedicated `prod` pool).
+- **Labels** target work to pools (e.g. a dedicated `prod` pool): a worker claims only runs whose
+  environment labels are a subset of its own, and whose stack's tool version it can run.
 - **Apply affinity**: the worker that produced a plan is preferred for the apply for ~60s; past
   that, any compatible worker takes it. Either way the apply worker starts from a fresh clone of
   the pinned commit and applies the saved plan it downloads from the API (§4) — no workspace is
@@ -369,10 +382,11 @@ register (pool token) → heartbeat (every ~20s) → claim (long-poll)
   tokens have expired before another worker takes the environment. `unconfirmed` and `confirmed` runs are
   never reclaimed: they wait on a human or on the apply claim, not on the plan worker.
 - **Command channel.** The heartbeat response is also the *downward* channel (still no inbound to
-  the worker). Today it carries **diagnostics**: an admin clicks a button, a `pending` command is
+  the worker). It carries **diagnostics**: an admin clicks a button, a `pending` command is
   queued, the worker picks it up on its next heartbeat, runs a **read-only** bundle (versions, disk,
-  environment variable *names* — never values, recent agent logs) and posts it back. Same mechanism will carry
-  `cancel_job`, which stops a job the worker is executing. Delivery latency is bounded by the heartbeat interval (~20 s).
+  environment variable *names* — never values, recent agent logs) and posts it back. It also carries
+  `cancel_job`, which stops a job the worker is executing (§4): SIGINT to the tool, SIGKILL after
+  `STACKD_CANCEL_GRACE_SECONDS` (120 s). Delivery latency is bounded by the heartbeat interval (~20 s).
 
 **Run an agent:**
 
@@ -389,7 +403,7 @@ cd worker && STACKD_POOL_TOKEN=$POOL STACKD_API_URL=http://localhost:8000 uv run
 The tfstate bytes live in **S3**, but Terraform talks to **Stackd's HTTP backend**, not S3 directly.
 
 ```
-terraform ──backend "http"──▶ Stackd API ──(SSE-KMS)──▶ S3
+terraform ──backend "http"──▶ Stackd API ──(bucket encryption)──▶ S3
                                   └─▶ Postgres: versions, locks, audit
 ```
 
@@ -427,7 +441,7 @@ curl -s -X POST localhost:8000/api/v1/environments/$APP_DEV/dependencies -H "$AU
 | `network/dev` already applied, output exists | the **real value**, provenance `dependency:core-network/dev` |
 | `network/dev` never applied, a `mock_value` exists | the **mock**, run flagged `used_mocks=true` |
 | `network/dev` never applied, no mock | run **fails** immediately (`missing_upstream_output`) |
-| upstream output is `sensitive` | config error (sensitive outputs are never propagated) |
+| upstream output is `sensitive` | run **fails** at claim (sensitive outputs are never propagated) |
 
 **Mocks solve the chicken-and-egg of bootstrapping a cascade:** you can plan `app/dev` with
 `network_name = "mock-network"` *before* `network/dev` has ever run — to validate config. But a run
@@ -435,8 +449,10 @@ that used mocks **cannot be applied** (`allow_mock_apply=false` by default) — 
 validation, not for real changes. The UI shows a violet `MOCKED` badge.
 
 **Cascade.** When `network/dev` finishes an apply, Stackd captures its outputs and triggers the
-downstream `app/dev` run automatically (`triggered_by=dependency`), passing the now-real value. The
-cascade **never bypasses protections** — a protected downstream still stops at `unconfirmed`.
+downstream `app/dev` run automatically (`triggered_by=dependency`), passing the now-real value — as
+the dependency's `trigger_policy` says: `on_output_change` (the default: only if a referenced output
+differs from what `app/dev` last consumed), `always` or `never`. The cascade **never bypasses
+protections** — a protected downstream still stops at `unconfirmed`.
 
 ```
 network/dev  ──apply finished──▶  capture outputs  ──cascade──▶  app/dev run (real network_name)
@@ -475,7 +491,8 @@ runs. The
 the human who confirmed it.
 
 ```bash
-curl -s -X PUT localhost:8000/api/v1/environments/$PROD/cloud-integration -H "$AUTH" -d '{
+curl -s -X PUT localhost:8000/api/v1/environments/$PROD/cloud-integration -H "$AUTH" \
+  -H 'content-type: application/json' -d '{
   "plan_role_arn":"arn:aws:iam::123:role/stackd-prod-plan",
   "apply_role_arn":"arn:aws:iam::123:role/stackd-prod-apply","region":"eu-west-1"}'
 curl -s -X POST localhost:8000/api/v1/environments/$PROD/cloud-integration/test -H "$AUTH"  # verify AssumeRole
@@ -485,7 +502,7 @@ curl -s -X POST localhost:8000/api/v1/environments/$PROD/cloud-integration/test 
 
 ## 11. Webhooks & Git staleness
 
-A Git webhook (HMAC-verified, secret per repo) maps a pushed branch to the environments tracking it,
+A Git webhook (HMAC-verified, secret per stack) maps a pushed branch to the environments tracking it,
 filtered by `project_root`:
 
 - **push** → a `tracked` run per matching environment, and `head_sha` advances.
@@ -497,8 +514,8 @@ filtered by `project_root`:
 **Staleness** answers "applied ≠ tip of branch": Stackd compares the commit of the last finished
 tracked run (every run is pinned to the commit it planned) to the branch head (`head_sha`, refreshed
 by webhook, by `git ls-remote` polling every 15 min, or manually). The API exposes it on each
-environment (`stale`, `commits_ahead`); the `↑N` chip and the *Re-plan* banner on a stale
-`unconfirmed` run (DESIGN §5.1–5.2) are not in the UI yet. Changing an environment's branch resets
+environment (`stale`, `commits_ahead`); the UI shows an `↑N` chip, and a stale `unconfirmed` run a
+*Re-plan on head* banner (DESIGN §5.1–5.2). Changing an environment's branch resets
 its recorded head; a push deleting the branch clears it. Staleness is information, never an
 automatic trigger.
 
@@ -510,11 +527,15 @@ automatic trigger.
 |---|---|---|
 | Question | *who did what, when* | *what is the system doing / why is it broken* |
 | Examples | `run.confirmed`, `run.applied`, `user.role_changed` | `run.transition`, `worker.claim`, `http.request` |
-| Storage | Postgres, **append-only at the DB level** (INSERT-only role + trigger), 2 years | in-memory ring buffer + stdout, ephemeral |
+| Storage | Postgres, **append-only at the DB level** (INSERT-only role + trigger), 2 years (then purged by a dedicated DB role) | in-memory ring buffer + stdout, ephemeral |
 | Written | in the **same transaction** as the action | best-effort, never blocks the request |
 | Audience | compliance, "who applied to prod last week?" | operators debugging |
 
 They never duplicate each other: a login is an **audit** event, not a debug log.
+
+A run's own output (tofu and hook logs) is a third journal: masked by the worker, streamed live,
+kept in Postgres while hot, archived to S3 (`logs/{run_id}/{phase}.log.gz`) once the run has ended,
+and its hot rows purged 7 days later — the run page reads either tier transparently.
 
 ```bash
 curl -s "localhost:8000/api/v1/audit?action=run.applied" -H "$AUTH" | jq   # who applied what
@@ -594,7 +615,46 @@ Targets are deleted with their stack or environment.
 
 ---
 
-## 15. Quick reference
+## 15. Beyond the core loop
+
+Five features built on the same machinery — runs, `transition()`, the audit log — none of which
+bypasses the apply gate.
+
+- **Drift detection.** Every 6 h (`STACKD_DRIFT_INTERVAL_SECONDS`), the scheduler queues a drift
+  run for each unlocked environment that has `drift_check_enabled`, an applied commit and no active
+  run: a read-only `proposed` run (`triggered_by=schedule`) planning that commit with `-refresh-only`,
+  claimed after any user run. Unlike a PR plan it keeps the environment's secrets (it runs code that
+  already ran with them). The outcome lands on the environment's `drift_status` — `drifted` (eligible
+  approvers get an inbox alert), `in_sync` or `error` — and a successful apply clears it. Drift is
+  never auto-remediated.
+- **Environment clones & rollouts.** `POST /api/v1/spaces/{space_id}/environment-clones` creates, in
+  several stacks of a space at once, an environment modelled on an existing one — settings,
+  governance and dependency edges. A **rollout** then plans and applies a set of environments along
+  their dependency edges under **one approval**: an approver who passes `can_apply` on every member
+  (and is not the rollout's creator, when a member requires four-eyes) approves it once, for 24 h by
+  default. Each member is planned once its upstreams are done, and auto-confirmed only if its plan
+  **only creates** resources in an environment never applied before (no mock, no secret fallback,
+  no warning, on the pinned commit); anything else stops at `unconfirmed` for an ordinary
+  confirmation. A rollout's runs never cascade.
+- **Plan review comments.** Threaded comments on a run (`/api/v1/runs/{id}/comments`), optionally
+  anchored to a plan line or a resource address, resolvable. They are advisory: the open threads
+  show next to *Confirm*, they never block it.
+- **In-app inbox.** A per-user notification list (`/api/v1/notifications`, the bell): approval
+  requests to every eligible approver when a run reaches `unconfirmed` (not its triggerer), the end
+  of a run to the human who started it, comment replies and `@mentions`, drift alerts, rollout
+  events. Written in the same transaction as the event and pushed live over WebSocket — the inbound
+  counterpart of §14's outbound targets.
+- **External secret sources.** A sensitive variable can hold a *reference* (`secret_source_id` +
+  `secret_ref`) to a secret source of its space — Proton Pass today — instead of a value. The API
+  fetches it at claim and never stores it (provenance `secret:…`). If the provider is down,
+  `secret_fallback_mode` decides: `error` (the default: the run fails closed), `static` (a stored
+  fallback value) or `break_glass` (a value supplied at trigger time, which needs `can_apply`). A
+  run that used a fallback can't be applied unless the environment sets `allow_fallback_apply` —
+  the mock block's shape (§9). See [External secret sources](guide/external-secrets.md).
+
+---
+
+## 16. Quick reference
 
 | Term | One line |
 |---|---|
@@ -602,9 +662,10 @@ Targets are deleted with their stack or environment.
 | **Stack** | template: repo + folder + tool |
 | **Environment** | instance: tier + branch + state + variables + protections |
 | **Variable set** | reusable bundle of variables, attached to tiers, stacks or environments of its own space |
-| **Provenance** | where a resolved variable came from (`set:…`, `stack`, `env`, `dependency:…`, `mock`) |
+| **Provenance** | where a resolved variable came from (`set:…`, `stack`, `env`, `dependency:…`, `mock`, `secret:…`) |
 | **Run** | one change to one environment, from plan to apply, driven by the state machine |
 | **Job** | what a worker executes for a run: the plan job, the apply job, or a command job |
+| **Command run** | one allowlisted tofu subcommand (`import`, `state rm`…) instead of plan → apply |
 | **`transition()`** | the only thing that changes a run's state |
 | **Tier** | configurable catalog; gates apply via the user's `allowed_tiers` set (not ordered) |
 | **Four-eyes** | the person who triggered a run can't confirm it, on a `requires_four_eyes` tier, a `protected` environment, or when the environment requires it |
@@ -620,3 +681,10 @@ Targets are deleted with their stack or environment.
 | **Proposed run** | plan-only run from a PR (`ro` state token, plan role, no secrets) |
 | **Notification target** | outbound Slack/webhook on a stack or environment, firing on chosen run states |
 | **Outbox** | run-event notifications enqueued in-txn, drained by the scheduler (at-least-once) |
+| **Cancel / stop** | ends a waiting run at once; asks the worker to stop an executing one (`failed` if it held apply credentials) |
+| **Drift run** | scheduled read-only `-refresh-only` plan of the applied commit; sets `drift_status`, never remediates |
+| **Environment clone** | one-shot creation of an environment in several stacks, modelled on an existing one |
+| **Rollout** | plan → apply of a set of environments along their dependencies under one approval |
+| **Plan comment** | threaded, optionally anchored review comment on a run; advisory |
+| **Inbox** | per-user in-app notifications (approval requests, run outcomes, mentions, drift, rollouts) |
+| **Secret source** | external secrets manager a variable references; fetched at claim, never stored |

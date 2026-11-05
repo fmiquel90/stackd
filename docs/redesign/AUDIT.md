@@ -1,5 +1,9 @@
 # Front-end redesign — Stage 1: audit and direction
 
+> **Historical snapshot (2026-10-10), not maintained.** Several §6 API items have shipped since —
+> A5 (`run_group_id` on runs), A10 (`GET /runs/{id}/logs/download`), and stopping an executing run
+> (no longer a 409; SPECS §4.1). The current reference is `docs/DESIGN.md`.
+
 > Status: **validated 2026-10-10** (stage 1 of 4). Decisions (§9): direction A with the two borrowings;
 > achromatic chrome; amber narrowed; space and names in the URL; plan diff parsed from the logs until A1;
 > stage-3 dependencies approved; API items A1–A10 stay in this document (no issues opened). Stage 2

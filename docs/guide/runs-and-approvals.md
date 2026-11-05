@@ -13,12 +13,21 @@ A worker claims a `queued` run and executes its **plan job**: it clones the repo
 `plan`, and reports back. With a non-empty diff the run stops at **`unconfirmed`** and waits for a
 human. After **confirm**, a worker (not necessarily the same one) claims the **apply job** and
 drives the run to **`finished`**. An empty diff goes straight to `finished`; a
-failure to `failed`. A human can `discard` an `unconfirmed` run, or `cancel` a `queued`, `confirmed` or
-`unconfirmed` one. A run a worker is **executing** can be **stopped**: the worker is asked on its next
-heartbeat and interrupts the tool as a Ctrl-C would (tofu finishes the operation in flight and releases
-the state lock). A stopped plan ends `canceled`. A stopped **apply** ends `failed` with
-`canceled_during_apply` — never `canceled`, because infrastructure may be partly changed — and needs the
-right to apply, like starting it did.
+failure to `failed`. A human (`writer`+) can `discard` an `unconfirmed` run (**Discard**), or
+`cancel` a `queued`, `confirmed` or `unconfirmed` one (**Cancel run**) — both end it at once, nothing
+applied. A run a worker is **executing** can be **stopped** (**Stop run** / **Stop apply**, the same
+`POST /runs/{id}/cancel`): the stop is recorded and audited (`run.cancel_requested`), the worker is
+asked on its next heartbeat and interrupts the tool as a Ctrl-C would (SIGINT: tofu finishes the
+operation in flight and releases the state lock). A tool still running after the grace period
+(`STACKD_CANCEL_GRACE_SECONDS` on the worker, 120 s by default) is killed. The run only ends once the
+worker reports it stopped. A stopped plan (or read-only [command](commands.md)) ends `canceled` —
+also when the plan finished before the stop reached it: it is never held for approval nor
+auto-confirmed. A stopped **apply** (or mutating command) ends `failed` with
+`canceled_during_apply` — never `canceled`, because infrastructure may be partly changed —, nothing
+cascades from it, and stopping it needs the right to apply, like starting it did (the UI asks for a
+second click). Once tofu's apply has succeeded, a late stop is ignored: the outputs still get
+recorded. Asking again is harmless: it re-sends the request. A worker that went offline never
+reports: the run ends through [worker loss](workers-and-scaling.md#worker-loss).
 
 !!! note
     State only ever changes through one function (`transition()`), which records a `run_event` and
@@ -57,8 +66,8 @@ Confirming an apply requires **both**:
    (not an ordered `dev<staging<prod`), so a grant can be non-contiguous — e.g. `{dev, prod}`
    confirms in dev and prod but not staging.
 
-A `destroy` run additionally requires the `can_destroy` permission. A tier flagged
-`requires_four_eyes` (e.g. `prod`) also forces the triggerer ≠ the confirmer.
+A `destroy` run additionally requires the `can_destroy` permission — to trigger it, too. A tier
+flagged `requires_four_eyes` (e.g. `prod`) also forces the triggerer ≠ the confirmer.
 
 These are your **effective** permissions in the environment's space: a space membership can set a
 different role, tier set or destroy right than your instance defaults.
@@ -73,21 +82,25 @@ different role, tier set or destroy right than your instance defaults.
 
 On an environment whose tier is flagged `requires_four_eyes` (the seeded `prod`), a `protected`
 environment, or any env with `require_second_pair_of_eyes`, the person who **triggered** the run
-cannot be the one who **confirms** it — another authorized approver must. It only applies to runs
-a human triggered: a webhook or cascade run has no triggerer to oppose, so any authorized approver
-can confirm it.
+cannot be the one who **confirms** it — another authorized approver must. An environment whose tier
+is missing from the catalog requires four-eyes too (fail closed). It only applies to runs a human
+triggered: a webhook or cascade run has no triggerer to oppose, so any authorized approver can
+confirm it. A [rollout](#rollouts)'s runs count its creator as their triggerer.
 
 ## Friction proportional to risk
 
-An authorized apply on an ordinary tier is one click. Confirming on a tier flagged
-`requires_four_eyes` or any **`destroy`** run opens a confirmation popover: type the **environment name** + review a `+a ~c −d` plan summary. This
+An authorized apply on an ordinary environment is one click (**Confirm apply**). Confirming where
+four-eyes applies (a tier flagged `requires_four_eyes`, a `protected` environment, or
+`require_second_pair_of_eyes`) or any **`destroy`** run (**Confirm destroy**) opens a confirmation
+popover: type the **environment name** + review a `+a ~c −d` plan summary. This
 is a misclick safeguard only — it never bypasses `can_apply` (still evaluated server-side).
 
 ## Autodeploy & checks
 
 An environment with `autodeploy` auto-confirms when the plan is clean — **but a `warn` check forces
-`unconfirmed`** so a human still sees it. A `protected` environment can never autodeploy, and
-requires four-eyes.
+`unconfirmed`** so a human still sees it, and so does a run that consumed a mock. A `protected`
+environment can never autodeploy, and requires four-eyes. A rollout's run never autodeploys: it
+follows the [rollout gate](#rollouts).
 
 Every [hook](hooks.md) result is kept on the run with the stage it ran at, from the plan job and
 then the apply job: `check_results.results` lists them all (`ok`, `warn`, `fail`) — what the run
@@ -104,16 +117,66 @@ sets `allow_mock_apply=true` — see [Dependencies & mocks](dependencies-and-moc
 ## Promotion (trunk-based)
 
 To roll out the **exact commit** running on one environment to another of the same stack
-(dev → staging → prod), use **promote** — the env's **Promote** tab, or:
+(dev → staging → prod), use **promote** — on the target env, **More → Promote from a sibling…**, or:
 
 ```bash
 curl -s -X POST localhost:8000/api/v1/environments/$STAGING_ID/promote -H "$AUTH" \
-  -d '{"from_environment_id": "'$DEV_ID'"}'
+  -H 'content-type: application/json' -d '{"from_environment_id": "'$DEV_ID'"}'
 ```
 
 It pins a new tracked run on the target to the source's last applied commit, so you deploy *what
 was tested* — not whatever HEAD happens to be. The apply is gated as usual (tier + four-eyes) at
 confirm. This is the same-stack counterpart to the cross-stack [cascade](dependencies-and-mocks.md).
+
+## Rollouts
+
+A **rollout** plans and applies a set of environments of one space — typically the ones a
+[clone](stacks-and-environments.md#cloning-an-environment-across-stacks) just created — in
+dependency order, under **one approval**. Start one from an environment's **More → Roll out every
+“name” environment…** (every environment of that name in the space), from the clone dialog once it
+is done, or:
+
+```bash
+curl -s -X POST localhost:8000/api/v1/rollouts -H "$AUTH" -H 'content-type: application/json' \
+  -d '{"space_id": "'$SPACE_ID'", "env_name": "prod-euw3"}'    # or "environment_ids": [...]
+```
+
+- A rollout is created `awaiting_approval` (`writer` in the space): nothing runs until an approver
+  approves it — the **Rollouts** page → **Approve…**, typing its name, or
+  `POST /api/v1/rollouts/{id}/approve`. Approving requires `can_apply` on **every** member and, when
+  any member requires four-eyes, someone other than the rollout's creator.
+- Each member is then planned — an ordinary tracked run — once its upstream members are done. All the
+  member runs of a stack plan the same commit: the one its first plan fixed.
+- **The rollout gate.** While the approval lasts (`STACKD_ROLLOUT_APPROVAL_TTL_SECONDS`, 24 h by
+  default), a member's plan is confirmed without asking again — the approver recorded as the
+  confirmer — only if it **only creates** resources, in an environment never applied before (managed
+  state, nothing stored yet), on the pinned commit, with no mock, no secret fallback and no `warn`
+  or `fail` check. Any other plan stops at `unconfirmed` for an ordinary confirmation (`can_apply` +
+  four-eyes), and the rollout shows `paused` meanwhile.
+- The gate closes — the rollout pauses — when the approval expires, the approver loses the right to
+  apply on a member, or a member's tier, `protected` or four-eyes requirement changes: **Approve
+  again…** reopens it.
+- A member run that fails, is discarded or canceled skips the members downstream of it; the rollout
+  ends `failed` once nothing else runs. **Retry the failed environments** (`POST …/retry`) starts the
+  failed and skipped members again. **Cancel rollout** (`POST …/cancel`) cancels the member runs not
+  executing yet; one in progress finishes on its own.
+- An environment belongs to one active rollout at a time (`409 Already rolling out`).
+
+See [SPECS §21](../SPECS.md).
+
+## Run logs
+
+The run page streams the log live, by phase. Once a run has ended, its logs are archived to the
+object store (`logs/{run_id}/{phase}.log.gz`) and the database copy is purged
+`LOG_HOT_RETENTION_DAYS` (7 by default) later; reads switch to the archive transparently. The log
+viewer's **Save** button saves the lines it shows as `run.log`; the API serves the whole log as
+plain text, ANSI colours kept:
+
+```bash
+curl -s "localhost:8000/api/v1/runs/$RUN_ID/logs/download?phase=all" -H "$AUTH" -o run.log
+```
+
+`phase=all` (the default) or one phase name; `404` when the run has no logs for it.
 
 ## Proposed runs (from a PR)
 
@@ -131,9 +194,8 @@ What a plan needs stays: the cloud credentials of the **plan role**, read-only b
     with `No value for required variable`. Plan with credentials that need no static secret (the
     OIDC plan role) for pull requests to plan. The pull request's code can still read the state
     (secrets a resource keeps there included) and use the plan role: keep that role read-only and
-    away from secret stores. A per-environment opt-in giving proposed runs the secrets is specified
-    but not implemented. A drift check is a proposed run too, of the last applied commit: it keeps
-    the secrets.
+    away from secret stores. There is no opt-in giving proposed runs the secrets: they are always
+    withheld. A drift check is a proposed run too, of the last applied commit: it keeps the secrets.
 
 ## Triggering over the API
 
@@ -142,7 +204,12 @@ curl -s -X POST localhost:8000/api/v1/environments/$ENV_ID/runs -H "$AUTH" \
   -H 'content-type: application/json' -d '{}'                                         # trigger plan
 curl -s -X POST localhost:8000/api/v1/runs/$RUN_ID/confirm -H "$AUTH"                 # approve → apply
 curl -s -X POST localhost:8000/api/v1/runs/$RUN_ID/discard -H "$AUTH"                 # discard
+curl -s -X POST localhost:8000/api/v1/runs/$RUN_ID/cancel -H "$AUTH"                  # cancel / stop
 ```
+
+A `destroy` run is triggered with `-d '{"type":"destroy"}'`; `commit_sha` (a full SHA, a branch or
+a tag) pins the plan to that commit, and `with_downstream: true` starts a
+[cascade](dependencies-and-mocks.md) group.
 
 ## See also
 

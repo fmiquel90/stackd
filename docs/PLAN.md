@@ -122,7 +122,7 @@ The platform becomes an **OIDC issuer** (the same mechanism as GitHub Actions OI
 ### Phase 0 — Foundations + Google Auth (1.5 weeks)
 
 - [x] Monorepo: `api/`, `worker/`, `front/`, `deploy/`, `docs/`
-- [x] `docker-compose.yml` dev: Postgres, Garage (local S3), hot-reload API, Vite front — **full dev mode specified in DEV.md** (dev login 3 personas, `file://` fixture repos, seed + e2e scenario, shortened timings)
+- [x] `deploy/docker-compose.dev.yml`: Postgres, Garage (local S3), hot-reload API, Vite front — **full dev mode specified in DEV.md** (dev login 3 personas, `file://` fixture repos, seed + e2e scenario, shortened timings)
 - [x] FastAPI: healthcheck, settings, modules (`auth/`, `stacks/`, `environments/`, `variable_sets/`, `runs/`, `workers/`, `audit/`, `oidc/`, ...)
 - [x] **Google OIDC auth** (Authorization Code + PKCE): full flow, upsert on `google_sub`, `hd` restriction to the domain, JWT sessions + rotating refresh (table `refresh_tokens`, reuse detection → family revocation, SPECS §2.5), CSRF on `/auth/refresh`, first-admin bootstrap
 - [x] Alembic migrations, `User`, `RefreshToken` models, **`Space` (`default` space created at bootstrap, SPECS §3.0)** — all `space_id` FKs depend on it starting in Phase 1
@@ -162,7 +162,7 @@ The platform becomes an **OIDC issuer** (the same mechanism as GitHub Actions OI
 #### 2a. Run state machine
 - [x] `Run` model (per environment) + `RunEvent`
 - [x] States: `queued → preparing → planning → [checking] → unconfirmed → confirmed → applying → finished` (+ `failed`, `discarded`, `canceled`)
-- [x] Manual trigger, confirm/discard (guarded by `can_apply`: tier + role, see §2.4; automatic 4-eyes on prod tier)
+- [x] Manual trigger, confirm/discard (guarded by `can_apply`: tier + role, see SPECS §2.4; automatic 4-eyes on a tier flagged `requires_four_eyes` — `prod` in the seed — and on a `protected` env)
 - [x] Concurrency: 1 active run per environment
 - [x] Cancelling an executing run (SPECS §4.1): a stop request via the heartbeat, SIGINT then SIGKILL after a grace period; an interrupted apply ends `failed` (`canceled_during_apply`), never `canceled`
 
@@ -312,12 +312,12 @@ Target versions (June 2026). Same technology choices as originally, current vers
 
 | Component | Initial | Target | What it unlocks (and where) |
 |---|---|---|---|
-| **PostgreSQL** | 16 | **18** (GA 2025-09-25) | Native `uuidv7()` → `DEFAULT` on the DB side, end of application-side ID generation (SPECS §1). Asynchronous I/O (seq scans / vacuum 2-3×) → faster audit and `run_logs` scans (set `io_method=worker`/`io_uring`). `RETURNING` old+new tuple → `transition()` emits the `from→to` `run_event` in a single query (SPECS §4.2). OAUTHBEARER and virtual generated columns: not required in the MVP |
-| **Python** | 3.12 | **3.13** (3.14 adoptable) | better error messages, refined typing, REPL. Free-threading (`python3.14t`, official in 3.14) **not relevant** for an async I/O-bound API — to be considered only if the worker becomes CPU-bound (unlikely: it delegates to terraform) |
-| **React** | 18 | **19** (GA early 2025) | Actions + `useActionState` → native pending/error handling of forms, directly serves the `loading` state of actions (DESIGN §7) and the wizards (DESIGN §5.7). `ref` as a prop → less `forwardRef` in the 7 identity components. Document metadata → shareable `title` per run. **To avoid: `useOptimistic` on the runs state** — the invariant is that WS events *invalidate* the queries, they do not patch the cache (DESIGN §6). **React Compiler**: opt-in to evaluate (auto-memoization useful on the heavily-refreshed rail/logs), not a prerequisite |
-| **Vite** | (not fixed) | **7.x** | Node 20.19+/22.12+. Tailwind v4 via the **`@tailwindcss/vite`** plugin (not PostCSS — avoids the known conflict) |
-| **Tailwind** | v4 | **v4.1.x** | already the right major; `@tailwindcss/vite` integration. No contract change (CSS tokens, DESIGN §8) |
-| **OpenTofu** (dev image) | (not fixed) | **1.12.x** | the dev image pre-installs a recent version; `tool_version` remains driven **per stack** (SPECS §3.1, user choice). 1.10 introduced **OCI distribution** of modules/providers — a track if we host private modules (otherwise out of scope) |
+| **PostgreSQL** | 16 | **18** (GA 2025-09-25; dev compose and testcontainers: `postgres:18`) | Native `uuidv7()` → `DEFAULT` on the DB side, end of application-side ID generation (SPECS §1). Asynchronous I/O (seq scans / vacuum 2-3×) → faster audit and `run_logs` scans (set `io_method=worker`/`io_uring`). `RETURNING` old+new tuple → `transition()` emits the `from→to` `run_event` in a single query (SPECS §4.2). OAUTHBEARER and virtual generated columns: not required in the MVP |
+| **Python** | 3.12 | **3.13** (3.14 adoptable; `requires-python >=3.13`, images `python:3.13-slim`) | better error messages, refined typing, REPL. Free-threading (`python3.14t`, official in 3.14) **not relevant** for an async I/O-bound API — to be considered only if the worker becomes CPU-bound (unlikely: it delegates to terraform) |
+| **React** | 18 | **19** (GA early 2025; locked 19.2.7) | Actions + `useActionState` → native pending/error handling of forms, directly serves the `loading` state of actions (DESIGN §7) and the wizards (DESIGN §5.7). `ref` as a prop → less `forwardRef` in the 7 identity components. Document metadata → shareable `title` per run. **To avoid: `useOptimistic` on the runs state** — the invariant is that WS events *invalidate* the queries, they do not patch the cache (DESIGN §6). **React Compiler**: opt-in to evaluate (auto-memoization useful on the heavily-refreshed rail/logs), not a prerequisite |
+| **Vite** | (not fixed) | **7.x** (locked 7.3.5) | Node 20.19+/22.12+. Tailwind v4 via the **`@tailwindcss/vite`** plugin (not PostCSS — avoids the known conflict) |
+| **Tailwind** | v4 | **v4.1.x** (floor; locked 4.3.1) | already the right major; `@tailwindcss/vite` integration. No contract change (CSS tokens, DESIGN §8) |
+| **OpenTofu** (dev image) | (not fixed) | **1.12.x** (1.12.2 in the dev worker and runner images) | the dev image pre-installs a recent version; `tool_version` remains driven **per stack** (SPECS §3.1, user choice). 1.10 introduced **OCI distribution** of modules/providers — a track if we host private modules (otherwise out of scope) |
 
 **Unchanged (already at the right major)**: FastAPI, Pydantic v2, SQLAlchemy 2 async, Alembic, uv, TanStack Query v5, react-flow + dagre, react-virtuoso, anser, pnpm.
 

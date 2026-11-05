@@ -5,7 +5,7 @@ A sensitive variable can carry its value **by reference** to an external secrets
 This is a security upgrade over a stored secret: no secret at rest in Stackd's database, automatic rotation (you rotate in the manager, not here), and a single revocable bootstrap credential per source.
 
 !!! info "Provider support"
-    **Proton Pass** is the first provider, via its [CLI](https://proton.me/blog/proton-pass-cli) and scoped Personal Access / AI Access Tokens. The model is provider-agnostic — Vault, AWS Secrets Manager, 1Password and others plug into the same interface.
+    **Proton Pass** is the only provider today (`"provider": "proton_pass"`), via its [CLI](https://proton.me/blog/proton-pass-cli) and scoped Personal Access / AI Access Tokens. The model is provider-agnostic — Vault, AWS Secrets Manager, 1Password and others can plug into the same interface later.
 
 ## How it fits together
 
@@ -19,7 +19,7 @@ flowchart LR
 Resolution precedence per reference mirrors the rule for dependency mocks — **real value > fallback > error**:
 
 1. **Provider reachable** → the live value is used. Provenance `secret:<source>`.
-2. **Provider unreachable** → the configured [fallback](#fallback-when-the-source-is-down) applies, or the run fails closed.
+2. **Provider unreachable**, or the entry can't be fetched (timeout, not found) → the configured [fallback](#fallback-when-the-source-is-down) applies, or the run fails closed.
 
 The fetched value flows into the run exactly like a stored sensitive variable: it lands in the worker's `tfvars`/`sensitive_env` and the agent masks it in all logs.
 
@@ -37,11 +37,13 @@ SRC=$(curl -s -X POST localhost:8000/api/v1/spaces/$SPACE/secret-sources \
       }' | jq -r .id)
 ```
 
-In the UI: **Stack → Secret sources → Manage secret sources**.
+In the UI: a stack's **Settings → Secret sources** (the sources of the stack's space) → **Add source**.
+**Rotate token** replaces the credential (`PATCH …/secret-sources/{id}` with a new
+`bootstrap_secret`); deleting a source still referenced by a variable is refused (`409 Secret source in use`).
 
 ## 2. Reference it from a variable
 
-Point a variable at the source with a provider-specific locator. For Proton Pass that is a `pass://vault/item/field` URI. A referenced variable is implicitly **sensitive**.
+Point a variable at the source with a provider-specific locator. For Proton Pass that is a `pass://vault/item/field` URI. A referenced variable is implicitly **sensitive**, and carries a reference **instead of** a `value` (give exactly one). The source must belong to the variable's space — the stack's, or the variable set's — or the request fails with `404 Secret source not found`.
 
 ```bash
 curl -s -X POST localhost:8000/api/v1/environments/$ENV/variables \
@@ -54,7 +56,7 @@ curl -s -X POST localhost:8000/api/v1/environments/$ENV/variables \
       }'
 ```
 
-The resolved value shows up in `GET /environments/{id}/resolved-variables` with provenance `secret:proton` (and masked, since it is sensitive).
+`GET /environments/{id}/resolved-variables` lists it like any sensitive variable — masked, with the provenance of the layer that defines it (`env` here): nothing is fetched there. The live fetch happens when a worker claims the run's job; the run's `variable_provenance` then records `secret:proton` for it, shown on the run's **Inputs** tab.
 
 ## Fallback when the source is down
 
@@ -110,7 +112,7 @@ This mirrors the mock apply-gate (`allow_mock_apply`). The plan is always allowe
 
 ## Audit
 
-Source management and every fallback event are audited (`secret_source.created`, `secret_source.token_rotated`, `secret.fallback_used`, `secret.fallback_overridden`). A run failed because a reference could not resolve is audited as `run.apply_failed` with `reason: secret`. The secret value itself is never written to the audit context. Successful live resolutions are not audited individually — the run's `variable_provenance` records `secret:<source>` per variable.
+Source management and every fallback event are audited (`secret_source.created`, `secret_source.updated`, `secret_source.token_rotated`, `secret_source.deleted`, `secret.fallback_used`, `secret.fallback_overridden`). A run failed because a reference could not resolve is audited as `run.apply_failed` with `reason: secret`. The secret value itself is never written to the audit context. Successful live resolutions are not audited individually — the run's `variable_provenance` records `secret:<source>` per variable.
 
 ## See also
 

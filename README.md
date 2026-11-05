@@ -40,6 +40,8 @@ log. **Stackd gives you the same guarantees on your own infrastructure.**
 | 🔐 **No static cloud keys** | With a cloud integration (AWS today), each job gets short-lived OIDC credentials — one role to plan, another to apply — that expire on their own. Nothing to store, leak or rotate. |
 | 📜 **A complete audit trail** | Who triggered, approved and applied what, on which commit, is recorded with every action. |
 | 🧬 **Environments that depend on each other** | One environment's outputs feed the next (network → app). When an upstream apply changes them, the dependents re-plan. |
+| 🚦 **New environments in one go** | Clone an environment across the stacks of a space, then roll out the whole dependency graph under a single approval — without skipping any guard. |
+| 🔎 **Drift detection** | A periodic read-only refresh plan flags environments whose real infrastructure no longer matches the last apply. It is never auto-remediated: you decide. |
 | 🏠 **Runs where your infrastructure lives** | Self-hosted. Workers pull their work over outbound HTTPS: no inbound ports, and no third party holding your state. |
 | 🔓 **Nothing to unlearn, easy to leave** | Code stays in Git, state is plain `tfstate`, IAM roles are standard. Leaving is one `tofu init -migrate-state`. |
 
@@ -97,7 +99,8 @@ Each concept is explained with examples in **[Concepts](docs/CONCEPTS.md)**.
 ## Quick start
 
 > **Prerequisites:** Docker, [Task](https://taskfile.dev), [`uv`](https://docs.astral.sh/uv/) and
-> `pnpm` (via corepack).
+> `pnpm` (via corepack), plus `git`, `openssl` and `python3` on the host (used by the bootstrap and
+> fixture scripts).
 
 ```bash
 task dev    # brings up the full stack (incl. local S3), migrates and seeds demo data
@@ -131,9 +134,10 @@ The worker agent has its own suite: `cd worker && uv run pytest`.
 ```
 api/      FastAPI (Python 3.13) — REST + worker API, auth, audit, OIDC issuer, state backend
 worker/   Pull-model agent (Python)
-front/    React 19 + Vite + TypeScript
-deploy/   Local stack (docker compose)
+front/    React 19 + Vite 7 + TypeScript
+deploy/   Local stack (docker compose) and the OpenTofu/Terraform runner images (deploy/images)
 docs/     User guide and reference docs (published with MkDocs)
+scripts/  Bootstrap and fixture scripts run by the Taskfile
 ```
 
 ---

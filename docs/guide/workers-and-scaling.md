@@ -43,7 +43,7 @@ After a plan is confirmed, the originating worker is **preferred** for the apply
 
 ### Worker loss
 
-A worker silent for > 60s is marked `offline`. The scheduler (every 10 s) then fails the runs whose job is **executing** on that worker — `preparing`, `planning`, `checking`, `running` (a command) or `applying` — as `failed (worker_lost)`, once the worker has been silent for > 120s. No human action required.
+A worker silent for > 60s (`STACKD_WORKER_OFFLINE_SECONDS` on the API) is marked `offline`. The scheduler (every 10 s) then fails the runs whose job is **executing** on an offline worker — `preparing`, `planning`, `checking`, `running` (a command) or `applying` — as `failed (worker_lost)`, once the job was claimed more than 120s ago (`STACKD_WORKER_LOST_SECONDS`). No human action required.
 
 Runs that are **not executing** are never reclaimed: an `unconfirmed` run waits for a human and a `confirmed` one for the apply claim, and neither depends on the plan worker. Losing the worker that planned a run doesn't fail it; another worker applies the saved plan.
 
@@ -89,6 +89,7 @@ STACKD_POOL_TOKEN=$POOL_TOKEN \
 | Variable | Default | What it does |
 |---|---|---|
 | `STACKD_API_URL` | `http://api:8000` | where the worker reaches the API |
+| `STACKD_RUNNER` | `local` | `local` or `docker`, see [Runners](#runners); any other value refuses to start |
 | `STACKD_POOL_TOKEN` / `STACKD_POOL_TOKEN_FILE` | — | the pool token, or a file holding it |
 | `STACKD_WORKER_NAME` | the host name | the worker's name in the UI |
 | `STACKD_MAX_CONCURRENT_JOBS` | `1` | jobs run at once, always on different environments |
@@ -97,12 +98,13 @@ STACKD_POOL_TOKEN=$POOL_TOKEN \
 | `STACKD_LEAK_TRIPWIRE` | `warn` | `fail` fails a plan whose non-sensitive output shows a secret |
 | `STACKD_WORKSPACE_ROOT` | `/tmp/stackd-ws` | where each job's workspace is created, then removed |
 | `STACKD_HEARTBEAT_INTERVAL`, `STACKD_POLL_WAIT` | `20`, `25` (s) | heartbeat period, claim long-poll |
+| `STACKD_LOG_FORMAT` | `json` | the agent's own log lines; any other value prints them for reading |
 
 These `STACKD_*` settings are the agent's own: **they never reach tofu or a hook**, so repo code
 can't read the pool token from its environment.
 
 !!! warning "Keep platform secrets out of the worker's environment"
-    The worker needs no database, S3 or signing credential: it reaches states and saved plans through the API. tofu and platform hooks inherit the worker's environment — minus the `STACKD_*` namespace — and repo code runs inside tofu (`data "external"`, provisioners). So never give the worker `DATABASE_URL`, `S3_*` keys or `GOOGLE_CLIENT_SECRET`, nor `STACKD_ENCRYPTION_KEY` or `STACKD_JWT_SECRET`. The dev compose file blanks them for the worker. Repo hooks get only an allowlist (`PATH`, `HOME`, locale, proxy and CA settings), see [Hooks](hooks.md#what-hooks-can-see).
+    The worker needs no database, S3 or signing credential: it reaches states and saved plans through the API. On the `local` runner, tofu and platform hooks inherit the worker's environment — minus the `STACKD_*` namespace — and repo code runs inside tofu (`data "external"`, provisioners). So never give the worker `DATABASE_URL`, `S3_*` keys or `GOOGLE_CLIENT_SECRET`, nor `STACKD_ENCRYPTION_KEY` or `STACKD_JWT_SECRET`. The dev compose file blanks them for the worker. Repo hooks get only an allowlist (`PATH`, `HOME`, locale, proxy and CA settings), see [Hooks](hooks.md#what-hooks-can-see).
 
 ### Runners
 
@@ -118,6 +120,7 @@ Every job runs in its own workspace, removed when the job ends. `STACKD_RUNNER` 
 | `STACKD_DOCKER_NETWORK` | `bridge` | the containers' network: it must reach the API (state backend); the place for an egress allowlist |
 | `STACKD_DOCKER_MEMORY`, `STACKD_DOCKER_CPUS` | unset | per-container limits (`2g`, `1.5`) |
 | `STACKD_DOCKER_PIDS_LIMIT` | `1024` | per-container process limit |
+| `STACKD_DOCKER_TMP_SIZE` | `1g` | size of the writable `/tmp` tmpfs (the container's `HOME`) |
 | `STACKD_DOCKER_RUNTIME` | unset | an alternative OCI runtime, e.g. `runsc` (gVisor) |
 
 !!! warning "The worker's host is privileged"
@@ -128,7 +131,10 @@ Every job runs in its own workspace, removed when the job ends. `STACKD_RUNNER` 
 
 ## Dedicate a pool with labels
 
-Labels route work to pools. A run is eligible for a worker only when `env.labels <@ worker.labels` (the environment's labels are a subset of the worker's). To dedicate a pool to production, label both the prod environments and a prod-only worker pool with `tier: prod`, and give general workers no such label — they will never pick up prod runs.
+Labels route work to workers. A run is eligible for a worker only when `env.labels <@ worker.labels` (the environment's labels are a subset of the worker's). To dedicate workers to production, label both the prod environments and the prod-only workers with `tier: prod`, and give general workers no such label — they will never pick up prod runs.
+
+!!! warning "The bundled agent registers without labels"
+    The match uses the labels a worker sends in `POST /worker/v1/register`; a pool's own `labels` are stored and shown on the Workers & health page but **not** matched. The bundled agent has no setting for its labels yet and always registers with none, so it only takes runs of environments with **no** labels: labelling an environment today leaves its runs queued as `no_compatible_worker`. An environment's labels also select variable sets ([Variables](variables.md)).
 
 ```yaml
 # environment
@@ -150,7 +156,9 @@ There is **no built-in autoscaler**, but the signals you need are exposed:
 - `GET /api/v1/health` — DB, workers (online/total + last heartbeat), runs active/queued, recent errors.
 - `GET /api/v1/queue` — waiting runs and *why* they wait (`active_run` | `env_locked` | `no_compatible_worker` | `apply_affinity_hold`).
 
-A `no_compatible_worker` backlog means a label mismatch, not a capacity problem — adding generic workers will not help; you need workers carrying the right labels. See [Observability](observability.md) for the Workers & health page.
+A `no_compatible_worker` backlog means no online worker carries the environment's labels or can run the stack's `tool_version` — not a capacity problem: adding generic workers will not help; you need workers with the right labels or tool versions. See [Observability](observability.md) for the Workers & health page.
+
+Drift detection adds background load: every environment with `drift_check_enabled` gets a read-only plan every 6 h (`STACKD_DRIFT_INTERVAL_SECONDS` on the API). A claim always takes user runs before these drift plans, then the oldest first.
 
 ## See also
 

@@ -24,26 +24,35 @@ Everything else (Postgres, Garage, the worker protocol, hooks, mocks, staleness)
 # deploy/docker-compose.dev.yml
 services:
   postgres:        # 18, port 5432, named volume
-  garage:          # local S3 (Garage), S3 API on :3900, admin CLI `garage` ; layout, key and stackd bucket provisioned by `task dev`
+  garage:          # local S3 (Garage), S3 API on :3900, admin API on :3903, CLI `/garage` ; layout, key and stackd bucket provisioned by `task dev`
   api:             # uv run uvicorn --reload, mounts ./api, port 8000
   front:           # vite dev server, mounts ./front, port 5173, proxy /api → api
-  worker:          # agent in --reload mode (watchfiles), runner=local (§5)
+  worker:          # agent under watchfiles (hot reload), runner=local (§5)
   # optional profiles:
   gitea:           # profile "git"  : real webhooks locally (§4)
-  localstack:      # profile "aws"  : simulated S3/RDS/IAM (§6)
+  localstack:      # profile "aws"  : simulated S3/STS/IAM (§6)
 ```
 
 ```bash
-task dev            # S3 bootstrap + compose up (base services) + migrations + seed
+task dev            # S3 bootstrap + compose up (base services) + migrations + fixture repos + seed
 task dev-git        # + Gitea (webhook testing)
 task dev-aws        # + LocalStack
+task dev-aws-creds  # dev stack with your ~/.aws mounted read-only into the worker (§6)
 task seed           # (re)creates the demo data, idempotent
 task s3             # provision the dev S3 (Garage layout, key into .env, bucket), idempotent; part of dev
-task s3-ls          # list the dev bucket (managed states, saved plans)
+task s3-ls          # list the dev bucket (managed states, saved plans, archived logs)
 task reset          # down -v, drop .dev/pool.token, then dev : start from scratch
 task logs           # aggregated colored logs (api, worker)
-task test           # pytest + vitest
+task test           # API pytest + front vitest (the worker suite runs apart, TESTING.md §2)
 task e2e            # complete automated scenario (§7)
+task lint           # ruff check + ruff format --check (api)
+task front          # Vite dev server on the host (pnpm dev); task up = dev + front
+task migrate        # alembic upgrade head; task makemigration NAME=... autogenerates one
+task seed-fixtures  # (re)creates the fixture git repos in .dev/repos (§4), idempotent
+task push-change    # commits a change in demo-network (staleness test, §4)
+task psql           # Postgres shell
+task build-runner-images  # builds the OpenTofu + Terraform runner images (deploy/images/)
+task docs           # serves the user documentation (mkdocs) on :8001; task docs-build builds it
 ```
 
 Orchestration via **[Task](https://taskfile.dev)** (`Taskfile.yml` at the root) rather than Make: readable YAML syntax, cross-platform (single Go binary, no dependency on GNU Make), native `deps`/`status` for idempotence, namespaces per module, and self-documented `task --list`. Excerpt:
@@ -57,7 +66,7 @@ vars:
 
 tasks:
   dev:
-    desc: Complete local stack (compose + S3 bootstrap + migrations + seed)
+    desc: Full local stack (compose + S3 bootstrap + migrations + seed)
     deps: [env]
     cmds:
       - task: s3                    # before `up`: compose reads the S3 key from .env at creation
@@ -71,12 +80,12 @@ tasks:
     cmds: [bash scripts/bootstrap-s3.sh]
 
   env:
-    desc: Generates .env and dev keys on first launch
+    desc: Generate .env and dev keys on first launch
     cmds: [bash scripts/bootstrap-env.sh]
     status: [test -f .env]          # idempotent: does nothing if .env exists
 
   seed:
-    desc: Demo data (idempotent)
+    desc: Demo data (idempotent — spaces, stacks, envs, deps, worker pool token)
     cmds: ["{{.COMPOSE}} exec -T api uv run python -m app.seed"]
 
   reset:
@@ -87,7 +96,7 @@ tasks:
       - task: dev
 
   push-change:
-    desc: Simulates a merge into demo-network (staleness test)
+    desc: Simulate a merge in demo-network (staleness test)
     dir: .dev/repos/demo-network
     cmds:
       - date >> CHANGELOG.txt
@@ -95,14 +104,14 @@ tasks:
       - 'git add -A && git commit -m "feat: simulated merge"'
 
   e2e:
-    desc: Complete §7 scenario (non-regression)
+    desc: Full non-regression scenario against the live stack + real worker (DEV §7)
     deps: [dev]
     cmds: ["{{.COMPOSE}} exec -T api uv run pytest e2e -v"]
 ```
 
 `.env.example` → `.env` copied automatically by `task dev` (`task env`, `scripts/bootstrap-env.sh`, only when `.env` is missing): dev keys (encryption key, JWT secret, OIDC keypair) **generated on first launch** and stored in `.dev/` (gitignored), the first two injected into `.env`. No secret value committed, no manual entry.
 
-**Dev S3 (Garage)**: the API keeps managed states and every tracked/destroy run's saved plan (encrypted; deleted when the run ends) in S3, so a plan with changes needs a provisioned Garage. `task s3` (`scripts/bootstrap-s3.sh`, run by every `dev*` task) brings `garage` up and, checking before each step:
+**Dev S3 (Garage)**: the API keeps managed states, every tracked/destroy run's saved plan (encrypted; deleted when the run ends) and the archived logs of terminal runs (`logs/{run_id}/{phase}.log.gz`, SPECS §5.2) in S3, so a plan with changes needs a provisioned Garage. `task s3` (`scripts/bootstrap-s3.sh`, run by every `dev*` task) brings `garage` up and, checking before each step:
 
 1. assigns the single-node layout (zone `dc1`) and applies it;
 2. writes a generated access key into `.env` (`S3_ACCESS_KEY` / `S3_SECRET_KEY`) **only when both are empty**, then imports it into Garage if Garage lacks it;
@@ -129,7 +138,7 @@ STACKD_DEV_AUTH=true        # rejected if STACKD_ENV=production (assert at start
 - Sessions, roles and audit events are strictly the same as with Google — only the `google_sub` is synthetic (`dev:admin`).
 - The real Google flow remains testable in dev by setting `GOOGLE_CLIENT_ID/SECRET` (the two coexist).
 
-Safeguard: the prod build of the API image **removes the dev_auth module** (not just the flag) — a configuration oversight cannot expose the bypass.
+Safeguard: the API refuses to start with `STACKD_DEV_AUTH=true` and `STACKD_ENV=production` (settings validator), and never mounts the dev-login router in production (`app/main.py`, plus a runtime check in `app/auth/dev.py`). The target is for the prod build of the API image to **remove the dev_auth module** (not just the flag); the repo has no production API image yet (only `api/Dockerfile.dev`).
 
 ---
 
@@ -155,7 +164,7 @@ Safeguard: the prod build of the API image **removes the dev_auth module** (not 
 - Launched by compose with `STACKD_RUNNER=local`: terraform commands run directly inside the worker container (image including OpenTofu + jq + git). **No Docker-in-Docker** in the dev stack.
 - The `docker` runner (SPECS §7.4, required in production) is exercised by the worker's tests against the host's Docker daemon: `tests/test_docker_runner.py` (isolation: one container per command, a `setsid` daemon contained, repo hooks seeing the checkout only, read-only rootfs, timeout) and `tests/test_docker_job.py` (a real plan → apply with tofu inside the container). They need `alpine:3.20` and the test image `docker build -f worker/tests/docker/tofu-test.Dockerfile -t stackd-test/tofu:1.12.2 worker/tests/docker`, and are skipped without a daemon. To run a worker on it by hand: `STACKD_RUNNER=docker`, `STACKD_RUNNER_IMAGES='{"opentofu:1.12.2": "<repo>@sha256:<digest>"}'` (an image built from `deploy/images/` and pushed), the Docker socket reachable, `STACKD_WORKSPACE_ROOT` at the same path on the host and in the agent, and `STACKD_DOCKER_NETWORK` set to a network that reaches the API.
 - Tool binaries: **OpenTofu and Terraform** pre-installed in the dev image (no download on first run). A stack's `tool` picks which one runs — no separate "terraform worker", any dev worker handles both.
-- Agent hot reload (watchfiles): modifying `worker/` cleanly restarts the poll loop (the current job finishes).
+- Agent hot reload (watchfiles): modifying `worker/` restarts the agent process — watchfiles sends SIGINT, then SIGKILL after 5 s — so a job still running is cut off, not drained.
 - Multi-workers to test concurrency and affinity: `docker compose -f deploy/docker-compose.dev.yml up -d --scale worker=3`, or `STACKD_MAX_CONCURRENT_JOBS` for several jobs per worker.
 - The worker reads its pool token from `.dev/pool.token` (`STACKD_POOL_TOKEN_FILE`), written by the seed: it waits for the file and re-reads it on a failed registration.
 
@@ -165,7 +174,7 @@ Safeguard: the prod build of the API image **removes the dev_auth module** (not 
 
 **By default**: the fixtures use only the built-in `terraform_data` resource — zero providers, zero credentials, zero cost, execution in seconds. Enough to test **the entire platform** (the platform orchestrates terraform, it does not depend on what terraform creates).
 
-**`aws` profile (LocalStack)**: to test AWS-realistic stacks (S3, SQS, IAM...), `task dev-aws` brings up LocalStack on `:4566`; the seed creates no LocalStack variable set, so add the provider endpoint overrides yourself (e.g. in a variable set). Known limitations: LocalStack does not cover everything and **does not validate workload OIDC** (STS AssumeRoleWithWebIdentity is superficial there).
+**`aws` profile (LocalStack)**: to test AWS-realistic stacks, `task dev-aws` brings up LocalStack on `:4566` with S3, STS and IAM enabled (`SERVICES` in the compose file); the seed creates no LocalStack variable set, so add the provider endpoint overrides yourself (e.g. in a variable set). Known limitations: LocalStack does not cover everything and **does not validate workload OIDC** (STS AssumeRoleWithWebIdentity is superficial there).
 
 **Your own AWS profiles (real `plan` against real AWS)**: to run a real `terraform plan` against your AWS account using your **named profiles** — without setting up the OIDC/STS integration — bring the stack up with:
 
@@ -225,7 +234,7 @@ Every tracked plan goes through S3 (saved encrypted after the plan, downloaded b
 - **API**: OpenAPI/Swagger on `/docs` (disabled in prod), **structured JSON logs by default** (`STACKD_LOG_FORMAT=pretty` for local reading; `STACKD_LOG_LEVEL=DEBUG` to also capture reads/polls/heartbeats), errors with traceback. Buffer browsable via `/api/v1/logs` + **Workers & health** page.
 - **Shortened timings** in dev: heartbeat 5 s, offline 15 s, staleness poll 15 s, apply affinity 10 s — asynchronous behaviors are tested without waiting.
 - **Front**: the UI runs against the real dev API (Vite proxies `/api` and the WebSocket to `:8000`); there is no mock-backend mode (no MSW `dev:mock` script yet).
-- **Ladle**: `cd front && pnpm ladle` — the identity components with stories (`PhaseRail`, `StateBadge`, `ProvenanceBadge`) are developed in isolation.
+- **Ladle**: `cd front && pnpm ladle` — the identity components with stories (`PhaseRail`, `StateBadge`, `ProvenanceBadge`, `LogViewer`, `PlanDiff`, `RunActionBar`, `EnvCell`, `TypeToConfirm`) are developed in isolation.
 - **DB**: `task psql` (shell); `task reset` to start from an empty database (there is no separate `db-reset` task). The local S3 storage (Garage) is inspected via `task s3-ls` (lists the bucket with the API's own settings), or the `aws s3 --endpoint-url http://localhost:3900 --region garage` CLI with the key from `.env`; no web console (Garage is administered via its CLI: `docker compose -f deploy/docker-compose.dev.yml exec garage /garage status`).
 - **Log data**: the fixtures plan and apply in seconds; to watch streaming and follow-tail on a longer run, add a slow resource (e.g. a `time_sleep`) to a fixture repo and commit it.
 
@@ -235,7 +244,7 @@ Every tracked plan goes through S3 (saved encrypted after the plan, downloaded b
 
 | Out of scope for local dev | Where it is tested |
 |---|---|
-| Real STS exchange (workload OIDC) | AWS sandbox account + provided Terraform module |
+| Real STS exchange (workload OIDC) | AWS sandbox account, set up per `docs/guide/cloud-credentials.md` (the provided Terraform module is not in the repo yet, PLAN Phase 6) |
 | Docker runner (per-container isolation) | not in the dev stack (`local` runner); covered by the worker's docker tests (SPECS §7.4) |
 | Real GitHub/GitLab webhooks | Gitea (git profile) covers 95%; the rest in staging |
 | Load (N workers × M runs) | not covered yet (no load scenario) |

@@ -15,6 +15,8 @@ Four documents are authoritative. **They take precedence over this file in case 
 | **DESIGN.md** | everything front-end: tokens, components, screens, visual rules |
 | **DEV.md** | local environment, Taskfile, seed, e2e scenario |
 
+Supporting docs (derived, not authoritative — on a conflict, the four above win): `docs/CONCEPTS.md` (the concepts with examples), `docs/ARCHITECTURE.md` (internals, diagrams), `docs/TESTING.md` (test strategy and suites), `docs/api.md` and the user guide in `docs/guide/` (published with MkDocs, `mkdocs.yml`). When a change alters behaviour they describe, update them too.
+
 Rule: **do not guess a structure that is already specified**. If you write a data model, a state transition or an endpoint, open SPECS.md and reuse the existing definition instead of inventing a variant of it. If something is missing or seems contradictory, flag it explicitly rather than filling the gap silently.
 
 ---
@@ -29,14 +31,15 @@ A platform that orchestrates Terraform/OpenTofu runs (`plan` → human confirmat
 
 ```
 api/        FastAPI (Python 3.13+) — REST + WS, auth, worker API, state backend, OIDC issuer, audit
-worker/     agent (Python for the whole MVP, Go rewrite post-MVP) — poll, clone, hooks, terraform, OIDC→STS
+worker/     agent (Python today; a Go rewrite is a post-MVP track) — poll, clone, hooks, terraform, OIDC→STS
 front/      React + Vite + TypeScript (SPA)
-deploy/     docker-compose.dev.yml, deployment Helm/Terraform (later)
-docs/       PLAN.md, SPECS.md, DESIGN.md, DEV.md
+deploy/     docker-compose.dev.yml (+ dev.aws overlay), garage.toml, images/ (OpenTofu/Terraform runner images); deployment Helm/Terraform (later)
+docs/       PLAN.md, SPECS.md, DESIGN.md, DEV.md (authoritative) + CONCEPTS.md, ARCHITECTURE.md, TESTING.md, api.md, guide/ (MkDocs site)
+scripts/    bootstrap-env.sh, bootstrap-s3.sh, seed-fixtures.sh (called by the Taskfile)
 Taskfile.yml  orchestration (see DEV.md)
 ```
 
-API modules (cf. SPECS §2.1): `auth/ stacks/ environments/ variable_sets/ runs/ workers/ scheduler/ audit/ oidc/ statebackend/ webhooks/ hooks/ ws/`. One module = one domain, with its routes, Pydantic schemas, and logic. No catch-all `utils/` that grows endlessly.
+API modules (`api/app/`, cf. PLAN §2.1): `auth/ users/ spaces/ tiers/ stacks/ environments/ variables/ variable_sets/ secret_sources/ runs/ comments/ workers/ scheduler/ audit/ oidc/ statebackend/ dependencies/ drift/ rollouts/ hooks/ webhooks/ vcs/ notifications/ inbox/ observability/ ws/`, plus `models/` (the SQLAlchemy models, one file per aggregate) and a few cross-cutting top-level files (`config.py`, `db.py`, `errors.py`, `permissions.py`, `crypto.py`, `ratelimit.py`, `seed.py`…). One module = one domain, with its routes, Pydantic schemas, and logic. No catch-all `utils/` that grows endlessly.
 
 ---
 
@@ -45,7 +48,7 @@ API modules (cf. SPECS §2.1): `auth/ stacks/ environments/ variable_sets/ runs/
 **Do not substitute these choices without explicit agreement** (they are the result of documented decisions):
 
 - **API**: FastAPI, Pydantic v2, SQLAlchemy 2 **async**, Alembic (migrations), PostgreSQL 18 (cf. PLAN §6 — native `uuidv7()`, async I/O). **Python package and environment management: `uv`** (not pip, not Poetry) — `uv sync`, `uv run`, `uv add`; dependencies in `pyproject.toml` + committed `uv.lock`. No Redis/broker in the MVP — the queue is Postgres via `SELECT ... FOR UPDATE SKIP LOCKED` (SPECS §7.2).
-- **Front**: React 19, Vite 7, strict TypeScript, TanStack Query (server state), Tailwind v4 (`@tailwindcss/vite` plugin) + CSS tokens, re-skinned shadcn/ui, react-flow + dagre (graphs), react-virtuoso + anser (ANSI logs). Package manager: **pnpm**. Details and unblocked directions: PLAN §6.
+- **Front**: React 19, Vite 7, strict TypeScript, TanStack Query (server state), Tailwind v4 (`@tailwindcss/vite` plugin) + CSS tokens, re-skinned shadcn/ui (the shadcn way: Radix primitives wrapped by hand in `src/ui/`, no shadcn CLI — DESIGN §8), react-flow (`@xyflow/react`) + dagre (graphs), react-virtuoso + anser (ANSI logs). Package manager: **pnpm**. Details and unblocked directions: PLAN §6.
 - **Worker**: Python + watchfiles (hot reload), Docker runner in prod / local in dev.
 - **Object**: S3 (Garage in dev) for tfstate, archived logs, artifacts.
 - **Target IaC**: **OpenTofu first**, Terraform as a user option (reason: BUSL license — see PLAN §5).
@@ -59,7 +62,7 @@ These rules run through all the code. Violating them breaks the security or audi
 1. **A run's state only changes through `transition(run, to_state, actor, payload)`** (SPECS §4.2). This single function checks legality, performs the atomic update guarded on `from_state`, writes the `run_event`, the `audit_event` if the action is human or terminal, publishes to the WS and calls the hooks. Never an `UPDATE runs SET state=...` anywhere else.
 2. **Every mutating action writes an `audit_event` in the SAME DB transaction** as the action (SPECS §6.3). No event bus, no "after the fact" write.
 3. **Secrets are never logged nor returned in clear text.** `sensitive` variables: write-only via the API, AES-256-GCM at rest, decrypted only when building the claim payload, masked in logs by the agent (SPECS §13).
-4. **Apply permission = `can_apply(user, env)`**: `role ∈ {approver, admin}` AND `env.tier ∈ user.allowed_tiers` (set membership — tiers are a configurable, non-ordered catalog, SPECS §2.4). `destroy` additionally requires `can_destroy`. This control does **not** rely on `protected` (which only forces confirmation + 4-eyes). Four-eyes comes from the tier's `requires_four_eyes` flag (fail-closed if the tier row is missing), not a hardcoded `prod`.
+4. **Apply permission = `can_apply(user, env)`**: `role ∈ {approver, admin}` AND `env.tier ∈ user.allowed_tiers` (set membership — tiers are a configurable, non-ordered catalog, SPECS §2.4). `destroy` additionally requires `can_destroy`. Role, `allowed_tiers` and `can_destroy` are the *effective* values: the user's `space_memberships` row for the resource's space when present, else their instance defaults (SPECS §2.4, `app/permissions.py`). This control does **not** rely on `protected` (which only forces confirmation + 4-eyes). Four-eyes comes from the tier's `requires_four_eyes` flag (fail-closed if the tier row is missing), not a hardcoded `prod`.
 5. **Concurrency: a single active run per environment** (partial unique index, SPECS §3.5). Two envs of the same stack can run in parallel.
 6. **A run that has consumed mocks (`used_mocks=true`) cannot be applied** unless `environment.allow_mock_apply=true` (SPECS §9.3).
 7. **Sensitive outputs: never stored, never propagated** in cascades (SPECS §9.1).
@@ -70,7 +73,7 @@ These rules run through all the code. Violating them breaks the security or audi
 ## 5. Code conventions
 
 **Python (api, worker)**
-- Formatting/lint: **ruff** (format + check), via `uv run ruff`. Typing: annotations everywhere, `mypy` in CI. Every Python command goes through `uv run` (never a direct invocation of a system python or a manually activated venv).
+- Formatting/lint: **ruff** (format + check), via `uv run ruff`. Typing: annotations everywhere, `mypy` (strict) in CI — the CI step is still `continue-on-error` until the existing errors are cleared, so do not add new ones. Every Python command goes through `uv run` (never a direct invocation of a system python or a manually activated venv).
 - Async end to end: async routes, async SQLAlchemy, no blocking I/O in the event loop.
 - Pydantic schemas separated from SQLAlchemy models (never expose an ORM model directly).
 - IDs: UUIDv7. Timestamps: `timestamptz` UTC, `_at` suffix. API errors: RFC 9457 (problem+json).
@@ -80,7 +83,7 @@ These rules run through all the code. Violating them breaks the security or audi
 - Lint: eslint + the project's formatter. Strict TS, no unjustified `any`.
 - Functional components + hooks. WS events **invalidate** TanStack queries (they do not patch the cache by hand), except for logs which are streamed (DESIGN §6).
 - **No hard-coded color**: only CSS tokens (`--color-state-running`, etc.). Color never carries information on its own — always a label/icon in addition (DESIGN §7).
-- The identity components (`PhaseRail`, `StateBadge`, `LogViewer`, `PlanDiff`, `ProvenanceBadge`, `RunActionBar`, `EnvCell`) have a Storybook story: it is their contract.
+- The identity components (`PhaseRail`, `StateBadge`, `LogViewer`, `PlanDiff`, `ProvenanceBadge`, `RunActionBar`, `EnvCell`, `TypeToConfirm` — `front/src/identity/`) have a Ladle story (`pnpm ladle`): it is their contract (DESIGN §8).
 
 **Git / commits**
 - Conventional commits (`feat:`, `fix:`, `refactor:`, `docs:`, `test:`, `chore:`).
@@ -94,14 +97,17 @@ These rules run through all the code. Violating them breaks the security or audi
 Everything goes through the **Taskfile** (see DEV.md, do not reintroduce a Makefile):
 
 ```
-task dev          # full local stack (compose + migrations + seed)
-task test         # pytest + vitest
+task dev          # full local stack incl. the front on :5173 (compose + S3 bootstrap + migrations + fixtures + seed)
+task test         # API pytest + front vitest (the worker suite: cd worker && uv run pytest)
 task e2e          # full non-regression scenario (the functional contract)
+task lint         # ruff check + ruff format --check (api)
 task seed         # idempotent demo data
 task reset        # start from scratch
 ```
 
-- In dev, auth is done via **dev login** (3 personas: admin/alice/bob, distinct tiers) — no need for Google. Git repos as `file://` fixtures, Terraform without cloud (`local_file`, `random`). Details: DEV.md.
+`task --list` shows the rest (`dev-git`, `dev-aws`, `migrate`, `makemigration`, `logs`, `psql`, `docs`, `build-runner-images`…).
+
+- In dev, auth is done via **dev login** (3 personas: `admin` = admin, `alice` = approver on dev/staging/prod, `bob` = writer on dev/staging — `app/auth/dev.py`) — no need for Google. Git repos as `file://` fixtures, Terraform without cloud (built-in `terraform_data`, no provider). Details: DEV.md.
 - Before marking a task done: `task test` passes, and if the task touches the core (runs, permissions, cascade), `task e2e` passes too.
 - The `dev_auth` module is **removed from the prod build** — never make it reachable when `STACKD_ENV=production`.
 

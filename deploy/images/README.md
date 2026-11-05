@@ -2,19 +2,21 @@
 
 Minimal, hardened images that carry **one IaC tool + git + jq**, built for Stackd's prod `docker`
 runner, where the worker executes each job's commands (tofu and hooks) inside one of these
-(SPECS §7.4). The dev worker image (`worker/Dockerfile.dev`) bundles OpenTofu directly for the
-`local` runner.
+(SPECS §7.4). The dev worker image (`worker/Dockerfile.dev`) bundles OpenTofu and Terraform directly
+for the `local` runner.
 
 ## What they follow
 
-- **Multi-stage** — the download/unzip tooling (`curl`, `unzip`) lives in a throwaway `fetch` stage;
-  the runtime image carries only the tool binary + git + ca-certificates + ssh client.
+- **Multi-stage** — the download/verify tooling (`curl`, `unzip`, plus `cosign` or `gnupg`) lives in a
+  throwaway `fetch` stage (Alpine); the runtime image (`debian:bookworm-slim`) carries only the tool
+  binary + jq + git + ca-certificates + ssh client.
 - **Pinned version** via `--build-arg` (`OPENTOFU_VERSION` / `TERRAFORM_VERSION`).
 - **Signature-verified, then checksum-verified** — the published `SHA256SUMS` must carry the
   vendor's signature (OpenTofu: keyless Sigstore `cosign verify-blob`, certificate identity = the
   OpenTofu release workflow of that minor series; Terraform: HashiCorp's GPG key, pinned by its
   fingerprint), then the release zip is checked against it. `jq` is pinned and checksum-verified.
-- **No entrypoint** — the worker names each command's program (`tofu …`, `sh -c <hook>`).
+- **No entrypoint** — the worker names each command's program (`tofu …`, `sh -c <hook>`); the
+  default `CMD` only prints the tool version.
 - **Non-root** — runs as `runner` (uid 10001) in `/workspace`.
 - **Multi-arch** — `TARGETARCH` (set by `docker buildx`) selects the `linux_amd64` / `linux_arm64`
   asset, so one command builds both.

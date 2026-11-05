@@ -12,7 +12,7 @@ A **notification target** is an outbound webhook attached to a **stack** or an *
 | `failed` | a run failed | alert on breakage |
 | `finished` | a run finished (incl. apply) | deploy log / changelog |
 
-Default `on_states` is `["unconfirmed", "failed"]`; those three states are the only accepted values. Two kinds exist: `slack` posts `{"text": …}` to a Slack/Mattermost incoming webhook (with a deep link to the run), and `webhook` posts a structured JSON envelope (state, run id, run type, stack/env, tier, commit, url). Deep links use `STACKD_APP_URL`, the SPA base.
+Default `on_states` is `["unconfirmed", "failed"]`; those three states are the only accepted values. They fire for every run type: `finished` also covers plan-only runs — an empty plan, a PR plan, a drift check, a command — so a `finished` target on an environment with drift detection hears from it every 6 h. The webhook envelope's `run_type` (`tracked`, `proposed`, `destroy`, `command`) tells them apart. Two kinds exist: `slack` posts `{"text": …}` to a Slack/Mattermost incoming webhook (with a deep link to the run), and `webhook` posts a structured JSON envelope (state, run id, run type, stack/env, tier, commit, url). Deep links use `STACKD_APP_URL`, the SPA base.
 
 ## Setting up Slack
 
@@ -26,7 +26,7 @@ The `slack` kind posts to a **Slack incoming webhook** — a URL Slack gives you
 [Mattermost](https://docs.mattermost.com/developer/webhooks-incoming.html) incoming webhooks accept the same `{"text": …}` payload — use the `slack` kind with the Mattermost URL.
 
 !!! tip "Verify before you rely on it"
-    After creating a target, hit **test** (UI) or `POST …/notifications/{id}/test` (API). It delivers a message **explicitly flagged as a test** (`🧪 … (test)` for Slack, `{"event":"notification.test","test":true}` for a webhook), so you can confirm the URL works without waiting for a real run — and no one mistakes it for a real event.
+    After creating a target, click **Send a test** (UI) or `POST …/notifications/{id}/test` (API). It delivers a message **explicitly flagged as a test** (`🧪 … (test)` for Slack, `{"event":"notification.test","test":true}` for a webhook), so you can confirm the URL works without waiting for a real run — and no one mistakes it for a real event. A failed test answers `502` with the reason.
 
 ## Setting up a generic webhook
 
@@ -86,7 +86,7 @@ The `webhook` kind POSTs a JSON envelope:
 
 ## Managing targets
 
-Both scopes expose the same CRUD. List or create on the scope, then patch or delete by target id:
+In the UI, targets live in the environment's **Settings** tab (**Notifications** section) and in the stack's **Settings → Notifications**. Both scopes expose the same CRUD — listing needs read access, creating, patching, deleting and testing need `writer`. List or create on the scope, then patch or delete by target id:
 
 ```bash
 curl -s localhost:8000/api/v1/stacks/$STACK_ID/notifications -H "Authorization: Bearer $TOKEN"
@@ -95,7 +95,7 @@ curl -s -X PATCH localhost:8000/api/v1/environments/$ENV_ID/notifications/$TARGE
 curl -s -X DELETE localhost:8000/api/v1/stacks/$STACK_ID/notifications/$TARGET_ID -H "Authorization: Bearer $TOKEN"
 ```
 
-For a run's env, both the env-level and the stack-level targets resolve and fire (filtered by `on_states`). Deleting a stack or an environment deletes its targets too (each audited `notification_target.deleted` with the reason).
+For a run's env, both the env-level and the stack-level targets resolve and fire (filtered by `on_states`), as they stand at delivery time. Creating, updating and deleting a target are audited (`notification_target.created`, `.updated`, `.deleted`). Deleting a stack or an environment deletes its targets too (each audited `notification_target.deleted` with the reason); cloning an environment copies its environment-level targets.
 
 ## Network requirements and SSRF protection
 
@@ -125,7 +125,11 @@ against server-side request forgery:
 Notifications are not a fire-and-forget side effect. When a run transitions to a notify-worthy state, a row is inserted into the outbox **in the same DB transaction** as the state change — no HTTP in the request path. A background scheduler drains the outbox under an advisory lock (one replica at a time) and POSTs to the matching targets.
 
 !!! note
-    Delivery is **at-least-once**. The outbox is drained under a `pg_try_advisory_lock` with `SKIP LOCKED`, so two API replicas never double-send — but a receiver may still see a retry, so make handlers idempotent. A rolled-back transition never notifies (its outbox row rolls back too). Failed deliveries retry up to 5 times, then dead-letter and log; a flaky Slack never blocks or fails a run.
+    Delivery is **at-least-once**. The outbox is drained under a `pg_try_advisory_lock` with `SKIP LOCKED`, so two API replicas never double-send — but a receiver may still see a retry, so make handlers idempotent. A rolled-back transition never notifies (its outbox row rolls back too). An event whose delivery fails for any one target is retried on the next scheduler tick (every 10 s) **for all its targets**, 5 attempts in total; each failure is logged (`notification.failed`, with the target and the error), and after the fifth the event is left undelivered. A flaky Slack never blocks or fails a run.
+
+## In-app notifications
+
+Separately from these outbound targets, every user has an in-app inbox (the bell in the topbar), filled in the same transaction as its trigger: an `approval_request` to every user who may confirm a plan waiting on `unconfirmed`, `run_finished` / `run_failed` to the human who triggered a run by hand, `comment_reply` and `mention` on run comments, `drift_detected` to the users who may apply on a drifted environment, and the rollout notifications (`rollout_paused`, `rollout_succeeded`, `rollout_failed`, `rollout_upstream_changed`) to a rollout's creator and approver. It needs no setup; `GET /api/v1/notifications` lists the current user's, `POST /api/v1/notifications/read` marks them read.
 
 ## See also
 

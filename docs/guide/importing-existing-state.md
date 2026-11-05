@@ -11,13 +11,19 @@ exactly as before. Stackd still orchestrates the run (plan → approve → apply
 
 ```bash
 # create the env with managed state off
-curl -s -X POST localhost:8000/api/v1/stacks/$STACK_ID/environments -H "$AUTH" -d '{
+curl -s -X POST localhost:8000/api/v1/stacks/$STACK_ID/environments -H "$AUTH" \
+  -H 'content-type: application/json' -d '{
   "name": "prod", "tier": "prod", "branch": "main", "managed_state": false
 }'
 ```
 
+If your backend block is partial, give the missing settings per environment: `backend_config_file`
+(a repo-relative `.config`/`.tfbackend` file) and/or `backend_config` (a `{key: value}` map, e.g. a
+`key` of its own per environment); the worker passes each as `-backend-config` at `init`.
+
 The first `plan` reads your real state — a **no-op diff confirms** the import is correct before you
-apply anything.
+apply anything. Once the environment has a finished run, drift detection (`drift_check_enabled`, on
+by default) re-plans it read-only (`-refresh-only`) every 6 h (`STACKD_DRIFT_INTERVAL_SECONDS`).
 
 !!! note
     The worker reaches your backend with the per-run [OIDC role](cloud-credentials.md), so that role
