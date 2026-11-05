@@ -25,6 +25,9 @@ async def ws_endpoint(websocket: WebSocket) -> None:
         first = await websocket.receive_json()
     except WebSocketDisconnect:
         return
+    except ValueError:  # not JSON
+        await websocket.close(code=4401)
+        return
     if not isinstance(first, dict) or first.get("type") != "auth":
         await websocket.close(code=4401)
         return

@@ -42,3 +42,13 @@ def test_bad_first_message_token_is_refused(_database: str) -> None:
         with pytest.raises(WebSocketDisconnect) as closed:
             ws.receive_text()
     assert closed.value.code == 4401
+
+
+def test_non_json_first_message_is_refused(_database: str) -> None:
+    from app.main import app
+
+    with TestClient(app).websocket_connect("/api/v1/ws") as ws:
+        ws.send_text("hello")
+        with pytest.raises(WebSocketDisconnect) as closed:
+            ws.receive_text()
+    assert closed.value.code == 4401
