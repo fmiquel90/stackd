@@ -2264,6 +2264,12 @@ Goal: a self-hostable Terraform orchestration platform with multi-environment st
 <td><strong>1.12.x</strong> (1.12.2 in the dev worker and runner images)</td>
 <td>the dev image pre-installs a recent version; <code>tool_version</code> remains driven <strong>per stack</strong> (SPECS §3.1, user choice). 1.10 introduced <strong>OCI distribution</strong> of modules/providers — a track if we host private modules (otherwise out of scope)</td>
 </tr>
+<tr>
+<td><strong>Terraform</strong> (user option, BUSL)</td>
+<td>(not fixed)</td>
+<td><strong>1.14.9</strong> in the dev worker image and the <code>terraform</code> runner image</td>
+<td>same pin in <code>worker/Dockerfile.dev</code>, <code>deploy/images/terraform.Dockerfile</code> and <code>task build-runner-images</code>; change them together</td>
+</tr>
 </tbody>
 </table>
 <p><strong>Unchanged (already at the right major)</strong>: FastAPI, Pydantic v2, SQLAlchemy 2 async, Alembic, uv, TanStack Query v5, react-flow + dagre, react-virtuoso, anser, pnpm.</p>

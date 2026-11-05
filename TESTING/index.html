@@ -1663,12 +1663,12 @@ all. Counts in parentheses include parametrized cases and drift as tests are add
 <td><code>can_apply</code> (pure): approver + tier set, writer refused, non-contiguous sets, empty set, custom tier, <code>can_destroy</code>; a space membership overrides the instance tiers, role and destroy right.</td>
 </tr>
 <tr>
-<td><code>test_spaces.py</code> (8)</td>
-<td>Per-space RBAC: non-members blocked on env-scoped reads, <code>/graph</code> and space listing scoped to memberships, grant then revoke, create = instance admin, members listing = space admin, create in an unknown space → 404.</td>
+<td><code>test_spaces.py</code> (10)</td>
+<td>Per-space RBAC: non-members blocked on env-scoped reads, <code>/graph</code> and space listing scoped to memberships, grant then revoke, create = instance admin, members listing = space admin, create in an unknown space → 404; a membership's <code>allowed_tiers</code> validated against the catalog and audited with the grant; a space writer with an instance <code>reader</code> role writes in that space (variables, trigger, cancel, discard) and nowhere else.</td>
 </tr>
 <tr>
-<td><code>test_tiers.py</code> (6)</td>
-<td>Tier catalog: name charset (OIDC <code>sub</code> safety), <code>allowed_tiers</code> validated, deleting a tier strips grants, a tier in use can't be deleted; <code>repo_hooks_at_apply</code> reaches the claim only from a tier that allows it, off on the default catalog.</td>
+<td><code>test_tiers.py</code> (7)</td>
+<td>Tier catalog: name charset (OIDC <code>sub</code> safety), <code>allowed_tiers</code> validated, deleting a tier strips grants and removes its variable-set attachments (audited), a tier in use can't be deleted; <code>repo_hooks_at_apply</code> reaches the claim only from a tier that allows it, off on the default catalog.</td>
 </tr>
 <tr>
 <td><code>test_users.py</code> (3)</td>
@@ -1679,8 +1679,8 @@ all. Counts in parentheses include parametrized cases and drift as tests are add
 <td>Mutations land in <code>/audit</code>, filter by action, CSV export columns; export is admin-only.</td>
 </tr>
 <tr>
-<td><code>test_runs.py</code> (10)</td>
-<td>Run lifecycle; one active run per env under concurrency (<code>23505</code>); tier gate; four-eyes on a <code>requires_four_eyes</code> tier and on a <code>protected</code> env; autodeploy and <code>warn</code> forcing <code>unconfirmed</code>; confirm only from <code>unconfirmed</code>; mock block; repo token masked in the claim; the claim carries <code>cred_phase</code>.</td>
+<td><code>test_runs.py</code> (14)</td>
+<td>Run lifecycle; one active run per env under concurrency (<code>23505</code>); tier gate; four-eyes on a <code>requires_four_eyes</code> tier and on a <code>protected</code> env; autodeploy and <code>warn</code> forcing <code>unconfirmed</code>, and a destroy never autodeployed; confirm only from <code>unconfirmed</code>, discard too (no <code>queued → discarded</code> edge); <code>POST …/runs</code> takes only <code>tracked</code>/<code>destroy</code> (422); a late or duplicate <code>job_failed</code> on a run its worker no longer executes → 409 (no <code>unconfirmed</code>/<code>confirmed → failed</code> edge); mock block; repo token masked in the claim; the claim carries <code>cred_phase</code>.</td>
 </tr>
 <tr>
 <td><code>test_cancel_running.py</code> (5)</td>
@@ -1699,8 +1699,8 @@ all. Counts in parentheses include parametrized cases and drift as tests are add
 <td>Command runs: allowlist, read-only for writers, mutating needs <code>can_apply</code>, lifecycle + audit; mutating → <code>rw</code> token with the apply-window TTL, read-only → <code>ro</code> token with the 6 h TTL.</td>
 </tr>
 <tr>
-<td><code>test_promote.py</code> (5)</td>
-<td>Promotion pins the source's applied commit (audited); needs an applied source; refuses cross-stack; distinct 404 for a missing source vs target; the source stays space-gated.</td>
+<td><code>test_promote.py</code> (6)</td>
+<td>Promotion pins the source's applied commit (audited) — its last apply, never a later PR plan or empty plan; needs an applied source; refuses cross-stack; distinct 404 for a missing source vs target; the source stays space-gated.</td>
 </tr>
 <tr>
 <td><code>test_deletion.py</code> (7)</td>
@@ -1715,8 +1715,8 @@ all. Counts in parentheses include parametrized cases and drift as tests are add
 <td><code>hcl</code> variables routed to the generated <code>.auto.tfvars</code>, everything else to JSON.</td>
 </tr>
 <tr>
-<td><code>test_secret_sources.py</code> (11)</td>
-<td>External secret references: live value masked, static fallback + apply gate, <code>error</code> mode fails closed, break-glass override (needs apply right, only for a <code>break_glass</code> reference — else 422 —, wiped at the terminal state), source CRUD hides the bootstrap secret, in-use source can't be deleted, a fallback appearing at the apply claim is gated; a variable can't reference another space's source, and one written before that check fails the run closed.</td>
+<td><code>test_secret_sources.py</code> (12)</td>
+<td>External secret references: live value masked, static fallback + apply gate (autodeploy stops such a plan at <code>unconfirmed</code>, even with <code>allow_fallback_apply</code>), <code>error</code> mode fails closed, break-glass override (needs apply right, only for a <code>break_glass</code> reference — else 422 —, wiped at the terminal state), source CRUD hides the bootstrap secret, in-use source can't be deleted, a fallback appearing at the apply claim is gated; a variable can't reference another space's source, and one written before that check fails the run closed.</td>
 </tr>
 <tr>
 <td><code>test_proposed_secrets.py</code> (3)</td>
@@ -1739,8 +1739,8 @@ all. Counts in parentheses include parametrized cases and drift as tests are add
 <td><code>before_apply</code>/<code>after_apply</code> checks are recorded and audited (<code>run.check_warned</code>); an apply without checks keeps the plan's; a failing <code>after_apply</code> hook records the outputs, clears the drift and cascades nothing; a failed apply records no outputs and leaves the drift.</td>
 </tr>
 <tr>
-<td><code>test_state_backend.py</code> (13)</td>
-<td>HTTP state backend (moto S3): LOCK/POST/GET/UNLOCK and serial regression; <code>ro</code> tokens can't write or unlock, <code>plan</code> tokens lock but can't write, proposed runs never lock; env scoping; TTL follows the credential phase; a terminal run's token can't write; UNLOCK and a locked POST need the holder's lock ID; import session (adopt, admin-only, managed state only).</td>
+<td><code>test_state_backend.py</code> (15)</td>
+<td>HTTP state backend (moto S3): LOCK/POST/GET/UNLOCK and serial regression; a bucket the API creates gets versioning and default encryption (an S3 without them only warns); <code>ro</code> tokens can't write or unlock, <code>plan</code> tokens lock but can't write, proposed runs never lock; env scoping; TTL follows the credential phase; a terminal run's token can't write; UNLOCK and a locked POST need the holder's lock ID; import session (adopt, admin-only, managed state only).</td>
 </tr>
 <tr>
 <td><code>test_oidc.py</code> (6)</td>
@@ -1767,12 +1767,16 @@ all. Counts in parentheses include parametrized cases and drift as tests are add
 <td>The advisory lock survives a task's commit (dedicated connection); worker loss fails an executing run, waits the apply window for a mutating command, spares <code>unconfirmed</code>/<code>confirmed</code> runs.</td>
 </tr>
 <tr>
+<td><code>test_queue.py</code> (3)</td>
+<td><code>/queue</code> blocking reasons: a <code>confirmed</code> run is held for its plan worker only within the affinity window (never blocked by itself), a run behind it waits on <code>active_run</code>, a locked env reports <code>env_locked</code>; an apply's claim latency counts from its confirmation.</td>
+</tr>
+<tr>
 <td><code>test_staleness.py</code> (11)</td>
 <td><code>stale</code> on the env API; head polling once per (repo, branch, credentials), surviving a failing repo, respecting the interval, bounded concurrency, never blocking the other scheduler tasks; refresh-head holds no transaction across git and is audited; a branch change resets the head.</td>
 </tr>
 <tr>
-<td><code>test_webhooks.py</code> (9)</td>
-<td>Push updates the head and triggers; bad signature → 401; PR → proposed run; a branch-deletion push clears the head and triggers nothing; an env re-pointed meanwhile is skipped; anti-replay: a repeated <code>X-GitHub-Delivery</code> within 5 min is a <code>200</code> no-op, processed again past the window, a missing id → 400 (a forged signature doesn't burn the id), old ids purged.</td>
+<td><code>test_webhooks.py</code> (10)</td>
+<td>Push updates the head and triggers; bad signature → 401; PR → proposed run; a branch-deletion push clears the head and triggers nothing; an env re-pointed meanwhile is skipped; a closed PR stops its executing proposed run through the worker (system stop request) and cancels its queued one; anti-replay: a repeated <code>X-GitHub-Delivery</code> within 5 min is a <code>200</code> no-op, processed again past the window, a missing id → 400 (a forged signature doesn't burn the id), old ids purged.</td>
 </tr>
 <tr>
 <td><code>test_vcs.py</code> (6)</td>
@@ -1791,8 +1795,8 @@ all. Counts in parentheses include parametrized cases and drift as tests are add
 <td>Environment clones (SPECS §21.2): settings, governance and dependency edges copied, never secrets; all or nothing; permissions (a space admin may not copy cloud integrations, an admin does; a shared upstream needs access to its space); dry run previews without rows or audit; null overrides rejected; integrity errors named; autodeploy forced off while something is left to fill or the env is protected; items shadowing a label set not copied; per-item copies audited; an edge from an uncloned stack and a tier change away from the reference flagged.</td>
 </tr>
 <tr>
-<td><code>test_rollouts.py</code> (28)</td>
-<td>Environment rollouts (SPECS §21): the graph applied under one approval; a plan that changes, forgets or does anything beyond creates, or an env that already has infrastructure, waits for a human; a failure skips its branch and can be retried; an expired approval pauses (also from the scheduler) and a re-approval resumes, audited as such; approval needs apply rights on every member, four-eyes vs the creator where it applies; one active rollout per env, cancel (a confirmed unclaimed run too, a cancel during the gate wins); preview flags mock plans and members no worker can take; members never fall back to autodeploy; a member made protected or moved to another tier after approval is not auto-confirmed, an approver removed from the space loses the gate; the pinned commit per stack; lock order; the cascade leaves active members alone; an active member can't be deleted.</td>
+<td><code>test_rollouts.py</code> (29)</td>
+<td>Environment rollouts (SPECS §21): the graph applied under one approval; the creator, as triggerer, gets <code>run_finished</code>/<code>run_failed</code> for member runs; a plan that changes, forgets or does anything beyond creates, or an env that already has infrastructure, waits for a human; a failure skips its branch and can be retried; an expired approval pauses (also from the scheduler) and a re-approval resumes, audited as such; approval needs apply rights on every member, four-eyes vs the creator where it applies; one active rollout per env, cancel (a confirmed unclaimed run too, a cancel during the gate wins); preview flags mock plans and members no worker can take; members never fall back to autodeploy; a member made protected or moved to another tier after approval is not auto-confirmed, an approver removed from the space loses the gate; the pinned commit per stack; lock order; the cascade leaves active members alone; an active member can't be deleted.</td>
 </tr>
 <tr>
 <td><code>test_notifications.py</code> (10)</td>
@@ -1829,6 +1833,10 @@ all. Counts in parentheses include parametrized cases and drift as tests are add
 <tr>
 <td><code>test_ws_notify.py</code> (1)</td>
 <td>Each <code>transition()</code> emits a <code>LISTEN/NOTIFY</code> signal on the run channel.</td>
+</tr>
+<tr>
+<td><code>test_ws_auth.py</code> (2)</td>
+<td>WebSocket auth only from the first message: a <code>?token=</code> in the URL is never read, a non-auth first message or a bad token closes with 4401.</td>
 </tr>
 <tr>
 <td><code>test_seed.py</code> (1)</td>
@@ -1981,8 +1989,8 @@ The tier gate (an approver without <code>prod</code>) and staleness stay manual 
 <td>Provenance parsing: prefixed kinds, <code>secret_fallback</code>/override vs bare secret, a credential shadowed by the OIDC integration, bare layers, unknown token → stack.</td>
 </tr>
 <tr>
-<td><code>src/lib/lib.test.ts</code> (36)</td>
-<td><code>runOutcome</code>, the phase rail's segments, <code>envSummary</code> (DESIGN §2.3), permissions mirroring the API gates (stop, cancel, confirm, mock, destroy, missing tier), <code>planParse</code>, <code>logModel</code>, the cascade walk, time formatting.</td>
+<td><code>src/lib/lib.test.ts</code> (37)</td>
+<td><code>runOutcome</code>, the phase rail's segments, <code>envSummary</code> (DESIGN §2.3), permissions mirroring the API gates (stop, cancel, confirm, mock, destroy, missing tier, a rollout creator held to four-eyes), <code>planParse</code>, <code>logModel</code>, the cascade walk, time formatting.</td>
 </tr>
 <tr>
 <td><code>src/styles/tokens.test.ts</code> (4 <code>it.each</code>, 136 cases)</td>
@@ -2020,6 +2028,10 @@ The tier gate (an approver without <code>prod</code>) and staleness stay manual 
 <td><code>src/features/settings/userChanges.test.ts</code> (2)</td>
 <td>Staged user changes: only real differences, summarised in words.</td>
 </tr>
+<tr>
+<td><code>src/components/StackGeneralPanel.test.tsx</code> (2)</td>
+<td>The webhook secret field follows the API's writer gate: shown to a writer, hidden from a reader.</td>
+</tr>
 </tbody>
 </table>
 <ul>
@@ -2033,8 +2045,8 @@ The tier gate (an approver without <code>prod</code>) and staleness stay manual 
 </ul>
 <hr />
 <h2 id="5-counts">5. Counts<a class="headerlink" href="#5-counts" title="Permanent link">&para;</a></h2>
-<p>About <strong>383 API tests</strong> (45 files), <strong>218 worker tests</strong> (22 files, the docker-runner ones
-included), <strong>1 e2e scenario</strong>, and <strong>103 front vitest tests</strong> in 12 files (235 cases once the
+<p>About <strong>392 API tests</strong> (45 files), <strong>218 worker tests</strong> (22 files, the docker-runner ones
+included), <strong>1 e2e scenario</strong>, and <strong>104 front vitest tests</strong> in 12 files (236 cases once the
 token-contrast <code>it.each</code> expands). Python counts are <code>pytest --collect-only</code> totals, parametrized
 cases included; the front count is a grep of <code>it(</code>/<code>test(</code>/<code>it.each(</code> declarations (as of
 2026-11-05). The numbers move with every change; count them instead of trusting this page:</p>

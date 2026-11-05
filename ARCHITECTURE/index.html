@@ -1308,7 +1308,6 @@ there are no <code>after_plan</code> hooks.</p>
     [*] --&gt; queued
     queued --&gt; preparing: worker claims
     queued --&gt; canceled
-    queued --&gt; discarded
     preparing --&gt; planning
     preparing --&gt; running: command run (import, state rm…)
     running --&gt; finished
@@ -1330,9 +1329,7 @@ there are no <code>after_plan</code> hooks.</p>
     planning --&gt; failed
     checking --&gt; failed
     applying --&gt; failed: incl. stopped mid-apply
-    unconfirmed --&gt; failed
-    confirmed --&gt; failed
-    preparing --&gt; canceled: stop request or PR closed
+    preparing --&gt; canceled: worker stopped (user or closed PR)
     planning --&gt; canceled
     checking --&gt; canceled
     running --&gt; canceled
@@ -1341,15 +1338,16 @@ there are no <code>after_plan</code> hooks.</p>
     discarded --&gt; [*]
     canceled --&gt; [*]</code></pre>
 <p><strong>Cancel and stop.</strong> A user (or a rollout's cancel) cancels a <code>queued</code>, <code>unconfirmed</code> or
-<code>confirmed</code> run at once; a closed pull request cancels its proposed runs from whatever in-flight
-state they are in. Stopping a run a worker is <em>executing</em> is a request, not a transition: the API
+<code>confirmed</code> run at once, and discards only an <code>unconfirmed</code> one; a closed pull request cancels its
+proposed runs not claimed yet. Stopping a run a worker is <em>executing</em> — a user's stop, or a closed
+pull request's on its proposed runs — is a request, not a transition: the API
 records it, audits <code>run.cancel_requested</code> and queues a <code>cancel_job</code> command for the worker's next
 heartbeat; the worker interrupts the tool (SIGINT, SIGKILL after <code>STACKD_CANCEL_GRACE_SECONDS</code>) and
 reports <code>job_canceled</code>. The run then ends <code>canceled</code> — or <code>failed</code> with <code>canceled_during_apply</code> if
 the job held apply credentials (an apply, a mutating command), since the infrastructure may be partly
-changed: <code>applying</code> is never <code>canceled</code>. Stopping such a job needs <code>can_apply</code>. The
-<code>unconfirmed</code>/<code>confirmed → failed</code> edges are legal, but only a failure report from the worker that
-planned the run takes them.</p>
+changed: <code>applying</code> is never <code>canceled</code>. Stopping such a job needs <code>can_apply</code>. <code>unconfirmed</code> and
+<code>confirmed</code> have no <code>→ failed</code> edge: no worker executes them, so a failure report on them (a late or
+duplicate <code>job_failed</code>) is refused with 409.</p>
 <p><strong>Worker loss</strong> fails only runs whose job is <em>executing</em> on the lost worker (<code>preparing</code>,
 <code>planning</code>, <code>checking</code>, <code>running</code>, <code>applying</code>) — after 120 s, or, for a job holding apply
 credentials (<code>applying</code>, a mutating command), after the apply budget + grace. <code>unconfirmed</code> and

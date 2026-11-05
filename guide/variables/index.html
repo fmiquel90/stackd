@@ -1433,7 +1433,7 @@ expression instead (a list, a map, a number…).</p>
 </ul>
 <div class="admonition note">
 <p class="admonition-title">Note</p>
-<p>Detach a set before deleting it. Deleting an attached set returns <strong>409</strong> with the list of attachments — explicit detachment is required. Deleting a stack or an environment removes the attachments that target it for you (audited <code>variable_set.detached</code> with the reason).</p>
+<p>Detach a set before deleting it. Deleting an attached set returns <strong>409</strong> with the list of attachments — explicit detachment is required. Deleting a stack, an environment or a tier removes the attachments that target it for you (audited <code>variable_set.detached</code> with the reason).</p>
 </div>
 <h2 id="sensitive-values">Sensitive values<a class="headerlink" href="#sensitive-values" title="Permanent link">&para;</a></h2>
 <p>Mark a variable <code>sensitive: true</code> to make it write-only:</p>
