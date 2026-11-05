@@ -1759,8 +1759,8 @@ all. Counts in parentheses include parametrized cases and drift as tests are add
 <td>Tool-version matching; a stack's <code>tool_version</code> is validated; the claim skips a run the worker can't run; the queue reports no compatible worker.</td>
 </tr>
 <tr>
-<td><code>test_log_retention.py</code> (7)</td>
-<td>Two-tier logs (moto S3): archived after the grace window then hot-purged and served from S3; an archived run with hot rows never reads S3; download from either tier; an archive failure leaves the run unarchived; refresh-token families purged once fully expired; the audit purge needs the distinct DB role.</td>
+<td><code>test_log_retention.py</code> (9)</td>
+<td>Two-tier logs (moto S3): archived after the grace window then hot-purged and served from S3; an archived run with hot rows never reads S3; download from either tier, phases in run order even across midnight; a log phase that can't be an S3 key segment refused (422) at ingest; an archive failure leaves the run unarchived; refresh-token families purged once fully expired; the audit purge needs the distinct DB role.</td>
 </tr>
 <tr>
 <td><code>test_scheduler.py</code> (4)</td>
@@ -1823,8 +1823,8 @@ all. Counts in parentheses include parametrized cases and drift as tests are add
 <td><code>in_flight</code> drives busy/idle; a bodyless heartbeat keeps the worker online.</td>
 </tr>
 <tr>
-<td><code>test_worker_register.py</code> (1)</td>
-<td>Re-registering under the same name reuses the worker row.</td>
+<td><code>test_worker_register.py</code> (3)</td>
+<td>Re-registering under the same name reuses the worker row; a worker's effective labels are its pool's plus its own (its own win per key); a labelled environment's run is claimed only by a worker carrying its labels — its own or its pool's — never by an unlabelled one.</td>
 </tr>
 <tr>
 <td><code>test_ws_notify.py</code> (1)</td>
@@ -1906,8 +1906,8 @@ The tier gate (an approver without <code>prod</code>) and staleness stay manual 
 <td>Masking (all secrets, longest first); platform hooks before repo hooks; plan summary and first error from tofu's JSON events (counters a newer tool reports kept, forgets counted from the plan JSON); the masked plan JSON hides every sensitive value and keeps the rest, and a non-JSON document is masked as text.</td>
 </tr>
 <tr>
-<td><code>test_workspace.py</code> (6)</td>
-<td><code>hcl</code> tfvars written verbatim; token injection into HTTPS clone URLs.</td>
+<td><code>test_workspace.py</code> (7)</td>
+<td><code>hcl</code> tfvars written verbatim; token injection into HTTPS clone URLs; the backend override never written through a repo-planted symlink.</td>
 </tr>
 <tr>
 <td><code>test_concurrency.py</code> (3)</td>
@@ -1928,6 +1928,14 @@ The tier gate (an approver without <code>prod</code>) and staleness stay manual 
 <tr>
 <td><code>test_runner_setting.py</code> (5)</td>
 <td><code>STACKD_RUNNER</code> only <code>local</code> or <code>docker</code> (no silent fallback); <code>docker</code> needs runner images; the runner is declared on every registration.</td>
+</tr>
+<tr>
+<td><code>test_worker_labels.py</code> (8)</td>
+<td><code>STACKD_WORKER_LABELS</code> (<code>key=value,…</code>) parsed; a malformed value or a repeated key refuses to start; the agent registers with its labels and keeps them on a re-registration.</td>
+</tr>
+<tr>
+<td><code>test_log_flush.py</code> (5)</td>
+<td>The agent's log buffer (SPECS §5.1, 1 s / 32 KB): a quiet command's line is sent on time, not with the next one; a chunk goes once the size is reached; the rest on exit; masked; a failed send on the timer thread reaches the reader.</td>
 </tr>
 <tr>
 <td><code>test_tools.py</code> (4)</td>

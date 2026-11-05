@@ -1502,6 +1502,11 @@
 <td>the worker's name in the UI</td>
 </tr>
 <tr>
+<td><code>STACKD_WORKER_LABELS</code></td>
+<td>—</td>
+<td>the worker's labels, comma-separated <code>key=value</code> (<code>tier=prod,region=eu-west-3</code>); added to its pool's, see <a href="#dedicate-a-pool-with-labels">labels</a>. A malformed value refuses to start</td>
+</tr>
+<tr>
 <td><code>STACKD_MAX_CONCURRENT_JOBS</code></td>
 <td><code>1</code></td>
 <td>jobs run at once, always on different environments</td>
@@ -1605,16 +1610,14 @@ can't read the pool token from its environment.</p>
 <p>The <code>docker</code> runner launches containers; <strong>AWS Fargate does not allow this</strong>. A worker on Fargate can only use the <code>local</code> runner, which a production API refuses.</p>
 </div>
 <h2 id="dedicate-a-pool-with-labels">Dedicate a pool with labels<a class="headerlink" href="#dedicate-a-pool-with-labels" title="Permanent link">&para;</a></h2>
-<p>Labels route work to workers. A run is eligible for a worker only when <code>env.labels &lt;@ worker.labels</code> (the environment's labels are a subset of the worker's). To dedicate workers to production, label both the prod environments and the prod-only workers with <code>tier: prod</code>, and give general workers no such label — they will never pick up prod runs.</p>
-<div class="admonition warning">
-<p class="admonition-title">The bundled agent registers without labels</p>
-<p>The match uses the labels a worker sends in <code>POST /worker/v1/register</code>; a pool's own <code>labels</code> are stored and shown on the Workers &amp; health page but <strong>not</strong> matched. The bundled agent has no setting for its labels yet and always registers with none, so it only takes runs of environments with <strong>no</strong> labels: labelling an environment today leaves its runs queued as <code>no_compatible_worker</code>. An environment's labels also select variable sets (<a href="../variables/">Variables</a>).</p>
-</div>
+<p>Labels route work to workers. A run is eligible for a worker only when <code>env.labels &lt;@ worker.labels</code> (the environment's labels are a subset of the worker's). A worker's labels are its pool's <code>labels</code> plus its own <code>STACKD_WORKER_LABELS</code> (the pool's value wins on a key both set: pool labels are set by an admin, a worker's are declared by its host), worked out each time it registers. To dedicate workers to production, label both the prod environments and a prod-only pool with <code>tier: prod</code>, and give the general pools a different <code>tier</code> label (e.g. <code>tier: general</code>) — their workers then never pick up prod runs, whatever they declare. Put such a boundary on the <strong>pool</strong>: a worker's own labels are self-declared by its host, and only fill keys its pool leaves unset.</p>
+<p>Labels are exact string matches: an environment label <code>{"replicas": 2}</code> (a number) never matches a worker's <code>replicas=2</code>. An environment's labels also select variable sets (<a href="../variables/">Variables</a>).</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="c1"># environment</span>
 <a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="nt">labels</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt"> tier</span><span class="p">:</span><span class="w"> </span><span class="nv">prod</span><span class="w"> </span><span class="p p-Indicator">}</span>
-<a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a><span class="c1"># prod worker pool / workers</span>
+<a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a><span class="c1"># prod worker pool (POST /api/v1/worker-pools)</span>
 <a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a><span class="nt">labels</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt"> tier</span><span class="p">:</span><span class="w"> </span><span class="nv">prod</span><span class="w"> </span><span class="p p-Indicator">}</span>
 </code></pre></div>
+<p>or on each prod worker: <code>STACKD_WORKER_LABELS=tier=prod</code>.</p>
 <p>This is the recommended isolation for sensitive environments: combine it with prod-scoped <a href="../cloud-credentials/">cloud credentials</a> for a hardened apply path.</p>
 <h2 id="scale">Scale<a class="headerlink" href="#scale" title="Permanent link">&para;</a></h2>
 <p><strong>Scaling = run more workers.</strong> They are stateless, so just increase the replica count — e.g. an ECS service <code>desiredCount</code>, a Deployment <code>replicas</code>, or more agent processes. Nothing to coordinate; they all long-poll the same queue.</p>
