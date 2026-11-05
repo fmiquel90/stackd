@@ -4,9 +4,10 @@ import uuid
 from datetime import datetime
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, field_validator
 
 from app.enums import WorkerStatus
+from app.runs.logs_archive import valid_phase
 
 
 class RegisterIn(BaseModel):
@@ -54,6 +55,15 @@ class LogIn(BaseModel):
     section: str | None = None
     seq: int
     lines: list
+
+    @field_validator("phase")
+    @classmethod
+    def _phase_is_a_key_segment(cls, v: str) -> str:
+        # The phase names the chunk's archive object (logs/{run_id}/{phase}.log.gz, §5.2): refused
+        # here (422) rather than stored and then unreadable, or a path, once archived.
+        if not valid_phase(v):
+            raise ValueError("phase must match [A-Za-z0-9_.-]{1,64}")
+        return v
 
 
 class PoolCreate(BaseModel):

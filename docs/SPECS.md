@@ -519,6 +519,7 @@ POST /worker/v1/jobs/{id}/logs
 ```
 
 - `seq` strictly increasing per phase → idempotency of retries.
+- `phase` is a log phase (the run state the lines belong to, §4): `[A-Za-z0-9_.-]{1,64}`, else 422 — it names the chunk's archive object (§5.2).
 - `section` distinguishes hooks from the terraform stream (dedicated sections in the viewer).
 - Agent buffer: 1 s / 32 KB — a command's output is sent once its oldest unsent line has waited 1 s or 32 KB are waiting, and the rest when the command exits (a timer thread sends a quiet command's last lines, the reader never polls). **Masking before sending of ALL the run's sensitive values** — `sensitive_env` *and* the `tfvars` marked `sensitive` (§3.3) — replaced with `***`. The agent builds the masking table from the claim payload, not only from `sensitive_env`.
 - **`plan.json` and hooks**: `tofu show -json` lists the run's variable values in clear, sensitive ones included. **Repo** hooks only ever read a **masked copy** (§8.3): every value tofu marks sensitive and every value of the masking table above replaced by `***`; the uploaded `plan.json` artifact is that copy too. **Platform** hooks (trusted, §8.1) read the raw JSON: one that dumps it can re-print a sensitive value to its stdout, where the value-based masking above still applies. Residual limit: a short or transformed secret (base64, substring) escapes value-based masking — in hook stdout, and in the repo hooks' copy wherever tofu did not mark the value sensitive itself — a **documented** limit, do not put exploitable secrets in non-sensitive `tfvars`. The check tools (tfsec/checkov/infracost) do not print values by default.
@@ -540,9 +541,12 @@ POST /worker/v1/jobs/{id}/logs
 > the hot rows are purged `log_hot_retention_days` (7, env `LOG_HOT_RETENTION_DAYS`) after that, by
 > the daily retention task. `GET …/logs` serves the hot rows while the run has any, and falls back
 > to the archive once they are gone (same chunks, same order, `phase`/`after_seq` honoured; a
-> `phase` outside `[A-Za-z0-9_.-]{1,64}` — it ends up in an S3 key — reads nothing from the archive,
-> and is refused with 400 by the download). `GET …/logs/download?phase=all|<phase>` returns plain text (ANSI kept, phases in start
-> order, hooks prefixed `[hook:x]`), from either tier. If S3 is down the run stays unarchived and its
+> `phase` outside `[A-Za-z0-9_.-]{1,64}` — it ends up in an S3 key — is refused with 422 at ingest
+> (§5.1), reads nothing from the archive, and is refused with 400 by the download).
+> `GET …/logs/download?phase=all|<phase>` returns plain text (ANSI kept, phases in the order a run
+> goes through its states — planning, checking, applying, or running; any other after them, by name
+> — never by the lines' `t`, a time of day that would misorder a run crossing midnight; each phase's
+> chunks by `seq`; hooks prefixed `[hook:x]`), from either tier. If S3 is down the run stays unarchived and its
 > hot rows untouched — retried next tick. The 1-year S3 expiry is a bucket lifecycle rule (ops), not
 > application code. A chunk ingested after its run was archived is not re-archived.
 
