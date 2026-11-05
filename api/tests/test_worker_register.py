@@ -57,7 +57,8 @@ async def _register(
 
 
 async def test_effective_labels_merge_pool_and_worker(client: httpx.AsyncClient) -> None:
-    # SPECS §3.7/§7.2: the pool's labels, then the worker's own on top (the worker wins per key).
+    # SPECS §3.7/§7.2: the worker's own labels, the pool's on top (the pool wins per key: admin-set,
+    # while the worker's are self-declared).
     h = await _admin(client)
     wid, _ = await _register(
         client,
@@ -68,7 +69,7 @@ async def test_effective_labels_merge_pool_and_worker(client: httpx.AsyncClient)
     )
     bare_id, _ = await _register(client, h, "labels-none-pool")
     workers = {w["id"]: w for w in (await client.get("/api/v1/workers", headers=h)).json()}
-    assert workers[wid]["labels"] == {"tier": "prod", "region": "eu-west-3", "gpu": "yes"}
+    assert workers[wid]["labels"] == {"tier": "prod", "region": "eu-west-1", "gpu": "yes"}
     assert workers[bare_id]["labels"] is None
 
 

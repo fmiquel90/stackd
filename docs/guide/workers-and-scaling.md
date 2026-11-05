@@ -132,7 +132,7 @@ Every job runs in its own workspace, removed when the job ends. `STACKD_RUNNER` 
 
 ## Dedicate a pool with labels
 
-Labels route work to workers. A run is eligible for a worker only when `env.labels <@ worker.labels` (the environment's labels are a subset of the worker's). A worker's labels are its pool's `labels` plus its own `STACKD_WORKER_LABELS` (the worker's value wins on a key both set), worked out each time it registers. To dedicate workers to production, label both the prod environments and a prod-only pool (or its workers) with `tier: prod`, and give general workers no such label — they will never pick up prod runs.
+Labels route work to workers. A run is eligible for a worker only when `env.labels <@ worker.labels` (the environment's labels are a subset of the worker's). A worker's labels are its pool's `labels` plus its own `STACKD_WORKER_LABELS` (the pool's value wins on a key both set: pool labels are set by an admin, a worker's are declared by its host), worked out each time it registers. To dedicate workers to production, label both the prod environments and a prod-only pool with `tier: prod`, and give the general pools a different `tier` label (e.g. `tier: general`) — their workers then never pick up prod runs, whatever they declare. Put such a boundary on the **pool**: a worker's own labels are self-declared by its host, and only fill keys its pool leaves unset.
 
 Labels are exact string matches: an environment label `{"replicas": 2}` (a number) never matches a worker's `replicas=2`. An environment's labels also select variable sets ([Variables](variables.md)).
 
