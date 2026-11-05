@@ -1520,7 +1520,7 @@ Specified but **not served yet**: `GET /api/v1/run-groups/{id}` (§9.4).
 | Static secrets | AES-256-GCM, write-only, decrypted at claim, masked in the logs |
 | Hooks | platform hooks not bypassable by PR; repo hooks without `sensitive_env` **nor cloud credentials**, with an allowlisted env, a masked `plan.json`, and no saved plan, tfvars, OIDC token file or repo token on disk while they run; the agent's `STACKD_*` settings reach no hook nor tofu; masking of sensitive values in their stdout; the process group killed when the hook exits, or past its 10 min timeout; a failing `fail` check stops the job at any stage (§8.3); on the `docker` runner each hook in its own container, a repo hook seeing the checkout only (§7.4). repo hooks at the `*_apply` stages only on a tier that allows them (`repo_hooks_at_apply`, off by default) |
 | Mocks | apply forbidden by default (`allow_mock_apply=false`), badge, audit `mock_consumed` |
-| External secrets | provider bootstrap credential AES-256-GCM write-only (`secret_sources.bootstrap_secret_encrypted` §15.1); live values fetched at claim, never persisted, masked; **fallback value (static or break-glass override) forbids apply by default** (`allow_fallback_apply=false`), badge, audit `secret.fallback_used` (§15) |
+| External secrets | provider bootstrap credential AES-256-GCM write-only (`secret_sources.bootstrap_secret_encrypted` §15.1); live values fetched at claim, never persisted, masked; **fallback value (static or break-glass override) forbids apply by default** (`allow_fallback_apply=false`), badge, audit `secret.fallback_used` (§15); a break-glass override only for a `break_glass` reference (else 422), sealed on its run and wiped at the run's terminal state (§15.4) |
 | Workers | revocable tokens, no incoming port, labels (isolated prod pool); production accepts the `docker` runner only (§7.4); tool binaries verified by signature then checksum when the runner images are built, and those images run only by digest (§7.4, supply-chain). The `local` runner (dev) runs the binary on its PATH, at the stack's version |
 | State | S3 SSE-KMS via API only; per-job state tokens scoped `ro` (proposed runs, read-only commands) / `plan` (lock, never write) / `rw` (apply, mutating command, import session), refused once their run is terminal; handed to tofu only, as `TF_HTTP_*` env (§11.2); audited force-unlock |
 | Saved plans | the reviewed `plan.tfplan` is AES-256-GCM-encrypted by the API (AAD bound to its S3 key), served only to the run's apply job, applied as-is (never re-planned), deleted on any terminal state (§7.3, §11.3) |
@@ -1662,7 +1662,12 @@ POST /api/v1/environments/{id}/runs
 
 - **Permission**: supplying an override is an apply-affecting bypass → requires
   `can_apply(user, env)` (§2.4). It is rejected unless the targeted variable's
-  `secret_fallback_mode = break_glass` (a source must opt in to being overridable).
+  `secret_fallback_mode = break_glass` (a source must opt in to being overridable): every name in
+  `secret_overrides` must be a secret reference resolved for the env with that mode, else **422**
+  (after the 403 permission check; the error lists the names, never a value) and no run is created.
+- **Lifetime**: the overrides are sealed AES-GCM on the run (`runs.secret_overrides_encrypted`)
+  only while a job may still claim them; `transition()` wipes the column when the run reaches a
+  terminal state, alongside the saved plan (§11.3).
 - The override value is injected like a sensitive variable, added to `mask_values`, and sets
   `run.used_secret_fallback = true`, provenance `secret_override:{source_name}`.
 - Audit `secret.fallback_overridden` (target: the run), `context = {variable, source}` — **the value itself

@@ -95,6 +95,11 @@ curl -s -X POST localhost:8000/api/v1/environments/$ENV/runs \
   -d '{ "secret_overrides": { "db_password": "manual-value" } }'
 ```
 
+Every name in `secret_overrides` must be a secret reference of the environment whose mode is
+`break_glass`; any other name (an `error` or `static` reference, a plain variable, an unknown name)
+gets a **422** and no run is created. The sealed values are wiped from the run as soon as it ends
+(finished, failed, canceled or discarded).
+
 ## Fallback blocks apply by default
 
 A fallback value is **not the real secret** — it may be stale or operator-chosen. So a run that resolved any reference via fallback is flagged `used_secret_fallback` and **cannot be applied** unless the environment opts in:
