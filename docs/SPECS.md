@@ -1344,7 +1344,13 @@ s3://stackd-<org>/
   artifacts/{run_id}/plan.tfplan | plan.json | outputs.json
 ```
 
-The bucket is `S3_BUCKET` (default `stackd`). *Status*: the API does not request SSE-KMS on its writes yet — encryption at rest is the bucket's default encryption, and versioning the bucket's own setting (PLAN Phase 3).
+The bucket is `S3_BUCKET` (default `stackd`). A bucket provisioned beforehand is used as is (set
+its versioning and encryption there). When the API creates the bucket itself (first write, bucket
+missing), it turns **versioning ON** and sets **default SSE-S3** (`AES256`) encryption on it; an S3
+that lacks those calls (Garage, the dev S3, implements neither) keeps the bucket without them and
+the API logs a warning (`s3.bucket_setting_unsupported`) instead of failing the write. *Status*:
+the API does not request SSE-KMS on its writes yet — encryption at rest is the bucket's default
+encryption (PLAN Phase 3).
 
 `artifacts/{run_id}/plan.tfplan` is the run's **saved plan** (§7.3): it holds the run's variable values in clear, sensitive ones included, so the API encrypts it **AES-256-GCM with the application key** before it reaches S3 (layout `nonce(12) || ciphertext || tag`, AAD = `stackd:artifact:<s3 key>` so a blob moved under another run's key does not decrypt) — on top of the bucket's SSE. Its key is recorded on the run (`runs.plan_artifact_key`). **Retention**: it lives only while the run can still be applied. On any transition to a terminal state (`finished`, `failed`, `discarded`, `canceled` — whatever the path: worker event, user, scheduler), `transition()` clears `plan_artifact_key` in the same transaction and the object is deleted once that transaction commits (best effort: a failed delete is logged; the blob stays encrypted and the API serves it to nobody, since only an `applying` run's worker can download it). `plan.json`/`outputs.json` are accepted but not archived yet.
 

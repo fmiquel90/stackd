@@ -6,6 +6,9 @@ import boto3
 from botocore.exceptions import ClientError
 
 from app.config import get_settings
+from app.logging import get_logger
+
+_log = get_logger("stackd.statebackend")
 
 # S3 holds the bytes; the API is the only thing with credentials to it (SPECS §11.1).
 
@@ -26,6 +29,38 @@ def _ensure_bucket(client, bucket: str) -> None:  # type: ignore[no-untyped-def]
         client.head_bucket(Bucket=bucket)
     except ClientError:
         client.create_bucket(Bucket=bucket)
+        _harden_bucket(client, bucket)
+
+
+def _harden_bucket(client, bucket: str) -> None:  # type: ignore[no-untyped-def]
+    """A bucket the API creates gets versioning ON and default SSE-S3 encryption (SPECS §11.3).
+    An S3 implementation without these calls (Garage, in dev) keeps the bucket as is, with a
+    warning — never a failed write. A bucket provisioned beforehand is left alone."""
+    steps = {
+        "versioning": lambda: client.put_bucket_versioning(
+            Bucket=bucket, VersioningConfiguration={"Status": "Enabled"}
+        ),
+        "encryption": lambda: client.put_bucket_encryption(
+            Bucket=bucket,
+            ServerSideEncryptionConfiguration={
+                "Rules": [{"ApplyServerSideEncryptionByDefault": {"SSEAlgorithm": "AES256"}}]
+            },
+        ),
+    }
+    for name, step in steps.items():
+        try:
+            step()
+        except ClientError as exc:
+            _log.warning(
+                "could not enable bucket %s",
+                name,
+                extra={
+                    "event": "s3.bucket_setting_unsupported",
+                    "bucket": bucket,
+                    "setting": name,
+                    "error": exc.response.get("Error", {}).get("Code", "unknown"),
+                },
+            )
 
 
 def _put_sync(key: str, data: bytes) -> None:
