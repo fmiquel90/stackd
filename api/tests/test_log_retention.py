@@ -147,6 +147,78 @@ async def test_download_hot_and_cold(client: httpx.AsyncClient) -> None:
         assert bad.status_code == 400
 
 
+async def test_log_phase_validated_at_ingest(client: httpx.AsyncClient) -> None:
+    """The phase ends up in an S3 key (§5.2): the same rule as the reads, refused with 422."""
+    admin = await login(client, "admin")
+    wh = await register_worker(client, admin, "pool-badphase")
+    stack = await make_stack(client, admin, "badphase-stack")
+    env_id = await make_env(client, admin, stack, "dev", "dev")
+    run = (await client.post(f"/api/v1/environments/{env_id}/runs", headers=admin, json={})).json()
+    await client.post("/worker/v1/jobs/claim", headers=wh)
+    url = f"/worker/v1/jobs/{run['id']}/logs"
+    for phase in ["../../x", "a/b", "", "p" * 65, "planning\n"]:
+        bad = await client.post(
+            url, headers=wh, json={"phase": phase, "seq": 0, "lines": [{"t": "", "msg": "x"}]}
+        )
+        assert bad.status_code == 422, (phase, bad.text)
+    assert await _count_hot(run["id"]) == 0
+    ok = await client.post(
+        url, headers=wh, json={"phase": "planning", "seq": 0, "lines": [{"t": "", "msg": "x"}]}
+    )
+    assert ok.status_code == 202, ok.text
+
+
+async def test_download_phases_in_run_order_across_midnight(client: httpx.AsyncClient) -> None:
+    """The lines' `t` is a time of day: a run planned before midnight and applied after it still
+    downloads its plan first."""
+    from app.db import SessionLocal
+    from app.runs.logs_archive import archive_run_logs, purge_hot_logs, render_text
+
+    with mock_aws():
+        admin = await login(client, "admin")
+        wh = await register_worker(client, admin, "pool-midnight")
+        stack = await make_stack(client, admin, "midnight-stack")
+        env_id = await make_env(client, admin, stack, "dev", "dev")
+        run = (
+            await client.post(f"/api/v1/environments/{env_id}/runs", headers=admin, json={})
+        ).json()
+        logs = f"/worker/v1/jobs/{run['id']}/logs"
+
+        async def log(phase: str, t: str, msg: str) -> None:
+            body = {"phase": phase, "seq": 0, "lines": [{"t": t, "msg": msg}]}
+            assert (await client.post(logs, headers=wh, json=body)).status_code == 202
+
+        await client.post("/worker/v1/jobs/claim", headers=wh)
+        await event(client, wh, run["id"], "phase_started", phase="planning")
+        await log("planning", "23:59:58", "plan line")
+        await event(client, wh, run["id"], "phase_started", phase="checking")
+        await log("checking", "23:59:59", "check line")
+        await event(client, wh, run["id"], "phase_finished", result=CHANGES)
+        await client.post(f"/api/v1/runs/{run['id']}/confirm", headers=admin)
+        await client.post("/worker/v1/jobs/claim", headers=wh)
+        await log("applying", "00:00:03", "apply line")
+        await event(client, wh, run["id"], "phase_finished")
+
+        url = f"/api/v1/runs/{run['id']}/logs/download"
+        hot = (await client.get(url, headers=admin)).text
+        order = [hot.index(f"===== {p} =====") for p in ("planning", "checking", "applying")]
+        assert order == sorted(order), hot
+
+        now = datetime.now(UTC) + timedelta(minutes=2)
+        async with SessionLocal() as session:
+            await archive_run_logs(session, now)
+            await purge_hot_logs(session, now + timedelta(days=8))
+        assert (await client.get(url, headers=admin)).text == hot  # the cold tier: same order
+
+    # A phase outside the run's states goes last, by name.
+    chunks = [
+        {"phase": p, "section": None, "seq": 0, "lines": [{"t": "00:00:00", "msg": p}]}
+        for p in ("zeta", "applying", "alpha", "planning")
+    ]
+    heads = [ln for ln in render_text(chunks).splitlines() if ln.startswith("=====")]
+    assert heads == [f"===== {p} =====" for p in ("planning", "applying", "alpha", "zeta")]
+
+
 async def test_archive_waits_for_the_grace_window(client: httpx.AsyncClient) -> None:
     """The agent's last buffered chunks can land just after the terminal event."""
     from app.db import SessionLocal

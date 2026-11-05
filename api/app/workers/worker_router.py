@@ -135,7 +135,12 @@ async def register(body: RegisterIn, request: Request, session: DbSession) -> Re
     if worker is None:
         worker = Worker(pool_id=pool.id, name=body.name)
         session.add(worker)
-    worker.labels = body.labels
+    # Effective labels, what the claim matches an environment's labels against (§3.7/§7.2): the
+    # worker's own, then the pool's on top. The pool wins on a key both set: its labels are set by
+    # an admin, the worker's are self-declared by the host — a worker of a `tier: dev` pool must not
+    # promote itself to prod runs. Computed at each registration (a pool's labels never change).
+    labels = {**(body.labels or {}), **(pool.labels or {})}
+    worker.labels = labels or None
     worker.version = body.version
     worker.runner = body.runner
     worker.tools = body.tools

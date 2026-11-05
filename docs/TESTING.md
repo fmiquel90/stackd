@@ -161,7 +161,7 @@ all. Counts in parentheses include parametrized cases and drift as tests are add
 | `test_oidc_kms.py` (16) | The issuer's signing key in KMS (moto): signs through `kms:Sign`, a key that can't sign is refused; rotation keeps the old key published until its tokens expired, a known key can be reactivated; a token that can't be signed fails the job closed; concurrent claims and JWKS fetches provision the key once, a losing race uses the winner's key; transient signing failures leave the run to retry, permanent ones store a generic code only and discard what the payload staged. |
 | `test_production_runner.py` (4) | A production API refuses a non-`docker` worker at registration and at claim; development accepts the `local` runner; production settings refuse dev-grade values (SPECS §7.4, §13). |
 | `test_worker_tools.py` (4) | Tool-version matching; a stack's `tool_version` is validated; the claim skips a run the worker can't run; the queue reports no compatible worker. |
-| `test_log_retention.py` (7) | Two-tier logs (moto S3): archived after the grace window then hot-purged and served from S3; an archived run with hot rows never reads S3; download from either tier; an archive failure leaves the run unarchived; refresh-token families purged once fully expired; the audit purge needs the distinct DB role. |
+| `test_log_retention.py` (9) | Two-tier logs (moto S3): archived after the grace window then hot-purged and served from S3; an archived run with hot rows never reads S3; download from either tier, phases in run order even across midnight; a log phase that can't be an S3 key segment refused (422) at ingest; an archive failure leaves the run unarchived; refresh-token families purged once fully expired; the audit purge needs the distinct DB role. |
 | `test_scheduler.py` (4) | The advisory lock survives a task's commit (dedicated connection); worker loss fails an executing run, waits the apply window for a mutating command, spares `unconfirmed`/`confirmed` runs. |
 | `test_staleness.py` (11) | `stale` on the env API; head polling once per (repo, branch, credentials), surviving a failing repo, respecting the interval, bounded concurrency, never blocking the other scheduler tasks; refresh-head holds no transaction across git and is audited; a branch change resets the head. |
 | `test_webhooks.py` (5) | Push updates the head and triggers; bad signature → 401; PR → proposed run; a branch-deletion push clears the head and triggers nothing; an env re-pointed meanwhile is skipped. |
@@ -177,7 +177,7 @@ all. Counts in parentheses include parametrized cases and drift as tests are add
 | `test_observability.py` (3) | `X-Request-ID`; `/health`; `/logs` admin-only and structured. |
 | `test_worker_diagnostics.py` (2) | Diagnostics round trip over the heartbeat; admin-only. |
 | `test_worker_heartbeat.py` (2) | `in_flight` drives busy/idle; a bodyless heartbeat keeps the worker online. |
-| `test_worker_register.py` (1) | Re-registering under the same name reuses the worker row. |
+| `test_worker_register.py` (3) | Re-registering under the same name reuses the worker row; a worker's effective labels are its pool's plus its own (its own win per key); a labelled environment's run is claimed only by a worker carrying its labels — its own or its pool's — never by an unlabelled one. |
 | `test_ws_notify.py` (1) | Each `transition()` emits a `LISTEN/NOTIFY` signal on the run channel. |
 | `test_seed.py` (1) | The demo seed is idempotent and yields exactly the DEV §7 graph. |
 
@@ -214,12 +214,14 @@ The tier gate (an approver without `prod`) and staleness stay manual checks (DEV
 | `test_init_cmd.py` (6) | The `init` command for managed state and for unmanaged partial backends (file, inline map, both). |
 | `test_security.py` (6) | Repo-hook env stripped of cloud credentials and sensitive values; the cleartext tripwire on plan and output JSON. |
 | `test_masking.py` (10) | Masking (all secrets, longest first); platform hooks before repo hooks; plan summary and first error from tofu's JSON events (counters a newer tool reports kept, forgets counted from the plan JSON); the masked plan JSON hides every sensitive value and keeps the rest, and a non-JSON document is masked as text. |
-| `test_workspace.py` (6) | `hcl` tfvars written verbatim; token injection into HTTPS clone URLs. |
+| `test_workspace.py` (7) | `hcl` tfvars written verbatim; token injection into HTTPS clone URLs; the backend override never written through a repo-planted symlink. |
 | `test_concurrency.py` (3) | The in-flight counter; `STACKD_MAX_CONCURRENT_JOBS` default and floor. |
 | `test_cancel.py` (8) | Stopping a job (SPECS §4.1): SIGINT stops the tool, one ignoring it is killed after the grace period; a stop between two commands starts no next one; past the point of no return a stop no longer applies; a command completing despite the signal is not a stop; the registry finds the job (an early cancel remembered); a canceled job is reported `job_canceled`, not failed. |
 | `test_docker_runner.py` (10) | The `docker` runner (SPECS §7.4): job containers hardened and mounting the workspace, repo-hook containers the checkout only, none of the host's env; output, env and exit code; timeout kills the container; nothing a command starts outlives it; no secret file for a repo hook; unprivileged, read-only rootfs; stdout/stderr kept apart. Real containers, skipped without a daemon. |
 | `test_docker_job.py` (1) | A whole plan → apply on the `docker` runner with a real tofu in the test image; skipped without a daemon or the image. |
 | `test_runner_setting.py` (5) | `STACKD_RUNNER` only `local` or `docker` (no silent fallback); `docker` needs runner images; the runner is declared on every registration. |
+| `test_worker_labels.py` (8) | `STACKD_WORKER_LABELS` (`key=value,…`) parsed; a malformed value or a repeated key refuses to start; the agent registers with its labels and keeps them on a re-registration. |
+| `test_log_flush.py` (5) | The agent's log buffer (SPECS §5.1, 1 s / 32 KB): a quiet command's line is sent on time, not with the next one; a chunk goes once the size is reached; the rest on exit; masked; a failed send on the timer thread reaches the reader. |
 | `test_tools.py` (4) | Tool versions the worker declares: exact and series picks; runner images pinned by digest; the docker runner declares its images; the local runner probes the binaries on `PATH`. |
 | `test_oidc_precedence.py` (2) | With OIDC credentials, the host's own AWS credentials never reach tofu or a platform hook; without them, the static fallback is untouched (SPECS §10.5). |
 | `test_repo_hook_policy.py` (2) | Repo hooks at the apply stages run only on a tier that allows them; elsewhere skipped with a warning (SPECS §8.3). |

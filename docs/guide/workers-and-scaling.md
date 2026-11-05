@@ -92,6 +92,7 @@ STACKD_POOL_TOKEN=$POOL_TOKEN \
 | `STACKD_RUNNER` | `local` | `local` or `docker`, see [Runners](#runners); any other value refuses to start |
 | `STACKD_POOL_TOKEN` / `STACKD_POOL_TOKEN_FILE` | — | the pool token, or a file holding it |
 | `STACKD_WORKER_NAME` | the host name | the worker's name in the UI |
+| `STACKD_WORKER_LABELS` | — | the worker's labels, comma-separated `key=value` (`tier=prod,region=eu-west-3`); added to its pool's, see [labels](#dedicate-a-pool-with-labels). A malformed value refuses to start |
 | `STACKD_MAX_CONCURRENT_JOBS` | `1` | jobs run at once, always on different environments |
 | `STACKD_CANCEL_GRACE_SECONDS` | `120` | after a stop request interrupts the tool (SIGINT), how long it gets to stop by itself before it is killed |
 | `STACKD_HOOK_TIMEOUT_SECONDS` | `600` | each hook's time budget |
@@ -131,17 +132,18 @@ Every job runs in its own workspace, removed when the job ends. `STACKD_RUNNER` 
 
 ## Dedicate a pool with labels
 
-Labels route work to workers. A run is eligible for a worker only when `env.labels <@ worker.labels` (the environment's labels are a subset of the worker's). To dedicate workers to production, label both the prod environments and the prod-only workers with `tier: prod`, and give general workers no such label — they will never pick up prod runs.
+Labels route work to workers. A run is eligible for a worker only when `env.labels <@ worker.labels` (the environment's labels are a subset of the worker's). A worker's labels are its pool's `labels` plus its own `STACKD_WORKER_LABELS` (the pool's value wins on a key both set: pool labels are set by an admin, a worker's are declared by its host), worked out each time it registers. To dedicate workers to production, label both the prod environments and a prod-only pool with `tier: prod`, and give the general pools a different `tier` label (e.g. `tier: general`) — their workers then never pick up prod runs, whatever they declare. Put such a boundary on the **pool**: a worker's own labels are self-declared by its host, and only fill keys its pool leaves unset.
 
-!!! warning "The bundled agent registers without labels"
-    The match uses the labels a worker sends in `POST /worker/v1/register`; a pool's own `labels` are stored and shown on the Workers & health page but **not** matched. The bundled agent has no setting for its labels yet and always registers with none, so it only takes runs of environments with **no** labels: labelling an environment today leaves its runs queued as `no_compatible_worker`. An environment's labels also select variable sets ([Variables](variables.md)).
+Labels are exact string matches: an environment label `{"replicas": 2}` (a number) never matches a worker's `replicas=2`. An environment's labels also select variable sets ([Variables](variables.md)).
 
 ```yaml
 # environment
 labels: { tier: prod }
-# prod worker pool / workers
+# prod worker pool (POST /api/v1/worker-pools)
 labels: { tier: prod }
 ```
+
+or on each prod worker: `STACKD_WORKER_LABELS=tier=prod`.
 
 This is the recommended isolation for sensitive environments: combine it with prod-scoped [cloud credentials](cloud-credentials.md) for a hardened apply path.
 

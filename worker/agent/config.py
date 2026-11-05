@@ -19,6 +19,25 @@ def _bytes(value: str) -> int:
     return int(v)
 
 
+def parse_labels(value: str) -> dict[str, str]:
+    """`STACKD_WORKER_LABELS`: comma-separated `key=value` pairs (`tier=prod,region=eu-west-3`),
+    sent at registration (§7.1) and matched against environments' labels by the claim (§7.2).
+    Blanks around keys and values are trimmed; empty → no labels. A malformed entry (no `=`, an
+    empty key) or a repeated key refuses to start: a typo must not silently route nothing."""
+    labels: dict[str, str] = {}
+    for entry in value.split(","):
+        if not entry.strip():
+            continue
+        key, sep, val = entry.partition("=")
+        key, val = key.strip(), val.strip()
+        if not sep or not key:
+            raise ValueError(f"STACKD_WORKER_LABELS: expected key=value, got {entry.strip()!r}")
+        if key in labels:
+            raise ValueError(f"STACKD_WORKER_LABELS: label {key!r} is set twice")
+        labels[key] = val
+    return labels
+
+
 def _docker_limits() -> DockerLimits:
     env = os.environ.get
     cpus = env("STACKD_DOCKER_CPUS")
@@ -46,6 +65,8 @@ class Settings:
     max_concurrent_jobs: int  # in-flight jobs across environments (§7, Phase E; default 1)
     # After a stop request's SIGINT, how long the tool gets to stop before SIGKILL (§4.1)
     cancel_grace_seconds: int = 120
+    # STACKD_WORKER_LABELS (§7.1): this worker's own labels; the API adds its pool's under them
+    labels: dict[str, str] = field(default_factory=dict)
     # docker runner (§7.4): {"opentofu:1.12.2": "<repo>@sha256:<digest>"}, from STACKD_RUNNER_IMAGES
     runner_images: dict[str, str] = field(default_factory=dict)
     docker_host: str | None = None  # STACKD_DOCKER_HOST: unix socket of the Docker Engine
@@ -78,6 +99,7 @@ class Settings:
             else "warn",
             max_concurrent_jobs=max(1, int(os.environ.get("STACKD_MAX_CONCURRENT_JOBS", "1"))),
             cancel_grace_seconds=max(1, int(os.environ.get("STACKD_CANCEL_GRACE_SECONDS", "120"))),
+            labels=parse_labels(os.environ.get("STACKD_WORKER_LABELS", "")),
             runner_images=parse_runner_images(os.environ.get("STACKD_RUNNER_IMAGES", "")),
             docker_host=os.environ.get("STACKD_DOCKER_HOST") or None,
             docker_limits=_docker_limits(),

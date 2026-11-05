@@ -26,6 +26,22 @@ def test_write_hcl_tfvars_skips_when_empty(tmp_path: Path) -> None:
     assert not (cwd / "zzz_stackd.auto.tfvars").exists()
 
 
+def test_backend_override_never_written_through_a_symlink(tmp_path: Path) -> None:
+    # A repo can commit `zzz_stackd_backend.tf` as a symlink pointing out of the checkout (§8.3):
+    # the override replaces it, it never writes to the symlink's target.
+    ws = Workspace(str(tmp_path), "job3")
+    cwd = tmp_path / "wd"
+    cwd.mkdir()
+    outside = tmp_path / "outside.txt"
+    outside.write_text("keep")
+    (cwd / "zzz_stackd_backend.tf").symlink_to(outside)
+    ws.write_backend_override(cwd)
+    assert outside.read_text() == "keep"
+    path = cwd / "zzz_stackd_backend.tf"
+    assert not path.is_symlink()
+    assert path.read_text() == 'terraform {\n  backend "http" {}\n}\n'
+
+
 def test_authed_url_injects_https_token():
     assert (
         _authed_url("https://github.com/acme/infra.git", "ghp_secret")

@@ -197,8 +197,10 @@ class Workspace:
                 (cwd / name).unlink(missing_ok=True)
 
     def write_backend_override(self, cwd: Path) -> None:
-        # Only for managed_state envs (§11.3): the repo declares no backend; we inject http.
-        (cwd / "zzz_stackd_backend.tf").write_text('terraform {\n  backend "http" {}\n}\n')
+        # Only for managed_state envs (§11.3): the repo declares no backend; we inject http. Written
+        # like the tfvars: a symlink the repo planted at that name is replaced, never written
+        # through (§8.3) — it could point anywhere the agent can write.
+        _write_new(cwd / "zzz_stackd_backend.tf", b'terraform {\n  backend "http" {}\n}\n')
 
     def secret_path(self, name: str) -> Path:
         """Where `secret_file` puts `name`: in the job's workspace, outside the checkout."""

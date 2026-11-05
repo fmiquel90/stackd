@@ -19,6 +19,7 @@ from sqlalchemy import delete, exists, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import get_settings
+from app.enums import RunState
 from app.logging import get_logger
 from app.models.run import Run
 from app.models.run_log import RunLog
@@ -154,19 +155,21 @@ async def load_chunks(
     return out
 
 
+# A run's log phases are its states (§4: planning → checking → applying, or running), so they start
+# in the state machine's order. Not by the lines' `t`: a time of day without a date, it would list a
+# run's apply before its plan once the run crosses midnight.
+_PHASE_ORDER = {state.value: i for i, state in enumerate(RunState)}
+
+
 def render_text(chunks: list[dict]) -> str:
     """Plain-text rendering for the download: one line per log line, ANSI kept, phases in the
-    order they started (the lines' own ISO timestamps)."""
+    order a run goes through them (any other phase after, by name), each phase's chunks by seq."""
     by_phase: dict[str, list[dict]] = defaultdict(list)
     for c in chunks:
         by_phase[c["phase"]].append(c)
 
-    def started(phase: str) -> str:
-        first = [ln.get("t", "") for c in by_phase[phase] for ln in c["lines"][:1]]
-        return min(first) if first else ""
-
     parts: list[str] = []
-    for phase in sorted(by_phase, key=lambda p: (started(p), p)):
+    for phase in sorted(by_phase, key=lambda p: (_PHASE_ORDER.get(p, len(_PHASE_ORDER)), p)):
         parts.append(f"===== {phase} =====")
         for c in sorted(by_phase[phase], key=lambda c: c["seq"]):
             prefix = f"[{c['section']}] " if c.get("section") else ""
