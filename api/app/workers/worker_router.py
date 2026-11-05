@@ -17,6 +17,7 @@ from app.db import get_session
 from app.dependencies.service import DependencyError, capture_outputs, cascade
 from app.drift.service import clear_drift, record_drift_result
 from app.enums import (
+    WORKER_EXECUTING_STATES,
     AuditActorKind,
     DriftStatus,
     RunEventActor,
@@ -389,11 +390,16 @@ async def _decide_after_plan(session: AsyncSession, worker: Worker, run: Run, re
     assert env is not None
     # A rollout member that did not pass the rollout gate stops for a human (§21.4 step 4) — the
     # env's own autodeploy never confirms it (a changing or destroying plan, a canceled rollout).
+    # Never a destroy either: only an approver passing can_apply (+ can_destroy) confirms one, and
+    # never a plan its apply gates would refuse (mocks §9.3, a secret fallback §15.5) — those stop
+    # at `unconfirmed`, where the block is shown, rather than fail at the apply claim.
     autoconfirm = (
         run.rollout_id is None
+        and run.type == RunType.tracked
         and env.autodeploy
         and not env.protected
         and not run.used_mocks
+        and not (run.used_secret_fallback and not env.allow_fallback_apply)
         and not warn
     )
     if autoconfirm:
@@ -480,6 +486,13 @@ async def post_event(
         return {"ok": True}
 
     if body.event == "job_failed":
+        # Only a job a worker is executing can fail, and only its worker reports it (checked
+        # above): a late or duplicate report on a plan already awaiting a human, confirmed, or
+        # over is stale — 409, like any other event the run's state no longer accepts (§7.3).
+        if run.state not in WORKER_EXECUTING_STATES:
+            raise ProblemException(
+                409, "Job not executing", f"A {run.state.value} run has no job to fail."
+            )
         if run.state == RunState.applying and body.phase == "after_apply":
             # The apply succeeded, an after_apply hook failed (§8.3): the run fails and nothing
             # cascades, but the infra has changed — its outputs are recorded (§9.1), and the state

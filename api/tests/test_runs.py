@@ -260,3 +260,119 @@ async def test_claim_payload_carries_credential_phase(client: httpx.AsyncClient)
         assert (job["phase"], job["cred_phase"]) == ("command", cred_phase), command
         await event(client, wh, job["job_id"], "phase_started", phase="running")
         await event(client, wh, job["job_id"], "phase_finished", result={"command": command})
+
+
+async def _state(client, h, run_id: str) -> str:  # type: ignore[no-untyped-def]
+    return str((await client.get(f"/api/v1/runs/{run_id}", headers=h)).json()["state"])
+
+
+async def test_autodeploy_never_confirms_a_destroy(client: httpx.AsyncClient) -> None:
+    # A destroy is confirmed by an approver passing can_apply + can_destroy, never by the system
+    # (#25): triggering one only takes can_destroy.
+    admin = await login(client, "admin")
+    wh = await register_worker(client, admin, "pool-auto-destroy")
+    stack = await make_stack(client, admin, "auto-destroy-stack")
+    env_id = await make_env(client, admin, stack, "dev", "dev", autodeploy=True)
+    run = await client.post(
+        f"/api/v1/environments/{env_id}/runs", headers=admin, json={"type": "destroy"}
+    )
+    assert run.status_code == 201, run.text
+    run_id = run.json()["id"]
+    await client.post("/worker/v1/jobs/claim", headers=wh)
+    await event(client, wh, run_id, "phase_started", phase="planning")
+    await event(client, wh, run_id, "phase_finished", result=CHANGES)
+    assert await _state(client, admin, run_id) == "unconfirmed"
+
+
+async def test_only_a_plan_awaiting_confirmation_is_discarded(client: httpx.AsyncClient) -> None:
+    from app.db import SessionLocal
+    from app.enums import RunEventActor, RunState
+    from app.errors import ProblemException
+    from app.models.run import Run
+    from app.runs.transition import transition
+
+    admin = await login(client, "admin")
+    wh = await register_worker(client, admin, "pool-discard-state")
+    stack = await make_stack(client, admin, "discard-state-stack")
+    env_id = await make_env(client, admin, stack, "dev", "dev")
+
+    queued = await client.post(f"/api/v1/environments/{env_id}/runs", headers=admin, json={})
+    queued_id = queued.json()["id"]
+    refused = await client.post(f"/api/v1/runs/{queued_id}/discard", headers=admin)
+    assert refused.status_code == 409, refused.text
+    assert await _state(client, admin, queued_id) == "queued"
+    # Nor is the edge legal for anyone else (§4.2): a queued run is canceled, not discarded.
+    async with SessionLocal() as s:
+        run = await s.get(Run, uuid.UUID(queued_id))
+        assert run is not None
+        try:
+            await transition(s, run, RunState.discarded, actor=RunEventActor.system)
+            raise AssertionError("queued → discarded must be illegal")
+        except ProblemException as exc:
+            assert exc.status == 409
+    await client.post(f"/api/v1/runs/{queued_id}/cancel", headers=admin)
+
+    run_id = await _drive_to_unconfirmed(client, wh, env_id, admin)
+    ok = await client.post(f"/api/v1/runs/{run_id}/discard", headers=admin)
+    assert ok.status_code == 200, ok.text
+    assert ok.json()["state"] == "discarded"
+    again = await client.post(f"/api/v1/runs/{run_id}/discard", headers=admin)
+    assert again.status_code == 409
+
+
+async def test_runs_endpoint_only_triggers_tracked_or_destroy(client: httpx.AsyncClient) -> None:
+    # A command run has its own endpoint; a proposed run comes from a PR webhook or drift (#28).
+    admin = await login(client, "admin")
+    stack = await make_stack(client, admin, "run-types-stack")
+    env_id = await make_env(client, admin, stack, "dev", "dev")
+    for run_type in ("command", "proposed"):
+        r = await client.post(
+            f"/api/v1/environments/{env_id}/runs", headers=admin, json={"type": run_type}
+        )
+        assert r.status_code == 422, (run_type, r.text)
+    assert (await client.get(f"/api/v1/environments/{env_id}/runs", headers=admin)).json() == []
+
+
+async def test_a_late_job_failed_cannot_end_a_run_the_worker_no_longer_executes(
+    client: httpx.AsyncClient,
+) -> None:
+    # job_failed is accepted only while the reporting worker executes the run (#29): a late or
+    # duplicate report is stale — 409 — and never fails a plan awaiting a human or confirmed.
+    from app.db import SessionLocal
+    from app.enums import RunEventActor, RunState
+    from app.errors import ProblemException
+    from app.models.run import Run
+    from app.runs.transition import transition
+
+    admin = await login(client, "admin")
+    wh = await register_worker(client, admin, "pool-late-fail")
+    stack = await make_stack(client, admin, "late-fail-stack")
+    env_id = await make_env(client, admin, stack, "dev", "dev")
+
+    run_id = await _drive_to_unconfirmed(client, wh, env_id, admin)
+    late = await event(client, wh, run_id, "job_failed", phase="planning", result={"error": "x"})
+    assert late.status_code == 409, late.text
+    assert await _state(client, admin, run_id) == "unconfirmed"
+    # The edge itself is gone: nothing fails a run that no worker executes (§4.2).
+    async with SessionLocal() as s:
+        run = await s.get(Run, uuid.UUID(run_id))
+        assert run is not None
+        try:
+            await transition(s, run, RunState.failed, actor=RunEventActor.system)
+            raise AssertionError("unconfirmed → failed must be illegal")
+        except ProblemException as exc:
+            assert exc.status == 409
+
+    assert (await client.post(f"/api/v1/runs/{run_id}/confirm", headers=admin)).status_code == 200
+    late = await event(client, wh, run_id, "job_failed", phase="planning", result={"error": "x"})
+    assert late.status_code == 409, late.text
+    assert await _state(client, admin, run_id) == "confirmed"
+
+    # The apply job's own failure still ends the run.
+    assert (await client.post("/worker/v1/jobs/claim", headers=wh)).json()["phase"] == "apply"
+    failed = await event(client, wh, run_id, "job_failed", phase="apply", result={"error": "x"})
+    assert failed.status_code == 200, failed.text
+    assert await _state(client, admin, run_id) == "failed"
+    # …once: a duplicate report is stale.
+    dup = await event(client, wh, run_id, "job_failed", phase="apply", result={"error": "x"})
+    assert dup.status_code == 409

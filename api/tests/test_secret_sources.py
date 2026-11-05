@@ -106,6 +106,47 @@ async def test_static_fallback_used_and_blocks_apply(
     assert ok.status_code == 200
 
 
+async def test_autodeploy_stops_a_fallback_plan_at_unconfirmed(
+    client: httpx.AsyncClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Like the mock gate (#25): autodeploy never confirms a plan whose apply the fallback gate
+    would refuse — it stops at `unconfirmed` instead of failing at the apply claim. An env that
+    opted into fallback applies still autodeploys."""
+    admin = await login(client, "admin")
+    wh = await register_worker(client, admin, "pool-sfb-auto")
+    stack = await make_stack(client, admin, "sfb-auto-stack")
+    space = await _space_id(client, admin, stack)
+    env_id = await make_env(client, admin, stack, "dev", "dev", autodeploy=True)
+    source = await _make_source(client, admin, space, "proton-sfb-auto")
+    await _make_ref_var(
+        client, admin, env_id, source, name="dbpass", fallback_mode="static", fallback="fb"
+    )
+
+    async def down(_src, _ref):
+        raise providers.SecretUnavailable("provider unreachable")
+
+    monkeypatch.setattr(providers, "fetch_secret", down)
+
+    async def plan() -> dict:
+        run = (
+            await client.post(f"/api/v1/environments/{env_id}/runs", headers=admin, json={})
+        ).json()
+        assert (await client.post("/worker/v1/jobs/claim", headers=wh)).status_code == 200
+        await event(client, wh, run["id"], "phase_started", phase="planning")
+        await event(client, wh, run["id"], "phase_finished", result=CHANGES)
+        return (await client.get(f"/api/v1/runs/{run['id']}", headers=admin)).json()
+
+    blocked = await plan()
+    assert (blocked["used_secret_fallback"], blocked["state"]) == (True, "unconfirmed")
+    await client.post(f"/api/v1/runs/{blocked['id']}/discard", headers=admin)
+
+    await client.patch(
+        f"/api/v1/environments/{env_id}", headers=admin, json={"allow_fallback_apply": True}
+    )
+    allowed = await plan()
+    assert (allowed["used_secret_fallback"], allowed["state"]) == (True, "confirmed")
+
+
 async def test_error_mode_fails_the_run(
     client: httpx.AsyncClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:

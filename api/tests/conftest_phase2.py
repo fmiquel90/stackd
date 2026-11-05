@@ -45,6 +45,29 @@ async def make_env(
     return r.json()["id"]
 
 
+async def make_proposed_run(env_id: str, commit_sha: str | None = None) -> str:
+    """A proposed (plan-only) run on `env_id`, created as a webhook does — `POST …/runs` refuses
+    that type (§12). Returns its id."""
+    import uuid
+
+    from app.db import SessionLocal
+    from app.enums import RunType, TriggeredBy
+    from app.models.environment import Environment
+    from app.runs.service import trigger_run
+
+    async with SessionLocal() as s:
+        env = await s.get(Environment, uuid.UUID(env_id))
+        assert env is not None
+        run = await trigger_run(
+            s,
+            env,
+            run_type=RunType.proposed,
+            triggered_by=TriggeredBy.webhook,
+            commit_sha=commit_sha,
+        )
+        return str(run.id)
+
+
 async def register_worker(
     client: httpx.AsyncClient, admin: dict[str, str], pool_name: str, worker_name: str = "w1"
 ) -> dict[str, str]:

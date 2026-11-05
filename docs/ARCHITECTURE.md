@@ -58,7 +58,6 @@ stateDiagram-v2
     [*] --> queued
     queued --> preparing: worker claims
     queued --> canceled
-    queued --> discarded
     preparing --> planning
     preparing --> running: command run (import, state rm…)
     running --> finished
@@ -80,9 +79,7 @@ stateDiagram-v2
     planning --> failed
     checking --> failed
     applying --> failed: incl. stopped mid-apply
-    unconfirmed --> failed
-    confirmed --> failed
-    preparing --> canceled: stop request or PR closed
+    preparing --> canceled: worker stopped (user or closed PR)
     planning --> canceled
     checking --> canceled
     running --> canceled
@@ -93,15 +90,16 @@ stateDiagram-v2
 ```
 
 **Cancel and stop.** A user (or a rollout's cancel) cancels a `queued`, `unconfirmed` or
-`confirmed` run at once; a closed pull request cancels its proposed runs from whatever in-flight
-state they are in. Stopping a run a worker is *executing* is a request, not a transition: the API
+`confirmed` run at once, and discards only an `unconfirmed` one; a closed pull request cancels its
+proposed runs not claimed yet. Stopping a run a worker is *executing* — a user's stop, or a closed
+pull request's on its proposed runs — is a request, not a transition: the API
 records it, audits `run.cancel_requested` and queues a `cancel_job` command for the worker's next
 heartbeat; the worker interrupts the tool (SIGINT, SIGKILL after `STACKD_CANCEL_GRACE_SECONDS`) and
 reports `job_canceled`. The run then ends `canceled` — or `failed` with `canceled_during_apply` if
 the job held apply credentials (an apply, a mutating command), since the infrastructure may be partly
-changed: `applying` is never `canceled`. Stopping such a job needs `can_apply`. The
-`unconfirmed`/`confirmed → failed` edges are legal, but only a failure report from the worker that
-planned the run takes them.
+changed: `applying` is never `canceled`. Stopping such a job needs `can_apply`. `unconfirmed` and
+`confirmed` have no `→ failed` edge: no worker executes them, so a failure report on them (a late or
+duplicate `job_failed`) is refused with 409.
 
 **Worker loss** fails only runs whose job is *executing* on the lost worker (`preparing`,
 `planning`, `checking`, `running`, `applying`) — after 120 s, or, for a job holding apply

@@ -8,6 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.audit import record_audit
 from app.crypto import encrypt
 from app.enums import (
+    WORKER_EXECUTING_STATES,
     AuditActorKind,
     RunEventActor,
     RunState,
@@ -104,8 +105,8 @@ async def promote_run(
     session: AsyncSession, source_env: Environment, target_env: Environment, user: User
 ) -> Run:
     """Promote the commit currently applied on `source_env` to `target_env` of the SAME stack: a
-    tracked run on the target pinned to the source's last finished commit (§9.7). Triggering a plan
-    needs writer; the apply is still gated by can_apply + 4-eyes at confirm time."""
+    tracked run on the target pinned to the commit of the source's last applied run (§9.7).
+    Triggering a plan needs writer; the apply is still gated by can_apply + 4-eyes at confirm."""
     from sqlalchemy import select
 
     if source_env.stack_id != target_env.stack_id:
@@ -115,21 +116,27 @@ async def promote_run(
     if source_env.id == target_env.id:
         raise ProblemException(400, "Same environment", "Pick a different source environment.")
 
+    # The last apply that went through: a confirmed tracked/destroy run that finished. Not a PR or
+    # drift plan (proposed: never applied — a PR's commit may not even be merged), a command run,
+    # or an empty plan (finished without a confirmation).
     src = (
         await session.execute(
             select(Run)
             .where(
                 Run.environment_id == source_env.id,
                 Run.state == RunState.finished,
+                Run.type.in_((RunType.tracked, RunType.destroy)),
+                Run.confirmed_at.is_not(None),
                 Run.commit_sha.is_not(None),
             )
             .order_by(Run.finished_at.desc())
             .limit(1)
         )
     ).scalar_one_or_none()
-    if src is None:
+    if src is None or src.type == RunType.destroy:
+        # After a destroy nothing is applied on the source: there is no commit to promote.
         raise ProblemException(
-            409, "Nothing to promote", "The source environment has no applied commit yet."
+            409, "Nothing to promote", "The source environment has no applied commit."
         )
 
     run = Run(
@@ -291,6 +298,14 @@ async def confirm_run(session: AsyncSession, run: Run, user: User) -> Run:
 
 
 async def discard_run(session: AsyncSession, run: Run, user: User) -> Run:
+    """unconfirmed → discarded (§4.2): a plan awaiting confirmation is dropped, never applied. Any
+    other run is canceled or stopped instead (`cancel_run`)."""
+    if run.state != RunState.unconfirmed:
+        raise ProblemException(
+            409,
+            "Cannot discard",
+            f"Only a plan awaiting confirmation is discarded, not a {run.state.value} run.",
+        )
     await transition(
         session,
         run,
@@ -305,18 +320,12 @@ async def discard_run(session: AsyncSession, run: Run, user: User) -> Run:
     return run
 
 
-# States in which a worker is executing the run's job (§4.1): a cancel there is a request the worker
-# honours, not a transition.
-_EXECUTING_STATES = frozenset(
-    {RunState.preparing, RunState.planning, RunState.checking, RunState.applying, RunState.running}
-)
-
-
 async def cancel_run(session: AsyncSession, run: Run, user: User) -> Run:
     """Cancel a run (§4.1). Not claimed yet (`queued`, `confirmed`) or waiting on a human
     (`unconfirmed`): `canceled` at once. Executing: ask the worker to stop (see
     `request_cancel`) — the run ends when the worker reports it."""
-    if run.state in _EXECUTING_STATES:
+    # A worker executing the job: a cancel there is a request the worker honours, not a transition.
+    if run.state in WORKER_EXECUTING_STATES:
         return await request_cancel(session, run, user)
     if run.state not in (RunState.queued, RunState.confirmed, RunState.unconfirmed):
         raise ProblemException(409, "Cannot cancel", f"A {run.state.value} run cannot be canceled.")
@@ -334,14 +343,18 @@ async def cancel_run(session: AsyncSession, run: Run, user: User) -> Run:
     return run
 
 
-async def request_cancel(session: AsyncSession, run: Run, user: User) -> Run:
+async def request_cancel(
+    session: AsyncSession, run: Run, user: User | None, *, reason: str | None = None
+) -> Run:
     """Ask the worker executing `run` to stop it (SPECS §4.1, §7.1): record the request, audit it
     and queue a `cancel_job` command for the worker's next heartbeat — one transaction. The state
     does not change here: the worker interrupts the tool (SIGINT, a graceful stop), reports
     `job_canceled`, and only then does `transition()` end the run. Idempotent: asking again
     re-queues the command (the first may have been lost with a restarting worker) without a second
     audit. A job holding apply credentials (an apply, a mutating command) needs `can_apply` — the
-    gate of starting it — since stopping it halfway leaves the infrastructure partially changed."""
+    gate of starting it — since stopping it halfway leaves the infrastructure partially changed.
+    `user=None` is the system — a closed pull request stopping its proposed runs (§18.3), with
+    `reason` in the audit context; it never stops a job holding apply credentials."""
     from sqlalchemy import select
 
     from app.models.worker_command import WorkerCommand
@@ -349,13 +362,20 @@ async def request_cancel(session: AsyncSession, run: Run, user: User) -> Run:
 
     # Re-read under the row lock: the job may have finished between the route's load and now.
     locked = (
-        await session.execute(select(Run).where(Run.id == run.id).with_for_update())
+        await session.execute(
+            select(Run)
+            .where(Run.id == run.id)
+            .with_for_update()
+            .execution_options(populate_existing=True)
+        )
     ).scalar_one()
-    if locked.state not in _EXECUTING_STATES or locked.worker_id is None:
+    if locked.state not in WORKER_EXECUTING_STATES or locked.worker_id is None:
         raise ProblemException(
             409, "Cannot cancel", f"A {locked.state.value} run cannot be canceled."
         )
     if holds_apply_credentials(locked):
+        if user is None:
+            raise ProblemException(409, "Cannot cancel", "The system never stops an apply.")
         env = await session.get(Environment, locked.environment_id)
         assert env is not None
         membership = await _env_membership(session, user, env)
@@ -368,15 +388,16 @@ async def request_cancel(session: AsyncSession, run: Run, user: User) -> Run:
         await record_audit(
             session,
             action="run.cancel_requested",
-            actor_kind=AuditActorKind.user,
-            actor_id=user.id,
-            actor_email=user.email,
+            actor_kind=AuditActorKind.user if user else AuditActorKind.system,
+            actor_id=user.id if user else None,
+            actor_email=user.email if user else None,
             target_kind="run",
             target_id=locked.id,
             context={
                 "state": locked.state.value,
                 "worker_id": str(locked.worker_id),
                 "environment_id": str(locked.environment_id),
+                **({"reason": reason} if reason else {}),
             },
         )
     session.add(

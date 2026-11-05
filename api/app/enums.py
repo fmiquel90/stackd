@@ -85,6 +85,17 @@ ACTIVE_STATES: frozenset[RunState] = frozenset(
         RunState.running,
     }
 )
+# Active states in which a worker is executing the run's job (§4.1): the claim moved the run there
+# and only that worker's reports move it on. `unconfirmed`/`confirmed` wait on a human or a claim.
+WORKER_EXECUTING_STATES: frozenset[RunState] = frozenset(
+    {
+        RunState.preparing,
+        RunState.planning,
+        RunState.checking,
+        RunState.applying,
+        RunState.running,
+    }
+)
 TERMINAL_STATES: frozenset[RunState] = frozenset(
     {RunState.finished, RunState.failed, RunState.discarded, RunState.canceled}
 )

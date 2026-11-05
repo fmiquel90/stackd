@@ -98,7 +98,9 @@ is a misclick safeguard only — it never bypasses `can_apply` (still evaluated 
 ## Autodeploy & checks
 
 An environment with `autodeploy` auto-confirms when the plan is clean — **but a `warn` check forces
-`unconfirmed`** so a human still sees it, and so does a run that consumed a mock. A `protected`
+`unconfirmed`** so a human still sees it, and so does a run that consumed a mock or resolved a
+secret through a fallback (unless the env sets `allow_fallback_apply`). A `destroy` run never
+autodeploys: an approver with the destroy right confirms it. A `protected`
 environment can never autodeploy, and requires four-eyes. A rollout's run never autodeploys: it
 follows the [rollout gate](#rollouts).
 
@@ -124,7 +126,8 @@ curl -s -X POST localhost:8000/api/v1/environments/$STAGING_ID/promote -H "$AUTH
   -H 'content-type: application/json' -d '{"from_environment_id": "'$DEV_ID'"}'
 ```
 
-It pins a new tracked run on the target to the source's last applied commit, so you deploy *what
+It pins a new tracked run on the target to the commit of the source's last **apply** — a pull
+request's plan, a drift check, a command or an empty plan does not count — so you deploy *what
 was tested* — not whatever HEAD happens to be. The apply is gated as usual (tier + four-eyes) at
 confirm. This is the same-stack counterpart to the cross-stack [cascade](dependencies-and-mocks.md).
 
@@ -207,7 +210,9 @@ curl -s -X POST localhost:8000/api/v1/runs/$RUN_ID/discard -H "$AUTH"           
 curl -s -X POST localhost:8000/api/v1/runs/$RUN_ID/cancel -H "$AUTH"                  # cancel / stop
 ```
 
-A `destroy` run is triggered with `-d '{"type":"destroy"}'`; `commit_sha` (a full SHA, a branch or
+A `destroy` run is triggered with `-d '{"type":"destroy"}'` (`tracked`, the default, and `destroy` are
+the only types this endpoint takes — 422 otherwise: a command runs through
+[`…/commands`](commands.md), a pull request's plan comes from its webhook); `commit_sha` (a full SHA, a branch or
 a tag) pins the plan to that commit, and `with_downstream: true` starts a
 [cascade](dependencies-and-mocks.md) group.
 

@@ -8,7 +8,7 @@ import uuid
 
 import httpx
 
-from tests.conftest_phase2 import login, make_env
+from tests.conftest_phase2 import event, login, make_env, register_worker
 
 REPO = "https://github.com/acme/demo"
 SECRET = "whsecret123"
@@ -185,3 +185,72 @@ async def test_push_skips_an_env_re_pointed_meanwhile(client: httpx.AsyncClient)
     env = (await client.get(f"/api/v1/environments/{env_id}", headers=admin)).json()
     assert (env["branch"], env["head_sha"]) == ("other", None)
     assert (await client.get(f"/api/v1/environments/{env_id}/runs", headers=admin)).json() == []
+
+
+PR_REPO = "https://github.com/acme/pr-close"  # its own repo: no other test's stack matches it
+
+
+async def _pull_request(client, action: str, number: int, sha: str) -> httpx.Response:  # type: ignore[no-untyped-def]
+    payload = {
+        "action": action,
+        "number": number,
+        "repository": {"clone_url": PR_REPO},
+        "pull_request": {"number": number, "base": {"ref": "main"}, "head": {"sha": sha}},
+    }
+    body = json.dumps(payload).encode()
+    return await client.post(
+        "/api/v1/webhooks/github",
+        content=body,
+        headers={
+            "X-GitHub-Event": "pull_request",
+            "X-GitHub-Delivery": str(uuid.uuid4()),
+            "X-Hub-Signature-256": _sig(body),
+        },
+    )
+
+
+async def test_closing_a_pr_stops_its_executing_runs_through_the_worker(
+    client: httpx.AsyncClient,
+) -> None:
+    # A proposed run a worker is planning is stopped like a user's stop (#29, §4.1): a request
+    # the worker honours, never a `canceled` under its feet. A run not claimed yet is canceled.
+    from sqlalchemy import select
+
+    from app.db import SessionLocal
+    from app.models.audit import AuditEvent
+
+    admin = await login(client, "admin")
+    wh = await register_worker(client, admin, "pool-wh-pr-close")
+    _stack, env_id = await _stack_with_webhook(client, admin, "wh-pr-close", repo=PR_REPO)
+
+    assert (await _pull_request(client, "opened", 71, "a" * 40)).status_code == 200
+    executing = (await client.post("/worker/v1/jobs/claim", headers=wh)).json()["job_id"]
+    await event(client, wh, executing, "phase_started", phase="planning")
+    assert (await _pull_request(client, "opened", 72, "b" * 40)).status_code == 200
+    runs = (await client.get(f"/api/v1/environments/{env_id}/runs", headers=admin)).json()
+    queued = next(r["id"] for r in runs if r["id"] != executing)  # waits: the env is busy
+
+    assert (await _pull_request(client, "closed", 71, "a" * 40)).status_code == 200
+    run = (await client.get(f"/api/v1/runs/{executing}", headers=admin)).json()
+    assert run["state"] == "planning" and run["cancel_requested_at"] is not None
+    beat = (await client.post("/worker/v1/heartbeat", headers=wh, json={"in_flight": 1})).json()
+    assert [c["payload"] for c in beat["commands"] if c["type"] == "cancel_job"] == [
+        {"job_id": executing}
+    ]
+    assert (await event(client, wh, executing, "job_canceled", phase="planning")).status_code == 200
+    assert (await client.get(f"/api/v1/runs/{executing}", headers=admin)).json()[
+        "state"
+    ] == "canceled"
+    async with SessionLocal() as s:
+        requested = (
+            await s.execute(
+                select(AuditEvent).where(
+                    AuditEvent.action == "run.cancel_requested",
+                    AuditEvent.target_id == uuid.UUID(executing),
+                )
+            )
+        ).scalar_one()
+    assert requested.actor_kind == "system" and requested.context["reason"] == "pr_closed"
+
+    assert (await _pull_request(client, "closed", 72, "b" * 40)).status_code == 200
+    assert (await client.get(f"/api/v1/runs/{queued}", headers=admin)).json()["state"] == "canceled"
