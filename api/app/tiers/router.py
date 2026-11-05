@@ -7,17 +7,18 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel, ConfigDict, field_validator
-from sqlalchemy import select, text
+from sqlalchemy import delete, select, text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.audit import record_audit
 from app.auth.deps import CurrentUser, require_role
 from app.db import get_session
-from app.enums import AuditActorKind, Role
+from app.enums import AttachmentTarget, AuditActorKind, Role
 from app.errors import ProblemException
 from app.models.environment import Environment
 from app.models.tier import Tier
+from app.models.variable_set import VariableSetAttachment
 
 router = APIRouter(prefix="/api/v1/tiers", tags=["tiers"])
 DbSession = Annotated[AsyncSession, Depends(get_session)]
@@ -126,7 +127,10 @@ async def update_tier(
 
 @router.delete("/{tier_id}", status_code=204, dependencies=[Admin])
 async def delete_tier(tier_id: uuid.UUID, user: CurrentUser, session: DbSession) -> None:
-    tier = await session.get(Tier, tier_id)
+    # FOR UPDATE: a variable set attaching to this tier holds it FOR KEY SHARE until it commits
+    # (`lock_attach_target`), so the attach either lands first and is removed below, or waits and
+    # then finds no tier — never an orphan attachment.
+    tier = await session.get(Tier, tier_id, with_for_update=True)
     if tier is None:
         raise ProblemException(404, "Tier not found", None)
     in_use = (
@@ -149,6 +153,28 @@ async def delete_tier(tier_id: uuid.UUID, user: CurrentUser, session: DbSession)
             "UPDATE space_memberships SET allowed_tiers = array_remove(allowed_tiers, :name)"
         ).bindparams(name=name)
     )
+    # Variable-set attachments to the tier go with it (no FK on the polymorphic target), each
+    # audited like its manual removal — as a stack's or an env's do when it is deleted (§3.4).
+    detached = await session.execute(
+        delete(VariableSetAttachment)
+        .where(
+            VariableSetAttachment.target_kind == AttachmentTarget.tier,
+            VariableSetAttachment.target_id == tier_id,
+        )
+        .returning(VariableSetAttachment.variable_set_id)
+        .execution_options(synchronize_session=False)
+    )
+    for set_id in detached.scalars().all():
+        await record_audit(
+            session,
+            action="variable_set.detached",
+            actor_kind=AuditActorKind.user,
+            actor_id=user.id,
+            actor_email=user.email,
+            target_kind="variable_set",
+            target_id=set_id,
+            context={"target_kind": "tier", "target_id": str(tier_id), "reason": "tier_deleted"},
+        )
     await session.delete(tier)
     await record_audit(
         session,

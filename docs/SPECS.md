@@ -78,7 +78,7 @@ The "apply everywhere except prod" need depends on the targeted environment, not
 > **Set-based, not linear** (evolved from the original MVP design): tiers are a **configurable catalog** (`tiers` table — `name` unique, `requires_four_eyes`, `repo_hooks_at_apply` (§8.3), `position`), not a fixed `dev<staging<prod` enum, and a user carries a **set** of allowed tiers, not a single ceiling. This expresses custom tiers (`qa`, `preprod`, `sandbox`) and **non-contiguous** grants (e.g. `dev`+`prod` but not `staging`) that the old linear ceiling could not.
 
 - `environments.tier` text — references `tiers.name` (validated against the catalog on env create/update). No ordering.
-- `users.allowed_tiers` text[] — the set of tiers where the user can **confirm an apply**. Empty = none (can read and plan, never apply). Each entry is validated against the catalog; deleting a tier — refused (409 `Tier in use`) while an environment still references it — strips it from every user's set and every space membership's (no FK on the array, so this is enforced in app code).
+- `users.allowed_tiers` text[] — the set of tiers where the user can **confirm an apply**. Empty = none (can read and plan, never apply). Each entry is validated against the catalog (**422** `Unknown tier`), as is a space membership's `allowed_tiers`; deleting a tier — refused (409 `Tier in use`) while an environment still references it — strips it from every user's set and every space membership's and removes the variable-set attachments to it (§3.4, audited `variable_set.detached`, reason `tier_deleted`) — no FK on the array nor on the attachment target, so this is enforced in app code.
 - Apply rule: `confirm` allowed iff `role ∈ {approver, admin}` **AND** `env.tier ∈ allowed_tiers` (set membership). Example: an approver with `{dev, staging}` confirms in dev/staging, denied in prod (the dev persona Bob holds that set but is a `writer`: he confirms nowhere, DEV §3); Alice `{dev, staging, prod}` confirms everywhere; a user `{dev, prod}` skips staging.
 - `users.can_destroy` — a run `type=destroy` (trigger AND confirm) requires `can_destroy=true` **in addition** to the tier rule. A destruction is more dangerous than an apply: a distinct, explicit right.
 
@@ -240,7 +240,7 @@ A set's **selector** (`{label: value}`) auto-attaches it to every environment wh
 
 **Attachments stay in the set's space.** Attaching to a `stack` or `environment` requires the target to belong to the variable set's space **and** the caller to be a `writer` there; otherwise it is refused with `400 Cross-space attachment` (`403` if the caller lacks write access on the target). A tier is a global catalog row (no space), so a `tier` attachment applies only to environments of that tier **inside the set's own space**. Resolution also ignores any explicit attachment whose set belongs to another space (defense in depth).
 
-**No orphan attachments.** Since there is no FK, deleting a stack or an environment removes the attachments targeting it — for a stack, also those targeting its environments — in the deletion's transaction, each audited `variable_set.detached` (context `reason`: `stack_deleted` | `environment_deleted`).
+**No orphan attachments.** Since there is no FK, deleting a stack, an environment or a tier removes the attachments targeting it — for a stack, also those targeting its environments — in the deletion's transaction, each audited `variable_set.detached` (context `reason`: `stack_deleted` | `environment_deleted` | `tier_deleted`). An attach locks its stack/env/tier row `FOR KEY SHARE` against the deletion's `FOR UPDATE`.
 
 At equal name and kind, the upper layer overrides. Two sources outside resolution are added at claim time: upstream outputs (`dependency:`) and mocks (`mock`) — see §9.
 
@@ -586,7 +586,8 @@ The exhaustive list of actions the API emits (to check it: `grep -rn 'action="' 
 
 ```
 auth.login / auth.logout / auth.domain_denied / auth.refresh_reuse_detected
-space.created / space.member_set / space.member_removed            # Phase F memberships (§2.4)
+space.created / space.member_set / space.member_removed            # Phase F memberships (§2.4);
+                                  #   member_set context: user_id, role, allowed_tiers, can_destroy
 stack.created / stack.updated / stack.deleted
 environment.created / environment.updated / environment.deleted   # created: also by a clone
                                   #   (context cloned_from, autodeploy, autodeploy_off_reason, §21.2)
@@ -598,7 +599,8 @@ variable.created / variable.updated / variable.deleted   # stack, env and set va
                                                           #   name, sensitive — NEVER the value
 variable_set.created / variable_set.updated / variable_set.deleted
 variable_set.attached / variable_set.detached   # detached: manual, or with its target — context
-                                                #   reason = stack_deleted | environment_deleted (§3.2)
+                                                #   reason = stack_deleted | environment_deleted
+                                                #   | tier_deleted (§3.2, §3.4)
 hook.created / hook.updated / hook.deleted      # deleted: manual, or with its stack/env (reason, §3.2)
 notification_target.created / notification_target.updated / notification_target.deleted
                                                 # deleted: manual, or with its stack/env (reason, §3.2)
