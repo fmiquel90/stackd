@@ -18,6 +18,7 @@ from app.models.user_notification import UserNotification
 from app.models.variable import Variable
 from app.models.variable_set import VariableSet, VariableSetAttachment
 from app.models.vcs import VcsOutbox
+from app.models.webhook_delivery import WebhookDelivery
 from app.models.worker import Worker, WorkerPool
 from app.models.worker_command import WorkerCommand
 
@@ -51,6 +52,7 @@ __all__ = [
     "VariableSet",
     "VariableSetAttachment",
     "VcsOutbox",
+    "WebhookDelivery",
     "Worker",
     "WorkerCommand",
     "WorkerPool",

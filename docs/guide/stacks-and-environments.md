@@ -26,6 +26,9 @@ STACK=$(curl -s -X POST localhost:8000/api/v1/stacks \
 !!! tip "One repo, several stacks"
     A single repo can host many stacks by giving each a distinct `project_root` (e.g. `network`, `db`, `app`). One GitHub webhook per repo (`POST /api/v1/webhooks/github`) serves them all, but each stack holds **its own** HMAC secret (`webhook_secret`, write-only, set with `PATCH /api/v1/stacks/{id}` or in the stack's **Settings → General**): a delivery acts only on the stacks of that repo whose secret verifies its signature, so give the stacks fed by one webhook the same secret. On a push, the API then picks the environments tracking the pushed branch and triggers a run only when the push touches the stack's `project_root`. See [SPECS §3.1](../SPECS.md).
 
+!!! note "Redelivering a GitHub webhook"
+    Each delivery is acted on once: the API remembers its `X-GitHub-Delivery` id for **5 minutes**. A delivery GitHub sends again within that window — including **Redeliver** in the repo's webhook settings, which reuses the id — gets a `200` with `"duplicate": true` and does nothing. Past 5 minutes a Redeliver is processed again; a delivery that failed (5xx) can be redelivered at once. A request without the `X-GitHub-Delivery` header is refused (`400`). See [SPECS §13](../SPECS.md).
+
 ### Validating the repo
 
 Before creating environments, check that Stackd can reach the repo with the configured auth:

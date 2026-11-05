@@ -203,6 +203,64 @@ async def test_break_glass_override(
     assert got["used_secret_fallback"] is True
     assert got["variable_provenance"]["TF_VAR_dbpass"] == "secret_override:proton-sbg"
 
+    # The sealed override lives only as long as the run: kept while it may still be claimed,
+    # wiped by transition() when it reaches a terminal state.
+    assert await _sealed_overrides(run["id"]) is not None
+    await event(client, wh, run["id"], "phase_started", phase="planning")
+    await event(client, wh, run["id"], "phase_finished", result={"has_changes": False})
+    got = (await client.get(f"/api/v1/runs/{run['id']}", headers=admin)).json()
+    assert got["state"] == "finished"
+    assert await _sealed_overrides(run["id"]) is None
+
+
+async def _sealed_overrides(run_id: str) -> bytes | None:
+    import uuid
+
+    from app.db import SessionLocal
+    from app.models.run import Run
+
+    async with SessionLocal() as session:
+        run = await session.get(Run, uuid.UUID(run_id))
+        assert run is not None
+        return run.secret_overrides_encrypted
+
+
+async def test_override_only_for_break_glass_references(
+    client: httpx.AsyncClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """§15.4: an override is refused (422) unless it targets a secret reference whose
+    `secret_fallback_mode` is `break_glass` — not an `error`/`static` reference, a plain variable,
+    or a name the env doesn't have. Nothing is created."""
+    admin = await login(client, "admin")
+    stack = await make_stack(client, admin, "sbg422-stack")
+    space = await _space_id(client, admin, stack)
+    env_id = await make_env(client, admin, stack, "dev", "dev")
+    source = await _make_source(client, admin, space, "proton-sbg422")
+    await _make_ref_var(client, admin, env_id, source, name="glass", fallback_mode="break_glass")
+    await _make_ref_var(client, admin, env_id, source, name="strict", fallback_mode="error")
+    plain = await client.post(
+        f"/api/v1/environments/{env_id}/variables",
+        headers=admin,
+        json={"kind": "terraform", "name": "region", "value": "eu-west-1"},
+    )
+    assert plain.status_code == 201, plain.text
+
+    async def down(_src, _ref):
+        raise providers.SecretUnavailable("provider unreachable")
+
+    monkeypatch.setattr(providers, "fetch_secret", down)
+    url = f"/api/v1/environments/{env_id}/runs"
+    for name in ("strict", "region", "nope"):
+        refused = await client.post(
+            url, headers=admin, json={"secret_overrides": {"glass": "ok", name: "x"}}
+        )
+        assert refused.status_code == 422, refused.text
+        assert name in refused.json()["detail"] and "x" not in refused.json()["detail"].split()
+    assert (await client.get(url, headers=admin)).json() == []
+
+    ok = await client.post(url, headers=admin, json={"secret_overrides": {"glass": "ok"}})
+    assert ok.status_code == 201, ok.text
+
 
 async def test_override_requires_apply_permission(client: httpx.AsyncClient) -> None:
     admin = await login(client, "admin")

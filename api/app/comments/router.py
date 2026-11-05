@@ -9,10 +9,11 @@ from fastapi import APIRouter, Depends
 from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.audit import record_audit
 from app.auth.deps import CurrentUser
 from app.comments.schemas import CommentCreate, CommentOut, CommentUpdate
 from app.db import get_session
-from app.enums import Role
+from app.enums import AuditActorKind, Role
 from app.errors import ProblemException
 from app.models.run_comment import RunComment
 from app.spaces import guard_run_id
@@ -28,6 +29,29 @@ async def _publish(session: AsyncSession, run_id: uuid.UUID) -> None:
     signal = json.dumps({"kind": "comment_event", "run_id": str(run_id)})
     await session.execute(
         text("SELECT pg_notify(:chan, :payload)").bindparams(chan=f"run_{run_id}", payload=signal)
+    )
+
+
+async def _audit(
+    session: AsyncSession, user: CurrentUser, action: str, comment: RunComment
+) -> None:
+    """Stage the comment's audit event in the caller's transaction (§6.3, §16.5). Targets the
+    comment; the context says where it lives (run, thread, anchor kind) — never the body, which is
+    free text a reviewer may have pasted anything into."""
+    context: dict[str, str] = {"run_id": str(comment.run_id)}
+    if comment.parent_id is not None:
+        context["parent_id"] = str(comment.parent_id)
+    if comment.anchor:
+        context["anchor_kind"] = str(comment.anchor.get("kind"))
+    await record_audit(
+        session,
+        action=action,
+        actor_kind=AuditActorKind.user,
+        actor_id=user.id,
+        actor_email=user.email,
+        target_kind="comment",
+        target_id=comment.id,
+        context=context,
     )
 
 
@@ -77,7 +101,8 @@ async def create_comment(
         anchor=body.anchor.model_dump(exclude_none=True) if body.anchor else None,
     )
     session.add(comment)
-    await session.flush()  # need comment.id is not required, but ensures ordering before notify
+    await session.flush()  # assigns comment.id, the audit target
+    await _audit(session, user, "comment.created", comment)
     from app.inbox.service import enqueue_for_comment
 
     await enqueue_for_comment(
@@ -106,15 +131,18 @@ async def update_comment(
             raise ProblemException(403, "Forbidden", "Only the author can edit a comment.")
         comment.body = body.body
         comment.edited_at = datetime.now(UTC)
+        await _audit(session, user, "comment.updated", comment)
     if body.resolved is not None:
         if not (is_author or user.role in _APPROVERS):
             raise ProblemException(403, "Forbidden", "Resolving needs the author or an approver.")
         if body.resolved:
             comment.resolved_at = datetime.now(UTC)
             comment.resolved_by_user_id = user.id
+            await _audit(session, user, "comment.resolved", comment)
         else:
             comment.resolved_at = None
             comment.resolved_by_user_id = None
+            await _audit(session, user, "comment.reopened", comment)
     await _publish(session, run_id)
     await session.commit()
     await session.refresh(comment)
@@ -139,6 +167,7 @@ async def delete_comment(
             raise ProblemException(
                 409, "Thread has replies", "Only an admin can delete a thread that has replies."
             )
+    await _audit(session, user, "comment.deleted", comment)
     await session.delete(comment)
     await _publish(session, run_id)
     await session.commit()

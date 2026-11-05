@@ -88,7 +88,7 @@ sharing a `run_group_id` — the triggering run's group, or the triggering run's
 |---|---|
 | `never` | downstream is never auto-triggered |
 | `always` | downstream triggered on every finished upstream apply |
-| `on_output_change` | triggered only if a referenced upstream output differs from the value the downstream's last finished run consumed (its `resolved_inputs`); a downstream that never finished a run is always triggered |
+| `on_output_change` | triggered only if a referenced upstream output differs from the value the downstream's last **apply** consumed (its `resolved_inputs`) — a plan-only run in between (proposed, drift, empty diff) doesn't count; a downstream never applied is always triggered |
 
 The run group is decided as a whole (SPECS §9.2):
 

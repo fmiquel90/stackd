@@ -51,7 +51,11 @@ async def _pr(
     return await client.post(
         "/api/v1/webhooks/github",
         content=body,
-        headers={"X-GitHub-Event": "pull_request", "X-Hub-Signature-256": _sig(body)},
+        headers={
+            "X-GitHub-Event": "pull_request",
+            "X-Hub-Signature-256": _sig(body),
+            "X-GitHub-Delivery": str(uuid.uuid4()),
+        },
     )
 
 
