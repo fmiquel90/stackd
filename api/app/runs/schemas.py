@@ -29,6 +29,15 @@ class TriggerRunIn(BaseModel):
 
     _check_sha = field_validator("commit_sha")(_validate_commit_sha)
 
+    @field_validator("type")
+    @classmethod
+    def _plan_apply_types(cls, v: RunType) -> RunType:
+        # A command run has its own endpoint (`…/commands`, §4.3) and a proposed run comes from a
+        # pull-request webhook (§18.3) or the drift scheduler (§19): never triggered here.
+        if v not in (RunType.tracked, RunType.destroy):
+            raise ValueError("type must be tracked or destroy")
+        return v
+
 
 class CommandTriggerIn(BaseModel):
     command: str  # one of the allowlisted subcommands (app.runs.commands.ALLOWED_COMMANDS)

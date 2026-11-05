@@ -14,7 +14,7 @@ import httpx
 import pytest
 
 from app.secret_sources import providers
-from tests.conftest_phase2 import login, make_env, make_stack, register_worker
+from tests.conftest_phase2 import login, make_env, make_proposed_run, make_stack, register_worker
 
 PLAN_ROLE = "arn:aws:iam::123456789012:role/stackd-plan"
 APPLY_ROLE = "arn:aws:iam::123456789012:role/stackd-apply"
@@ -102,10 +102,7 @@ async def test_a_proposed_run_gets_no_secret(
     client: httpx.AsyncClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     admin, wh, env_id, fetched = await _env_with_secrets(client, monkeypatch, "proposed-secrets")
-    run = await client.post(
-        f"/api/v1/environments/{env_id}/runs", headers=admin, json={"type": "proposed"}
-    )
-    assert run.status_code == 201, run.text
+    run_id = await make_proposed_run(env_id)
     payload = await _claim(client, wh)
 
     blob = json.dumps(payload)
@@ -119,7 +116,7 @@ async def test_a_proposed_run_gets_no_secret(
     # What a plan needs stays: the plan role (read-only, §10.3), the `ro` state, the clone token.
     assert payload["cloud_credentials"]["role_arn"] == PLAN_ROLE
     assert payload["repo_credentials"]["token"] == REPO_TOKEN
-    provenance = (await client.get(f"/api/v1/runs/{run.json()['id']}", headers=admin)).json()[
+    provenance = (await client.get(f"/api/v1/runs/{run_id}", headers=admin)).json()[
         "variable_provenance"
     ]
     assert provenance == {"REGION": "env", "TF_VAR_size": "env"}

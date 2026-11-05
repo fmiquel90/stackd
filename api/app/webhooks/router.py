@@ -222,8 +222,16 @@ async def github_webhook(
                 .scalars()
                 .all()
             )
+            from app.enums import WORKER_EXECUTING_STATES
+            from app.runs.service import request_cancel
+
             for run in stale:
                 try:
+                    if run.state in WORKER_EXECUTING_STATES:
+                        # A worker is planning it: ask that worker to stop (§4.1) — the run ends
+                        # `canceled` when it reports, never under its feet.
+                        await request_cancel(session, run, None, reason="pr_closed")
+                        continue
                     await transition(
                         session,
                         run,

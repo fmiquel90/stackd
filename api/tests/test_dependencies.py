@@ -5,7 +5,14 @@ import uuid
 import httpx
 import pytest
 
-from tests.conftest_phase2 import event, login, make_env, make_stack, register_worker
+from tests.conftest_phase2 import (
+    event,
+    login,
+    make_env,
+    make_proposed_run,
+    make_stack,
+    register_worker,
+)
 
 CHANGES = {"has_changes": True, "summary": {"add": 1}}
 
@@ -811,11 +818,9 @@ async def test_on_output_change_compares_with_the_last_apply(client: httpx.Async
 
     # The upstream's output moves to V2, and a proposed plan of down reads it — and finishes.
     await _set_output(envs["up"], "out", "V2")
-    proposed = await client.post(
-        f"/api/v1/environments/{envs['down']}/runs", headers=admin, json={"type": "proposed"}
-    )
+    proposed = await make_proposed_run(envs["down"])
     job = await _claim(client, wh)
-    assert job["job_id"] == proposed.json()["id"]
+    assert job["job_id"] == proposed
     assert job["resolved_inputs"] == {"TF_VAR_in_up": "V2"}
     await _plan(client, wh, admin, job)
     assert (await _env_runs(client, admin, envs["down"]))[0]["state"] == "finished"

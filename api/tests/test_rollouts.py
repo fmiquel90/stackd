@@ -186,6 +186,29 @@ async def test_a_plan_that_changes_something_waits_for_a_human(client: httpx.Asy
     assert ro["state"] == "running" and _member(ro, g["net"])["auto_confirmed"] is False
 
 
+async def test_the_creator_hears_how_member_runs_end(client: httpx.AsyncClient) -> None:
+    # A member run is an ordinary run whose triggerer is the rollout's creator (§17.1, #27): its
+    # end reaches the creator's inbox like a run they started — not the approver's.
+    admin, alice = await login(client, "admin"), await login(client, "alice")
+    wh = await register_worker(client, admin, "pool-ro-notify")
+    await _graph(client, admin, "ro-notify")
+    ro = await _rollout(client, admin, "ro-notify")
+    await client.post(f"/api/v1/rollouts/{ro['id']}/approve", headers=alice)
+
+    net = await _plan(client, wh, CREATES)
+    await _apply(client, wh, net["job_id"])
+    app = await _claim(client, wh)
+    await event(client, wh, app["job_id"], "job_failed", phase="plan", result={"error": "x"})
+
+    def kinds(feed: list[dict]) -> set[tuple[str, str]]:
+        return {(n["kind"], n["run_id"]) for n in feed if n.get("run_id")}
+
+    creator = kinds((await client.get("/api/v1/notifications", headers=admin)).json())
+    assert {("run_finished", net["job_id"]), ("run_failed", app["job_id"])} <= creator
+    approver = kinds((await client.get("/api/v1/notifications", headers=alice)).json())
+    assert not {k for k in approver if k[1] in (net["job_id"], app["job_id"])}
+
+
 async def test_a_failure_skips_its_branch_and_can_be_retried(client: httpx.AsyncClient) -> None:
     admin, alice = await login(client, "admin"), await login(client, "alice")
     wh = await register_worker(client, admin, "pool-ro-fail")

@@ -14,7 +14,7 @@ from datetime import UTC, datetime, timedelta
 import httpx
 import pytest
 
-from tests.conftest_phase2 import event, login, make_env, register_worker
+from tests.conftest_phase2 import event, login, make_env, make_proposed_run, register_worker
 
 CHANGES = {"has_changes": True, "summary": {"add": 1, "change": 0, "destroy": 0}}
 
@@ -62,13 +62,16 @@ async def _run(
 ) -> str:
     """Drive a run on `sha` to `finished`: through an apply when the plan has changes (tracked),
     plan-only otherwise (empty plan, or a proposed run)."""
-    run = (
-        await client.post(
-            f"/api/v1/environments/{env_id}/runs",
-            headers=admin,
-            json={"commit_sha": sha, "type": run_type},
-        )
-    ).json()
+    if run_type == "proposed":  # a PR's run: `POST …/runs` does not create one (§12)
+        run = {"id": await make_proposed_run(env_id, sha)}
+    else:
+        run = (
+            await client.post(
+                f"/api/v1/environments/{env_id}/runs",
+                headers=admin,
+                json={"commit_sha": sha, "type": run_type},
+            )
+        ).json()
     assert (await client.post("/worker/v1/jobs/claim", headers=wh)).status_code == 200
     await event(client, wh, run["id"], "phase_started", phase="planning")
     await event(

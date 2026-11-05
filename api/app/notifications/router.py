@@ -9,7 +9,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.audit import record_audit
-from app.auth.deps import CurrentUser, require_role
+from app.auth.deps import CurrentUser
 from app.db import get_session
 from app.enums import AttachmentTarget, AuditActorKind, Role
 from app.environments.router import lock_attach_target
@@ -23,7 +23,6 @@ from app.spaces import guard_env_id, guard_stack_id
 # delivered. Scoped to a stack or an environment, mirroring platform hooks.
 router = APIRouter(prefix="/api/v1", tags=["notifications"])
 DbSession = Annotated[AsyncSession, Depends(get_session)]
-Writer = Depends(require_role(Role.writer))
 
 
 async def _list(
@@ -182,7 +181,6 @@ async def list_stack_notifications(
     "/stacks/{stack_id}/notifications",
     response_model=NotificationOut,
     status_code=201,
-    dependencies=[Writer],
 )
 async def create_stack_notification(
     stack_id: uuid.UUID, body: NotificationCreate, user: CurrentUser, session: DbSession
@@ -194,7 +192,6 @@ async def create_stack_notification(
 @router.patch(
     "/stacks/{stack_id}/notifications/{target_id}",
     response_model=NotificationOut,
-    dependencies=[Writer],
 )
 async def update_stack_notification(
     stack_id: uuid.UUID,
@@ -208,9 +205,7 @@ async def update_stack_notification(
     return NotificationOut.of(await _update(session, user, t, body))
 
 
-@router.delete(
-    "/stacks/{stack_id}/notifications/{target_id}", status_code=204, dependencies=[Writer]
-)
+@router.delete("/stacks/{stack_id}/notifications/{target_id}", status_code=204)
 async def delete_stack_notification(
     stack_id: uuid.UUID, target_id: uuid.UUID, user: CurrentUser, session: DbSession
 ) -> None:
@@ -220,7 +215,7 @@ async def delete_stack_notification(
     )
 
 
-@router.post("/stacks/{stack_id}/notifications/{target_id}/test", dependencies=[Writer])
+@router.post("/stacks/{stack_id}/notifications/{target_id}/test")
 async def test_stack_notification(
     stack_id: uuid.UUID, target_id: uuid.UUID, user: CurrentUser, session: DbSession
 ) -> dict:
@@ -245,7 +240,6 @@ async def list_env_notifications(
     "/environments/{env_id}/notifications",
     response_model=NotificationOut,
     status_code=201,
-    dependencies=[Writer],
 )
 async def create_env_notification(
     env_id: uuid.UUID, body: NotificationCreate, user: CurrentUser, session: DbSession
@@ -259,7 +253,6 @@ async def create_env_notification(
 @router.patch(
     "/environments/{env_id}/notifications/{target_id}",
     response_model=NotificationOut,
-    dependencies=[Writer],
 )
 async def update_env_notification(
     env_id: uuid.UUID,
@@ -273,9 +266,7 @@ async def update_env_notification(
     return NotificationOut.of(await _update(session, user, t, body))
 
 
-@router.delete(
-    "/environments/{env_id}/notifications/{target_id}", status_code=204, dependencies=[Writer]
-)
+@router.delete("/environments/{env_id}/notifications/{target_id}", status_code=204)
 async def delete_env_notification(
     env_id: uuid.UUID, target_id: uuid.UUID, user: CurrentUser, session: DbSession
 ) -> None:
@@ -287,7 +278,7 @@ async def delete_env_notification(
     )
 
 
-@router.post("/environments/{env_id}/notifications/{target_id}/test", dependencies=[Writer])
+@router.post("/environments/{env_id}/notifications/{target_id}/test")
 async def test_env_notification(
     env_id: uuid.UUID, target_id: uuid.UUID, user: CurrentUser, session: DbSession
 ) -> dict:

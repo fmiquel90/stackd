@@ -7,7 +7,7 @@ from fastapi import APIRouter, Depends, Response
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.auth.deps import CurrentUser, require_role
+from app.auth.deps import CurrentUser
 from app.db import get_session
 from app.dependencies.service import group_status
 from app.enums import Role, RunEventActor, RunState, TriggeredBy
@@ -41,7 +41,6 @@ DbSession = Annotated[AsyncSession, Depends(get_session)]
     "/environments/{env_id}/runs",
     response_model=RunOut,
     status_code=201,
-    dependencies=[Depends(require_role(Role.writer))],
 )
 async def create_run(
     env_id: uuid.UUID, body: TriggerRunIn, user: CurrentUser, session: DbSession
@@ -63,7 +62,6 @@ async def create_run(
     "/environments/{env_id}/commands",
     response_model=RunOut,
     status_code=201,
-    dependencies=[Depends(require_role(Role.writer))],
 )
 async def run_command(
     env_id: uuid.UUID, body: CommandTriggerIn, user: CurrentUser, session: DbSession
@@ -80,7 +78,6 @@ async def run_command(
     "/environments/{env_id}/promote",
     response_model=RunOut,
     status_code=201,
-    dependencies=[Depends(require_role(Role.writer))],
 )
 async def promote(env_id: uuid.UUID, body: PromoteIn, user: CurrentUser, session: DbSession) -> Run:
     """Promote the commit currently applied on `from_environment_id` to this environment (same
@@ -154,7 +151,6 @@ async def confirm(run_id: uuid.UUID, user: CurrentUser, session: DbSession) -> R
 @router.post(
     "/runs/{run_id}/discard",
     response_model=RunOut,
-    dependencies=[Depends(require_role(Role.writer))],
 )
 async def discard(run_id: uuid.UUID, user: CurrentUser, session: DbSession) -> Run:
     run = await guard_run_id(session, user, run_id, min_role=Role.writer)
@@ -164,7 +160,6 @@ async def discard(run_id: uuid.UUID, user: CurrentUser, session: DbSession) -> R
 @router.post(
     "/runs/{run_id}/cancel",
     response_model=RunOut,
-    dependencies=[Depends(require_role(Role.writer))],
 )
 async def cancel(run_id: uuid.UUID, user: CurrentUser, session: DbSession) -> Run:
     run = await guard_run_id(session, user, run_id, min_role=Role.writer)
@@ -174,7 +169,6 @@ async def cancel(run_id: uuid.UUID, user: CurrentUser, session: DbSession) -> Ru
 @router.post(
     "/runs/{run_id}/vcs/resync",
     status_code=202,
-    dependencies=[Depends(require_role(Role.writer))],
 )
 async def vcs_resync(run_id: uuid.UUID, user: CurrentUser, session: DbSession) -> dict:
     """Re-enqueue the VCS post-back for this run's current state (manual recovery, §18)."""

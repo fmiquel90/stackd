@@ -57,7 +57,9 @@ export function fourEyesOf(
   else if (tier.requires_four_eyes) because.push(`tier ${env.tier}`);
   if (env.protected) because.push("protected environment");
   if (env.require_second_pair_of_eyes) because.push("environment requires a second pair of eyes");
-  const human = run.triggered_by === "manual" ? run.trigger_user_id : null;
+  // A human triggerer: a manual run's, or a rollout member's — the rollout's creator, whom the API
+  // also holds to four-eyes (api/app/runs/service.py `confirm_run`, SPECS §2.4).
+  const human = run.triggered_by === "manual" || run.triggered_by === "rollout" ? run.trigger_user_id : null;
   return { required: because.length > 0, because, triggererId: human };
 }
 
