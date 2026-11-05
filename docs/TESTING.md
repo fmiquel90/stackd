@@ -221,6 +221,7 @@ The tier gate (an approver without `prod`) and staleness stay manual checks (DEV
 | `test_docker_job.py` (1) | A whole plan → apply on the `docker` runner with a real tofu in the test image; skipped without a daemon or the image. |
 | `test_runner_setting.py` (5) | `STACKD_RUNNER` only `local` or `docker` (no silent fallback); `docker` needs runner images; the runner is declared on every registration. |
 | `test_worker_labels.py` (8) | `STACKD_WORKER_LABELS` (`key=value,…`) parsed; a malformed value or a repeated key refuses to start; the agent registers with its labels and keeps them on a re-registration. |
+| `test_log_flush.py` (5) | The agent's log buffer (SPECS §5.1, 1 s / 32 KB): a quiet command's line is sent on time, not with the next one; a chunk goes once the size is reached; the rest on exit; masked; a failed send on the timer thread reaches the reader. |
 | `test_tools.py` (4) | Tool versions the worker declares: exact and series picks; runner images pinned by digest; the docker runner declares its images; the local runner probes the binaries on `PATH`. |
 | `test_oidc_precedence.py` (2) | With OIDC credentials, the host's own AWS credentials never reach tofu or a platform hook; without them, the static fallback is untouched (SPECS §10.5). |
 | `test_repo_hook_policy.py` (2) | Repo hooks at the apply stages run only on a tier that allows them; elsewhere skipped with a warning (SPECS §8.3). |
