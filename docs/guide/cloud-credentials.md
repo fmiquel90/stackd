@@ -22,6 +22,10 @@ The token expires after `session_duration`, capped per phase: 30 min for `plan`,
 apply window (the apply budget + grace, 20 min by default) for `apply` — so apply
 credentials never outlive the job they were minted for.
 
+Besides `iss` (`STACKD_PUBLIC_URL`), `sub`, `aud` (always `sts.amazonaws.com`), `iat` and `exp`,
+the token carries `environment`, `tier`, `stack`, `phase`, `environment_id`, `run_id` and
+`triggered_by`.
+
 ## How the issuer works
 
 Stackd exposes a standard OIDC discovery surface, RS256-signed:
@@ -36,8 +40,8 @@ AWS STS fetches the JWKS from these endpoints to validate the workload token.
 !!! warning "The issuer must be publicly reachable over HTTPS"
     AWS STS calls `/.well-known/openid-configuration` and `/oidc/jwks` directly. The
     Stackd issuer URL must be reachable from AWS over HTTPS — a private-only deployment
-    will fail every `AssumeRoleWithWebIdentity`. Expose it publicly, or use the provided
-    Terraform module that registers the identity provider with its thumbprint.
+    will fail every `AssumeRoleWithWebIdentity`. Expose `/.well-known/openid-configuration` and
+    `/oidc/jwks` publicly, even if the rest of the API stays private.
 
 ## The signing key
 
@@ -67,14 +71,16 @@ issuer rotates from its local key to the configured KMS key.
 **Rotation.** `POST /api/v1/oidc/keys/rotate` (admin) makes a new key the signing one — a new KMS
 key named in `{"kms_key_arn": "…"}`, or a new local key on a local issuer. The previous key stays
 in the JWKS, so the tokens it signed keep verifying, and leaves it automatically once the longest
-of them has expired (the apply budget plus grace, plus five minutes of clock skew).
+of them has expired: the longer of the plan cap (30 min) and the apply window, plus five minutes
+of clock skew — 35 minutes with the defaults.
 `GET /api/v1/oidc/keys` lists the keys and their status. Both rotations and retirements are
 audited (`oidc_key.rotated`, `oidc_key.retired`).
 
 ## 1. Configure the cloud provider (AWS)
 
-On the AWS account, create an **IAM OIDC identity provider** trusting the Stackd issuer,
-then the roles each run will assume. A provided Terraform module sets this up.
+On the AWS account, create an **IAM OIDC identity provider** trusting the Stackd issuer — its URL
+is `STACKD_PUBLIC_URL` (the token's `iss`), its audience (client ID) `sts.amazonaws.com` — then the
+roles each run will assume. No Terraform module for this ships with Stackd yet.
 
 Use a separate role per phase:
 
@@ -86,6 +92,11 @@ Each role's trust policy filters on the `sub` claim. The wildcard covers **only 
 
 ```hcl
 # Trust policy of the prod APPLY role — refuses everything else
+condition {
+  test     = "StringEquals"
+  variable = "stackd.example.com:aud"
+  values   = ["sts.amazonaws.com"]
+}
 condition {
   test     = "StringLike"
   variable = "stackd.example.com:sub"
@@ -109,7 +120,8 @@ GET|PUT|DELETE /api/v1/environments/{id}/cloud-integration
 ```
 
 ```bash
-curl -s -X PUT localhost:8000/api/v1/environments/$PROD/cloud-integration -H "$AUTH" -d '{
+curl -s -X PUT localhost:8000/api/v1/environments/$PROD/cloud-integration -H "$AUTH" \
+  -H 'content-type: application/json' -d '{
   "provider": "aws",
   "plan_role_arn":  "arn:aws:iam::123:role/stackd-prod-plan",
   "apply_role_arn": "arn:aws:iam::123:role/stackd-prod-apply",
@@ -118,7 +130,9 @@ curl -s -X PUT localhost:8000/api/v1/environments/$PROD/cloud-integration -H "$A
 }'
 ```
 
-AWS is the MVP target; GCP and Azure come later.
+Writing or deleting it is admin-only and audited (`cloud_integration.created`, `.updated`,
+`.deleted`); `session_duration` defaults to 3600 s and is capped per phase as above. AWS is the MVP
+target; GCP and Azure come later.
 
 ## 3. Test it
 
@@ -128,9 +142,10 @@ A built-in **AssumeRole test** verifies the trust chain without launching a run:
 curl -s -X POST localhost:8000/api/v1/environments/$PROD/cloud-integration/test -H "$AUTH"
 ```
 
-It signs a probe token and attempts the `AssumeRoleWithWebIdentity` end to end — a fast
-way to catch a missing identity provider, a too-narrow `sub` condition, or an
-unreachable issuer.
+It (admin-only) signs a probe `plan` token and attempts the `AssumeRoleWithWebIdentity` on the
+**plan role** end to end — a fast way to catch a missing identity provider, a too-narrow `sub`
+condition, or an unreachable issuer. It returns the assumed role's ARN, or a `422` with the STS
+error. The apply role is not exercised: its trust policy is only tested by a real apply.
 
 ## What the agent injects
 

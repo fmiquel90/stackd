@@ -22,12 +22,14 @@ flowchart LR
     STS["Cloud STS<br/>(AssumeRoleWithWebIdentity)"]
 
     Hooks["Slack · webhooks · GitHub"]
+    Secrets[("External secret source<br/>(Proton Pass)")]
 
     Browser <-->|"REST + WebSocket"| API
     API <--> PG
     API <-->|"states · encrypted saved plans"| S3
     API -->|"ls-remote head poll · check-repo · input discovery"| Git
     API -->|"notifications · PR status/comment"| Hooks
+    API -->|"secret references, at claim"| Secrets
     Worker -->|"register · heartbeat · claim · events · logs<br/>saved plan up/down (outbound only)"| API
     Worker -->|"shallow clone @ pinned commit"| Git
     Worker -->|"tofu http backend (TF_HTTP_*)"| API
@@ -37,11 +39,18 @@ flowchart LR
 Only the API holds the S3 and database credentials: workers reach states and saved plans through
 it.
 
+**Run logs have two tiers.** The worker streams masked chunks to the API, which keeps them in
+Postgres (`run_logs`) and signals them over `LISTEN/NOTIFY` for the live viewer. Once a run has been
+terminal for a minute, a scheduler task archives its logs to S3 (`logs/{run_id}/{phase}.log.gz`);
+the hot rows are purged 7 days after archiving (`log_hot_retention_days`, a daily task). Reads fall back to the archive
+transparently.
+
 ## 🔄 Run state machine
 
 Every state change goes through one function, `transition()`: it checks legality, does an atomic
 guarded update, writes a `run_event` + (for human/terminal actions) an `audit_event` in the **same
-transaction**, emits `LISTEN/NOTIFY`, and enqueues any notification. `checking` is skipped when
+transaction**, emits `LISTEN/NOTIFY`, enqueues any notification (outbound targets, the PR
+post-back, the in-app inbox) and advances the run's rollout, if any. `checking` is skipped when
 there are no `after_plan` hooks.
 
 ```mermaid
@@ -57,28 +66,42 @@ stateDiagram-v2
     preparing --> failed
     planning --> checking: has after_plan hooks
     planning --> unconfirmed: diff, no autodeploy
-    planning --> confirmed: autodeploy
-    planning --> finished: empty diff
+    planning --> confirmed: autodeploy or rollout gate
+    planning --> finished: empty diff, or a proposed (PR/drift) plan
     checking --> unconfirmed
     checking --> confirmed
     checking --> finished
-    unconfirmed --> confirmed: human confirm (can_apply + 4-eyes + mock-block)
+    unconfirmed --> confirmed: human confirm (can_apply + 4-eyes + mock/fallback block)
     unconfirmed --> discarded
     unconfirmed --> canceled
     confirmed --> applying: worker claims apply (saved plan)
+    confirmed --> canceled
     applying --> finished
     planning --> failed
     checking --> failed
-    applying --> failed
+    applying --> failed: incl. stopped mid-apply
+    unconfirmed --> failed
+    confirmed --> failed
+    preparing --> canceled: stop request or PR closed
+    planning --> canceled
+    checking --> canceled
+    running --> canceled
     finished --> [*]
     failed --> [*]
     discarded --> [*]
     canceled --> [*]
 ```
 
-Not drawn: a closed pull request cancels its proposed runs from whatever in-flight state they are
-in. A user cancels only `queued` or `unconfirmed` runs: stopping a job a worker is executing is not
-implemented yet.
+**Cancel and stop.** A user (or a rollout's cancel) cancels a `queued`, `unconfirmed` or
+`confirmed` run at once; a closed pull request cancels its proposed runs from whatever in-flight
+state they are in. Stopping a run a worker is *executing* is a request, not a transition: the API
+records it, audits `run.cancel_requested` and queues a `cancel_job` command for the worker's next
+heartbeat; the worker interrupts the tool (SIGINT, SIGKILL after `STACKD_CANCEL_GRACE_SECONDS`) and
+reports `job_canceled`. The run then ends `canceled` — or `failed` with `canceled_during_apply` if
+the job held apply credentials (an apply, a mutating command), since the infrastructure may be partly
+changed: `applying` is never `canceled`. Stopping such a job needs `can_apply`. The
+`unconfirmed`/`confirmed → failed` edges are legal, but only a failure report from the worker that
+planned the run takes them.
 
 **Worker loss** fails only runs whose job is *executing* on the lost worker (`preparing`,
 `planning`, `checking`, `running`, `applying`) — after 120 s, or, for a job holding apply
@@ -100,7 +123,7 @@ sequenceDiagram
     participant H as Human
     W->>A: POST /worker/v1/register (pool token)
     loop every 20s
-        W->>A: heartbeat → pending commands (e.g. diagnostics)
+        W->>A: heartbeat → pending commands (diagnostics, cancel_job)
     end
     W->>A: POST /jobs/claim?wait=25 (long-poll)
     A-->>W: plan job: vars + secrets, hooks, state token (plan scope), plan OIDC token
@@ -136,7 +159,8 @@ to tofu only, as `TF_HTTP_*` environment variables — hooks never see it.
 no secret (an allowlisted env, a masked `plan.json`, no tfvars or token file on disk). Every check
 result, with the stage it ran at, is kept on the run (`check_results`). A failing `fail` check stops
 the job at its stage; a failing `after_apply` check fails the run after the infrastructure changed:
-its outputs are recorded, nothing cascades.
+its outputs are recorded, nothing cascades. At the apply stages, repo hooks run only on a tier with
+`repo_hooks_at_apply` (off by default); otherwise each is skipped with a `warn` check.
 
 **Apply affinity.** A confirmed run is reserved for the worker that planned it for 60 s, then any
 compatible worker takes it. Nothing is carried over in the workspace: the apply always starts from a
@@ -146,7 +170,8 @@ fresh clone of the pinned commit and the saved plan from the API.
 
 At claim the API resolves each referenced input as **real upstream output › mock › explicit
 error**. A run that consumed a mock is flagged `used_mocks` and can't be applied unless the env opts
-in. When a tracked apply finishes, downstream environments cascade — protections are never bypassed.
+in. When a tracked apply finishes, downstream environments cascade (as each edge's `trigger_policy`
+allows) — protections are never bypassed.
 
 ```mermaid
 flowchart TD
@@ -215,8 +240,9 @@ the `one_active_run_per_env` unique index). What's worth knowing:
 
 - 🧩 **The unit of parallelism is the environment, not the worker** — one active run per env, but
   different envs run concurrently. Throughput ≈ `min(workers, envs with queued work)`.
-- 🏷️ **Labels segment pools** — a worker only claims runs whose env labels are a subset of its own,
-  so you can dedicate (and scale) a prod pool independently.
+- 🏷️ **Labels segment pools** — a worker only claims runs whose env labels are a subset of its own
+  (and whose stack's tool version it can run), so you can dedicate (and scale) a prod pool
+  independently.
 - ♻️ **Workers are interchangeable & disposable** — apply affinity prefers the worker that planned
   for 60 s, but the apply never depends on it (pinned commit + saved plan from the API). Losing a
   worker only fails the runs *executing* on it (`worker_lost`); runs waiting for a human or for the
@@ -227,6 +253,6 @@ the `one_active_run_per_env` unique index). What's worth knowing:
   dedicated connection), so a task runs once per tick across replicas. The git head poll runs as a
   separate task (at most 8 `ls-remote` at a time), so slow repos never delay worker-loss detection
   or notifications.
-- 📊 **No built-in autoscaler**, but `/api/v1/health` and `/queue` expose the signals an external one
+- 📊 **No built-in autoscaler**, but `/api/v1/health` and `/api/v1/queue` expose the signals an external one
   (ECS target-tracking, KEDA) can drive; `/metrics` serves Prometheus gauges. On Fargate, mind the
   runner execution model (no DinD).

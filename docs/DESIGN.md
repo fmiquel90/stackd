@@ -80,7 +80,9 @@ THE memorable thing about the interface: a **vertical rail** on every run page t
 
 `command` runs use `Prepare · Run`. After the last segment, the rail ends with the **outcome cap**: the
 terminal outcome label of §3.2 (`APPLIED +3 ~1 −0`, `NO CHANGES`, `FAILED at Check`, `DISCARDED`,
-`CANCELED`, `PLANNED`, `DESTROYED −3`, `EXECUTED`), or nothing while the run is live.
+`CANCELED`, `PLANNED`, `DESTROYED −3`, `EXECUTED`), or nothing while the run is live. **[not built
+yet]** `PhaseRail` renders no cap today: on the run page the outcome is carried by the `StateBadge`
+of the action bar, and in a cell by the compact badge next to the mini rail.
 
 **Segment status** (each status = colour + glyph + text, never colour alone):
 
@@ -96,21 +98,25 @@ terminal outcome label of §3.2 (`APPLIED +3 ~1 −0`, `NO CHANGES`, `FAILED at 
 
 **Failed segment**: `Apply` if `confirmed_at` is set; otherwise the segment of the stage of the first
 `fail` check (`before_init`/`after_init` → Prepare, `before_plan` → Plan, `after_plan` → Check);
-otherwise `Plan` (a tofu failure before a plan exists). A failure during Apply is labelled
+otherwise `Plan` (a tofu failure before a plan exists), or `Prepare` when no worker ever claimed the
+run (`command` runs: `Run` once claimed, else `Prepare`). A failure during Apply is labelled
 **"FAILED during apply — infrastructure may be partially changed"**: that sentence is the most
 important thing on the page and is never truncated.
 
 **Metadata** under each vertical segment (mono, `text-secondary`): duration computed from the first
-and last log line timestamps of that phase **[today]**, exact from run events **[with A7]**; Plan: the
-summary `+a ~c −d`; Check: `2 ok · 1 warn`; Decision: `alice · 12:04` or `auto` or `waiting 12m`.
+and last log line timestamps of that phase **[today]**, exact from run events **[with A7]** — on
+Plan, Apply and Run, and only once the phase ran; Plan: the summary `+a ~c −d`; Check: `2 ok · 1 warn`;
+Decision: the confirmer's email (`… (rollout approval)` under a rollout, §5.11), `auto`, `discarded`,
+`canceled` or `no changes`. A "waiting 12m" on a pending decision is **[not built yet]**.
 
-**Interaction**: each vertical segment is a button that opens the Logs tab scrolled to that phase's
-first section (`?tab=logs&section=planning`). Keyboard: segments are in the tab order after the
-action bar.
+**Interaction**: each segment with a log phase (Plan, Check, Apply, Run) is a button that opens the
+Logs tab at that phase's first line (`?tab=logs&line=planning.1`). Keyboard: segments are in the tab
+order after the action bar. Below 1024 px the vertical rail is replaced by a **horizontal** variant
+(same segments, labels under a coloured top rule) above the tabs.
 
 **Mini variant**: 5 cells of 10 × 4 px, 2 px gaps, same statuses (pending = 1 px outline, done =
-fill, failed = fill + `✕` cap glyph after the rail, waiting = fill amber), followed by the outcome
-glyph. `role="img"` with an `aria-label` that reads the outcome: "Unconfirmed, needs your decision, plan +2 ~1 −0".
+fill, failed = fill + `✕` cap glyph after the rail, waiting = fill amber), followed — in `EnvCell` —
+by the compact state badge. `role="img"` with an `aria-label` that reads the outcome: "Unconfirmed, needs your decision, plan +2 ~1 −0".
 
 **Motion**: the active segment pulses (opacity 1 → 0.45, 1.6 s) — the only ambient animation in the
 app; `prefers-reduced-motion` replaces it with a static 0.7 opacity.
@@ -193,18 +199,19 @@ text** (badges are 11–12 px), **≥ 3:1 for non-text UI** (control borders, fo
 
 | Foreground | Dark: base / surface / raised / sunken | Light: base / surface / raised / sunken |
 |---|---|---|
-| `text-primary` | 16.2 / 14.8 / 12.9 / 16.7 | 14.3 / 15.2 / 13.5 / 13.0 |
+| `text-primary` | 16.2 / 14.8 / 12.9 / 16.7 | 14.2 / 15.2 / 13.5 / 13.0 |
 | `text-secondary` | 7.6 / 7.0 / 6.1 / 7.9 | 5.9 / 6.2 / 5.6 / 5.4 |
 | `state-queued` | 7.6 / 7.0 / 6.1 / 7.9 | 5.3 / 5.7 / 5.1 / 4.9 |
 | `state-running` | 7.9 / 7.2 / 6.3 / 8.1 | 5.6 / 6.0 / 5.3 / 5.1 |
-| `state-decision` | 10.2 / 9.3 / 8.1 / 10.5 | 6.0 / 6.3 / 5.6 / 5.4 |
+| `state-decision` | 10.2 / 9.3 / 8.1 / 10.5 | 5.9 / 6.3 / 5.6 / 5.4 |
 | `state-finished` | 8.4 / 7.7 / 6.7 / 8.6 | 5.8 / 6.2 / 5.5 / 5.3 |
 | `state-failed` | 7.5 / 6.9 / 6.0 / 7.7 | 5.5 / 5.8 / 5.2 / 5.0 |
 | `mock` | 7.5 / 6.9 / 6.0 / 7.7 | 6.2 / 6.6 / 5.9 / 5.7 |
 | `focus` (non-text, ≥ 3) | 6.9 / 6.3 / 5.5 / 7.1 | 6.0 / 6.3 / 5.6 / 5.4 |
-| `border-control` (non-text, ≥ 3) | 4.3 / 4.0 / 3.4 / 4.4 | 3.3 / 3.5 / 3.1 / 3.0 |
+| `border-control` (non-text, ≥ 3) | 4.3 / 3.9 / 3.4 / 4.4 | 3.3 / 3.5 / 3.1 / 3.0 |
 
-On tints, every state colour and both text colours stay ≥ 5.0:1 (dark ≥ 6.2, light ≥ 5.1). `on-fill` on fills (dark / light): on `state-decision` 10.2 / 6.3; on `text-primary` 16.2 / 15.2;
+On tints, every state colour and both text colours stay ≥ 4.9:1 (dark ≥ 6.2, light ≥ 4.9 — the
+lowest is `state-queued` on `failed-tint`, 4.96). `on-fill` on fills (dark / light): on `state-decision` 10.2 / 6.3; on `text-primary` 16.2 / 15.2;
 on `state-failed` 7.5 / 5.8; on `mock` 7.5 / 6.6.
 
 Trade-off, stated: AA forces the light amber down to `#8A5300`, which reads as ochre rather than
@@ -221,9 +228,9 @@ the `⏸` glyph and the "needs you" label as well.
 | State(s) | Badge label | Glyph | Token |
 |---|---|---|---|
 | `queued` | QUEUED | `○` | `state-queued` |
-| `preparing` `planning` `checking` `confirmed` `applying` | PREPARING / PLANNING / CHECKING / APPLYING (`confirmed` shows APPLYING · STARTING) | `◐` (pulse) | `state-running` |
+| `preparing` `planning` `checking` `confirmed` `applying` `running` | PREPARING / PLANNING / CHECKING / APPLYING / RUNNING (`confirmed` shows APPLYING · STARTING; `running` is a `command` run) | `◐` (pulse) | `state-running` |
 | `unconfirmed` | UNCONFIRMED (the SPECS state name, kept for vocabulary consistency; the personal form below says what it means for the viewer) | `⏸` | `state-decision` |
-| `failed` | FAILED (+ `at <segment>`) | `✕` | `state-failed` |
+| `failed` | FAILED (+ `at <segment>`), or FAILED DURING APPLY once an apply was decided (§2.2) | `✕` | `state-failed` |
 | `discarded` | DISCARDED | `⊘` | `state-queued`, label struck through |
 | `canceled` | CANCELED | `⊘` | `state-queued`, label struck through |
 
@@ -258,7 +265,7 @@ Two forms:
 | Stale | `↑3` (or `↑` until AUDIT A6) | `text-secondary` | branch ahead of the deployed commit; attenuated (`text-secondary`, dotted underline) when `affects_project_root=false` |
 | Drift | `≈ DRIFT` / `≈? DRIFT CHECK FAILED` | `text-primary` | neutral per SPECS §19.5 — a fact to investigate, not a decision |
 | Locked | `⚿ LOCKED` | `text-primary` | |
-| PR | `PR` | `text-secondary` | the env's active run is a proposed run |
+| PR | `PR` | `state-queued` (outlined) | the env's active run is a proposed run |
 
 Absolute rule: these colours serve **only** state semantics. Never decorative blue, never green on a
 button unrelated to a success, never amber for telemetry or log severity.
@@ -299,7 +306,7 @@ a state colour never silently changes the diff (they alias the state values toda
 | `diff-destroy` | = `state-failed` | `−` | DESTROY |
 | `diff-replace` | = `state-failed` | `±` | REPLACE |
 | `diff-update` | = `text-primary` | `~` | UPDATE |
-| `diff-read` / no-op | = `text-secondary` | `<=` / `·` | READ / NO-OP |
+| `diff-read` | = `text-secondary` | `<=` / `→` / `·` | READ / MOVE / OTHER |
 
 The update is **neutral** (v1 used amber): an in-place update is the least alarming action, and amber
 is reserved to the decision. Zero counts are rendered in `text-secondary` without colour
@@ -344,10 +351,10 @@ is reserved to the decision. Zero counts are rendered in `text-secondary` withou
 └──────────────┴───────────────────────────────────────────────────────────┘
 ```
 
-- **Side nav (208 px, labels always visible — v1 decision kept)**: Overview (count badge = decisions that need *you*), Graph, Rollouts (§5.11), Queue (count badge = runs waiting > 2 min), Workers, Audit (admin only, §5.6), Variable sets, Settings. At the bottom: the **space switcher** (a Radix dropdown listing spaces with their stack counts) and the user block (email, role, allowed tiers, theme toggle, sign out). Active item: selection mark (§2.1).
-- **Top bar**: entity breadcrumb, connection indicator (`● live` / `◌ reconnecting…`), ⌘K button, notification bell.
-- **Breadcrumb**: built from entities, never from path segments: `space / stack / env / run 01a1276c`. Each segment is a link; the run segment copies the run URL on click.
-- **Responsive**: ≥ 1024 px as above. 768–1023 px: the side nav becomes a drawer opened from a menu button in the top bar. < 768 px: a **bottom bar** with three destinations (Overview, Queue, Menu — notifications stay in the top bar at every width) and the run page's action bar docked above it.
+- **Side nav (208 px, labels always visible — v1 decision kept)**: Overview (solid amber count badge = decisions that need *you*), Graph, Rollouts (§5.11), Queue (neutral outlined count badge = runs waiting > 2 min), Workers (`online/total` in mono, red when none is online or the API is down), Audit (admin only, §5.6), Variable sets, Settings. At the bottom: the **space switcher** (a Radix dropdown listing the space names, the current one marked; hidden when the user sees a single space) and the user block (email, role, allowed tiers) opening a menu with the theme toggle, keyboard shortcuts, single-key shortcuts on/off and sign out. Active item: selection mark (§2.1).
+- **Top bar**: entity breadcrumb, connection indicator (`● live` / `◌ reconnecting…`), ⌘K button ("Search ⌘K"), notification bell.
+- **Breadcrumb**: built from entities, never from path segments: `space / stack / env / run 01a1276c`. Each segment but the last is a link; the run segment is the current page (its URL is copied with ⌘K "Copy the link to this page").
+- **Responsive**: ≥ 1024 px as above. 768–1023 px: the side nav becomes a drawer (a sheet from the right) opened from a menu button in the top bar. < 768 px: a **bottom bar** with three destinations (Overview, Queue, Menu — the Menu opens the same drawer; notifications stay in the top bar at every width) and the run page's action bar docked above it.
 
 ### 4.1 URLs (v2)
 
@@ -361,25 +368,30 @@ is reserved to the decision. Zero counts are rendered in `text-secondary` withou
 | `/s/:space/graph` | Graph |
 | `/s/:space/rollouts` | Rollouts list (§5.11) — the side nav's **Rollouts** entry (§4) |
 | `/rollouts/:rolloutId` | Rollout page (§5.11; space resolved from the rollout, like the run page) |
-| `/queue`, `/workers`, `/audit`, `/settings`, `/variable-sets` | instance or space-scoped pages (variable sets: `/s/:space/variable-sets`) |
+| `/s/:space/variable-sets`, `/s/:space/variable-sets/:set` | Variable sets list and one set (§5.10) |
+| `/queue`, `/workers`, `/audit`, `/settings` | instance pages |
 
 Names are used instead of UUIDs where they are unique in their parent (space names; stack per space;
-env per stack — SPECS constraints). A renamed entity breaks old name-based links, so **v1 UUID routes
-stay as redirects** (`/stacks/:uuid` → `/s/<space>/stacks/<name>`), and the run URL stays UUID-based
-(it is the incident link).
+env per stack — SPECS constraints). A renamed entity breaks old name-based links, so **v1 routes
+stay as redirects** (`/stacks/:uuid` → `/s/<space>/stacks/<name>`; `/stacks`, `/graph` and
+`/variable-sets` → the current space's page), and the run URL stays UUID-based (it is the incident link).
 
-**Everything that determines what is on screen is in the URL**: tab (`?tab=plan`), filters (`?q=app&state=attention&tier=prod`), log position (`?tab=logs&line=planning.87`), plan search (`?plan_q=nat`), graph filter and view (`?env=prod&view=list`). The active space is the URL's, never in-memory state. (No browser storage, CLAUDE §4.8.)
+**Everything that determines what is on screen is in the URL**: tab (`?tab=plan`), filters (`?q=app&state=attention&tier=prod`), the overview's selected cell and cascade preview (`?sel=demo-network/prod&cascade=1`), log position (`?tab=logs&line=planning.87`), plan search (`?plan_q=nat`), graph filter, view and node (`?env=prod&tier=prod&view=list&node=<id>`), env run-history filter (`?kind=`), stack settings section (`?tab=settings&sub=hooks`). The active space is the URL's, never in-memory state. (No browser storage, CLAUDE §4.8.)
 
 ### 4.2 ⌘K command palette
 
-Opened with ⌘K / Ctrl-K from anywhere (`cmdk` on a Radix dialog). Sections, in order:
-1. **Needs you** — pending decisions the user can act on (jump to the run).
-2. **Go to** — stacks, environments (`demo-network/prod`), recent runs by short ID, pages.
-3. **Actions on the current page** — Plan this env, Plan with downstream, Confirm / Discard / Cancel (opens the same confirmation as the button, never bypasses it), Re-plan, Copy run link, Copy commit SHA, Toggle theme.
-4. **Spaces** — switch space.
+Opened with ⌘K / Ctrl-K from anywhere (`cmdk` on a Radix dialog). Sections, in order **[today]**:
+1. **Run** — shown when the query is a full run UUID: open that run.
+2. **Go to** — the nav pages (Audit for admins only).
+3. **Stacks** and **Environments** (`demo-network/prod`, with the tier) across the user's spaces.
+4. **Actions** — Switch to light/dark theme, Copy the link to this page.
+5. **Spaces** — switch space (when the user sees more than one).
 
-Results show the env summary glyphs (§2.3). The palette never performs a state-changing action
-without the same friction as the button it mirrors.
+Specified, **[not built yet]**: a **Needs you** section first (pending decisions the user can act on),
+recent runs by short ID, actions on the current page (Plan this env, Plan with downstream, Confirm /
+Discard / Cancel — opening the same confirmation as the button, never bypassing it —, Re-plan, Copy
+commit SHA), and the env summary glyphs (§2.3) on results. The palette never performs a
+state-changing action without the same friction as the button it mirrors.
 
 ### 4.3 Keyboard map
 
@@ -388,18 +400,21 @@ without the same friction as the button it mirrors.
 | `⌘K` / `Ctrl-K` | everywhere | palette |
 | `g o` / `g q` / `g g` / `g a` | everywhere | go to Overview / Queue / Graph / Audit |
 | `?` | everywhere | keyboard help |
-| `/` | lists, matrix, plan, logs | focus the filter / search |
-| `j` `k` | lists, matrix rows, attention zone | next / previous row |
+| `/` | log viewer (lists, matrix and plan: **[not bound yet]**) | focus the filter / search |
+| `j` `k` | matrix rows, attention zone | next / previous row |
 | `h` `l` | matrix | previous / next cell in the row |
-| `Enter` | list, matrix | open |
+| `Home` `End` | matrix | first / last cell of the row |
+| `Enter` | attention zone, matrix | open (matrix: the env page) |
+| `r` / `s` | matrix | open the cell's run / toggle the downstream preview |
 | `]` `[` | run page | next / previous run that needs you |
 | `1`…`5` | run page | tabs Plan, Checks, Logs, Inputs, Discussion |
 | `c` / `d` / `x` | run page | Confirm (opens its friction), Discard, Cancel — only when enabled |
 | `f`, `t`, `w`, `e` | log viewer | full screen, timestamps, wrap, jump to first error |
+| `n` / `N` | log viewer | next / previous search match |
 | `Esc` | overlays | close, focus returns to the trigger |
 
-Single-letter shortcuts are inactive while focus is in a text field, and can be disabled from the
-user menu (WCAG 2.1.4); the setting lives in memory.
+Single-letter shortcuts are inactive while focus is in a text field or an overlay is open, and can be
+disabled from the user menu or Settings → Preferences (WCAG 2.1.4); the setting lives in memory.
 
 ---
 
@@ -426,25 +441,26 @@ Overview · demo                                       filter [ app____ ]  state
  demo-app         ▰▰▰▰ ✓ APPLIED +3   2h       ▰▰▰▰ ✓ APPLIED +3   1h  ≈       ▰▰⏸· ⏸ 20m  ◆
  demo-dns         ▰▰✕   ✕ FAILED at Check 6m   ▰▰⏸· ⏸ DESTROY −3  9m            —
  demo-network     ▰▰⏸· ⏸ 9m  ↑                 ▰▰⏸· ⏸ 12m  ↑                  ▰▰⏸· ⏸ 20m
- j/k rows · h/l cells · ⏎ open env · r open run · p plan · s show downstream
+ h/j/k/l move · ⏎ open · r run · s downstream
 ```
 
 **Attention zone** (pinned above the matrix, never auto-collapsed while it holds a *needs you* item):
 
-- Groups, in order: **Needs you** (unconfirmed, the user can confirm), **Waiting on someone** (unconfirmed, the user cannot confirm — with the missing condition in words), **Failed** (env's primary run failed), **Drift** (`drifted` or check error), **Blocked** (primary run mocked or fallback with apply not allowed). A row appears in the first matching group only. A stale plan (unconfirmed run whose commit ≠ env head) is a `↑ stale plan` tag on its row — every unconfirmed run already falls in one of the first three groups.
-- Row: summary glyph + `stack / env` + badge + plan summary + who/age + the reason or next step + Enter target (the run page, Plan tab for decisions, Logs tab at first error for failures, env page for drift).
+- Groups, in order: **Needs you** (unconfirmed, the user can confirm), **Waiting on someone** (unconfirmed, the user cannot confirm — with the missing condition in words), **Blocked** (unconfirmed, and nobody can confirm: mocked or fallback with apply not allowed on the env), **Failed** (env's primary run failed, during apply or before), **Drift** (`drifted` or check error). A row appears in the first matching group only. A stale plan (unconfirmed run whose commit ≠ env head) is a `↑ stale plan` tag on its row — every unconfirmed run already falls in one of the first three groups.
+- Row: badge (compact) + `stack / env` + plan summary + who/age + the reason or next step + Enter target (the run page: Plan tab for decisions, Logs tab — opening at the first error — for failures; for drift, the drift run's Plan tab, else the env page).
 - Empty zone: one line, "Nothing needs attention in demo." — not hidden, so its absence is never ambiguous.
 
 **Matrix**:
 
-- Rows = stacks of the space (sortable by name, by "worst state", by last activity). Columns = environment **names** present in the space, ordered by tier `position`, then env `position`, then name; a stack without that env shows `—`. A column header shows the env name, plus `four-eyes` when every env in the column is on a `requires_four_eyes` tier.
-- Sticky header row and first column. Above 8 columns the matrix scrolls horizontally inside its own container, never the page.
-- **`EnvCell`** (one per env, 200 px min): line 1 = mini rail + outcome/state glyph + short label (+ plan summary if relevant); line 2 = relative age + modifiers (`↑` `≈` `⚿` `◆` `◈` `PR`). Cell background stays `bg-surface`, except `decision-tint` when the cell *needs you*. Hover/focus shows a popover: branch, deployed commit, head commit, last run, triggerer, and the actions the user can take (Open, Plan, Open run).
-- **Cascade preview on demand**: `s` (or "Show downstream" in the cell menu) outlines the selected cell's downstream cells (BFS over `GET /graph` edges) with the selection mark, and a strip under the matrix lists "demo-network/prod → demo-app/prod via `network_name` (on_output_change)". `Esc` clears.
-- **Filters** in a top bar, reflected in the URL: text (stack or env name), state (`all`, `needs attention`, `needs you`, `running`, `failed`, `drift`, `stale`), tier. Filtering by state hides non-matching rows, not cells.
-- **Keyboard**: the matrix is a `role="grid"` with roving tabindex (`h/j/k/l`, arrows, Enter); the attention zone is a list before it in the tab order.
-- **Data** **[today]**: `stacks.list` → `stacks.environments` per stack → `runs.list` per env (the summary needs the active run and the last tracked outcome), one WebSocket subscribed to every `environment:<id>` channel invalidating `["env-runs", id]`, 30 s poll fallback. Skeleton cells while loading. **[with A4]** one request.
-- **Empty states**: no stack → "No stack in demo yet. Connect a repository." + New stack (writer+); no stack in this space but in others → list them.
+- Rows = stacks of the space, by name (sorting by "worst state" or last activity is **[not built yet]**). Columns = environment **names** present in the space, ordered by tier `position`, then env `position`, then name; a stack without that env shows `—`. A column header shows the env name, plus `four-eyes` when every env in the column is on a `requires_four_eyes` tier.
+- Sticky header row and first column. A wide matrix scrolls horizontally inside its own container, never the page.
+- **`EnvCell`** (one per env, 180 px min): line 1 = mini rail + compact state badge (wrapping under the rail when the cell is narrow); line 2 = relative age (+ plan summary when unconfirmed) + modifiers (`↑` `≈` `⚿` `◆` `◈` `PR`). Cell background stays the matrix's `bg-surface`, except `decision-tint` when the cell *needs you*.
+- **Selection details**: clicking or focusing a cell selects it (`?sel=stack/env`) and opens a panel under the matrix: `stack / env`, tier, branch, modifiers, deployed commit, branch head, active run or last outcome with who/age, "Confirm needs …" for a pending run, and the actions the user can take (Show downstream, Open run, Open environment, Plan — writer+, when no run is active). A hover popover on the cell is **[not built yet]**.
+- **Cascade preview on demand**: `s` (or "Show downstream" in the selection panel; `?cascade=1`) outlines the selected cell's downstream cells (BFS over `GET /graph` edges) with a dashed selection mark and a `↳ will plan` / `↳ plans if outputs change` line, and the panel lists them ("demo-app/prod (if outputs change)"). `s` again or "Hide downstream" clears.
+- **Filters** in a top bar, reflected in the URL: text (stack or env name), state (All, Needs attention, Needs you, Running, Failed, Drift, Branch ahead), tier. Filtering by state hides non-matching rows, not cells.
+- **Keyboard**: the matrix is a `role="grid"` with roving tabindex (`h/j/k/l`, arrows, `Home`/`End`, Enter, `r`, `s`); the attention zone is a list before it in the tab order.
+- **Data** **[today]**: `stacks.list` → `stacks.environments` per stack → `runs.list` per env (the summary needs the active run and the last tracked outcome), one WebSocket subscribed to every `environment:<id>` channel invalidating `["env-runs", id]` (and the stack's environments), plus a 60 s poll. Skeleton blocks while loading. **[with A4]** one request.
+- **Empty states**: no stack → "No stack in demo yet. Connect a repository to get started." + New stack (writer+), and the user's other spaces listed as links. The header carries **New environment from…** (§5.11) and **New stack** (writer+).
 - **< 768 px**: the attention zone first, then one block per stack listing its envs as rows (`EnvCell` full width). No horizontal scroll.
 
 ### 5.2 `/runs/{id}` — the most important screen
@@ -471,10 +487,12 @@ Overview · demo                                       filter [ app____ ]  state
 └────────────┴──────────────────────────────────────────────────────────────────────────────────┘
 ```
 
-**Header** (identity, read-only): breadcrumb; run type; commit SHA (copy) + message + author;
-branch; how it was triggered (`manual by bob`, `webhook`, `dependency from demo-network/prod`
-**[today: upstream env]** / `[with A5: upstream run]`, `schedule (drift check)`); age (relative,
-absolute ISO on hover); total duration; worker. A `PR` marker for proposed runs.
+**Header** (identity, read-only): `stack / env` (link to the env page) + run short ID; run type
+(a `PR plan` badge for proposed runs, a `− destroy` badge for destroys); commit SHA (copy) + message +
+author; branch; how it was triggered (`triggered by bob@…`, `via webhook`, `via dependency`, `via drift
+check` **[today]**; the upstream env / run of a cascade `[with A5]`); the rollout and level (§5.11);
+age (relative, absolute ISO on hover); total duration; the command and its arguments for a `command`
+run. The worker is **[not shown yet]**.
 
 **`RunActionBar`** — sticky under the top bar on desktop, docked at the bottom on < 768 px:
 

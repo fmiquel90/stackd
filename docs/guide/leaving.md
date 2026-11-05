@@ -18,12 +18,18 @@ how to leave and get everything back.
 ## What lives only in Stackd (but is exportable)
 
 - **Orchestration config** — stacks, environments, tiers, dependencies, variable sets. Exportable
-  via the API (`GET /stacks`, `/environments/{id}`, `/graph`,
+  via the API (`GET /stacks`, `/stacks/{id}/environments`, `/environments/{id}`,
+  `/environments/{id}/dependencies`, `/graph`, `/variable-sets`,
   `/environments/{id}/resolved-variables`). Re-creatable; it isn't infrastructure.
-- **History** — runs, logs, audit. The audit trail exports to CSV (`GET /api/v1/audit/export`).
+- **History** — runs, logs, audit. Runs list per environment (`GET /environments/{id}/runs`); a
+  run's logs download as plain text (`GET /runs/{id}/logs/download`), and once archived they also
+  sit in your bucket under `logs/<run_id>/<phase>.log.gz`. The audit trail exports to CSV
+  (`GET /api/v1/audit/export`, admin, same filters as `GET /audit`). Export it before it ages out
+  if your instance purges it (`AUDIT_RETENTION_DAYS`, 730 days, with a purge role configured).
 - **Sensitive variable values** — write-only by design (AES-GCM, never returned in clear). Keep
-  your own source of truth for secrets — you should anyway. Non-sensitive values come back via
-  `/resolved-variables`.
+  your own source of truth for secrets — you should anyway; secrets read from an
+  [external secret source](external-secrets.md) already live in your own secret manager.
+  Non-sensitive values come back via `/resolved-variables` (sensitive ones come back masked).
 
 !!! tip "Want zero state exit cost?"
     Stay on `managed_state: false`. You get the full orchestration (plan → approval → apply, audit,
@@ -52,6 +58,11 @@ tofu state pull > terraform.tfstate
 # (`s3`, local…), then:
 tofu init -migrate-state
 ```
+
+The state versions are also plain tfstate objects in Stackd's bucket, at
+`states/<environment_id>/<version_id>.tfstate` — readable with your own S3 credentials, no API
+involved. `GET /api/v1/environments/{id}/state/versions` lists them (id, serial, lineage), newest
+first.
 
 ### 2. Repoint terraform / CI at the repos directly
 
