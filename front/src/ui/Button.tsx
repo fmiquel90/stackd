@@ -3,7 +3,8 @@ import { Loader } from "lucide-react";
 import { cn } from "./cn";
 
 // Buttons (DESIGN §2.1, §3.1, §7). The chrome is neutral: `primary` is a text-primary fill; amber
-// (`decision`) exists for exactly one job — Confirm — and red (`danger`) for typed-name destructive
+// (`decision`) is kept for decisions only — Confirm, a rollout's Approve and the typed-name submit
+// that turns a safety switch off (DESIGN §5.7) — and red (`danger`) for typed-name destructive
 // submits. Disabled never uses opacity: dashed border + muted text, and the caller shows the reason.
 
 export type ButtonVariant = "primary" | "secondary" | "ghost" | "decision" | "danger";

@@ -20,7 +20,7 @@ export interface NavItem {
   /** Path prefixes (after the space) that mark the item active. */
   match: (pathname: string) => boolean;
   adminOnly?: boolean;
-  /** One of the four destinations of the mobile bottom bar. */
+  /** Shown in the mobile bottom bar, beside its Menu button (AppShell). */
   mobile?: boolean;
 }
 

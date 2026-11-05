@@ -88,7 +88,7 @@ export const AwaitingDecision = () => (
 export const InFlight = () => (
   <>
     <Bar r={run("queued")} label="queued — Cancel available" />
-    <Bar r={run("planning")} label="planning — cancel not supported while executing" />
+    <Bar r={run("planning")} label="planning — Stop run available (see Stopping)" />
     <Bar r={run("unconfirmed")} label="confirm in flight" extra={{ pending: { confirm: true } }} />
     <Bar
       r={run("unconfirmed")}

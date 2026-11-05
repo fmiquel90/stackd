@@ -1,4 +1,4 @@
-// Flat config (ESLint 9). Lint is part of the front's definition of done (CLAUDE §5, DESIGN §8).
+// Flat config (ESLint 10). Lint is part of the front's definition of done (CLAUDE §5, DESIGN §8).
 import js from "@eslint/js";
 import tseslint from "typescript-eslint";
 import reactHooks from "eslint-plugin-react-hooks";
