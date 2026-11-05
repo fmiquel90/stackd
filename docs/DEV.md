@@ -46,7 +46,8 @@ task logs           # aggregated colored logs (api, worker)
 task test           # API pytest + front vitest (the worker suite runs apart, TESTING.md §2)
 task e2e            # complete automated scenario (§7)
 task lint           # ruff check + ruff format --check (api)
-task front          # Vite dev server on the host (pnpm dev); task up = dev + front
+task front          # Vite on the host (pnpm dev) — task dev already serves the front on :5173
+                    #   (compose `front` service): stop that service first
 task migrate        # alembic upgrade head; task makemigration NAME=... autogenerates one
 task seed-fixtures  # (re)creates the fixture git repos in .dev/repos (§4), idempotent
 task push-change    # commits a change in demo-network (staleness test, §4)

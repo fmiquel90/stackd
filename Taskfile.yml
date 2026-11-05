@@ -70,16 +70,12 @@ tasks:
     status: [test -d node_modules]
 
   front:
-    desc: Front-end dev server (Vite — http://localhost:5173, proxies /api + ws to :8000)
+    # `task dev` already serves the front (compose `front` service, :5173): stop that service
+    # first (`docker compose -f deploy/docker-compose.dev.yml stop front`) to run Vite on the host.
+    desc: Front-end dev server on the host (Vite :5173; stop the compose front service first)
     deps: [front-install]
     dir: front
     cmds: [pnpm dev]
-
-  up:
-    desc: Full stack incl. the front (backend detached, Vite in the foreground)
-    deps: [dev]
-    cmds:
-      - task: front
 
   migrate:
     desc: Apply Alembic migrations
