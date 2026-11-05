@@ -1401,7 +1401,7 @@
 <p>A worker has <strong>no inbound ports</strong>. The API never connects out to it. Instead the worker drives everything:</p>
 <ol>
 <li><strong>Register</strong> to a pool with the pool token → it gets a <code>worker_id</code> and a per-worker token. The token expires (default 24h); the worker re-registers automatically on a <code>401</code> to refresh it.</li>
-<li><strong>Heartbeat</strong> every ~20s. The heartbeat response is the only <em>downward</em> channel (e.g. diagnostics, and later <code>cancel_job</code>).</li>
+<li><strong>Heartbeat</strong> every ~20s. The heartbeat response is the only <em>downward</em> channel (diagnostics, and <code>cancel_job</code> to stop a running job).</li>
 <li><strong>Claim</strong> a job via long-poll (<code>POST /worker/v1/jobs/claim?wait=25</code>), returning <code>204</code> when there is nothing to do.</li>
 <li><strong>Run</strong> the job: clone the repo, run hooks + <code>init</code>/<code>plan</code>/<code>apply</code> (or the command), stream logs, report results and upload artifacts — including the saved plan the apply will use.</li>
 <li>Clean up the workspace and repeat.</li>
@@ -1500,6 +1500,11 @@
 <td><code>STACKD_MAX_CONCURRENT_JOBS</code></td>
 <td><code>1</code></td>
 <td>jobs run at once, always on different environments</td>
+</tr>
+<tr>
+<td><code>STACKD_CANCEL_GRACE_SECONDS</code></td>
+<td><code>120</code></td>
+<td>after a stop request interrupts the tool (SIGINT), how long it gets to stop by itself before it is killed</td>
 </tr>
 <tr>
 <td><code>STACKD_HOOK_TIMEOUT_SECONDS</code></td>

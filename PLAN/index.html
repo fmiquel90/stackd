@@ -1969,126 +1969,127 @@ Goal: a self-hostable Terraform orchestration platform with multi-environment st
 <h2 id="3-implementation-phases">3. Implementation phases<a class="headerlink" href="#3-implementation-phases" title="Permanent link">&para;</a></h2>
 <h3 id="phase-0-foundations-google-auth-15-weeks">Phase 0 — Foundations + Google Auth (1.5 weeks)<a class="headerlink" href="#phase-0-foundations-google-auth-15-weeks" title="Permanent link">&para;</a></h3>
 <ul>
-<li>[ ] Monorepo: <code>api/</code>, <code>worker/</code>, <code>front/</code>, <code>deploy/</code>, <code>docs/</code></li>
-<li>[ ] <code>docker-compose.yml</code> dev: Postgres, Garage (local S3), hot-reload API, Vite front — <strong>full dev mode specified in DEV.md</strong> (dev login 3 personas, <code>file://</code> fixture repos, seed + e2e scenario, shortened timings)</li>
-<li>[ ] FastAPI: healthcheck, settings, modules (<code>auth/</code>, <code>stacks/</code>, <code>environments/</code>, <code>variable_sets/</code>, <code>runs/</code>, <code>workers/</code>, <code>audit/</code>, <code>oidc/</code>, ...)</li>
-<li>[ ] <strong>Google OIDC auth</strong> (Authorization Code + PKCE): full flow, upsert on <code>google_sub</code>, <code>hd</code> restriction to the domain, JWT sessions + rotating refresh (table <code>refresh_tokens</code>, reuse detection → family revocation, SPECS §2.5), CSRF on <code>/auth/refresh</code>, first-admin bootstrap</li>
-<li>[ ] Alembic migrations, <code>User</code>, <code>RefreshToken</code> models, <strong><code>Space</code> (<code>default</code> space created at bootstrap, SPECS §3.0)</strong> — all <code>space_id</code> FKs depend on it starting in Phase 1</li>
-<li>[ ] Front: scaffold + <strong>setup of the DESIGN.md design system</strong> (tokens, theme, base components) + <strong>Storybook/Ladle</strong> of the identity components (PhaseRail, StateBadge, ProvenanceBadge...) — the visual contract required by DESIGN.md §8, login page</li>
-<li>[ ] GitHub Actions CI, root <code>CLAUDE.md</code></li>
+<li>[x] Monorepo: <code>api/</code>, <code>worker/</code>, <code>front/</code>, <code>deploy/</code>, <code>docs/</code></li>
+<li>[x] <code>docker-compose.yml</code> dev: Postgres, Garage (local S3), hot-reload API, Vite front — <strong>full dev mode specified in DEV.md</strong> (dev login 3 personas, <code>file://</code> fixture repos, seed + e2e scenario, shortened timings)</li>
+<li>[x] FastAPI: healthcheck, settings, modules (<code>auth/</code>, <code>stacks/</code>, <code>environments/</code>, <code>variable_sets/</code>, <code>runs/</code>, <code>workers/</code>, <code>audit/</code>, <code>oidc/</code>, ...)</li>
+<li>[x] <strong>Google OIDC auth</strong> (Authorization Code + PKCE): full flow, upsert on <code>google_sub</code>, <code>hd</code> restriction to the domain, JWT sessions + rotating refresh (table <code>refresh_tokens</code>, reuse detection → family revocation, SPECS §2.5), CSRF on <code>/auth/refresh</code>, first-admin bootstrap</li>
+<li>[x] Alembic migrations, <code>User</code>, <code>RefreshToken</code> models, <strong><code>Space</code> (<code>default</code> space created at bootstrap, SPECS §3.0)</strong> — all <code>space_id</code> FKs depend on it starting in Phase 1</li>
+<li>[x] Front: scaffold + <strong>setup of the DESIGN.md design system</strong> (tokens, theme, base components) + <strong>Storybook/Ladle</strong> of the identity components (PhaseRail, StateBadge, ProvenanceBadge...) — the visual contract required by DESIGN.md §8, login page</li>
+<li>[x] GitHub Actions CI, root <code>CLAUDE.md</code></li>
 </ul>
 <p><strong>Deliverable: <code>docker compose up</code> → Sign in with Google → app shell with the final design.</strong></p>
 <hr />
 <h3 id="phase-1-stacks-environments-variable-sets-3-weeks">Phase 1 — Stacks + Environments + Variable sets (3 weeks)<a class="headerlink" href="#phase-1-stacks-environments-variable-sets-3-weeks" title="Permanent link">&para;</a></h3>
 <p><strong>Goal: the complete layered configuration model.</strong></p>
 <ul>
-<li>[ ] <code>Stack</code> model (template: repo, project_root, tool, version)</li>
-<li>[ ] <code>Environment</code> model (instance: <strong>tier dev/staging/prod</strong>, branch, autodeploy, protected, 4-eyes, managed_state, labels, position)</li>
-<li>[ ] <strong>Per-tier apply permissions</strong> (see SPECS §2.4): <code>users.allowed_tiers</code> (a set over a configurable tier catalog — originally a linear <code>max_apply_tier</code>) + <code>users.can_destroy</code>; <code>can_apply(user, env)</code> helper called in the <code>unconfirmed → confirmed</code> transition; <code>protected</code> refocused on its own effects (forced confirmation + 4-eyes), with access control moving to the tier; admin Users page (role, tiers, destroy) + audit of changes</li>
-<li>[ ] <strong>Variable sets</strong> (see SPECS §3.4):</li>
+<li>[x] <code>Stack</code> model (template: repo, project_root, tool, version)</li>
+<li>[x] <code>Environment</code> model (instance: <strong>tier dev/staging/prod</strong>, branch, autodeploy, protected, 4-eyes, managed_state, labels, position)</li>
+<li>[x] <strong>Per-tier apply permissions</strong> (see SPECS §2.4): <code>users.allowed_tiers</code> (a set over a configurable tier catalog — originally a linear <code>max_apply_tier</code>) + <code>users.can_destroy</code>; <code>can_apply(user, env)</code> helper called in the <code>unconfirmed → confirmed</code> transition; <code>protected</code> refocused on its own effects (forced confirmation + 4-eyes), with access control moving to the tier; admin Users page (role, tiers, destroy) + audit of changes</li>
+<li>[x] <strong>Variable sets</strong> (see SPECS §3.4):</li>
 <li>named sets of variables (terraform + environment), at the space level</li>
 <li>attachable to stacks (→ all their envs), to specific environments or to a tier — always within the set's own space (<em>status: enforced at attach and at resolution</em>)</li>
 <li><code>auto_attach: true</code> = attached to all stacks in the space (e.g. <code>common-aws</code>)</li>
 <li>attachment priority to order the sets relative to each other</li>
 <li>final resolution: <strong>variable sets (by priority) &lt; stack &lt; environment</strong></li>
 <li>UI: provenance badge on each resolved variable ("inherited from <code>common-aws</code>", "overridden here")</li>
-<li>[ ] Stack variables + env overrides (existing model, integrated into the resolution)</li>
-<li>[ ] Git integration via token/deploy key (encrypted), check-repo endpoint</li>
-<li>[ ] AES-256-GCM encryption of sensitive values (write-only)</li>
-<li>[ ] Front: list of stacks × envs, creation wizard, stack page, <strong>Variable Sets page</strong> (CRUD + list of attachments + "where is this set used")</li>
-<li>[ ] Audit: CRUD stacks/envs/variables/variable sets + attachments</li>
+<li>[x] Stack variables + env overrides (existing model, integrated into the resolution)</li>
+<li>[x] Git integration via token/deploy key (encrypted), check-repo endpoint</li>
+<li>[x] AES-256-GCM encryption of sensitive values (write-only)</li>
+<li>[x] Front: list of stacks × envs, creation wizard, stack page, <strong>Variable Sets page</strong> (CRUD + list of attachments + "where is this set used")</li>
+<li>[x] Audit: CRUD stacks/envs/variables/variable sets + attachments</li>
 </ul>
 <p><strong>Deliverable: a <code>common-aws</code> set (region, default tags, Datadog token) attached to 3 stacks, occasionally overridden by an env.</strong></p>
 <hr />
 <h3 id="phase-2-runs-workers-logs-hooks-35-weeks-critical-phase">Phase 2 — Runs + Workers + Logs + Hooks (3.5 weeks) ⭐ critical phase<a class="headerlink" href="#phase-2-runs-workers-logs-hooks-35-weeks-critical-phase" title="Permanent link">&para;</a></h3>
 <h4 id="2a-run-state-machine">2a. Run state machine<a class="headerlink" href="#2a-run-state-machine" title="Permanent link">&para;</a></h4>
 <ul>
-<li>[ ] <code>Run</code> model (per environment) + <code>RunEvent</code></li>
-<li>[ ] States: <code>queued → preparing → planning → [checking] → unconfirmed → confirmed → applying → finished</code> (+ <code>failed</code>, <code>discarded</code>, <code>canceled</code>)</li>
-<li>[ ] Manual trigger, confirm/discard (guarded by <code>can_apply</code>: tier + role, see §2.4; automatic 4-eyes on prod tier)</li>
-<li>[ ] Concurrency: 1 active run per environment</li>
+<li>[x] <code>Run</code> model (per environment) + <code>RunEvent</code></li>
+<li>[x] States: <code>queued → preparing → planning → [checking] → unconfirmed → confirmed → applying → finished</code> (+ <code>failed</code>, <code>discarded</code>, <code>canceled</code>)</li>
+<li>[x] Manual trigger, confirm/discard (guarded by <code>can_apply</code>: tier + role, see §2.4; automatic 4-eyes on prod tier)</li>
+<li>[x] Concurrency: 1 active run per environment</li>
+<li>[x] Cancelling an executing run (SPECS §4.1): a stop request via the heartbeat, SIGINT then SIGKILL after a grace period; an interrupted apply ends <code>failed</code> (<code>canceled_during_apply</code>), never <code>canceled</code></li>
 </ul>
 <h4 id="2b-worker-api-pull-protocol">2b. Worker API (pull protocol)<a class="headerlink" href="#2b-worker-api-pull-protocol" title="Permanent link">&para;</a></h4>
 <ul>
-<li>[ ] Register/heartbeat/claim (<code>SKIP LOCKED</code>), events, chunked logs, artifacts</li>
-<li>[ ] Dead worker detection → <code>worker_lost</code> — <em>status: only runs whose job is executing on the lost worker; an apply or a mutating command only after the apply window (SPECS §3.7)</em></li>
+<li>[x] Register/heartbeat/claim (<code>SKIP LOCKED</code>), events, chunked logs, artifacts</li>
+<li>[x] Dead worker detection → <code>worker_lost</code> — <em>status: only runs whose job is executing on the lost worker; an apply or a mutating command only after the apply window (SPECS §3.7)</em></li>
 </ul>
 <h4 id="2c-the-worker-agent">2c. The worker agent<a class="headerlink" href="#2c-the-worker-agent" title="Permanent link">&para;</a></h4>
 <ul>
-<li>[ ] Loop claim → clone → tool setup → <strong>hooks</strong> → init → plan → upload → confirmation → <strong>hooks</strong> → apply → report — <em>status: the run is pinned to the commit its plan checked out, and the apply clones that commit and applies the uploaded saved plan, never a fresh plan (SPECS §7.3)</em></li>
-<li>[ ] Ephemeral workspace, Docker runner, secret masking in the logs — <em>status: done — workspace and masking; <code>tool_version</code> enforced (claim + agent check); runner images signature-verified, run by digest; the <code>docker</code> runner runs each command in its own hardened container (repo hooks see the checkout only), and production refuses any other runner (SPECS §7.4)</em></li>
+<li>[x] Loop claim → clone → tool setup → <strong>hooks</strong> → init → plan → upload → confirmation → <strong>hooks</strong> → apply → report — <em>status: the run is pinned to the commit its plan checked out, and the apply clones that commit and applies the uploaded saved plan, never a fresh plan (SPECS §7.3)</em></li>
+<li>[x] Ephemeral workspace, Docker runner, secret masking in the logs — <em>status: done — workspace and masking; <code>tool_version</code> enforced (claim + agent check); runner images signature-verified, run by digest; the <code>docker</code> runner runs each command in its own hardened container (repo hooks see the checkout only), and production refuses any other runner (SPECS §7.4)</em></li>
 </ul>
 <h4 id="2d-hooks-checks-custom-flows-see-specs-8">2d. Hooks &amp; checks (custom flows, see SPECS §8)<a class="headerlink" href="#2d-hooks-checks-custom-flows-see-specs-8" title="Permanent link">&para;</a></h4>
 <ul>
-<li>[ ] <strong>YAML</strong> declaration in two places, merged: <code>.stackd.yml</code> file in the repo (versioned with the code) + hooks defined at the stack/environment level in the UI (governance imposed by the platform, not bypassable by a PR)</li>
-<li>[ ] Anchor points: <code>before_init</code>, <code>after_init</code>, <code>before_plan</code>, <code>after_plan</code>, <code>before_apply</code>, <code>after_apply</code></li>
-<li>[ ] Each hook = a command executed in the workspace, with read access to <code>plan.json</code> (for post-plan checks: tfsec, checkov, infracost, in-house scripts)</li>
-<li>[ ] Failure modes: <code>fail</code> (run → failed), <code>warn</code> (continue, visible warning, manual confirmation forced even if autodeploy) — <em>status: done at every stage, plan and apply jobs; each hook under a 10 min timeout; every check result kept on the run with its stage; repo hooks run without secrets, and at the apply stages only on a tier that allows them (<code>repo_hooks_at_apply</code>, off by default); the per-env secret opt-ins were rejected (SPECS §8.3)</em></li>
-<li>[ ] Hook logs integrated into the viewer (dedicated sections)</li>
+<li>[x] <strong>YAML</strong> declaration in two places, merged: <code>.stackd.yml</code> file in the repo (versioned with the code) + hooks defined at the stack/environment level in the UI (governance imposed by the platform, not bypassable by a PR)</li>
+<li>[x] Anchor points: <code>before_init</code>, <code>after_init</code>, <code>before_plan</code>, <code>after_plan</code>, <code>before_apply</code>, <code>after_apply</code></li>
+<li>[x] Each hook = a command executed in the workspace, with read access to <code>plan.json</code> (for post-plan checks: tfsec, checkov, infracost, in-house scripts)</li>
+<li>[x] Failure modes: <code>fail</code> (run → failed), <code>warn</code> (continue, visible warning, manual confirmation forced even if autodeploy) — <em>status: done at every stage, plan and apply jobs; each hook under a 10 min timeout; every check result kept on the run with its stage; repo hooks run without secrets, and at the apply stages only on a tier that allows them (<code>repo_hooks_at_apply</code>, off by default); the per-env secret opt-ins were rejected (SPECS §8.3)</em></li>
+<li>[x] Hook logs integrated into the viewer (dedicated sections)</li>
 </ul>
 <h4 id="2e-terraform-job-logs">2e. Terraform job logs<a class="headerlink" href="#2e-terraform-job-logs" title="Permanent link">&para;</a></h4>
 <ul>
-<li>[ ] Live: multiplexed WebSocket, line-by-line tracking per phase</li>
-<li>[ ] Viewer: virtualized, ANSI, search, shareable anchors, follow-tail</li>
-<li>[ ] Two-tier storage (hot DB 7 d → S3 gz 1 year), download, configurable retention — <em>status: hot tier only; no archiving or download yet (SPECS §5.2)</em></li>
+<li>[x] Live: multiplexed WebSocket, line-by-line tracking per phase</li>
+<li>[x] Viewer: virtualized, ANSI, search, shareable anchors, follow-tail</li>
+<li>[x] Two-tier storage (hot DB 7 d → S3 gz 1 year), download, configurable retention — <em>status: done (SPECS §5.2); the 1-year expiry is a bucket lifecycle rule</em></li>
 </ul>
 <h4 id="2f-runs-front">2f. Runs front<a class="headerlink" href="#2f-runs-front" title="Permanent link">&para;</a></h4>
 <ul>
-<li>[ ] Run page: phase timeline (hooks included), viewer, plan summary, action bar</li>
-<li>[ ] <strong>/queue</strong> page: in-progress and pending runs with <strong>blocking reason</strong> computed by the API (active run on the env, locked env, no compatible worker, apply affinity reservation) — see DESIGN.md §5.5</li>
+<li>[x] Run page: phase timeline (hooks included), viewer, plan summary, action bar</li>
+<li>[x] <strong>/queue</strong> page: in-progress and pending runs with <strong>blocking reason</strong> computed by the API (active run on the env, locked env, no compatible worker, apply affinity reservation) — see DESIGN.md §5.5</li>
 </ul>
 <p><strong>Deliverable: a run with an <code>after_plan: infracost breakdown</code> hook in warn mode, live logs, confirmed apply.</strong></p>
 <hr />
 <h3 id="phase-3-s3-states-via-http-backend-audit-trail-ui-2-weeks">Phase 3 — S3 states via HTTP backend + Audit trail UI (2 weeks)<a class="headerlink" href="#phase-3-s3-states-via-http-backend-audit-trail-ui-2-weeks" title="Permanent link">&para;</a></h3>
 <h4 id="3a-managed-state">3a. Managed state<a class="headerlink" href="#3a-managed-state" title="Permanent link">&para;</a></h4>
 <ul>
-<li>[ ] Complete HTTP backend protocol (GET/POST/LOCK/UNLOCK/423), S3 SSE-KMS storage</li>
-<li>[ ] Application versioning linked to runs, Postgres locking visible in UI, audited force-unlock</li>
-<li>[ ] Per-job scoped tokens (<code>ro</code>/<code>plan</code>/<code>rw</code>), backend settings injected automatically — <em>status: done, as <code>TF_HTTP_*</code> environment variables for tofu only (not <code>-backend-config</code>, which tofu persists), SPECS §11.2</em></li>
-<li>[ ] Saved plans in S3: the reviewed <code>plan.tfplan</code>, encrypted by the API, kept until the run ends — <em>status: done (SPECS §7.3, §11.3); <code>plan.json</code>/<code>outputs.json</code> artifacts are accepted but not archived yet</em></li>
-<li>[ ] "Bring your own S3 backend" mode</li>
-<li>[ ] Front: State tab per env (versions, lock, admin download)</li>
+<li>[ ] Complete HTTP backend protocol (GET/POST/LOCK/UNLOCK/423), S3 SSE-KMS storage — <em>status: the protocol is done; the API does not request SSE-KMS on its S3 writes yet (bucket default encryption only)</em></li>
+<li>[x] Application versioning linked to runs, Postgres locking visible in UI, audited force-unlock</li>
+<li>[x] Per-job scoped tokens (<code>ro</code>/<code>plan</code>/<code>rw</code>), backend settings injected automatically — <em>status: done, as <code>TF_HTTP_*</code> environment variables for tofu only (not <code>-backend-config</code>, which tofu persists), SPECS §11.2</em></li>
+<li>[x] Saved plans in S3: the reviewed <code>plan.tfplan</code>, encrypted by the API, kept until the run ends — <em>status: done (SPECS §7.3, §11.3); <code>plan.json</code>/<code>outputs.json</code> artifacts are accepted but not archived yet</em></li>
+<li>[x] "Bring your own S3 backend" mode</li>
+<li>[ ] Front: State tab per env (versions, lock, admin download) — <em>status: versions, lock and the admin force-unlock; no state download yet (neither API nor UI)</em></li>
 </ul>
 <h4 id="3b-audit-who-applied-what">3b. Audit: "who applied what"<a class="headerlink" href="#3b-audit-who-applied-what" title="Permanent link">&para;</a></h4>
 <ul>
-<li>[ ] <code>audit_events</code> completed: trigger, confirm (Google identity), discard, apply, force-unlock, rotations, roles</li>
-<li>[ ] Filterable /audit page + CSV export, Activity tab per env, per-user view</li>
-<li>[ ] Immutability, 2-year retention</li>
+<li>[x] <code>audit_events</code> completed: trigger, confirm (Google identity), discard, apply, force-unlock, rotations, roles</li>
+<li>[x] Filterable /audit page + CSV export, Activity tab per env, per-user view</li>
+<li>[x] Immutability, 2-year retention</li>
 </ul>
 <p><strong>Deliverable: "who applied what to prod last week, with which plan?" in 10 seconds.</strong></p>
 <hr />
 <h3 id="phase-4-dependencies-outputs-mock-outputs-25-weeks-the-differentiator">Phase 4 — Dependencies + outputs + mock outputs (2.5 weeks) ⭐ the differentiator<a class="headerlink" href="#phase-4-dependencies-outputs-mock-outputs-25-weeks-the-differentiator" title="Permanent link">&para;</a></h3>
 <ul>
-<li>[ ] Dependencies between <strong>environments</strong> + "link homonyms" helper</li>
-<li>[ ] <code>OutputReference</code> (upstream output → downstream variable mapping), anti-cycle</li>
-<li>[ ] Output capture after apply, hash, never the sensitive ones</li>
-<li>[ ] <strong>Mock outputs</strong> (inspired by Terragrunt, see SPECS §9.3):</li>
+<li>[x] Dependencies between <strong>environments</strong> + "link homonyms" helper</li>
+<li>[x] <code>OutputReference</code> (upstream output → downstream variable mapping), anti-cycle</li>
+<li>[x] Output capture after apply, hash, never the sensitive ones</li>
+<li>[x] <strong>Mock outputs</strong> (inspired by Terragrunt, see SPECS §9.3):</li>
 <li>each <code>output_reference</code> can carry a <code>mock_value</code></li>
 <li>used when the upstream has <strong>never produced</strong> the output (bootstrapping a new cascade) or on <strong>proposed runs</strong> if the upstream is not applied</li>
 <li>a run that has consumed at least one mock is marked <code>used_mocks: true</code>: visible badge, <strong>apply forbidden</strong> (validation plan-only) unless explicit opt-in per env</li>
 <li>solves the chicken-and-egg problem: write <code>app/dev</code> and plan its config before <code>network/dev</code> has run</li>
 <li>[x] Propagation scheduler: topological cascade, policies, multi-parents, stop on failure — <em>status: done — policies, multi-parent gating within a run group, stop on failure, computed group status (SPECS §9.2)</em></li>
-<li>[ ] Run groups + graph view; the cascade never bypasses the protections</li>
+<li>[x] Run groups + graph view; the cascade never bypasses the protections</li>
 </ul>
 <p><strong>Deliverable: plan <code>app/dev</code> with <code>vpc_id = "vpc-mock00000"</code> before the first apply of <code>network/dev</code>, then a real cascade.</strong></p>
 <hr />
 <h3 id="phase-5-git-webhooks-proposed-runs-2-weeks">Phase 5 — Git webhooks + proposed runs (2 weeks)<a class="headerlink" href="#phase-5-git-webhooks-proposed-runs-2-weeks" title="Permanent link">&para;</a></h3>
 <ul>
-<li>[ ] GitHub/GitLab webhook: HMAC, branch → environments mapping, filtering by <code>project_root</code></li>
-<li>[ ] <strong>Git staleness</strong>: tracking of <code>head_sha</code> per env (webhook + ls-remote polling 15 min + manual refresh), <code>↑N</code> chip on lagging envs, "stale plan" banner + re-plan on stale unconfirmed runs — see SPECS §9.6 / DESIGN §5.1-5.2 — <em>status: done: <code>stale</code> computed on every env the API returns, background ls-remote polling, audited manual refresh, branch-deletion and re-pointed-branch handling; the <code>↑N</code> chip and the stale-plan banner are not in the UI yet</em></li>
-<li>[ ] Push → tracked runs; PR → <strong>proposed runs</strong> plan-only (RO state, secrets not injected by default, mocks allowed) — <em>status: done (SPECS §13): a proposed run gets no secret, keeping the read-only plan role; the per-env opt-in was rejected (SPECS §13)</em></li>
-<li>[ ] (Optional) PR comment: plan summary + check results (warn/fail hooks) — <em>status: shipped for GitHub (SPECS §18): a commit status and one comment per run, edited in place</em></li>
+<li>[x] GitHub/GitLab webhook: HMAC, branch → environments mapping, filtering by <code>project_root</code></li>
+<li>[x] <strong>Git staleness</strong>: tracking of <code>head_sha</code> per env (webhook + ls-remote polling 15 min + manual refresh), <code>↑N</code> chip on lagging envs, "stale plan" banner + re-plan on stale unconfirmed runs — see SPECS §9.6 / DESIGN §5.1-5.2 — <em>status: done: <code>stale</code> computed on every env the API returns, background ls-remote polling, audited manual refresh, branch-deletion and re-pointed-branch handling; <code>↑N</code> chip and stale-plan banner in the UI</em></li>
+<li>[x] Push → tracked runs; PR → <strong>proposed runs</strong> plan-only (RO state, secrets not injected by default, mocks allowed) — <em>status: done (SPECS §13): a proposed run gets no secret, keeping the read-only plan role; the per-env opt-in was rejected (SPECS §13)</em></li>
+<li>[x] (Optional) PR comment: plan summary + check results (warn/fail hooks) — <em>status: shipped for GitHub (SPECS §18): a commit status and one comment per run, edited in place</em></li>
 </ul>
 <p><strong>Deliverable: <code>git push</code> → automatic plans + checks visible in the PR.</strong></p>
 <hr />
 <h3 id="phase-6-dynamic-cloud-credentials-oidc-15-weeks">Phase 6 — Dynamic cloud credentials OIDC (1.5 weeks)<a class="headerlink" href="#phase-6-dynamic-cloud-credentials-oidc-15-weeks" title="Permanent link">&para;</a></h3>
 <ul>
-<li>[ ] <strong>OIDC issuer</strong>: <code>/.well-known/openid-configuration</code>, JWKS (RS256 keys, rotation), signing of workload tokens at claim time</li>
-<li>[ ] <code>CloudIntegration</code> model per environment: provider <code>aws</code>, <code>plan_role_arn</code>, <code>apply_role_arn</code> (see SPECS §10)</li>
-<li>[ ] Agent: token writing, export of <code>AWS_WEB_IDENTITY_TOKEN_FILE</code>/<code>AWS_ROLE_ARN</code> (or explicit AssumeRoleWithWebIdentity + export of the 3 variables if compatibility is needed)</li>
-<li>[ ] Documentation + provided Terraform module: create the AWS Identity Provider + example roles with trust policies filtered on the claims</li>
-<li>[ ] UI: integration config per env, "dynamic credentials" vs "static variables" indicator, AssumeRole test</li>
-<li>[ ] Audit: <code>cloud_integration.created/updated</code>, assumed role traced in the run context</li>
+<li>[x] <strong>OIDC issuer</strong>: <code>/.well-known/openid-configuration</code>, JWKS (RS256 keys, rotation), signing of workload tokens at claim time</li>
+<li>[x] <code>CloudIntegration</code> model per environment: provider <code>aws</code>, <code>plan_role_arn</code>, <code>apply_role_arn</code> (see SPECS §10)</li>
+<li>[x] Agent: token writing, export of <code>AWS_WEB_IDENTITY_TOKEN_FILE</code>/<code>AWS_ROLE_ARN</code> (or explicit AssumeRoleWithWebIdentity + export of the 3 variables if compatibility is needed)</li>
+<li>[ ] Documentation + provided Terraform module: create the AWS Identity Provider + example roles with trust policies filtered on the claims — <em>status: documentation done (docs/guide/cloud-credentials.md); the Terraform module is not in the repo yet</em></li>
+<li>[x] UI: integration config per env, "dynamic credentials" vs "static variables" indicator, AssumeRole test</li>
+<li>[x] Audit: <code>cloud_integration.created/updated</code>, assumed role traced in the run context</li>
 </ul>
 <p><strong>Deliverable: a prod env with no AWS secret stored anywhere — the plan assumes a ReadOnly role, the apply a write role, backed by a trust policy.</strong></p>
 <hr />
@@ -2102,8 +2103,9 @@ Goal: a self-hostable Terraform orchestration platform with multi-environment st
 <li>[ ] <strong>Environment matrix</strong> (track, not specified): declare <code>{eu-west-1, us-east-1} × {dev, prod}</code> on a stack and generate/synchronize the corresponding environments — multi-region is done by naming convention + variable sets in the MVP; standing one up across stacks is the job of environment rollouts above (one-shot, no synchronization)</li>
 <li>[ ] HTTP run tasks (blocking external webhooks), advanced policies (OPA) if there is a real need</li>
 <li>[ ] OIDC to GCP/Azure (the <code>CloudIntegration</code> interface is already generic)</li>
-<li>[ ] Scheduled drift detection — <em>status: shipped (SPECS §19)</em></li>
-<li>[ ] Audit export, automated retention/purge</li>
+<li>[x] Scheduled drift detection — <em>status: shipped (SPECS §19)</em></li>
+<li>[x] Automated retention/purge: hot logs, expired refresh-token families, audit &gt; 2 years via a distinct DB role (SPECS §6.1, §7.5)</li>
+<li>[ ] Audit export to an external system (SIEM)</li>
 <li>[ ] Platform observability (Prometheus, OTel, Datadog dashboard) — <em>status: <code>/metrics</code> and optional OTLP tracing shipped (SPECS §20); no dashboard yet</em></li>
 <li>[ ] Helm chart / Terraform deployment module (dogfooding)</li>
 <li>[ ] <strong>Go rewrite of the worker</strong> (single binary, easier distribution) — the MVP Python agent remains the functional reference; the Go port does not change the protocol (§7)</li>

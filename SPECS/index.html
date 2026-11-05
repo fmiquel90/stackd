@@ -4243,7 +4243,7 @@ context kid, backend, ARN, previous kid, <code>reactivated</code>, and for a rea
 <a id="__codelineno-18-31" name="__codelineno-18-31" href="#__codelineno-18-31"></a>      │     finished     │──▶ scheduler hooks: capture outputs, cascade, audit
 <a id="__codelineno-18-32" name="__codelineno-18-32" href="#__codelineno-18-32"></a>      └──────────────────┘
 </code></pre></div>
-<p>Terminal: <code>finished</code>, <code>failed</code>, <code>discarded</code>, <code>canceled</code>. <code>canceled</code>: user on <code>queued</code>/<code>unconfirmed</code>, the system when a PR closes (its in-flight proposed runs, §18.3), or a rollout's cancel on its member runs that are <code>queued</code>, <code>unconfirmed</code> or <code>confirmed</code> and not claimed yet (§21.4 step 8 — <code>confirmed → canceled</code> is that edge). Cancelling a run a worker is executing (signal via heartbeat → SIGINT) is not implemented yet: the API answers 409. Any terminal state drops the run's saved plan (§11.3).</p>
+<p>Terminal: <code>finished</code>, <code>failed</code>, <code>discarded</code>, <code>canceled</code>. <code>canceled</code>: user on <code>queued</code>/<code>confirmed</code>/<code>unconfirmed</code> (not claimed yet, or waiting on a human), the system when a PR closes (its in-flight proposed runs, §18.3), or a rollout's cancel on its member runs that are <code>queued</code>, <code>unconfirmed</code> or <code>confirmed</code> and not claimed yet (§21.4 step 8 — <code>confirmed → canceled</code> is that edge). <strong>Cancelling a run a worker is executing</strong> is a request, not a transition: <code>POST /runs/{id}/cancel</code> records <code>runs.cancel_requested_at</code>, audits <code>run.cancel_requested</code> and queues a <code>cancel_job</code> command for the worker's next heartbeat (§7.1) — one transaction. The worker interrupts its tool (SIGINT, a graceful stop: tofu finishes the operation in flight, releases the state lock, exits; SIGKILL only after <code>STACKD_CANCEL_GRACE_SECONDS</code>, default 120) and reports <code>job_canceled</code>; only then does <code>transition()</code> end the run. A job that holds <strong>no apply credentials</strong> (preparing, planning, checking, a read-only command) ends <code>canceled</code>; one that does (<code>applying</code>, a mutating command, §4.3) ends <strong><code>failed</code> with <code>error=canceled_during_apply</code></strong> — <code>applying</code> is never <code>canceled</code>, since the infrastructure may be partly changed — and nothing cascades. Stopping a job that holds apply credentials needs <code>can_apply</code> (the gate of starting it); any other needs <code>writer</code>. Idempotent: asking again re-queues the command (the first may have been lost) without a second audit. If the plan finishes before the stop reaches it, the run ends <code>canceled</code> instead of going to <code>unconfirmed</code>/<code>confirmed</code> — a stopped plan is never auto-confirmed. Once an apply has succeeded the worker ignores a later stop (what is left — recording the outputs — must finish). A worker that is offline never reports: <code>worker_lost</code> (§3.7) ends the run. Any terminal state drops the run's saved plan (§11.3).</p>
 <p>Command runs (§4.3) take a shorter path: <code>queued → preparing → running → finished | failed</code>.</p>
 <h3 id="42-transition-rules">4.2 Transition rules<a class="headerlink" href="#42-transition-rules" title="Permanent link">&para;</a></h3>
 <table>
@@ -4281,14 +4281,19 @@ context kid, backend, ARN, previous kid, <code>reactivated</code>, and for a rea
 <td>empty diff (outputs captured after refresh)</td>
 </tr>
 <tr>
-<td><code>queued / unconfirmed → canceled</code></td>
+<td><code>queued / confirmed / unconfirmed → canceled</code></td>
 <td>user, or system</td>
-<td>a user's cancel; the system when a PR closes (its proposed runs, §18.3) or a rollout is canceled (its member runs, §21.4 step 8)</td>
+<td>a user's cancel (a <code>confirmed</code> run is not claimed yet); the system when a PR closes (its proposed runs, §18.3) or a rollout is canceled (its member runs not claimed yet, §21.4 step 8)</td>
 </tr>
 <tr>
-<td><code>confirmed → canceled</code></td>
-<td>system</td>
-<td>a rollout's cancel, the run not claimed yet (§21.4 step 8); a run already <code>applying</code> is never canceled</td>
+<td><code>preparing / planning / checking / running → canceled</code></td>
+<td>worker</td>
+<td><code>job_canceled</code> after a user's stop request (§4.1), the job holding no apply credentials</td>
+</tr>
+<tr>
+<td><code>applying → failed</code> (<code>canceled_during_apply</code>)</td>
+<td>worker</td>
+<td><code>job_canceled</code> after a stop request on a job holding apply credentials; a run already <code>applying</code> is never <code>canceled</code></td>
 </tr>
 <tr>
 <td><code>unconfirmed → confirmed</code></td>
@@ -4357,8 +4362,14 @@ context kid, backend, ARN, previous kid, <code>reactivated</code>, and for a rea
 </table>
 <p><code>GET /runs/{id}/logs?phase=&amp;after_seq=</code> serves one or the other transparently. <code>GET /runs/{id}/logs/download?phase=all</code>.</p>
 <blockquote>
-<p><strong>Status</strong>: only the hot tier exists today — logs stay in <code>run_logs</code> (no archiving, no purge,
-§7.5) and <code>/logs/download</code> is not served yet.</p>
+<p><strong>Status</strong>: done. A periodic task (§7.5) archives each terminal run's logs — one gzip'd JSONL
+object per phase, one <code>{seq, section, lines}</code> chunk per line — and stamps <code>runs.logs_archived_at</code>;
+the hot rows are purged <code>log_hot_retention_days</code> (7) after that. <code>GET …/logs</code> serves the hot rows
+and falls back to the archive once they are gone (same chunks, same order, <code>phase</code>/<code>after_seq</code>
+honoured; a <code>phase</code> outside <code>[A-Za-z0-9_.-]</code> is refused, it ends up in an S3 key). <code>GET …/logs/download?phase=all|&lt;phase&gt;</code> returns plain text (ANSI kept, phases in start
+order, hooks prefixed <code>[hook:x]</code>), from either tier. If S3 is down the run stays unarchived and its
+hot rows untouched — retried next tick. The 1-year S3 expiry is a bucket lifecycle rule (ops), not
+application code. A chunk ingested after its run was archived is not re-archived.</p>
 </blockquote>
 <h3 id="53-live-distribution">5.3 Live distribution<a class="headerlink" href="#53-live-distribution" title="Permanent link">&para;</a></h3>
 <p>Single multiplexed WebSocket: <code>{"sub": "run:&lt;id&gt;"}</code> → <code>log_chunk {phase, section, seq, lines}</code> + <code>run_event</code>. Reconnection → REST GET <code>after_seq</code> to fill the gap, then the stream.</p>
@@ -4381,7 +4392,7 @@ context kid, backend, ARN, previous kid, <code>reactivated</code>, and for a rea
 <a id="__codelineno-20-5" name="__codelineno-20-5" href="#__codelineno-20-5"></a>context jsonb,                      -- stack_name, env_name, run_id, commit, plan_summary...
 <a id="__codelineno-20-6" name="__codelineno-20-6" href="#__codelineno-20-6"></a>ip, user_agent nullable, created_at
 </code></pre></div>
-<p><strong>Real immutability, not just "no API"</strong>: the absence of an update/delete endpoint does not protect against a bug or an application compromise. The application DB role only has <code>INSERT</code> and <code>SELECT</code> on <code>audit_events</code> (<code>REVOKE UPDATE, DELETE</code>), a <code>BEFORE UPDATE OR DELETE</code> trigger raises an exception, and retention purging goes through a distinct role, separate from the application role and itself audited. 2-year retention, explicit admin purge (audited). Indexes: <code>(created_at)</code>, <code>(actor_id, created_at)</code>, <code>(target_kind, target_id, created_at)</code>, <code>(action, created_at)</code>.</p>
+<p><strong>Real immutability, not just "no API"</strong>: the absence of an update/delete endpoint does not protect against a bug or an application compromise. The application DB role only has <code>INSERT</code> and <code>SELECT</code> on <code>audit_events</code> (<code>REVOKE UPDATE, DELETE</code>), a <code>BEFORE UPDATE OR DELETE</code> trigger raises an exception, and retention purging goes through a distinct role, separate from the application role and itself audited. 2-year retention: a daily task (§7.5) purges older events on a connection of the <code>stackd_audit_purge</code> role (created <code>NOLOGIN</code> by migration 0031 — an operator gives it a login and sets <code>STACKD_AUDIT_PURGE_DATABASE_URL</code>; without that URL no purge runs). The role holds <code>SELECT, INSERT, DELETE</code> only, and the append-only trigger lets exactly that role delete; it writes an <code>audit.purged</code> event (<code>deleted</code>, <code>before</code>, <code>retention_days</code>) in the same transaction as the delete. Indexes: <code>(created_at)</code>, <code>(actor_id, created_at)</code>, <code>(target_kind, target_id, created_at)</code>, <code>(action, created_at)</code>.</p>
 <h3 id="62-taxonomy">6.2 Taxonomy<a class="headerlink" href="#62-taxonomy" title="Permanent link">&para;</a></h3>
 <p>The exhaustive list of actions the API emits (to check it: <code>grep -rn 'action="' api/app</code>, plus the
 <code>audit_action=</code> of each <code>transition()</code> call and the per-field map in <code>users/router.py</code>):</p>
@@ -4390,49 +4401,51 @@ context kid, backend, ARN, previous kid, <code>reactivated</code>, and for a rea
 <a id="__codelineno-21-3" name="__codelineno-21-3" href="#__codelineno-21-3"></a>stack.created / stack.updated / stack.deleted
 <a id="__codelineno-21-4" name="__codelineno-21-4" href="#__codelineno-21-4"></a>environment.created / environment.updated / environment.deleted   # created: also by a clone
 <a id="__codelineno-21-5" name="__codelineno-21-5" href="#__codelineno-21-5"></a>                                  #   (context cloned_from, autodeploy, autodeploy_off_reason, §21.2)
-<a id="__codelineno-21-6" name="__codelineno-21-6" href="#__codelineno-21-6"></a>environment.head_refreshed        # manual head refresh (§9.6) — context: branch, old_sha, new_sha
-<a id="__codelineno-21-7" name="__codelineno-21-7" href="#__codelineno-21-7"></a>environment.inputs_discovered     # discover-inputs created placeholder env variables (§20.3)
-<a id="__codelineno-21-8" name="__codelineno-21-8" href="#__codelineno-21-8"></a>environment.drift_detected / environment.drift_cleared               # §19.4
-<a id="__codelineno-21-9" name="__codelineno-21-9" href="#__codelineno-21-9"></a>variable.created / variable.updated / variable.deleted   # stack, env and set variables — context:
-<a id="__codelineno-21-10" name="__codelineno-21-10" href="#__codelineno-21-10"></a>                                                          #   name, sensitive — NEVER the value
-<a id="__codelineno-21-11" name="__codelineno-21-11" href="#__codelineno-21-11"></a>variable_set.created / variable_set.updated / variable_set.deleted
-<a id="__codelineno-21-12" name="__codelineno-21-12" href="#__codelineno-21-12"></a>variable_set.attached / variable_set.detached   # detached: manual, or with its target — context
-<a id="__codelineno-21-13" name="__codelineno-21-13" href="#__codelineno-21-13"></a>                                                #   reason = stack_deleted | environment_deleted (§3.2)
-<a id="__codelineno-21-14" name="__codelineno-21-14" href="#__codelineno-21-14"></a>hook.created / hook.updated / hook.deleted      # deleted: manual, or with its stack/env (reason, §3.2)
-<a id="__codelineno-21-15" name="__codelineno-21-15" href="#__codelineno-21-15"></a>notification_target.created / notification_target.updated / notification_target.deleted
-<a id="__codelineno-21-16" name="__codelineno-21-16" href="#__codelineno-21-16"></a>                                                # deleted: manual, or with its stack/env (reason, §3.2)
-<a id="__codelineno-21-17" name="__codelineno-21-17" href="#__codelineno-21-17"></a>run.triggered / run.destroy_triggered / run.command_triggered / run.promoted   # §4.3, §9.7
-<a id="__codelineno-21-18" name="__codelineno-21-18" href="#__codelineno-21-18"></a>                                  # run.triggered by the system: context via = cascade (§9.2) |
-<a id="__codelineno-21-19" name="__codelineno-21-19" href="#__codelineno-21-19"></a>                                  #   rollout (§21.4: rollout_id, environment_id, commit)
-<a id="__codelineno-21-20" name="__codelineno-21-20" href="#__codelineno-21-20"></a>run.confirmed ⭐                  # a human confirm, or the system: on autodeploy (context
-<a id="__codelineno-21-21" name="__codelineno-21-21" href="#__codelineno-21-21"></a>                                  #   autodeploy), or under a rollout&#39;s approval (context via =
-<a id="__codelineno-21-22" name="__codelineno-21-22" href="#__codelineno-21-22"></a>                                  #   rollout, rollout_id, approved_by, approved_by_email, §21.5)
-<a id="__codelineno-21-23" name="__codelineno-21-23" href="#__codelineno-21-23"></a>run.discarded / run.canceled      # canceled: a user, or the system when a PR closes (reason pr_closed);
-<a id="__codelineno-21-24" name="__codelineno-21-24" href="#__codelineno-21-24"></a>                                  #   a rollout&#39;s cancel: the canceller, context via = rollout (§21.8)
-<a id="__codelineno-21-25" name="__codelineno-21-25" href="#__codelineno-21-25"></a>run.plan_finished                 # plan-only terminal: empty diff, or a proposed/drift run
-<a id="__codelineno-21-26" name="__codelineno-21-26" href="#__codelineno-21-26"></a>run.applied ⭐ / run.command_executed
-<a id="__codelineno-21-27" name="__codelineno-21-27" href="#__codelineno-21-27"></a>run.apply_failed                  # any failed run, whatever its phase, unless a check failed it —
-<a id="__codelineno-21-28" name="__codelineno-21-28" href="#__codelineno-21-28"></a>                                  #   context phase, or reason:
-<a id="__codelineno-21-29" name="__codelineno-21-29" href="#__codelineno-21-29"></a>                                  #   worker_lost | commit_mismatch | dependency | secret (§7.2/§7.3)
-<a id="__codelineno-21-30" name="__codelineno-21-30" href="#__codelineno-21-30"></a>run.check_failed                  # a hook check with on_failure=fail failed the run, at any stage
-<a id="__codelineno-21-31" name="__codelineno-21-31" href="#__codelineno-21-31"></a>                                  #   (§8.3) — context phase = the failing stage
-<a id="__codelineno-21-32" name="__codelineno-21-32" href="#__codelineno-21-32"></a>run.check_warned                  # a job (plan or apply) ended — finished or failed — with warn
-<a id="__codelineno-21-33" name="__codelineno-21-33" href="#__codelineno-21-33"></a>                                  #   checks; context: checks (their names), stages (where they ran)
-<a id="__codelineno-21-34" name="__codelineno-21-34" href="#__codelineno-21-34"></a>state.force_unlocked / state.import_session_created   # §11.2, §11.4
-<a id="__codelineno-21-35" name="__codelineno-21-35" href="#__codelineno-21-35"></a>dependency.created / dependency.deleted / dependency.mock_consumed   # created: also via link-by-name,
-<a id="__codelineno-21-36" name="__codelineno-21-36" href="#__codelineno-21-36"></a>                                  #   or a clone (via = clone, upstream_kind, §21.2)
-<a id="__codelineno-21-37" name="__codelineno-21-37" href="#__codelineno-21-37"></a>cloud_integration.created / cloud_integration.updated / cloud_integration.deleted
-<a id="__codelineno-21-38" name="__codelineno-21-38" href="#__codelineno-21-38"></a>oidc_key.rotated / oidc_key.retired            # issuer signing key (§3.11)
-<a id="__codelineno-21-39" name="__codelineno-21-39" href="#__codelineno-21-39"></a>worker_pool.created / worker_pool.deleted
-<a id="__codelineno-21-40" name="__codelineno-21-40" href="#__codelineno-21-40"></a>worker.rejected                                # a non-docker runner refused in production (§7.4)
-<a id="__codelineno-21-41" name="__codelineno-21-41" href="#__codelineno-21-41"></a>worker.diagnostics_requested                   # read-only debug bundle (cf. §observability)
-<a id="__codelineno-21-42" name="__codelineno-21-42" href="#__codelineno-21-42"></a>user.role_changed / user.apply_tier_changed / user.destroy_permission_changed / user.disabled
-<a id="__codelineno-21-43" name="__codelineno-21-43" href="#__codelineno-21-43"></a>tier.created / tier.updated / tier.deleted     # configurable tier catalog (§2.4)
-<a id="__codelineno-21-44" name="__codelineno-21-44" href="#__codelineno-21-44"></a>secret_source.created / secret_source.updated / secret_source.token_rotated / secret_source.deleted
-<a id="__codelineno-21-45" name="__codelineno-21-45" href="#__codelineno-21-45"></a>secret.fallback_used / secret.fallback_overridden                    # §15
-<a id="__codelineno-21-46" name="__codelineno-21-46" href="#__codelineno-21-46"></a>environment.cloned                                                   # §21.2
-<a id="__codelineno-21-47" name="__codelineno-21-47" href="#__codelineno-21-47"></a>rollout.created / rollout.approved / rollout.paused / rollout.resumed    # §21.8
-<a id="__codelineno-21-48" name="__codelineno-21-48" href="#__codelineno-21-48"></a>rollout.retried / rollout.canceled / rollout.succeeded / rollout.failed  # §21.8
+<a id="__codelineno-21-6" name="__codelineno-21-6" href="#__codelineno-21-6"></a>audit.purged                      # retention purge of old audit events (§6.1) — actor system
+<a id="__codelineno-21-7" name="__codelineno-21-7" href="#__codelineno-21-7"></a>environment.head_refreshed        # manual head refresh (§9.6) — context: branch, old_sha, new_sha
+<a id="__codelineno-21-8" name="__codelineno-21-8" href="#__codelineno-21-8"></a>environment.inputs_discovered     # discover-inputs created placeholder env variables (§20.3)
+<a id="__codelineno-21-9" name="__codelineno-21-9" href="#__codelineno-21-9"></a>environment.drift_detected / environment.drift_cleared               # §19.4
+<a id="__codelineno-21-10" name="__codelineno-21-10" href="#__codelineno-21-10"></a>variable.created / variable.updated / variable.deleted   # stack, env and set variables — context:
+<a id="__codelineno-21-11" name="__codelineno-21-11" href="#__codelineno-21-11"></a>                                                          #   name, sensitive — NEVER the value
+<a id="__codelineno-21-12" name="__codelineno-21-12" href="#__codelineno-21-12"></a>variable_set.created / variable_set.updated / variable_set.deleted
+<a id="__codelineno-21-13" name="__codelineno-21-13" href="#__codelineno-21-13"></a>variable_set.attached / variable_set.detached   # detached: manual, or with its target — context
+<a id="__codelineno-21-14" name="__codelineno-21-14" href="#__codelineno-21-14"></a>                                                #   reason = stack_deleted | environment_deleted (§3.2)
+<a id="__codelineno-21-15" name="__codelineno-21-15" href="#__codelineno-21-15"></a>hook.created / hook.updated / hook.deleted      # deleted: manual, or with its stack/env (reason, §3.2)
+<a id="__codelineno-21-16" name="__codelineno-21-16" href="#__codelineno-21-16"></a>notification_target.created / notification_target.updated / notification_target.deleted
+<a id="__codelineno-21-17" name="__codelineno-21-17" href="#__codelineno-21-17"></a>                                                # deleted: manual, or with its stack/env (reason, §3.2)
+<a id="__codelineno-21-18" name="__codelineno-21-18" href="#__codelineno-21-18"></a>run.triggered / run.destroy_triggered / run.command_triggered / run.promoted   # §4.3, §9.7
+<a id="__codelineno-21-19" name="__codelineno-21-19" href="#__codelineno-21-19"></a>                                  # run.triggered by the system: context via = cascade (§9.2) |
+<a id="__codelineno-21-20" name="__codelineno-21-20" href="#__codelineno-21-20"></a>                                  #   rollout (§21.4: rollout_id, environment_id, commit)
+<a id="__codelineno-21-21" name="__codelineno-21-21" href="#__codelineno-21-21"></a>run.confirmed ⭐                  # a human confirm, or the system: on autodeploy (context
+<a id="__codelineno-21-22" name="__codelineno-21-22" href="#__codelineno-21-22"></a>                                  #   autodeploy), or under a rollout&#39;s approval (context via =
+<a id="__codelineno-21-23" name="__codelineno-21-23" href="#__codelineno-21-23"></a>                                  #   rollout, rollout_id, approved_by, approved_by_email, §21.5)
+<a id="__codelineno-21-24" name="__codelineno-21-24" href="#__codelineno-21-24"></a>run.cancel_requested              # a user asked the worker to stop an executing run (§4.1) — once per run
+<a id="__codelineno-21-25" name="__codelineno-21-25" href="#__codelineno-21-25"></a>run.discarded / run.canceled      # canceled: also the worker, on `job_canceled` (context reason cancel_requested); a user, or the system when a PR closes (reason pr_closed);
+<a id="__codelineno-21-26" name="__codelineno-21-26" href="#__codelineno-21-26"></a>                                  #   a rollout&#39;s cancel: the canceller, context via = rollout (§21.8)
+<a id="__codelineno-21-27" name="__codelineno-21-27" href="#__codelineno-21-27"></a>run.plan_finished                 # plan-only terminal: empty diff, or a proposed/drift run
+<a id="__codelineno-21-28" name="__codelineno-21-28" href="#__codelineno-21-28"></a>run.applied ⭐ / run.command_executed
+<a id="__codelineno-21-29" name="__codelineno-21-29" href="#__codelineno-21-29"></a>run.apply_failed                  # any failed run, whatever its phase, unless a check failed it —
+<a id="__codelineno-21-30" name="__codelineno-21-30" href="#__codelineno-21-30"></a>                                  #   context phase, or reason: cancel_requested (a stopped apply, §4.1) |
+<a id="__codelineno-21-31" name="__codelineno-21-31" href="#__codelineno-21-31"></a>                                  #   worker_lost | commit_mismatch | dependency | secret (§7.2/§7.3)
+<a id="__codelineno-21-32" name="__codelineno-21-32" href="#__codelineno-21-32"></a>run.check_failed                  # a hook check with on_failure=fail failed the run, at any stage
+<a id="__codelineno-21-33" name="__codelineno-21-33" href="#__codelineno-21-33"></a>                                  #   (§8.3) — context phase = the failing stage
+<a id="__codelineno-21-34" name="__codelineno-21-34" href="#__codelineno-21-34"></a>run.check_warned                  # a job (plan or apply) ended — finished or failed — with warn
+<a id="__codelineno-21-35" name="__codelineno-21-35" href="#__codelineno-21-35"></a>                                  #   checks; context: checks (their names), stages (where they ran)
+<a id="__codelineno-21-36" name="__codelineno-21-36" href="#__codelineno-21-36"></a>state.force_unlocked / state.import_session_created   # §11.2, §11.4
+<a id="__codelineno-21-37" name="__codelineno-21-37" href="#__codelineno-21-37"></a>dependency.created / dependency.deleted / dependency.mock_consumed   # created: also via link-by-name,
+<a id="__codelineno-21-38" name="__codelineno-21-38" href="#__codelineno-21-38"></a>                                  #   or a clone (via = clone, upstream_kind, §21.2)
+<a id="__codelineno-21-39" name="__codelineno-21-39" href="#__codelineno-21-39"></a>cloud_integration.created / cloud_integration.updated / cloud_integration.deleted
+<a id="__codelineno-21-40" name="__codelineno-21-40" href="#__codelineno-21-40"></a>oidc_key.rotated / oidc_key.retired            # issuer signing key (§3.11)
+<a id="__codelineno-21-41" name="__codelineno-21-41" href="#__codelineno-21-41"></a>worker_pool.created / worker_pool.deleted
+<a id="__codelineno-21-42" name="__codelineno-21-42" href="#__codelineno-21-42"></a>worker.rejected                                # a non-docker runner refused in production (§7.4)
+<a id="__codelineno-21-43" name="__codelineno-21-43" href="#__codelineno-21-43"></a>worker.diagnostics_requested                   # read-only debug bundle (cf. §observability)
+<a id="__codelineno-21-44" name="__codelineno-21-44" href="#__codelineno-21-44"></a>user.role_changed / user.apply_tier_changed / user.destroy_permission_changed / user.disabled
+<a id="__codelineno-21-45" name="__codelineno-21-45" href="#__codelineno-21-45"></a>tier.created / tier.updated / tier.deleted     # configurable tier catalog (§2.4)
+<a id="__codelineno-21-46" name="__codelineno-21-46" href="#__codelineno-21-46"></a>secret_source.created / secret_source.updated / secret_source.token_rotated / secret_source.deleted
+<a id="__codelineno-21-47" name="__codelineno-21-47" href="#__codelineno-21-47"></a>secret.fallback_used / secret.fallback_overridden                    # §15
+<a id="__codelineno-21-48" name="__codelineno-21-48" href="#__codelineno-21-48"></a>environment.cloned                                                   # §21.2
+<a id="__codelineno-21-49" name="__codelineno-21-49" href="#__codelineno-21-49"></a>rollout.created / rollout.approved / rollout.paused / rollout.resumed    # §21.8
+<a id="__codelineno-21-50" name="__codelineno-21-50" href="#__codelineno-21-50"></a>rollout.retried / rollout.canceled / rollout.succeeded / rollout.failed  # §21.8
 </code></pre></div>
 <p>Not audited by a dedicated action: a run failed because an external secret could not resolve is
 <code>run.apply_failed</code> with <code>reason: secret</code> (§15.6); a pool token is not rotatable through the API
@@ -4456,7 +4469,7 @@ action lives there, e.g. the approver of a rollout's auto-confirmation (§21.5).
 <div class="highlight"><pre><span></span><code><a id="__codelineno-23-1" name="__codelineno-23-1" href="#__codelineno-23-1"></a>POST /worker/v1/register   (Bearer pool_token) { &quot;name&quot;, &quot;labels&quot;?, &quot;version&quot;?, &quot;runner&quot;: &quot;local&quot;|&quot;docker&quot; } → worker_id + worker_token
 <a id="__codelineno-23-2" name="__codelineno-23-2" href="#__codelineno-23-2"></a>POST /worker/v1/heartbeat  (20 s) { &quot;in_flight&quot;: N, &quot;capacity&quot;: M } → { &quot;commands&quot;: [{&quot;id&quot;: ..., &quot;type&quot;: &quot;diagnostics&quot;}] }
 </code></pre></div>
-<p>Heartbeat = downstream command channel. No incoming connection. Today it carries <code>diagnostics</code> only; <code>cancel_job</code> (cancelling an executing run, §4.1) is not implemented yet. <strong>In-flight count (Phase E)</strong>: the worker reports the number of jobs it is currently executing; the API sets <code>status = busy</code> when it is &gt; 0, <code>idle</code> when 0 (the worker is authoritative, which also flips a finished worker back to idle). <code>capacity</code> (the worker's <code>STACKD_MAX_CONCURRENT_JOBS</code>) is advertised for the scheduler to reason about; not persisted this phase (no schema change). A heartbeat with no body is just a liveness ping.</p>
+<p>Heartbeat = downstream command channel. No incoming connection. It carries <code>diagnostics</code> and <code>cancel_job</code> (<code>{job_id}</code>, cancelling an executing run, §4.1): the agent keeps a registry of its running jobs, flips the job's cancel token — the job's own thread interrupts its subprocess (the <code>docker</code> runner signals the container, whose init forwards SIGINT) — and answers the command with <code>{running_here}</code>. A cancel that beats the job's registration is remembered and applied when it registers. The worker reports the end with the job event <code>job_canceled</code> (§7.1 events), refused with 409 unless a cancel was requested. <strong>In-flight count (Phase E)</strong>: the worker reports the number of jobs it is currently executing; the API sets <code>status = busy</code> when it is &gt; 0, <code>idle</code> when 0 (the worker is authoritative, which also flips a finished worker back to idle). <code>capacity</code> (the worker's <code>STACKD_MAX_CONCURRENT_JOBS</code>) is advertised for the scheduler to reason about; not persisted this phase (no schema change). A heartbeat with no body is just a liveness ping.</p>
 <p><strong>Worker concurrency (Phase E).</strong> <code>STACKD_MAX_CONCURRENT_JOBS</code> (default <code>1</code> = today's serial behaviour) bounds the in-flight jobs a single worker runs at once, each on its own thread (the heartbeat thread is already independent). The claim stays one-run-at-a-time on the wire; the API's <code>SELECT … FOR UPDATE SKIP LOCKED</code> (§7.2) and the one-active-run-per-env partial unique index (§3.5) keep concurrent claims safe — <strong>concurrency is across different environments only</strong>. Same-env races are still guarded by the state-backend lock (§11.2).</p>
 <h3 id="72-claim-long-poll">7.2 Claim (long-poll)<a class="headerlink" href="#72-claim-long-poll" title="Permanent link">&para;</a></h3>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-24-1" name="__codelineno-24-1" href="#__codelineno-24-1"></a>POST /worker/v1/jobs/claim?wait=25
@@ -4554,7 +4567,7 @@ action lives there, e.g. the approver of a rollout's auto-confirmation (§21.5).
 <p>Apply affinity: a <code>confirmed</code> run is reserved for its originating worker for <strong>60 s</strong> (<code>AND (r.worker_id = :wid OR r.confirmed_at &lt; now() - interval '60 seconds')</code> on confirmed runs). Past that delay (dead or saturated worker), any compatible worker takes it: the apply needs nothing from the plan worker's workspace — it downloads the run's <strong>saved plan</strong> from the API (§7.3) and applies exactly it. There is <strong>no re-plan</strong> on the apply path: no saved plan → the apply fails.</p>
 <h3 id="73-events-and-artifacts">7.3 Events and artifacts<a class="headerlink" href="#73-events-and-artifacts" title="Permanent link">&para;</a></h3>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-26-1" name="__codelineno-26-1" href="#__codelineno-26-1"></a>POST /worker/v1/jobs/{id}/events
-<a id="__codelineno-26-2" name="__codelineno-26-2" href="#__codelineno-26-2"></a>  { &quot;event&quot;: &quot;phase_started&quot;|&quot;phase_finished&quot;|&quot;job_failed&quot;,
+<a id="__codelineno-26-2" name="__codelineno-26-2" href="#__codelineno-26-2"></a>  { &quot;event&quot;: &quot;phase_started&quot;|&quot;phase_finished&quot;|&quot;job_failed&quot;|&quot;job_canceled&quot;,
 <a id="__codelineno-26-3" name="__codelineno-26-3" href="#__codelineno-26-3"></a>    &quot;phase&quot;: &quot;...&quot;, &quot;exit_code&quot;: 0,
 <a id="__codelineno-26-4" name="__codelineno-26-4" href="#__codelineno-26-4"></a>    &quot;result&quot;: { &quot;has_changes&quot;: true,
 <a id="__codelineno-26-5" name="__codelineno-26-5" href="#__codelineno-26-5"></a>                &quot;summary&quot;: {&quot;add&quot;: 2, &quot;change&quot;: 0, &quot;destroy&quot;: 0, &quot;import&quot;: 0, &quot;forget&quot;: 0, …},
@@ -4569,9 +4582,11 @@ action lives there, e.g. the approver of a rollout's auto-confirmation (§21.5).
 <a id="__codelineno-26-14" name="__codelineno-26-14" href="#__codelineno-26-14"></a>  job_failed(after_apply) carries &quot;result&quot;: {&quot;checks&quot;: [...], &quot;outputs&quot;: {...}}   # §8.3: the
 <a id="__codelineno-26-15" name="__codelineno-26-15" href="#__codelineno-26-15"></a>      # apply went through, an after_apply hook failed → outputs recorded (§9.1), drift
 <a id="__codelineno-26-16" name="__codelineno-26-16" href="#__codelineno-26-16"></a>      # cleared (§19), no cascade
-<a id="__codelineno-26-17" name="__codelineno-26-17" href="#__codelineno-26-17"></a>
-<a id="__codelineno-26-18" name="__codelineno-26-18" href="#__codelineno-26-18"></a>PUT /worker/v1/jobs/{id}/artifacts/plan.tfplan | plan.json | outputs.json
-<a id="__codelineno-26-19" name="__codelineno-26-19" href="#__codelineno-26-19"></a>GET /worker/v1/jobs/{id}/artifacts/plan.tfplan          # the apply job&#39;s saved plan
+<a id="__codelineno-26-17" name="__codelineno-26-17" href="#__codelineno-26-17"></a>  job_canceled carries &quot;result&quot;: {&quot;checks&quot;: [...]} — the job stopped on a user&#39;s request
+<a id="__codelineno-26-18" name="__codelineno-26-18" href="#__codelineno-26-18"></a>      (§4.1); 409 unless `runs.cancel_requested_at` is set
+<a id="__codelineno-26-19" name="__codelineno-26-19" href="#__codelineno-26-19"></a>
+<a id="__codelineno-26-20" name="__codelineno-26-20" href="#__codelineno-26-20"></a>PUT /worker/v1/jobs/{id}/artifacts/plan.tfplan | plan.json | outputs.json
+<a id="__codelineno-26-21" name="__codelineno-26-21" href="#__codelineno-26-21"></a>GET /worker/v1/jobs/{id}/artifacts/plan.tfplan          # the apply job&#39;s saved plan
 </code></pre></div>
 <p><strong>Saved plan.</strong> What a human confirms is the plan file the plan job made, and the apply applies exactly that file (<code>tofu apply plan.tfplan</code>) — never a fresh plan:</p>
 <ul>
@@ -4730,8 +4745,8 @@ name and hour: the agent keeps retrying, slowly — every 5 min — after a 403,
 </tr>
 <tr>
 <td>Cold log archiving</td>
-<td>end of run</td>
-<td><code>run_logs</code> → S3 gz, purge hot &gt; 7 d (§5.2) — <strong>not implemented yet</strong>: logs stay in <code>run_logs</code></td>
+<td>every tick</td>
+<td>runs terminal for ≥ 60 s (the agent's last buffered chunks, §5.1) with <code>logs_archived_at IS NULL</code> (20 per tick) → S3 <code>logs/{run_id}/{phase}.log.gz</code> (§5.2)</td>
 </tr>
 <tr>
 <td>OIDC key retirement</td>
@@ -4744,14 +4759,14 @@ name and hour: the agent keeps retrying, slowly — every 5 min — after a 403,
 <td>a started rollout whose approval has expired is advanced under its lock → <code>paused (approval_expired)</code> (§21.4), without waiting for its next event</td>
 </tr>
 <tr>
-<td>Refresh token / audit purge</td>
+<td>Retention purge</td>
 <td>daily</td>
-<td>expired families (§2.5), audit &gt; 2 years (§6.1, audited purge) — <strong>not implemented yet</strong></td>
+<td>hot <code>run_logs</code> rows 7 d after archiving (§5.2); refresh-token families whose every token has expired (§2.5); audit events older than <code>audit_retention_days</code> (730) through the distinct <code>stackd_audit_purge</code> role (§6.1), only if <code>STACKD_AUDIT_PURGE_DATABASE_URL</code> is set</td>
 </tr>
 </tbody>
 </table>
 <p><strong>Single-execution guarantee</strong>: each task takes a dedicated <strong>PG advisory lock</strong> (<code>pg_try_advisory_lock(&lt;task_key&gt;)</code>) before running; a replica that does not obtain the lock skips its tick. The lock is session-level, so it is taken and released on a <strong>dedicated connection</strong> held for the task's whole run, separate from the task's own DB session — the tasks commit mid-way, which returns the session's connection to the pool, and an unlock through it could land on another connection and leak the lock. No permanently elected leader (no external dependency), no double execution. The tasks are <strong>idempotent</strong> anyway (re-running a staleness computation or an archive breaks nothing) — the advisory lock mainly avoids redundant work and races on the <code>worker_lost</code> transitions.</p>
-<p><strong>Advisory-lock keys</strong> (one per lock, never shared — two holders of the same key would skip each other's work): 74001 <code>worker_lost</code>, 74002 notification outbox, 74003 VCS outbox, 74004 drift, 74005 head poll, 74006 OIDC key retirement, 74007 OIDC key management (the issuer's rotation lock, §3.11), 74008 rollout approval expiry. A new lock takes the next free key and is added here.</p>
+<p><strong>Advisory-lock keys</strong> (one per lock, never shared — two holders of the same key would skip each other's work): 74001 <code>worker_lost</code>, 74002 notification outbox, 74003 VCS outbox, 74004 drift, 74005 head poll, 74006 OIDC key retirement, 74007 OIDC key management (the issuer's rotation lock, §3.11), 74008 rollout approval expiry, 74009 log archiving, 74010 retention purge. A new lock takes the next free key and is added here.</p>
 <hr />
 <h2 id="8-hooks-checks-custom-flows">8. Hooks &amp; checks (custom flows)<a class="headerlink" href="#8-hooks-checks-custom-flows" title="Permanent link">&para;</a></h2>
 <h3 id="81-two-sources-one-merge">8.1 Two sources, one merge<a class="headerlink" href="#81-two-sources-one-merge" title="Permanent link">&para;</a></h3>
@@ -4976,7 +4991,7 @@ unprotected environment, with no mock and no <code>warn</code> check.
 - <em>Level 1 — branch ahead</em>: SHA comparison, always available. <code>commits_ahead</code> via the Git provider's compare API if available, otherwise binary "behind" display.
 - <em>Level 2 — concerns you</em>: <code>affects_project_root</code> = at least one commit ahead modifies files under <code>project_root</code> (GitHub/GitLab compare API). If unavailable: NULL, the UI stays at level 1.</p>
 <p><strong>Effects</strong>:
-- <code>↑N</code> chip on the env cell (DESIGN.md §5.1) and the env header; attenuated variant if <code>affects_project_root = false</code> ("the branch moved ahead, but not this folder"). <strong>Not in the UI yet</strong>, nor the banner below: today staleness is the API's <code>stale</code>/<code>commits_ahead</code> fields.
+- <code>↑N</code> chip on the env cell (DESIGN.md §5.1) and the env header; attenuated variant if <code>affects_project_root = false</code> ("the branch moved ahead, but not this folder"). Shipped: the chip (<code>ModifierChips</code>, overview matrix and env header) and the banner below (run page).
 - <strong>Obsolete <code>unconfirmed</code> run</strong>: if <code>head_sha</code> advances while a plan awaits confirmation, banner on the run page — "plan computed on <code>abc1234</code>, the branch advanced by N commits" — with a <em>Re-plan</em> action (discard + new run on the head). Confirmation remains <strong>possible</strong> (applying a specific commit is legitimate) but the obsolescence is impossible to miss.
 - No automatic action: staleness is information, never a trigger (that is the role of webhooks).
 - <code>GET /api/v1/environments/{id}</code> exposes <code>head_sha</code>, <code>commits_ahead</code>, <code>affects_project_root</code>, <code>stale</code>.</p>

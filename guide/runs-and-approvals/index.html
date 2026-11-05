@@ -1358,8 +1358,12 @@
 <code>plan</code>, and reports back. With a non-empty diff the run stops at <strong><code>unconfirmed</code></strong> and waits for a
 human. After <strong>confirm</strong>, a worker (not necessarily the same one) claims the <strong>apply job</strong> and
 drives the run to <strong><code>finished</code></strong>. An empty diff goes straight to <code>finished</code>; a
-failure to <code>failed</code>. A human can <code>discard</code> an <code>unconfirmed</code> run, or <code>cancel</code> a <code>queued</code> or
-<code>unconfirmed</code> one (stopping a run a worker is executing is not supported yet).</p>
+failure to <code>failed</code>. A human can <code>discard</code> an <code>unconfirmed</code> run, or <code>cancel</code> a <code>queued</code>, <code>confirmed</code> or
+<code>unconfirmed</code> one. A run a worker is <strong>executing</strong> can be <strong>stopped</strong>: the worker is asked on its next
+heartbeat and interrupts the tool as a Ctrl-C would (tofu finishes the operation in flight and releases
+the state lock). A stopped plan ends <code>canceled</code>. A stopped <strong>apply</strong> ends <code>failed</code> with
+<code>canceled_during_apply</code> — never <code>canceled</code>, because infrastructure may be partly changed — and needs the
+right to apply, like starting it did.</p>
 <div class="admonition note">
 <p class="admonition-title">Note</p>
 <p>State only ever changes through one function (<code>transition()</code>), which records a <code>run_event</code> and

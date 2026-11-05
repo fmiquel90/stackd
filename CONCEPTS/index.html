@@ -2101,7 +2101,7 @@ out to them.</p>
   the worker). Today it carries <strong>diagnostics</strong>: an admin clicks a button, a <code>pending</code> command is
   queued, the worker picks it up on its next heartbeat, runs a <strong>read-only</strong> bundle (versions, disk,
   environment variable <em>names</em> — never values, recent agent logs) and posts it back. Same mechanism will carry
-  <code>cancel_job</code> later. Delivery latency is bounded by the heartbeat interval (~20 s).</li>
+  <code>cancel_job</code>, which stops a job the worker is executing. Delivery latency is bounded by the heartbeat interval (~20 s).</li>
 </ul>
 <p><strong>Run an agent:</strong></p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-11-1" name="__codelineno-11-1" href="#__codelineno-11-1"></a><span class="nv">POOL</span><span class="o">=</span><span class="k">$(</span>curl<span class="w"> </span>-s<span class="w"> </span>-X<span class="w"> </span>POST<span class="w"> </span>localhost:8000/api/v1/worker-pools<span class="w"> </span>-H<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$AUTH</span><span class="s2">&quot;</span><span class="w"> </span><span class="se">\</span>

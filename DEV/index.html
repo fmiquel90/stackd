@@ -1445,7 +1445,7 @@
 </code></pre></div>
 <ul>
 <li>The seed stacks point to them with <code>repo_url: file:///stackd-dev/repos/demo-network</code> (<code>.dev/</code> is mounted at <code>/stackd-dev</code> in the API and the worker; <code>STACKD_SEED_REPO_BASE</code> overrides the base). <code>repo_auth_kind: none</code>. The fixtures carry no <code>.stackd.yml</code>.</li>
-<li><strong>Simulate "a PR is merged"</strong> without GitHub: <code>task push-change</code> commits a change in demo-network → staleness polling (reduced to <strong>15 s</strong> in dev via <code>STACKD_HEAD_POLL_INTERVAL</code>) turns <code>stale</code> to <code>true</code> (<code>GET /api/v1/environments/{id}</code>) on an env that already has a finished tracked run. The <code>↑1</code> chip of DESIGN §5.1 is not in the UI yet. Perfect for testing the "apply at 9am, merge at 9:15am" scenario.</li>
+<li><strong>Simulate "a PR is merged"</strong> without GitHub: <code>task push-change</code> commits a change in demo-network → staleness polling (reduced to <strong>15 s</strong> in dev via <code>STACKD_HEAD_POLL_INTERVAL</code>) turns <code>stale</code> to <code>true</code> (<code>GET /api/v1/environments/{id}</code>) on an env that already has a finished tracked run. The <code>↑1</code> chip of DESIGN §5.1 shows on the env cell and the stale-plan banner on an unconfirmed run's page. Perfect for testing the "apply at 9am, merge at 9:15am" scenario.</li>
 <li><strong>Real webhooks</strong>: <code>task dev-git</code> launches Gitea (profile <code>git</code>, port 3000). Pushing the fixtures to it and configuring its webhook to the API are manual for now (no <code>seed-gitea</code> or <code>webhook</code> task yet).</li>
 </ul>
 <hr />
