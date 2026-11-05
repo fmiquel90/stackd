@@ -143,12 +143,19 @@ async def _should_trigger(
         return False
     if dep.trigger_policy == TriggerPolicy.always:
         return True
-    # on_output_change: trigger unless the downstream's last finished run already consumed the
-    # current upstream values for every referenced output.
+    # on_output_change: trigger unless the downstream's last *applied* run already consumed the
+    # current upstream values for every referenced output. Only an apply that finished deploys the
+    # inputs it resolved: a proposed or drift plan, a command, or an empty-diff plan in between
+    # changed nothing, so it must not stand as the baseline and suppress a needed cascade.
     last = (
         await session.execute(
             select(Run)
-            .where(Run.environment_id == downstream.id, Run.state == RunState.finished)
+            .where(
+                Run.environment_id == downstream.id,
+                Run.state == RunState.finished,
+                Run.type.in_((RunType.tracked, RunType.destroy)),
+                Run.confirmed_at.is_not(None),
+            )
             .order_by(Run.finished_at.desc())
             .limit(1)
         )

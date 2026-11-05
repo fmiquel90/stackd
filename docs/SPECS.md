@@ -1061,7 +1061,9 @@ At `applying → finished`, parsing of `outputs.json`:
 1. outgoing edges of run.environment
 2. policy: never → skip; always → trigger;
    on_output_change → trigger if a referenced output's current value ≠ the one in
-   resolved_inputs of the last finished run of the downstream env (no such run → trigger)
+   resolved_inputs of the last applied run of the downstream env (a finished tracked/
+   destroy run with confirmed_at set — never a proposed/drift plan, a command or an
+   empty-diff plan, which deployed nothing; no such run → trigger)
 3. run created: type=tracked, triggered_by=dependency, parent_run_id, run_group_id
 4. multi-parents: downstream triggered when ALL its parents of the run group are finished
 5. parent failed → branch stopped, run group = partial_failure
