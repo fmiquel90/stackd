@@ -784,3 +784,43 @@ async def test_group_status_counts_the_runs_the_caller_can_read(client: httpx.As
     root_id = await _drive_root(client, admin, wh, shared)  # hidden's run is queued
     assert (await _group(client, admin, root_id))["status"] == "running"
     assert (await _group(client, bob, root_id)) == {"id": root_id, "status": "succeeded"}
+
+
+async def test_on_output_change_compares_with_the_last_apply(client: httpx.AsyncClient) -> None:
+    """The `on_output_change` baseline is the downstream's last *applied* run (§9.2): a proposed
+    plan that read the new upstream value in between deployed nothing, so it must not suppress
+    the cascade that brings that value to the downstream."""
+    admin = await login(client, "admin")
+    wh = await register_worker(client, admin, "pool-ooc-baseline")
+    envs = await _envs(client, admin, "oocb", ("up", "down"))
+    await _dep_io(client, admin, envs["down"], envs["up"], "on_output_change", "out", "in_up")
+
+    async def apply_up(value: str) -> None:
+        run = await client.post(
+            f"/api/v1/environments/{envs['up']}/runs", headers=admin, json={"with_downstream": True}
+        )
+        await _plan(client, wh, admin, await _claim(client, wh))
+        await _apply_out(client, wh, admin, run.json()["id"], {"out": value})
+
+    # down applies V1.
+    await apply_up("V1")
+    down_job = await _claim(client, wh)
+    assert down_job["resolved_inputs"] == {"TF_VAR_in_up": "V1"}
+    await _plan(client, wh, admin, down_job)
+    await _apply_out(client, wh, admin, down_job["job_id"], {})
+
+    # The upstream's output moves to V2, and a proposed plan of down reads it — and finishes.
+    await _set_output(envs["up"], "out", "V2")
+    proposed = await client.post(
+        f"/api/v1/environments/{envs['down']}/runs", headers=admin, json={"type": "proposed"}
+    )
+    job = await _claim(client, wh)
+    assert job["job_id"] == proposed.json()["id"]
+    assert job["resolved_inputs"] == {"TF_VAR_in_up": "V2"}
+    await _plan(client, wh, admin, job)
+    assert (await _env_runs(client, admin, envs["down"]))[0]["state"] == "finished"
+
+    # The upstream applies V2: down still runs V1, so the cascade must trigger it.
+    await apply_up("V2")
+    latest = (await _env_runs(client, admin, envs["down"]))[0]
+    assert latest["triggered_by"] == "dependency" and latest["state"] == "queued"

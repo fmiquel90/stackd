@@ -140,6 +140,9 @@ async def transition(
         # Saved-plan retention (§11.3): a terminal run is never applied, and its plan file holds
         # secrets — drop it (pointer now, S3 object once this transaction commits).
         discard_saved_plan(session, locked)
+        # Break-glass overrides (§15.4) are for this run only: no job reads them once it is
+        # terminal, so the sealed values don't outlive it.
+        locked.secret_overrides_encrypted = None
 
     session.add(
         RunEvent(

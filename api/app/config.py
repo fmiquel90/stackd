@@ -31,7 +31,9 @@ class Settings(BaseSettings):
 
     # Auth
     stackd_dev_auth: bool = False
-    stackd_allowed_domains: str = ""  # comma-separated `hd` allowlist
+    # Comma-separated Google `hd` allowlist (§2.1). Empty admits no Google login (fail closed) and
+    # is refused at production startup; dev login does not read it.
+    stackd_allowed_domains: str = ""
     google_client_id: str = ""
     google_client_secret: str = ""
     stackd_public_url: str = "http://localhost:8000"  # browser/OAuth + OIDC issuer (must be public)
@@ -109,7 +111,8 @@ class Settings(BaseSettings):
     def _production_ready(self) -> Settings:
         """Refuse to start a production API on dev-grade settings (§13): a master key that does not
         decode to 32 bytes, a short session-signing secret, or a public URL that is not https (the
-        OIDC issuer AWS fetches, the session cookies)."""
+        OIDC issuer AWS fetches, the session cookies), or no Google `hd` allowlist (§2.1 — the
+        login would admit nobody)."""
         if not self.is_production:
             return self
         problems: list[str] = []
@@ -121,6 +124,8 @@ class Settings(BaseSettings):
             problems.append("STACKD_JWT_SECRET must be at least 32 characters")
         if not self.stackd_public_url.startswith("https://"):
             problems.append("STACKD_PUBLIC_URL must be an https:// URL")
+        if not self.allowed_domains:
+            problems.append("STACKD_ALLOWED_DOMAINS must list at least one Google Workspace domain")
         if self.stackd_oidc_signer == "local" and not self.stackd_allow_local_signer:
             problems.append(
                 "STACKD_OIDC_SIGNER must be `kms` (or acknowledge a local signing key with "

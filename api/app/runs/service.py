@@ -12,6 +12,7 @@ from app.enums import (
     RunEventActor,
     RunState,
     RunType,
+    SecretFallback,
     TriggeredBy,
 )
 from app.errors import ProblemException
@@ -32,6 +33,30 @@ async def _env_membership(session: AsyncSession, user: User | None, env: Environ
     stack = await session.get(Stack, env.stack_id)
     assert stack is not None
     return await get_membership(session, user.id, stack.space_id)
+
+
+async def _check_overridable(
+    session: AsyncSession, env: Environment, secret_overrides: dict[str, str]
+) -> None:
+    """A break-glass override is only accepted for a variable of `env` that is an external secret
+    reference opted in with `secret_fallback_mode = break_glass` (§15.4) — any other name is
+    refused (422), so an override can never stand in for a plain or sensitive variable. Names
+    only in the error, never a value."""
+    from app.variables.resolution import resolve_variables
+
+    overridable = {
+        rv.name
+        for rv in await resolve_variables(session, env)
+        if rv.is_reference and rv.secret_fallback_mode == SecretFallback.break_glass
+    }
+    refused = sorted(set(secret_overrides) - overridable)
+    if refused:
+        raise ProblemException(
+            422,
+            "Override not allowed",
+            "A secret override needs a secret reference with secret_fallback_mode=break_glass; "
+            f"not overridable: {', '.join(refused)}.",
+        )
 
 
 async def trigger_run(
@@ -67,6 +92,7 @@ async def trigger_run(
             raise ProblemException(
                 403, "Forbidden", "Supplying secret overrides requires apply permission."
             )
+        await _check_overridable(session, env, secret_overrides)
         overrides_encrypted = encrypt(json.dumps(secret_overrides))
 
     run = Run(

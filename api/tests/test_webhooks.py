@@ -47,6 +47,7 @@ async def test_push_updates_head_and_triggers(client: httpx.AsyncClient) -> None
         headers={
             "X-GitHub-Event": "push",
             "X-Hub-Signature-256": _sig(body),
+            "X-GitHub-Delivery": str(uuid.uuid4()),
             "Content-Type": "application/json",
         },
     )
@@ -85,7 +86,11 @@ async def test_pull_request_creates_proposed_run(client: httpx.AsyncClient) -> N
     resp = await client.post(
         "/api/v1/webhooks/github",
         content=body,
-        headers={"X-GitHub-Event": "pull_request", "X-Hub-Signature-256": _sig(body)},
+        headers={
+            "X-GitHub-Event": "pull_request",
+            "X-Hub-Signature-256": _sig(body),
+            "X-GitHub-Delivery": str(uuid.uuid4()),
+        },
     )
     assert resp.status_code == 200
     runs = (await client.get(f"/api/v1/environments/{env_id}/runs", headers=admin)).json()
@@ -108,7 +113,11 @@ async def test_branch_deletion_push_clears_head_and_triggers_nothing(
         return await client.post(
             "/api/v1/webhooks/github",
             content=body,
-            headers={"X-GitHub-Event": "push", "X-Hub-Signature-256": _sig(body)},
+            headers={
+                "X-GitHub-Event": "push",
+                "X-Hub-Signature-256": _sig(body),
+                "X-GitHub-Delivery": str(uuid.uuid4()),
+            },
         )
 
     assert (await _push({"after": "abc1234def", "commits": [{"modified": ["main.tf"]}]})).json()[
@@ -170,7 +179,11 @@ async def test_push_skips_an_env_re_pointed_meanwhile(client: httpx.AsyncClient)
             client.post(
                 "/api/v1/webhooks/github",
                 content=body,
-                headers={"X-GitHub-Event": "push", "X-Hub-Signature-256": _sig(body)},
+                headers={
+                    "X-GitHub-Event": "push",
+                    "X-Hub-Signature-256": _sig(body),
+                    "X-GitHub-Delivery": str(uuid.uuid4()),
+                },
             )
         )
         for _ in range(200):  # until the push waits on the env's row lock (or is done)
@@ -185,3 +198,128 @@ async def test_push_skips_an_env_re_pointed_meanwhile(client: httpx.AsyncClient)
     env = (await client.get(f"/api/v1/environments/{env_id}", headers=admin)).json()
     assert (env["branch"], env["head_sha"]) == ("other", None)
     assert (await client.get(f"/api/v1/environments/{env_id}/runs", headers=admin)).json() == []
+
+
+# --- anti-replay (SPECS §13) ---
+
+
+async def _deliver(
+    client: httpx.AsyncClient,
+    payload: dict,
+    event: str,
+    delivery: str | None,
+    sig: str | None = None,
+) -> httpx.Response:
+    body = json.dumps(payload).encode()
+    headers = {"X-GitHub-Event": event, "X-Hub-Signature-256": sig or _sig(body)}
+    if delivery is not None:
+        headers["X-GitHub-Delivery"] = delivery
+    return await client.post("/api/v1/webhooks/github", content=body, headers=headers)
+
+
+async def _backdate(delivery: str, minutes: int) -> None:
+    """Pretend `delivery` was first received `minutes` ago."""
+    from datetime import UTC, datetime, timedelta
+
+    from sqlalchemy import update
+
+    from app.db import SessionLocal
+    from app.models.webhook_delivery import WebhookDelivery
+
+    async with SessionLocal() as session:
+        await session.execute(
+            update(WebhookDelivery)
+            .where(WebhookDelivery.delivery_id == delivery)
+            .values(received_at=datetime.now(UTC) - timedelta(minutes=minutes))
+        )
+        await session.commit()
+
+
+async def test_a_replayed_delivery_is_a_no_op(client: httpx.AsyncClient) -> None:
+    """The same `X-GitHub-Delivery` id within 5 min is acknowledged (2xx, `duplicate`) and not
+    acted on again: one run, whatever GitHub (or a replayer) sends twice."""
+    admin = await login(client, "admin")
+    repo = "https://github.com/acme/replay"
+    _stack, env_id = await _stack_with_webhook(client, admin, "wh-replay", repo)
+    payload = {
+        "ref": "refs/heads/main",
+        "after": "abc1234def",
+        "repository": {"clone_url": repo},
+        "commits": [{"modified": ["main.tf"]}],
+    }
+    delivery = str(uuid.uuid4())
+
+    first = await _deliver(client, payload, "push", delivery)
+    assert first.status_code == 200 and first.json()["triggered"] == 1
+    again = await _deliver(client, payload, "push", delivery)
+    assert again.status_code == 200
+    assert again.json() == {"matched": 1, "triggered": 0, "duplicate": True}
+    runs = (await client.get(f"/api/v1/environments/{env_id}/runs", headers=admin)).json()
+    assert len(runs) == 1
+
+
+async def test_a_delivery_past_the_window_is_processed_again(client: httpx.AsyncClient) -> None:
+    """Past the replay window the id counts as new (e.g. a deliberate Redeliver from GitHub)."""
+    admin = await login(client, "admin")
+    repo = "https://github.com/acme/replay-window"
+    await _stack_with_webhook(client, admin, "wh-replay-window", repo)
+    ping = {"zen": "hi", "repository": {"clone_url": repo}}
+    delivery = str(uuid.uuid4())
+
+    assert "duplicate" not in (await _deliver(client, ping, "ping", delivery)).json()
+    assert (await _deliver(client, ping, "ping", delivery)).json()["duplicate"] is True
+    await _backdate(delivery, minutes=4)
+    assert (await _deliver(client, ping, "ping", delivery)).json()["duplicate"] is True
+    await _backdate(delivery, minutes=6)
+    assert "duplicate" not in (await _deliver(client, ping, "ping", delivery)).json()
+    assert (await _deliver(client, ping, "ping", delivery)).json()["duplicate"] is True
+
+
+async def test_a_delivery_without_an_id_is_rejected(client: httpx.AsyncClient) -> None:
+    """An authenticated request without `X-GitHub-Delivery` (GitHub always sends one) → 400, and
+    nothing runs; a bad signature stays a 401, and doesn't record its delivery id."""
+    admin = await login(client, "admin")
+    repo = "https://github.com/acme/replay-noid"
+    _stack, env_id = await _stack_with_webhook(client, admin, "wh-replay-noid", repo)
+    payload = {"ref": "refs/heads/main", "after": "abc", "repository": {"clone_url": repo}}
+
+    missing = await _deliver(client, payload, "push", None)
+    assert missing.status_code == 400
+    assert (await _deliver(client, payload, "push", "x" * 200)).status_code == 400
+    delivery = str(uuid.uuid4())
+    forged = await _deliver(client, payload, "push", delivery, sig="sha256=deadbeef")
+    assert forged.status_code == 401
+    assert (await client.get(f"/api/v1/environments/{env_id}/runs", headers=admin)).json() == []
+    # The forged attempt did not burn the id: the genuine delivery is processed.
+    assert (await _deliver(client, payload, "push", delivery)).json()["triggered"] == 1
+
+
+async def test_retention_purges_delivery_ids_past_the_window(client: httpx.AsyncClient) -> None:
+    from datetime import UTC, datetime
+
+    from sqlalchemy import select
+
+    from app.db import SessionLocal
+    from app.models.webhook_delivery import WebhookDelivery
+    from app.webhooks.replay import purge_webhook_deliveries
+
+    admin = await login(client, "admin")
+    repo = "https://github.com/acme/replay-purge"
+    await _stack_with_webhook(client, admin, "wh-replay-purge", repo)
+    old, fresh = str(uuid.uuid4()), str(uuid.uuid4())
+    for delivery in (old, fresh):
+        await _deliver(client, {"repository": {"clone_url": repo}}, "ping", delivery)
+    await _backdate(old, minutes=10)
+
+    async with SessionLocal() as session:
+        assert await purge_webhook_deliveries(session, datetime.now(UTC)) >= 1
+        left = set(
+            (
+                await session.execute(
+                    select(WebhookDelivery.delivery_id).where(
+                        WebhookDelivery.delivery_id.in_((old, fresh))
+                    )
+                )
+            ).scalars()
+        )
+    assert left == {fresh}
