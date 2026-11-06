@@ -24,6 +24,7 @@ from agent.logging import get_logger, setup as setup_logging
 from agent.masking import Masker, mask_plan_json
 from agent.docker_engine import DockerEngine
 from agent.docker_runner import DockerRunner
+from agent.registry_auth import credential_for, registry_host
 from agent.tools import pick
 from agent.runner import (
     LOCAL,
@@ -118,7 +119,18 @@ def _make_runner(settings: Settings, job: dict[str, Any], ws: Workspace) -> Runn
     image = settings.runner_images[f"{env_info['tool']}:{version}"]
     engine = DockerEngine(settings.docker_host)
     if not engine.image_exists(image):
-        engine.pull(image)
+        # A private registry's credential (STACKD_REGISTRY_AUTH_FILE), for this pull only.
+        credential = credential_for(image, settings.registry_auth_file)
+        log.info(
+            "pulling runner image",
+            extra={
+                "event": "agent.image_pull",
+                "image": image,
+                "registry": registry_host(image),
+                "authenticated": credential is not None,
+            },
+        )
+        engine.pull(image, credential)
     return DockerRunner(engine, image, ws.path, job["job_id"], settings.docker_limits)
 
 

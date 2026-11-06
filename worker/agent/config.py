@@ -5,6 +5,7 @@ from dataclasses import dataclass, field
 
 from agent.docker_runner import DockerLimits
 from agent.drain import DEFAULT_DRAIN_TIMEOUT_SECONDS
+from agent.registry_auth import load_auths
 from agent.tools import parse_runner_images, probe_local, tools_from_images
 
 
@@ -74,6 +75,9 @@ class Settings:
     runner_images: dict[str, str] = field(default_factory=dict)
     docker_host: str | None = None  # STACKD_DOCKER_HOST: unix socket of the Docker Engine
     docker_limits: DockerLimits = field(default_factory=DockerLimits)
+    # STACKD_REGISTRY_AUTH_FILE (§7.4): a Docker config.json whose `auths` authenticate the pull of
+    # a runner image from a private registry. Re-read at each pull (rotated credentials apply).
+    registry_auth_file: str | None = None
 
     def __post_init__(self) -> None:
         # A typo must not fall back to `local` silently: that runner has no isolation (§7.4).
@@ -82,6 +86,10 @@ class Settings:
         if self.runner == "docker" and not self.runner_images:
             # Without images the worker could run nothing: refuse to start rather than register.
             raise ValueError("STACKD_RUNNER=docker needs STACKD_RUNNER_IMAGES (pinned by digest)")
+        if self.registry_auth_file is not None:
+            # A wrong path or a broken file refuses to start, rather than surfacing as a failed
+            # pull on the first run that needs a missing image.
+            load_auths(self.registry_auth_file)
 
     @classmethod
     def from_env(cls) -> "Settings":
@@ -112,6 +120,7 @@ class Settings:
             runner_images=parse_runner_images(os.environ.get("STACKD_RUNNER_IMAGES", "")),
             docker_host=os.environ.get("STACKD_DOCKER_HOST") or None,
             docker_limits=_docker_limits(),
+            registry_auth_file=os.environ.get("STACKD_REGISTRY_AUTH_FILE") or None,
         )
 
     def available_tools(self) -> dict[str, list[str]]:
