@@ -93,6 +93,7 @@ export const TIERS: TierDef[] = [
 export function makeUser(over: Partial<User> = {}): User {
   return {
     id: "user-alice",
+    kind: "human",
     email: "alice@dev.local",
     display_name: null,
     avatar_url: null,

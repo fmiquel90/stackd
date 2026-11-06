@@ -25,6 +25,7 @@ const STACK: Stack = {
 function renderAs(role: Role) {
   const user: User = {
     id: "u1",
+    kind: "human",
     email: `${role}@dev.local`,
     display_name: null,
     avatar_url: null,

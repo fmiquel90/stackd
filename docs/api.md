@@ -33,7 +33,8 @@ on `/refresh` and `/logout` use a CSRF double-submit token.
 
 **Automation** (CI, scripts, scheduled exports) uses a **service account** and its API token
 ([SPECS §23](SPECS.md)): an instance admin creates the account, grants it a space membership, and
-mints an expiring token, shown once:
+mints an expiring token, shown once — in the UI under **Settings → Service accounts** (the
+membership under **Settings → Spaces**), or over the API:
 
 ```bash
 SA=$(curl -s -X POST $STACKD/api/v1/service-accounts -H "$AUTH" -H 'content-type: application/json' \

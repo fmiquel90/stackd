@@ -12,8 +12,12 @@ export interface TierDef {
   created_at: string;
 }
 
+/** A person signing in with Google, or a service account authenticating with an API token (SPECS §23). */
+export type UserKind = "human" | "service";
+
 export interface User {
   id: string;
+  kind: UserKind;
   email: string;
   display_name: string | null;
   avatar_url: string | null;
@@ -294,6 +298,81 @@ export interface WorkerPool {
 // Pool creation returns the agent token in cleartext exactly once — never retrievable again.
 export interface PoolCreated extends WorkerPool {
   token: string;
+}
+
+// Service accounts & API tokens (SPECS §23) — instance admin.
+export interface ServiceAccount {
+  id: string;
+  name: string;
+  email: string;
+  /** Instance role: reader or writer only (no instance-admin token). */
+  role: Role;
+  disabled: boolean;
+  created_at: string;
+  /** Tokens neither revoked nor expired. */
+  active_tokens: number;
+}
+
+export interface ApiToken {
+  id: string;
+  name: string;
+  /** Display prefix only (`stkd_ab12…`): the token itself is stored hashed. */
+  prefix: string;
+  expires_at: string;
+  last_used_at: string | null;
+  revoked_at: string | null;
+  created_at: string;
+}
+
+/** Token creation returns the raw token exactly once — never retrievable again. */
+export interface ApiTokenCreated extends ApiToken {
+  token: string;
+}
+
+// Configuration export / import of a space (SPECS §22). The document is opaque to the UI: it is
+// read from a file and posted back as is (the API validates it strictly).
+export type ConfigDocument = Record<string, unknown>;
+
+export type ImportOp = "created" | "updated" | "unchanged";
+
+export interface ImportChange {
+  op: ImportOp;
+  kind: string;
+  path: string;
+  fields?: string[];
+}
+
+export interface ImportSkipped {
+  kind: string;
+  path: string;
+  reason: string;
+  [extra: string]: unknown;
+}
+
+export interface ImportMissingSecret {
+  path: string;
+  item: string;
+  [extra: string]: unknown;
+}
+
+export interface ImportWarning {
+  kind: string;
+  path?: string;
+  reason?: string;
+  fields?: string[];
+  [extra: string]: unknown;
+}
+
+export interface ImportReport {
+  dry_run: boolean;
+  summary: { created: number; updated: number; unchanged: number; skipped: number };
+  changes: ImportChange[];
+  skipped: ImportSkipped[];
+  missing_secrets: ImportMissingSecret[];
+  warnings: ImportWarning[];
+  id_map: { stacks: Record<string, string>; environments: Record<string, string> };
+  /** Tokens of the worker pools the import created — once, never in a dry run. */
+  worker_pool_tokens: { name: string; token: string }[];
 }
 
 export interface QueueEntry {

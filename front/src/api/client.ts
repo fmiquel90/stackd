@@ -16,14 +16,38 @@ function readCsrfCookie(): string | null {
   return match ? decodeURIComponent(match[1]) : null;
 }
 
+/** One entry of a 422's `errors` (FastAPI validation): where, and what is wrong. */
+export interface ProblemFieldError {
+  loc: (string | number)[];
+  msg: string;
+}
+
 export class ApiError extends Error {
   constructor(
     public status: number,
     public title: string,
     public detail?: string,
+    /** The field errors of a 422 (problem+json `errors`), when the API lists them. */
+    public errors?: ProblemFieldError[],
   ) {
     super(detail ?? title);
   }
+}
+
+// Only `loc` and `msg` are kept: a validation error also echoes the offending `input`, which may be
+// a value the user supplied (a secret in an imported document) — it is never surfaced.
+function fieldErrors(data: unknown): ProblemFieldError[] | undefined {
+  const raw = (data as { errors?: unknown } | null)?.errors;
+  if (!Array.isArray(raw)) return undefined;
+  return raw.flatMap((e: { loc?: unknown; msg?: unknown } | null) =>
+    e && Array.isArray(e.loc) && typeof e.msg === "string"
+      ? [{ loc: e.loc as (string | number)[], msg: e.msg }]
+      : [],
+  );
+}
+
+function problem(resp: Response, data: { title?: string; detail?: string } | null): ApiError {
+  return new ApiError(resp.status, data?.title ?? resp.statusText, data?.detail, fieldErrors(data));
 }
 
 interface RequestOptions {
@@ -51,9 +75,7 @@ export async function api<T>(path: string, opts: RequestOptions = {}): Promise<T
 
   if (resp.status === 204) return undefined as T;
   const data = resp.headers.get("content-type")?.includes("json") ? await resp.json() : null;
-  if (!resp.ok) {
-    throw new ApiError(resp.status, data?.title ?? resp.statusText, data?.detail);
-  }
+  if (!resp.ok) throw problem(resp, data);
   return data as T;
 }
 
@@ -66,9 +88,37 @@ export async function apiBlob(path: string): Promise<Blob> {
   if (!resp.ok) {
     // Errors come back as problem+json even on a blob endpoint — surface the detail, not bare status.
     const data = resp.headers.get("content-type")?.includes("json") ? await resp.json() : null;
-    throw new ApiError(resp.status, data?.title ?? resp.statusText, data?.detail);
+    throw problem(resp, data);
   }
   return resp.blob();
+}
+
+/** The file name a `Content-Disposition: attachment; filename="…"` header gives, if any. */
+export function attachmentName(header: string | null): string | null {
+  const m = header?.match(/filename="?([^";]+)"?/i);
+  return m ? m[1] : null;
+}
+
+/** Authenticated GET of a download: the body and the server's file name (Content-Disposition). */
+export async function apiFile(path: string): Promise<{ blob: Blob; filename: string | null }> {
+  const headers: Record<string, string> = {};
+  if (accessToken) headers["Authorization"] = `Bearer ${accessToken}`;
+  const resp = await fetch(`/api/v1${path}`, { headers, credentials: "include" });
+  if (!resp.ok) {
+    const data = resp.headers.get("content-type")?.includes("json") ? await resp.json() : null;
+    throw problem(resp, data);
+  }
+  return { blob: await resp.blob(), filename: attachmentName(resp.headers.get("content-disposition")) };
+}
+
+/** Hand a blob to the browser as a download: an object URL, revoked at once — nothing is stored. */
+export function saveBlob(blob: Blob, filename: string): void {
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  a.click();
+  URL.revokeObjectURL(url);
 }
 
 export const auth = {

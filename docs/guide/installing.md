@@ -209,8 +209,9 @@ start, before announcing the URL. Then promote the others in
 members. Only accounts of the `STACKD_ALLOWED_DOMAINS` Workspace domains can sign in at all.
 
 For automation (CI triggering plans, scheduled configuration exports), create a **service
-account** and an expiring API token rather than using a person's session — see
-[API › Authentication](../api.md#authentication). It reads and plans; it never confirms an apply.
+account** and an expiring API token (**Settings → Service accounts**) rather than using a
+person's session — see [API › Authentication](../api.md#authentication). It reads and plans; it
+never confirms an apply.
 
 ## 6. Runner images
 

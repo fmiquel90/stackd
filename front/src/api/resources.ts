@@ -1,7 +1,12 @@
-import { api, apiBlob } from "./client";
+import { api, apiBlob, apiFile } from "./client";
 import type {
+  ApiToken,
+  ApiTokenCreated,
   AuditEvent,
   CommentAnchor,
+  ConfigDocument,
+  ImportReport,
+  ServiceAccount,
   Environment,
   EnvOutput,
   Health,
@@ -107,6 +112,27 @@ export const spaces = {
     api<SpaceMember>(`/spaces/${id}/members`, { method: "PUT", body }),
   removeMember: (id: string, userId: string) =>
     api<void>(`/spaces/${id}/members/${userId}`, { method: "DELETE" }),
+  // Configuration export / import (SPECS §22) — space admin. The export is a download (attachment).
+  exportConfig: (id: string) => apiFile(`/spaces/${id}/export`),
+  importConfig: (id: string, doc: ConfigDocument, dryRun: boolean) =>
+    api<ImportReport>(`/spaces/${id}/import?dry_run=${dryRun}`, { body: doc }),
+};
+
+// Service accounts & API tokens (SPECS §23) — instance admin. Disabling one is PATCH /users/{id}.
+export interface NewServiceAccount {
+  name: string;
+  role: "reader" | "writer";
+}
+
+export const serviceAccounts = {
+  list: () => api<ServiceAccount[]>("/service-accounts"),
+  create: (body: NewServiceAccount) => api<ServiceAccount>("/service-accounts", { body }),
+  tokens: (id: string) => api<ApiToken[]>(`/service-accounts/${id}/tokens`),
+  /** Returns the raw token once: keep it in component state only, never in a cache or storage. */
+  createToken: (id: string, body: { name: string; expires_in_days: number }) =>
+    api<ApiTokenCreated>(`/service-accounts/${id}/tokens`, { body }),
+  revokeToken: (id: string, tokenId: string) =>
+    api<void>(`/service-accounts/${id}/tokens/${tokenId}`, { method: "DELETE" }),
 };
 
 export interface NewEnvironment {
