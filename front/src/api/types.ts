@@ -165,6 +165,12 @@ export type RunType = "tracked" | "proposed" | "destroy" | "command";
 export type TriggeredBy = "manual" | "webhook" | "dependency" | "api" | "schedule" | "rollout";
 
 /** Mirrors the API's `RunOut` (api/app/runs/schemas.py). */
+/** Plan options of a run (SPECS §3.5): only the non-empty keys are present. */
+export interface PlanOptions {
+  targets?: string[];
+  replace?: string[];
+}
+
 export interface Run {
   id: string;
   environment_id: string;
@@ -172,6 +178,8 @@ export interface Run {
   state: RunState;
   /** Command runs only: the allowlisted subcommand and its args (SPECS §4.3). */
   command: { name: string; args: string[] } | null;
+  /** A targeted / replace plan (SPECS §3.5): `-target=` / `-replace=` addresses; null for a full plan. */
+  plan_options?: PlanOptions | null;
   commit_sha: string | null;
   commit_message: string | null;
   commit_author: string | null;

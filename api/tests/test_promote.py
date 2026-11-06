@@ -16,11 +16,11 @@ from tests.conftest_phase2 import (
 CHANGES = {"has_changes": True, "summary": {"add": 1, "change": 0, "destroy": 0}}
 
 
-async def _apply_commit(client, wh, admin, env_id, sha) -> None:
-    """Drive a run on env_id to `finished` (apply) at commit `sha`."""
+async def _apply_commit(client, wh, admin, env_id, sha, **opts) -> None:
+    """Drive a run on env_id to `finished` (apply) at commit `sha` (`opts`: plan options)."""
     run = (
         await client.post(
-            f"/api/v1/environments/{env_id}/runs", headers=admin, json={"commit_sha": sha}
+            f"/api/v1/environments/{env_id}/runs", headers=admin, json={"commit_sha": sha, **opts}
         )
     ).json()
     await client.post("/worker/v1/jobs/claim", headers=wh)
@@ -92,6 +92,39 @@ async def test_promote_takes_the_last_apply_not_the_last_plan(client: httpx.Asyn
     promoted = await promote()
     assert promoted.status_code == 201, promoted.text
     assert promoted.json()["commit_sha"] == applied_sha
+
+
+async def test_promote_skips_a_targeted_apply(client: httpx.AsyncClient) -> None:
+    # A `-target` apply changed only part of its commit (§9.7): the promotion source is the last
+    # full apply. A replace-only apply applied its whole commit: it is a source.
+    admin = await login(client, "admin")
+    wh = await register_worker(client, admin, "promote-targeted-pool")
+    stack = await make_stack(client, admin, "promote-targeted")
+    dev = await make_env(client, admin, stack, "dev", "dev")
+    staging = await make_env(client, admin, stack, "staging", "staging")
+
+    async def promoted_sha() -> str | None:
+        r = await client.post(
+            f"/api/v1/environments/{staging}/promote",
+            headers=admin,
+            json={"from_environment_id": dev},
+        )
+        assert r.status_code in (201, 409), r.text
+        if r.status_code == 409:
+            return None
+        # Free staging for the next promotion.
+        await client.post(f"/api/v1/runs/{r.json()['id']}/cancel", headers=admin)
+        return r.json()["commit_sha"]
+
+    await _apply_commit(client, wh, admin, dev, "a" * 40, targets=["aws_s3_bucket.a"])
+    assert await promoted_sha() is None  # only a targeted apply: nothing to promote
+
+    await _apply_commit(client, wh, admin, dev, "b" * 40)
+    await _apply_commit(client, wh, admin, dev, "c" * 40, targets=["aws_s3_bucket.a"])
+    assert await promoted_sha() == "b" * 40
+
+    await _apply_commit(client, wh, admin, dev, "d" * 40, replace=["aws_instance.web"])
+    assert await promoted_sha() == "d" * 40
 
 
 async def test_promote_requires_an_applied_source(client: httpx.AsyncClient) -> None:

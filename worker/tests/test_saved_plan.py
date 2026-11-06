@@ -162,7 +162,54 @@ def test_destroy_run_plans_with_destroy(monkeypatch, tmp_path: Path) -> None:
     assert "-destroy" in plan and f"-out={tmp_path / 'run-1' / 'plan.tfplan'}" in plan
 
 
+@pytest.mark.parametrize("destroy", [False, True])
+def test_plan_options_reach_the_plan_command(monkeypatch, tmp_path: Path, destroy: bool) -> None:
+    # A targeted / replace plan (§3.5): each address is one `-target=`/`-replace=` argv element.
+    calls: list[list[str]] = []
+    _patch(monkeypatch, calls)
+    _FakeWorkspace.repo_hooks = {}
+    addr = 'module.net["eu"].aws_subnet.a[0]'
+    opts = {"targets": [addr, "aws_s3_bucket.b"], "replace": ["aws_instance.web"]}
+    job = _job("plan", destroy=destroy, save_plan=True, plan_options=opts)
+    main.handle_plan(_FakeClient(), job, _settings(tmp_path))
+    [plan] = [c for c in calls if c[1] == "plan"]
+    assert plan[:2] == ["tofu", "plan"]
+    assert [a for a in plan if a.startswith(("-target", "-replace"))] == [
+        f"-target={addr}",
+        "-target=aws_s3_bucket.b",
+        "-replace=aws_instance.web",
+    ]
+    assert ("-destroy" in plan) is destroy
+
+
+def test_plan_without_options_has_no_target_flags(monkeypatch, tmp_path: Path) -> None:
+    calls: list[list[str]] = []
+    _patch(monkeypatch, calls)
+    _FakeWorkspace.repo_hooks = {}
+    main.handle_plan(_FakeClient(), _job("plan", plan_options=None), _settings(tmp_path))
+    [plan] = [c for c in calls if c[1] == "plan"]
+    assert not [a for a in plan if a.startswith(("-target", "-replace"))]
+
+
+def test_plan_option_flags_drop_anything_option_like() -> None:
+    # Defence in depth: the API validates addresses; the agent still never emits a bare option.
+    flags = main._plan_option_flags({"targets": ["-destroy", "", 3, "a.b"], "replace": None})
+    assert flags == ["-target=a.b"]
+
+
 # --- apply job ---------------------------------------------------------------------------------
+
+
+def test_apply_job_never_carries_plan_options(monkeypatch, tmp_path: Path) -> None:
+    # The apply applies the saved plan (which already carries -target/-replace): no flag is re-added
+    # even if a payload were to send options with an apply job.
+    calls: list[list[str]] = []
+    _patch(monkeypatch, calls)
+    _FakeWorkspace.repo_hooks = {}
+    job = _job("apply", plan_options={"targets": ["a.b"], "replace": ["c.d"]})
+    main.handle_apply(_FakeClient(), job, _settings(tmp_path))
+    [apply] = [c for c in calls if c[1] == "apply"]
+    assert apply == ["tofu", "apply", "-input=false", "-json", "plan.tfplan"]
 
 
 def test_apply_job_applies_exactly_the_saved_plan(monkeypatch, tmp_path: Path) -> None:

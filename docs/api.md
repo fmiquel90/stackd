@@ -50,7 +50,7 @@ exhaustive list):
 | Stacks | `GET/POST /stacks`, `GET/PATCH/DELETE /stacks/{id}` (409 while a run is active), `POST /stacks/{id}/check-repo` |
 | Environments | `POST /stacks/{id}/environments`, `GET /environments/{id}/resolved-variables`, `POST /environments/{id}/refresh-head`, `POST /environments/{id}/discover-inputs` |
 | Variables & sets | variables CRUD (stack/env/set), variable sets + attachments (tier/stack/env of the set's space) |
-| Runs | `POST /environments/{id}/runs`, `/commands`, `/promote`; `GET /environments/{id}/runs`; `GET /runs/{id}`, `POST /runs/{id}/confirm`/`discard`/`cancel`, `GET /runs/{id}/logs` (+ `/logs/download`)/`plan`/`checks`, `POST /runs/{id}/vcs/resync` |
+| Runs | `POST /environments/{id}/runs` (optional `targets`/`replace`: a targeted / replace plan), `/commands` (incl. `force-unlock` on an unmanaged backend, admin), `/promote`; `GET /environments/{id}/runs`; `GET /runs/{id}`, `POST /runs/{id}/confirm`/`discard`/`cancel`, `GET /runs/{id}/logs` (+ `/logs/download`)/`plan`/`checks`, `POST /runs/{id}/vcs/resync` |
 | Rollouts | `GET/POST /rollouts`, `GET /rollouts/{id}`, `POST /rollouts/{id}/approve`/`retry`/`cancel` |
 | Comments | `GET/POST /runs/{id}/comments`, `PATCH/DELETE /runs/{id}/comments/{cid}` |
 | Hooks | `GET/POST/PATCH/DELETE /stacks/{id}/hooks` and `/environments/{id}/hooks` |

@@ -5,9 +5,10 @@ import uuid
 from datetime import datetime
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, field_validator
+from pydantic import BaseModel, ConfigDict, field_validator, model_validator
 
 from app.enums import RunState, RunType, TriggeredBy
+from app.runs.commands import check_addresses
 
 # A git ref/SHA must start alphanumeric (so it can never be parsed as a git `-option`) and stay
 # within a safe charset — blocks argument injection into the worker's git fetch/checkout.
@@ -26,8 +27,34 @@ class TriggerRunIn(BaseModel):
     commit_sha: str | None = None
     # Break-glass overrides for down secret sources (§15.4): variable name → value. Requires apply.
     secret_overrides: dict[str, str] | None = None
+    # Plan options (§3.5, §7.4): resource addresses passed as `-target=` / `-replace=` to the plan.
+    # `targets` on tracked and destroy runs, `replace` on tracked runs only. Validated, deduplicated
+    # (first kept), at most 50 each; an empty list is the same as none.
+    targets: list[str] | None = None
+    replace: list[str] | None = None
 
     _check_sha = field_validator("commit_sha")(_validate_commit_sha)
+
+    @field_validator("targets")
+    @classmethod
+    def _check_targets(cls, v: list[str] | None) -> list[str] | None:
+        return (check_addresses(v, "targets") or None) if v is not None else None
+
+    @field_validator("replace")
+    @classmethod
+    def _check_replace(cls, v: list[str] | None) -> list[str] | None:
+        return (check_addresses(v, "replace") or None) if v is not None else None
+
+    @model_validator(mode="after")
+    def _replace_only_tracked(self) -> TriggerRunIn:
+        if self.replace and self.type != RunType.tracked:
+            raise ValueError("replace is only allowed on a tracked run")
+        return self
+
+    def plan_options(self) -> dict[str, list[str]] | None:
+        """The `runs.plan_options` value: only the non-empty keys, None when there are none."""
+        opts = {k: v for k, v in (("targets", self.targets), ("replace", self.replace)) if v}
+        return opts or None
 
     @field_validator("type")
     @classmethod
@@ -66,6 +93,8 @@ class RunOut(BaseModel):
     type: RunType
     state: RunState
     command: dict | None
+    # §3.5: {"targets": [...], "replace": [...]} — a targeted / replace plan; None for a full plan.
+    plan_options: dict[str, list[str]] | None = None
     commit_sha: str | None
     commit_message: str | None
     commit_author: str | None
