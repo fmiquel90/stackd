@@ -45,6 +45,11 @@ class VariableKind(enum.StrEnum):
     environment = "environment"  # → process env var
 
 
+class UserKind(enum.StrEnum):
+    human = "human"  # a Google identity (§2.1)
+    service = "service"  # a service account: API tokens only, never confirms (§23)
+
+
 class AttachmentTarget(enum.StrEnum):
     stack = "stack"
     environment = "environment"

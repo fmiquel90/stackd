@@ -42,13 +42,15 @@ admission gate, so an empty list admits no Google login, and a production API re
 without at least one domain (§13). There is no "any Google account" mode: a personal account has no
 `hd` claim and is never admitted. Dev login (`STACKD_DEV_AUTH`, never in production) ignores it.
 
-Bootstrap: the first user of an allowed domain = `admin`, subsequent ones = `reader`. No local auth; internal `AuthProvider` interface for other IdPs later. Login/logout/denial → `audit_events`.
+Bootstrap: the first user of an allowed domain = `admin`, subsequent ones = `reader` — or, when `STACKD_BOOTSTRAP_ADMIN_EMAILS` is set (recommended in production), exactly the listed emails become `admin` at their first sign-in and everyone else `reader` (no first-come admin seat). No local auth; internal `AuthProvider` interface for other IdPs later. Login/logout/denial → `audit_events`.
 
 ### 2.2 Table `users`
 
 ```
 id uuid PK, google_sub text unique, email text, display_name, avatar_url,
 role enum(admin|approver|writer|reader),    -- global capabilities (§2.3)
+kind enum(human|service) default 'human',   -- §23: a service account (API tokens, never decides);
+                                            --   google_sub is NULL for it, required for a human
 allowed_tiers text[] not null default '{}',  -- set of tiers where the user can confirm an apply (§2.4)
 can_destroy bool default false,             -- right to trigger/confirm a destroy run (§2.4)
 disabled bool, last_login_at,
@@ -681,6 +683,7 @@ dependency.created / dependency.deleted / dependency.mock_consumed   # created: 
                                   #   or a clone (via = clone, upstream_kind, §21.2)
 dependency.updated                # policy / output references changed by a config import (§22.3)
 variable_set.attachment_updated   # an attachment's priority changed by a config import (§22.3)
+service_account.created / api_token.created / api_token.revoked   # §23 — never the token
 space.config_exported / space.config_imported   # §22 — every item an import writes is also
                                   #   audited under its own action, context via = import
 cloud_integration.created / cloud_integration.updated / cloud_integration.deleted
@@ -1473,6 +1476,10 @@ GET  /api/v1/oidc/keys ; POST /api/v1/oidc/keys/rotate { kms_key_arn? }   # admi
 # Spaces & memberships (§2.4, Phase F)
 GET|POST /api/v1/spaces                                  # create = instance admin
 GET|PUT  /api/v1/spaces/{id}/members ; DELETE /api/v1/spaces/{id}/members/{user_id}   # space admin
+
+# Service accounts & API tokens (§23) — instance admin
+GET|POST /api/v1/service-accounts ; GET|POST /api/v1/service-accounts/{id}/tokens
+DELETE   /api/v1/service-accounts/{id}/tokens/{tid}
 
 # Configuration export / import (§22) — space admin
 GET  /api/v1/spaces/{id}/export                          # stackd.config document, never a secret
@@ -2679,3 +2686,57 @@ an environment is keyed by its id: an environment re-created by an import starts
   (space admin floor; instance admin for tiers, cloud integrations, pools).
 - **No silent loss**: nothing is deleted; whatever could not be imported is in `skipped` /
   `missing_secrets`.
+
+---
+
+## 23. Service accounts & API tokens (post-MVP)
+
+> **Status:** shipped (API; no UI yet). Module `app/service_accounts/`, migration 0035. Extends
+> §2.2 (`users.kind`), §2.4 (`can_apply`), §6.2, §12.
+
+**Need.** The human API only accepted Google sessions (15-min access tokens): nothing could be
+automated — a CI job triggering a plan, a scheduled configuration export (§22), a script reading
+the queue.
+
+**Model.** A service account is a `users` row with `kind = 'service'` (`kind` enum `human |
+service`, default `human`): no `google_sub` (nullable now; a check keeps it required for a human),
+an email `<name>@service-accounts.stackd.invalid` (RFC 2606 — never deliverable), `name` matching
+`^[a-z0-9][a-z0-9-]{0,62}$`. Being a user, it gets everything users have — space memberships (§2.4),
+the audit actor (its email), membership-gated access — with three restrictions:
+
+1. **Instance role ∈ {reader, writer}** (422 otherwise, on create and on `PATCH /users/{id}`): no
+   instance-admin token. Space-level rights — up to a space's `admin`, e.g. for config
+   export/import (§22) — come from its memberships, granted explicitly.
+2. **No space by default**: unlike a new Google user, it is enrolled in no space; an admin grants
+   it one (`PUT /spaces/{id}/members`). Least privilege for a credential living in a CI system.
+3. **It never decides**: `can_apply` is false for a service account and its effective
+   `can_destroy` is false, whatever its role, tiers or memberships. So it cannot confirm an apply,
+   approve a rollout (§21.6), trigger or confirm a destroy, run a mutating command (§4.3), supply a
+   break-glass value (§15.4) — every apply-level act stays a named human's (§2.4). It can read,
+   trigger plans (`triggered_by = manual`, its id as `trigger_user_id`; any authorized human
+   confirms them — four-eyes is trivially met, the triggerer being no human), and do whatever its
+   space role allows outside the apply gate (configuration writes, export/import).
+
+**Tokens** (`api_tokens`: `id, user_id, name, token_hash unique, prefix, expires_at, last_used_at,
+revoked_at, created_by_user_id, created_at`): `stkd_` + 32 random bytes (urlsafe). Only the SHA-256
+is stored; the raw token is returned **once** at creation. Always expiring (`expires_in_days` 1–365,
+default 90), revocable. Sent as `Authorization: Bearer stkd_…` on the human API (`/api/v1`); not
+accepted on the WebSocket, the worker API or the state backend. An unknown, revoked or expired token,
+or a disabled account, gets the same **401**. `last_used_at` is a hint (written at most once a
+minute, outside the request's transaction), not an audit record.
+
+**API** (instance admin):
+
+```
+GET|POST /api/v1/service-accounts                      # {name, role: reader|writer}
+GET|POST /api/v1/service-accounts/{id}/tokens          # POST {name, expires_in_days} → token, once
+DELETE   /api/v1/service-accounts/{id}/tokens/{tid}    # revoke
+PATCH    /api/v1/users/{id} {disabled: true}           # disable the account: every token stops
+```
+
+**Audit**: `service_account.created`, `api_token.created`, `api_token.revoked` (context: token id,
+name, display prefix — never the token); every action taken with a token is audited as usual, with
+the service account as actor.
+
+**Invariants preserved**: the apply gate (CLAUDE §4.4) — a service account never passes it; secrets
+(§4.3) — a token is stored hashed and shown once, never logged or audited; same-transaction audit.

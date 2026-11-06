@@ -267,7 +267,8 @@ The platform becomes an **OIDC issuer** (the same mechanism as GitHub Actions OI
 - [x] Scheduled drift detection — *status: shipped (SPECS §19)*
 - [x] Automated retention/purge: hot logs, expired refresh-token families, audit > 2 years via a distinct DB role (SPECS §6.1, §7.5)
 - [ ] Audit export to an external system (SIEM)
-- [x] **Configuration export / import** per space (SPECS §22): a portable `stackd.config` JSON document by names, never a secret; merge import (never deletes), dry run, audited — *status: API only, no UI yet; automated (scheduled) exports wait for API service accounts*. Backup & restore guide (`docs/guide/backup-restore.md`)
+- [x] **Service accounts & API tokens** (SPECS §23): automation reads and plans with an expiring, revocable token — never confirms an apply — *status: API only, no UI yet*
+- [x] **Configuration export / import** per space (SPECS §22): a portable `stackd.config` JSON document by names, never a secret; merge import (never deletes), dry run, audited — *status: API only, no UI yet*. Backup & restore guide (`docs/guide/backup-restore.md`)
 - [ ] Platform observability (Prometheus, OTel, Datadog dashboard) — *status: `/metrics` and optional OTLP tracing shipped (SPECS §20); no dashboard yet*
 - [ ] Helm chart / Terraform deployment module (dogfooding) — *status: production images (`api/`, `front/`, `worker/` `Dockerfile`) and the single-host Docker Compose reference deployment shipped (`deploy/production/`, [Installing in production](guide/installing.md)); Helm chart and Terraform module pending*
 - [ ] **Go rewrite of the worker** (single binary, easier distribution) — the MVP Python agent remains the functional reference; the Go port does not change the protocol (§7)

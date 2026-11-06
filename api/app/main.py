@@ -29,6 +29,7 @@ from app.portability.router import router as portability_router
 from app.rollouts.router import router as rollouts_router
 from app.runs.router import router as runs_router
 from app.secret_sources.router import router as secret_sources_router
+from app.service_accounts.router import router as service_accounts_router
 from app.spaces.router import router as spaces_router
 from app.stacks.router import router as stacks_router
 from app.statebackend.router import human_router as state_human_router
@@ -172,6 +173,7 @@ def create_app() -> FastAPI:
     app.include_router(clones_router)
     app.include_router(rollouts_router)
     app.include_router(portability_router)
+    app.include_router(service_accounts_router)
 
     # dev_auth is removed from the production image build (DEV §3); never mounted in prod.
     if settings.stackd_dev_auth and not settings.is_production:

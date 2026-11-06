@@ -1,3 +1,4 @@
+from app.models.api_token import ApiToken
 from app.models.audit import AuditEvent
 from app.models.dependency import EnvDependency, EnvOutput, OutputReference
 from app.models.environment import Environment
@@ -23,6 +24,7 @@ from app.models.worker import Worker, WorkerPool
 from app.models.worker_command import WorkerCommand
 
 __all__ = [
+    "ApiToken",
     "AuditEvent",
     "CloudIntegration",
     "EnvDependency",

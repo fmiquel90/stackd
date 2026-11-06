@@ -201,10 +201,16 @@ curl -s -o /dev/null -w '%{http_code}\n' https://stackd.example.com/metrics   # 
 
 ## 5. The first admin
 
-The **first user to sign in becomes `admin`**; every later one gets `reader` (SPECS §2.1). Sign in
-with Google right after the first start, before announcing the URL. Then promote the others in
+Set **`STACKD_BOOTSTRAP_ADMIN_EMAILS`** (in `stackd.env`) to the email(s) of the first
+administrator(s): they become `admin` at their first sign-in, everyone else `reader` (SPECS §2.1).
+Without it, the **first user to sign in becomes `admin`** — then sign in right after the first
+start, before announcing the URL. Then promote the others in
 **Settings → Users** (role, allowed tiers, destroy right) and scope them per space with the space
 members. Only accounts of the `STACKD_ALLOWED_DOMAINS` Workspace domains can sign in at all.
+
+For automation (CI triggering plans, scheduled configuration exports), create a **service
+account** and an expiring API token rather than using a person's session — see
+[API › Authentication](../api.md#authentication). It reads and plans; it never confirms an apply.
 
 ## 6. Runner images
 

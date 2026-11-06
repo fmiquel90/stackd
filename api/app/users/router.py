@@ -58,6 +58,11 @@ async def update_user(
         raise ProblemException(404, "User not found", None)
 
     changes = body.model_dump(exclude_unset=True)
+    if target.is_service_account and changes.get("role") not in (None, Role.reader, Role.writer):
+        # §23: an automation reads and plans; space-level rights come from its memberships.
+        raise ProblemException(
+            422, "Invalid role", "A service account's instance role is reader or writer."
+        )
     # allowed_tiers carries no FK; validate every entry against the catalog so a typo (or a stale
     # name) can't be stored — symmetry with environments.tier validation (§2.4).
     if "allowed_tiers" in changes:

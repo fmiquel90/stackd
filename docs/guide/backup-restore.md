@@ -133,8 +133,9 @@ It is **not** a backup: it carries no secret (sensitive values, tokens, credenti
 for:
 
 - **Configuration as a reviewable file** — commit the export to Git: the next export's diff shows
-  exactly what changed in the space (it is sorted and stable). *Today an export needs a human
-  access token; scheduled exports wait for API service accounts.*
+  exactly what changed in the space (it is sorted and stable). Schedule it with a **service
+  account** that is admin of the space ([API › Automation](../api.md#authentication)): its token
+  can export, never confirm an apply.
 - **Re-creating a space after a mistake** — the import merges by name: it re-creates what was
   deleted and resets what was changed, and **never deletes** anything that is not in the file.
 - **Moving or cloning a space to another instance** — export → create the secret sources on the

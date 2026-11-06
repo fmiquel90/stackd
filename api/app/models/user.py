@@ -9,7 +9,7 @@ from sqlalchemy.dialects.postgresql import UUID as PGUUID
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db import Base, created_at_col, pk_uuid
-from app.enums import Role
+from app.enums import Role, UserKind
 
 
 class User(Base):
@@ -19,7 +19,8 @@ class User(Base):
     __tablename__ = "users"
 
     id: Mapped[uuid.UUID] = pk_uuid()
-    google_sub: Mapped[str] = mapped_column(String, unique=True)
+    # NULL for a service account (§23): it never signs in with Google.
+    google_sub: Mapped[str | None] = mapped_column(String, unique=True, default=None)
     email: Mapped[str] = mapped_column(String)
     display_name: Mapped[str | None] = mapped_column(String, default=None)
     avatar_url: Mapped[str | None] = mapped_column(String, default=None)
@@ -27,6 +28,9 @@ class User(Base):
     allowed_tiers: Mapped[list[str]] = mapped_column(ARRAY(String), default=list)
     can_destroy: Mapped[bool] = mapped_column(Boolean, default=False)
     disabled: Mapped[bool] = mapped_column(Boolean, default=False)
+    kind: Mapped[UserKind] = mapped_column(
+        Enum(UserKind, name="user_kind"), default=UserKind.human, server_default="human"
+    )
     last_login_at: Mapped[datetime | None] = mapped_column(default=None)
     onboarded_at: Mapped[datetime | None] = mapped_column(default=None)  # first-login tour seen
     created_at: Mapped[datetime] = created_at_col()
@@ -34,6 +38,10 @@ class User(Base):
     @property
     def onboarded(self) -> bool:
         return self.onboarded_at is not None
+
+    @property
+    def is_service_account(self) -> bool:
+        return self.kind == UserKind.service
 
 
 class RefreshToken(Base):

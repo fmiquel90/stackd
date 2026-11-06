@@ -5,7 +5,7 @@ from datetime import datetime
 
 from pydantic import BaseModel, ConfigDict
 
-from app.enums import Role
+from app.enums import Role, UserKind
 
 
 class UserOut(BaseModel):
@@ -21,6 +21,7 @@ class UserOut(BaseModel):
     disabled: bool
     onboarded: bool
     last_login_at: datetime | None
+    kind: UserKind = UserKind.human
 
 
 class SessionOut(BaseModel):

@@ -26,6 +26,8 @@ def effective_allowed_tiers(user: User, membership: SpaceMembership | None) -> l
 
 
 def effective_can_destroy(user: User, membership: SpaceMembership | None) -> bool:
+    if user.is_service_account:
+        return False  # a destruction is a named human's decision (§23)
     return membership.can_destroy if membership is not None else user.can_destroy
 
 
@@ -44,6 +46,10 @@ def can_apply(
     membership when present, else the user's instance defaults. This does NOT enforce 4-eyes
     (triggerer ≠ confirmer) — that lives in the run transition, since it needs the run's triggerer.
     """
+    if user.is_service_account:
+        # An automation plans, never decides (§23): confirming an apply, a mutating command, a
+        # break-glass value or a rollout approval is always a named human's act (§2.4).
+        return ApplyDecision(False, "service accounts cannot confirm applies")
     if effective_role(user, membership) not in _APPROVER_ROLES:
         return ApplyDecision(False, "approver role required")
     allowed = effective_allowed_tiers(user, membership)
