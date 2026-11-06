@@ -23,7 +23,14 @@ services:
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
       - ${STACKD_WORKSPACE_ROOT:-/var/lib/stackd/workspaces}:${STACKD_WORKSPACE_ROOT:-/var/lib/stackd/workspaces}
-    init: true
-    # A running job is not drained on stop (no drain mode yet): stop workers while idle.
-    stop_grace_period: 30s
+      # Private registry for the runner images: a Docker config.json (`auths` entries, no
+      # credential helper), read-only, then STACKD_REGISTRY_AUTH_FILE=/run/secrets/registry-auth.json
+      # in worker.env. Only the agent reads it; job containers never see it.
+      # - /etc/stackd/registry-auth.json:/run/secrets/registry-auth.json:ro
+    init: true # forwards SIGTERM to the agent, which drains (SPECS §7.1)
+    # On stop, the agent drains: no new job, the running ones finish (up to
+    # STACKD_DRAIN_TIMEOUT_SECONDS, default 1200), then the rest are stopped (SIGINT, SIGKILL after
+    # STACKD_CANCEL_GRACE_SECONDS, 120) and report. Docker must not kill it before:
+    # 1200 + 120 + 30 s to report < 23 min. Raise it with either setting.
+    stop_grace_period: 23m
     restart: unless-stopped

@@ -387,6 +387,10 @@ register (pool token) → heartbeat (every ~20s) → claim (long-poll)
   environment variable *names* — never values, recent agent logs) and posts it back. It also carries
   `cancel_job`, which stops a job the worker is executing (§4): SIGINT to the tool, SIGKILL after
   `STACKD_CANCEL_GRACE_SECONDS` (120 s). Delivery latency is bounded by the heartbeat interval (~20 s).
+- **Drain.** A worker stopped with SIGTERM/SIGINT claims nothing more, keeps heartbeating, lets
+  its running jobs finish and report, then exits; past `STACKD_DRAIN_TIMEOUT_SECONDS` (20 min) or
+  on a second signal it stops them as `cancel_job` would, and their runs fail `worker_shutdown`
+  (SPECS §7.1). Give the container more stop time than that (`stop_grace_period`).
 
 **Run an agent:**
 
