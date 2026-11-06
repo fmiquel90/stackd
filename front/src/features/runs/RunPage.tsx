@@ -7,6 +7,7 @@ import { rollouts, runs } from "@/api/resources";
 import type { RunComment } from "@/api/types";
 import { useSpaces } from "@/app/SpaceContext";
 import { useHotkeys } from "@/app/keyboard";
+import { PlanOptionsChips } from "@/components/PlanOptions";
 import { useSpaceEnvs } from "@/features/data/spaceEnvs";
 import { LogViewer } from "@/identity/LogViewer";
 import { PhaseRail } from "@/identity/PhaseRail";
@@ -125,7 +126,8 @@ export function RunPage() {
     mutationFn: async () => {
       if (!run || !env) throw new Error("run not loaded");
       if (run.state === "unconfirmed") await runs.discard(run.id);
-      return runs.trigger(env.id, run.type === "destroy" ? "destroy" : "tracked");
+      // A re-plan keeps the run's targets / replace addresses (SPECS §3.5).
+      return runs.trigger(env.id, run.type === "destroy" ? "destroy" : "tracked", false, run.plan_options);
     },
     onSuccess: (r) => navigate(`/runs/${r.id}`),
   });
@@ -264,6 +266,7 @@ export function RunPage() {
             </span>
           )}
         </p>
+        <PlanOptionsChips options={run.plan_options} />
       </header>
 
       {/* ---------- decision ---------- */}

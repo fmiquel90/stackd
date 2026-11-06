@@ -14,6 +14,7 @@ import type {
   RepoAuthKind,
   ResolvedVariable,
   Role,
+  PlanOptions,
   Run,
   Space,
   SpaceMember,
@@ -250,8 +251,21 @@ export const comments = {
 export const runs = {
   list: (envId: string) => api<Run[]>(`/environments/${envId}/runs`),
   get: (id: string) => api<Run>(`/runs/${id}`),
-  trigger: (envId: string, type: "tracked" | "destroy" = "tracked", withDownstream = false) =>
-    api<Run>(`/environments/${envId}/runs`, { body: { type, with_downstream: withDownstream } }),
+  /** `options`: a targeted / replace plan (SPECS §3.5) — `replace` on a tracked run only. */
+  trigger: (
+    envId: string,
+    type: "tracked" | "destroy" = "tracked",
+    withDownstream = false,
+    options?: PlanOptions | null,
+  ) =>
+    api<Run>(`/environments/${envId}/runs`, {
+      body: {
+        type,
+        with_downstream: withDownstream,
+        ...(options?.targets?.length ? { targets: options.targets } : {}),
+        ...(options?.replace?.length && type === "tracked" ? { replace: options.replace } : {}),
+      },
+    }),
   confirm: (id: string) => api<Run>(`/runs/${id}/confirm`, { method: "POST" }),
   discard: (id: string) => api<Run>(`/runs/${id}/discard`, { method: "POST" }),
   cancel: (id: string) => api<Run>(`/runs/${id}/cancel`, { method: "POST" }),
@@ -267,7 +281,23 @@ export const runs = {
 
 // Allowlisted ad-hoc subcommands (mirrors app/runs/commands.py). Mutating ones need apply rights.
 export const COMMANDS_READONLY = ["output", "show", "state list", "state show", "validate", "providers"];
-export const COMMANDS_MUTATING = ["import", "state rm", "state mv", "taint", "untaint", "refresh"];
+export const COMMANDS_MUTATING = [
+  "import",
+  "state rm",
+  "state mv",
+  "taint",
+  "untaint",
+  "refresh",
+  "force-unlock",
+];
+/** Admin only, and only on an environment whose state Stackd does not manage (SPECS §4.3). */
+export const COMMANDS_ADMIN_ONLY = ["force-unlock"];
+/** The per-command option allowlist (SPECS §4.3): every other leading-`-` argument is refused. */
+export const COMMAND_OPTIONS: Record<string, { targets?: boolean; dryRun?: boolean }> = {
+  refresh: { targets: true },
+  "state rm": { dryRun: true },
+  "state mv": { dryRun: true },
+};
 
 export const queue = {
   list: () => api<QueueEntry[]>("/queue"),
