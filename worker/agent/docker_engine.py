@@ -7,11 +7,14 @@ process's argv (`ps`), and lets the runner kill and remove a container it no lon
 
 from __future__ import annotations
 
+import json
 import struct
 from collections.abc import Callable, Iterator
 from typing import Any
 
 import httpx
+
+from agent.registry_auth import RegistryCredential
 
 DEFAULT_SOCKET = "/var/run/docker.sock"
 
@@ -91,17 +94,39 @@ class DockerEngine:
     def image_exists(self, ref: str) -> bool:
         return self._http.get(f"/images/{ref}/json").status_code == 200
 
-    def pull(self, ref: str) -> None:
-        """Pull `ref` (`repo@sha256:…`): the daemon verifies the content against the digest."""
+    def pull(self, ref: str, credential: RegistryCredential | None = None) -> None:
+        """Pull `ref` (`repo@sha256:…`): the daemon verifies the content against the digest. With
+        a `credential`, it authenticates to the registry through `X-Registry-Auth` — sent to the
+        local daemon only, and masked out of any error raised here."""
         repo, _, digest = ref.partition("@")
-        with self._http.stream(
-            "POST", "/images/create", params={"fromImage": repo, "tag": digest}, timeout=None
-        ) as resp:
-            self._check(resp, f"pull {ref}")
-            for _ in resp.iter_bytes():  # progress messages; the pull ends with the stream
-                pass
-        if not self.image_exists(ref):
-            raise DockerError(f"docker pull {ref} did not produce the image")
+        headers = {"X-Registry-Auth": credential.header()} if credential else None
+        error: str | None = None
+        try:
+            with self._http.stream(
+                "POST",
+                "/images/create",
+                params={"fromImage": repo, "tag": digest},
+                headers=headers,
+                timeout=None,
+            ) as resp:
+                self._check(resp, f"pull {ref}")
+                # Progress messages, one JSON object per line; the pull ends with the stream. A
+                # failure after the 200 (access denied, unknown manifest) arrives as `{"error"}`.
+                for line in resp.iter_lines():
+                    try:
+                        msg = json.loads(line)
+                    except ValueError:
+                        continue
+                    if isinstance(msg, dict) and msg.get("error"):
+                        error = str(msg["error"])
+            if error is None and not self.image_exists(ref):
+                error = "the pull did not produce the image"
+        except (DockerError, httpx.HTTPError) as exc:
+            error = str(exc)
+        if error is not None:
+            if credential is not None:
+                error = credential.mask(error)
+            raise DockerError(f"docker pull {ref} failed: {error}")
 
     def create(self, name: str, spec: dict[str, Any]) -> str:
         resp = self._http.post("/containers/create", params={"name": name}, json=spec)

@@ -50,6 +50,33 @@ STACKD_RUNNER_IMAGES='{"opentofu:1.12.2": "registry.example.com/stackd/opentofu@
 The worker declares the versions it holds images for; the API only hands it runs whose stack's
 `tool_version` matches one (SPECS §7.4).
 
+### From a private registry
+
+The worker pulls a missing image through the Docker Engine API. To authenticate that pull, give it
+a Docker client config file and point `STACKD_REGISTRY_AUTH_FILE` at it (mounted read-only):
+
+```json
+{
+  "auths": {
+    "registry.example.com:5000": {"auth": "<base64 of user:password>"},
+    "https://index.docker.io/v1/": {"username": "me", "password": "<access token>"},
+    "myregistry.azurecr.io": {"identitytoken": "<refresh token>"}
+  }
+}
+```
+
+The entry is picked by the image reference's registry host — the first path component when it has
+a `.` or a `:` or is `localhost` (`registry.example.com:5000/stackd/opentofu@sha256:…`), else
+Docker Hub (`docker.io`, `index.docker.io` and `https://index.docker.io/v1/` all match it) — and
+sent as the `X-Registry-Auth` header of that pull only. No matching entry: an anonymous pull. The
+file is re-read at each pull (a job refreshing a short-lived ECR/GAR token can rewrite it); a
+missing or malformed file refuses to start the worker. The credential is never logged, is masked
+out of pull errors, and never reaches a job container.
+
+**Not supported:** credential helpers (`credsStore`, `credHelpers` — e.g. `docker-credential-ecr-login`,
+Docker Desktop's store). Write the credential into `auths`, or pre-pull the images on the worker
+host (`docker pull <ref>@sha256:…`), which the agent then finds locally.
+
 ## Sanity check
 
 ```bash

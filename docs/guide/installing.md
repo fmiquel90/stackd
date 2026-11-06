@@ -235,9 +235,23 @@ A worker only takes runs whose stack `tool_version` matches one of its images. A
 version (and a Terraform image if you use it — BUSL, opt-in, see `deploy/images/README.md`).
 
 !!! note "Private registry"
-    The agent pulls a missing image through the Docker Engine API **without registry
-    credentials**. With a private registry, pull the images on each worker host beforehand
-    (`docker login` then `docker pull <ref>@sha256:…`); the agent then finds them locally.
+    The agent pulls a missing image through the Docker Engine API. For a private registry, give
+    it a Docker config file holding the credential in `auths` — e.g. one `docker login` writes
+    when no credential helper is configured:
+
+    ```json
+    {"auths": {"registry.example.com": {"auth": "<base64 of user:password>"}}}
+    ```
+
+    Mount it read-only into the worker (uncomment the volume in `worker.compose.yml`) and set
+    `STACKD_REGISTRY_AUTH_FILE=/run/secrets/registry-auth.json` in `worker.env`. The entry
+    matching the image's registry host (`registry.example.com:5000`, or Docker Hub's
+    `https://index.docker.io/v1/`) is sent with that pull only; `username`/`password` and
+    `identitytoken` entries work too. The file is re-read at each pull, so a job refreshing a
+    short-lived token (ECR, GAR) can rewrite it. **Credential helpers (`credsStore`,
+    `credHelpers`) are not supported.** The credential is never logged and never reaches a job
+    container. Alternatively, pre-pull the images on each worker host
+    (`docker pull <ref>@sha256:…`): the agent then finds them locally.
 
 ## 7. Workers
 
@@ -304,10 +318,15 @@ traces. Logs are JSON on stdout (`docker compose logs`). See [Observability](obs
 Stackd upgrades are **migrate, then restart**; the migration runs before the new API starts:
 
 1. Read the release notes (configuration changes, required steps).
-2. Let the workers go idle — there is no drain mode yet: a worker stopped mid-job leaves its run
-   to the `worker_lost` reclaim (an apply only after the apply window). Check the **Workers** page
-   or `GET /api/v1/queue`, then stop them (`docker compose stop worker`, and on worker hosts
-   `docker compose -f worker.compose.yml stop`).
+2. Stop the workers (`docker compose stop worker`, and on worker hosts
+   `docker compose -f worker.compose.yml stop`). A stopped worker **drains**: it takes no new
+   job, lets its running ones finish and report, then exits — so `stop` can take as long as the
+   longest running job, up to `STACKD_DRAIN_TIMEOUT_SECONDS` (20 min by default); past it, the
+   remaining jobs are stopped and their runs fail with `worker_shutdown`. The compose files give
+   the worker `stop_grace_period: 23m` so Docker does not kill it first; with plain Docker use
+   `docker stop -t 1380 <container>` (the default 10 s would kill a running apply). Stop the
+   workers **before** the API: a draining worker reports to it. A second `Ctrl-C`/signal stops
+   the running jobs at once. See [Workers & scaling](workers-and-scaling.md#stopping-a-worker).
 3. [Back up](backup-restore.md) the database (and keep `stackd.env`).
 4. Point `.env` at the new image tags (or rebuild them), then:
 
@@ -376,7 +395,10 @@ this as a design sketch, not a supported install:
   Engine on the nodes and a `hostPath` workspace (privileged, root-equivalent), or a Docker-in-Docker
   sidecar sharing an `emptyDir` workspace mounted at the same path in both containers. A runner that
   starts a Kubernetes `Pod` per command does not exist yet; until it does, the simplest option is
-  to keep the workers on VMs (as above) and run only the API and the front in the cluster.
+  to keep the workers on VMs (as above) and run only the API and the front in the cluster. A
+  worker pod drains on SIGTERM: give it `terminationGracePeriodSeconds: 1380` (drain timeout +
+  cancel grace + 30 s) — the default 30 s would kill a running apply — and the registry
+  credential as a read-only `Secret` volume (`STACKD_REGISTRY_AUTH_FILE`).
 
 ## Troubleshooting
 
@@ -389,4 +411,6 @@ this as a design sketch, not a supported install:
 | a worker logs `registration refused by the API` | a production API refuses any runner but `docker` |
 | a worker logs `register failed, retrying` (401) | a wrong pool token, or its pool was deleted |
 | a run fails reaching `/state/v1/…` | the job containers cannot reach `STACKD_INTERNAL_URL` — see [What the docker runner needs](#what-the-docker-runner-needs) |
-| a run fails `docker pull … did not produce the image` | a private registry: pre-pull the runner images on the worker host |
+| a run fails `docker pull … failed: … unauthorized` / `pull access denied` | a private registry without a matching credential: set `STACKD_REGISTRY_AUTH_FILE` (an `auths` entry for the image's registry host), or pre-pull the runner images on the worker host |
+| a worker refuses to start: `STACKD_REGISTRY_AUTH_FILE …` | the file is not mounted at that path, or is not valid JSON / its `auth` is not base64 `user:password` |
+| a run fails `worker_shutdown: …` | its worker was stopped and the job outlived the drain timeout (or a second stop signal) |
