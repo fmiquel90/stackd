@@ -143,3 +143,29 @@ async def test_cancel_before_claim_and_after_the_end(client: httpx.AsyncClient) 
     ] == "canceled"
     # Terminal: refused.
     assert (await client.post(f"/api/v1/runs/{run_id}/cancel", headers=admin)).status_code == 409
+
+
+async def test_worker_shutdown_during_apply_fails_the_run(client: httpx.AsyncClient) -> None:
+    """§7.1 drain: a job stopped by the worker's own shutdown (drain timeout / second signal) is
+    reported `job_failed` with `worker_shutdown` — accepted without a user's cancel request, the
+    run ends `failed`, never `canceled`, and is audited."""
+    admin = await login(client, "admin")
+    wh = await register_worker(client, admin, "pool-shutdown-apply")
+    stack = await make_stack(client, admin, "shutdown-apply")
+    env_id = await make_env(client, admin, stack, "dev", "dev")
+    run_id = await _planning(client, admin, wh, env_id)
+    await event(client, wh, run_id, "phase_finished", result=CHANGES)
+    assert (await client.post(f"/api/v1/runs/{run_id}/confirm", headers=admin)).status_code == 200
+    assert (await client.post("/worker/v1/jobs/claim", headers=wh)).status_code == 200
+    r = await event(
+        client,
+        wh,
+        run_id,
+        "job_failed",
+        phase="apply",
+        result={"error": "worker_shutdown: drain timeout"},
+    )
+    assert r.status_code == 200, r.text
+    run = await _state(client, admin, run_id)
+    assert run["state"] == "failed" and "worker_shutdown" in (run["error"] or "")
+    assert "run.apply_failed" in await _actions(run_id)
