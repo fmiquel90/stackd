@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import re
 import uuid
 from typing import Annotated, Any
+from urllib.parse import quote
 
 from fastapi import APIRouter, Depends
 from fastapi.responses import JSONResponse
@@ -34,6 +36,19 @@ async def _space(session: AsyncSession, user: Any, space_id: uuid.UUID) -> Space
     return space
 
 
+def _attachment(space_name: str, stamp: str) -> dict[str, str]:
+    """Content-Disposition for any space name: headers are Latin-1, and a name may hold anything
+    (`"`, non-Latin scripts). An ASCII-safe `filename` (RFC 6266 fallback) + the exact name as
+    `filename*` (RFC 5987, UTF-8 percent-encoded)."""
+    safe = re.sub(r"[^A-Za-z0-9._-]+", "-", space_name).strip("-") or "space"
+    exact = quote(f"stackd-{space_name}-{stamp}.json", safe="")
+    return {
+        "Content-Disposition": (
+            f"attachment; filename=\"stackd-{safe}-{stamp}.json\"; filename*=UTF-8''{exact}"
+        )
+    }
+
+
 @router.get("/{space_id}/export")
 async def export_config(space_id: uuid.UUID, user: CurrentUser, session: DbSession) -> JSONResponse:
     """The space's configuration as a `stackd.config` document (§22.2). Space admin: it is the
@@ -56,10 +71,7 @@ async def export_config(space_id: uuid.UUID, user: CurrentUser, session: DbSessi
     )
     await session.commit()
     stamp = doc.exported_at.strftime("%Y%m%dT%H%M%SZ") if doc.exported_at else "export"
-    return JSONResponse(
-        doc.model_dump(mode="json"),
-        headers={"Content-Disposition": f'attachment; filename="stackd-{space.name}-{stamp}.json"'},
-    )
+    return JSONResponse(doc.model_dump(mode="json"), headers=_attachment(space.name, stamp))
 
 
 @router.post("/{space_id}/import")

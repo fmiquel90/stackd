@@ -451,3 +451,117 @@ async def test_permissions(client: httpx.AsyncClient) -> None:
     # An instance admin gets the pool created and its token, once.
     rep = (await _import(client, admin, sp, doc)).json()
     assert [t["name"] for t in rep["worker_pool_tokens"]] == [f"p-{sp}"]
+
+
+async def test_review_fixes(client: httpx.AsyncClient) -> None:
+    """A space admin can't re-point a secret source through an import (PATCH is instance admin);
+    a skipped variable is left untouched (no unaudited `hcl` change); any space name exports."""
+    admin = await login(client, "admin")
+    bob = await login(client, "bob")
+    sp = await _space(client, admin, f'生产-"q"-{uuid.uuid4().hex[:6]}')
+    bob_id = (await client.get("/api/v1/auth/me", headers=bob)).json()["id"]
+    r = await client.put(
+        f"/api/v1/spaces/{sp}/members",
+        headers=admin,
+        json={"user_id": bob_id, "role": "admin", "allowed_tiers": [], "can_destroy": False},
+    )
+    assert r.status_code == 200, r.text
+    await _post(
+        client,
+        admin,
+        f"/api/v1/spaces/{sp}/secret-sources",
+        {"name": "vault", "provider": "proton_pass", "bootstrap_secret": "pat_xyz"},
+    )
+
+    r = await client.get(f"/api/v1/spaces/{sp}/export", headers=bob)
+    assert r.status_code == 200, r.text
+    assert "filename*=UTF-8''" in r.headers["content-disposition"]
+    doc = r.json()
+
+    doc["secret_sources"][0]["config"] = {"server": "https://evil.example"}
+    rep = (await _import(client, bob, sp, doc)).json()
+    assert {
+        "kind": "secret_source",
+        "path": "secret_sources/vault",
+        "reason": "instance_admin_required",
+    } in rep["skipped"]
+    again = (await client.get(f"/api/v1/spaces/{sp}/export", headers=admin)).json()
+    assert again["secret_sources"][0]["config"] == {}
+
+    # An existing referenced variable whose source the document names wrongly: skipped, untouched.
+    stack = (
+        await _post(
+            client,
+            admin,
+            "/api/v1/stacks",
+            {"space_id": sp, "name": "s", "repo_url": "file:///r", "tool_version": "1.12"},
+        )
+    )["id"]
+    src = again["secret_sources"]
+    assert src
+    sources = (await client.get(f"/api/v1/spaces/{sp}/secret-sources", headers=admin)).json()
+    await _post(
+        client,
+        admin,
+        f"/api/v1/stacks/{stack}/variables",
+        {
+            "kind": "terraform",
+            "name": "k",
+            "secret_source_id": sources[0]["id"],
+            "secret_ref": "p://a",
+        },
+    )
+    doc = (await client.get(f"/api/v1/spaces/{sp}/export", headers=admin)).json()
+    var = doc["stacks"][0]["variables"][0]
+    var["hcl"] = True
+    var["secret"]["source"] = "nope"
+    rep = (await _import(client, admin, sp, doc)).json()
+    assert any(s["reason"] == "secret_source_missing" for s in rep["skipped"])
+    async with SessionLocal() as s:
+        row = (
+            await s.execute(select(Variable).where(Variable.stack_id == uuid.UUID(stack)))
+        ).scalar_one()
+        assert row.hcl is False
+
+
+async def test_export_skips_a_reference_to_another_spaces_source(client: httpx.AsyncClient) -> None:
+    """A legacy row referencing another space's source is left out (and the source not named),
+    never a 500."""
+    from app.models.secret_source import SecretSource
+
+    admin = await login(client, "admin")
+    a = await _space(client, admin, f"ref-a-{uuid.uuid4().hex[:6]}")
+    b = await _space(client, admin, f"ref-b-{uuid.uuid4().hex[:6]}")
+    src = await _post(
+        client,
+        admin,
+        f"/api/v1/spaces/{b}/secret-sources",
+        {"name": "other-vault", "provider": "proton_pass", "bootstrap_secret": "pat"},
+    )
+    stack = (
+        await _post(
+            client,
+            admin,
+            "/api/v1/stacks",
+            {"space_id": a, "name": "s", "repo_url": "file:///r", "tool_version": "1.12"},
+        )
+    )["id"]
+    async with SessionLocal() as s:
+        assert await s.get(SecretSource, uuid.UUID(src["id"])) is not None
+        s.add(
+            Variable(
+                stack_id=uuid.UUID(stack),
+                kind="terraform",
+                name="legacy",
+                sensitive=True,
+                secret_source_id=uuid.UUID(src["id"]),
+                secret_ref="pass://x/y/z",
+            )
+        )
+        await s.commit()
+    doc = await _export(client, admin, a)
+    assert doc["stacks"][0]["variables"] == []
+    assert {"stack": "s", "item": "secret_reference_out_of_space", "name": "legacy"} in doc[
+        "missing_secrets"
+    ]
+    assert "other-vault" not in str(doc)

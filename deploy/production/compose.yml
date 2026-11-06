@@ -101,6 +101,10 @@ services:
   front:
     image: ${STACKD_FRONT_IMAGE:-stackd/front:latest}
     read_only: true
+    # Caddy writes its instance id and storage locks under /data even when it serves static files:
+    # a tmpfs keeps the root read-only without the startup errors.
+    tmpfs:
+      - /data:uid=10003,gid=10003,mode=0700
     cap_drop: [ALL]
     security_opt: ["no-new-privileges:true"]
     networks: [edge]

@@ -103,10 +103,10 @@ jobs:
         if: matrix.component == 'api'
         run: |
           docker run --rm stackd/api:ci sh -c 'test ! -e /app/app/auth/dev.py'
-          if docker run --rm stackd/api:ci python -c 'import app.auth.dev'; then
-            echo "app.auth.dev is importable in the production image" >&2
-            exit 1
-          fi
+          # find_spec is None only if the module is absent; any other failure (e.g. app.auth
+          # failing to import) makes this step fail too, instead of passing for the wrong reason.
+          docker run --rm stackd/api:ci python -c \
+            'import importlib.util, sys; sys.exit(importlib.util.find_spec("app.auth.dev") is not None)'
 
   front:
     runs-on: ubuntu-latest

@@ -184,6 +184,22 @@ async def export_space(session: AsyncSession, space: Space) -> ConfigDocument:
     tier_by_name = {t.name: t for t in tiers.values()}
 
     missing: list[dict[str, Any]] = []
+    # A reference to another space's source (a row predating the §15.1 check — the claim already
+    # fails it closed): not exported, and the other space's source is not named.
+    set_names = {vs.id: vs.name for vs in sets}
+    for v in variables:
+        if v.secret_source_id is not None and v.secret_source_id not in source_names:
+            where: dict[str, Any] = {}
+            if v.variable_set_id is not None:
+                where["variable_set"] = set_names.get(v.variable_set_id)
+            if v.stack_id is not None:
+                where["stack"] = stack_by_id[v.stack_id].name
+            if v.environment_id is not None:
+                where["environment"] = env_by_id[v.environment_id].name
+            missing.append({**where, "item": "secret_reference_out_of_space", "name": v.name})
+    variables = [
+        v for v in variables if v.secret_source_id is None or v.secret_source_id in source_names
+    ]
 
     def scoped(kind: AttachmentTarget, target_id: uuid.UUID, rows: list[Any]) -> list[Any]:
         return [r for r in rows if r.target_kind == kind and r.target_id == target_id]

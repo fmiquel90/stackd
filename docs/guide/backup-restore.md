@@ -164,8 +164,8 @@ for:
 |---|---|
 | `value_required` | a sensitive variable with no value in the file and none on the target: set it through the API or the UI (or fill `value` in the file by hand — it is then stored encrypted) |
 | `secret_source_missing` / `bootstrap_secret_required` | create the secret source (with its credential) on the target first, then re-import |
-| `instance_admin_required` | cloud integrations and worker pools need an instance admin; tiers too (refused with 403) |
-| `target_not_found`, `downstream_not_found`, `upstream_not_found`, `upstream_forbidden` | an attachment or a dependency names something that is not there, or a space you can't write |
+| `instance_admin_required` | cloud integrations, worker pools and a secret source's `config` need an instance admin; tiers too (refused with 403) |
+| `target_not_found`, `downstream_not_found`, `upstream_not_found` | an attachment or a dependency names something that is not there — or, for an upstream of another space, a space you can't write (the same answer, so an import reveals no other space's names) |
 | `ambiguous_name`, `name_taken_in_another_space` | two hooks / notification targets share a name on the target; a worker pool name is used by another space |
 
 ## See also

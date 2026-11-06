@@ -290,6 +290,12 @@ class Importer:
                     f"'{doc.name}' is a {row.provider.value} source here, "
                     f"{doc.provider.value} in the document.",
                 )
+            if row.config != doc.config and not self.instance_admin:
+                # Re-pointing a source (its server, its scope) is an instance admin's call, as on
+                # PATCH …/secret-sources (§15): the stored credential would follow the new config.
+                self.report.skip("secret_source", path, "instance_admin_required")
+                self.source_ids[doc.name] = row.id  # the source itself is usable as it is
+                continue
             changed = _assign(row, {"config": doc.config})
             if changed:
                 await self._audit(
@@ -518,7 +524,7 @@ class Importer:
                     name=doc.name,
                     hcl=doc.hcl,
                 )
-            changed = _assign(var, {"hcl": doc.hcl}) if not created else []
+            changed: list[str] = []
             if doc.secret is not None:
                 source_id = self.source_ids.get(doc.secret.source)
                 if source_id is None:
@@ -580,6 +586,10 @@ class Importer:
                     assert var.value is not None
                     store_value(var, var.value, sensitive=True)  # flag it; the value is kept
                     changed.append("sensitive")
+            # `hcl` last: a variable skipped above is left untouched (no unaudited change).
+            if not created and var.hcl != doc.hcl:
+                var.hcl = doc.hcl
+                changed.append("hcl")
             if created:
                 self.s.add(var)
                 await self.s.flush()
@@ -738,11 +748,17 @@ class Importer:
             existing.setdefault(n.name, []).append(n)
         for doc in docs:
             path = f"{owner}/notification_targets/{doc.name}"
-            try:
-                await check_url_safe(doc.url)  # the SSRF half the schema can't do (§14)
-            except ValueError as exc:
-                raise ProblemException(422, "Unsafe notification URL", f"{path}: {exc}") from exc
             matches = existing.get(doc.name, [])
+            if len(matches) <= 1 and (not matches or matches[0].url != doc.url):
+                # The SSRF half the schema can't do (§14) — for a URL being written only: an
+                # unchanged one was vetted when it was stored, and a transient DNS failure on it
+                # must not abort the import.
+                try:
+                    await check_url_safe(doc.url)
+                except ValueError as exc:
+                    raise ProblemException(
+                        422, "Unsafe notification URL", f"{path}: {exc}"
+                    ) from exc
             values = {
                 "kind": doc.kind,
                 "url": doc.url,
@@ -847,7 +863,8 @@ class Importer:
             try:
                 upstream = await self._foreign_env(up.space, up.stack, up.environment)
             except ProblemException:
-                self.report.skip("dependency", path, "upstream_forbidden")
+                # Same answer as a missing one: an import must not reveal another space's names.
+                self.report.skip("dependency", path, "upstream_not_found")
                 return
         if upstream is None:
             self.report.skip("dependency", path, "upstream_not_found")

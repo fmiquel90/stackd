@@ -35,7 +35,7 @@ REPO_BASE = os.environ.get("STACKD_SEED_REPO_BASE", "file:///stackd-dev/repos")
 async def seed() -> None:
     """Idempotent base data the app (and tests) require: the spaces (SPECS §3.0 — `demo` outside
     production only) and the default tier catalog (§2.4) — dev/staging/prod, prod requiring
-    four-eyes (old hardcoded behavior)."""
+    four-eyes (old hardcoded behavior) — into an empty catalog only."""
     async with SessionLocal() as session:
         spaces = [("default", "Default space")]
         if not get_settings().is_production:
@@ -47,7 +47,11 @@ async def seed() -> None:
             ).scalar_one_or_none()
             if exists is None:
                 session.add(Space(name=name, description=desc))
-        for position, name in enumerate(DEFAULT_TIERS):
+        # The default catalog is a bootstrap, not a desired state: seeded into an empty catalog
+        # only, so a tier an admin deleted (audited `tier.deleted`) is not silently re-created by
+        # the next upgrade's migrate step.
+        has_tiers = (await session.execute(select(Tier.id).limit(1))).first() is not None
+        for position, name in enumerate(() if has_tiers else DEFAULT_TIERS):
             exists = (
                 await session.execute(select(Tier).where(Tier.name == name))
             ).scalar_one_or_none()

@@ -40,6 +40,22 @@ RUN rm -f app/auth/dev.py \
     && /opt/venv/bin/python -m compileall -q app migrations
 
 # ---------------------------------------------------------------------------------------------
+# Optional: Proton Pass `pass-cli`, the binary the proton_pass secret source runs on the API
+# (SPECS §15.7). Off by default — set PASS_CLI_URL to the release binary for your architecture and
+# PASS_CLI_SHA256 to its published checksum; the build fails on a URL without a checksum or on a
+# mismatch (supply chain, §7.4). Without it, a proton_pass reference fails closed (§15.2).
+FROM ${PYTHON_IMAGE} AS passcli
+ARG PASS_CLI_URL=""
+ARG PASS_CLI_SHA256=""
+RUN mkdir -p /out \
+    && if [ -n "$PASS_CLI_URL" ]; then \
+         [ -n "$PASS_CLI_SHA256" ] || { echo "PASS_CLI_URL needs PASS_CLI_SHA256" >&2; exit 1; }; \
+         python -c 'import sys, urllib.request; urllib.request.urlretrieve(sys.argv[1], "/out/pass-cli")' "$PASS_CLI_URL" \
+         && echo "$PASS_CLI_SHA256  /out/pass-cli" | sha256sum -c - \
+         && chmod 0755 /out/pass-cli; \
+       fi
+
+# ---------------------------------------------------------------------------------------------
 FROM ${PYTHON_IMAGE} AS runtime
 
 # git: repo reachability checks, staleness polling (ls-remote) and input discovery clones;
@@ -51,6 +67,7 @@ RUN apt-get update \
     && useradd --system --uid 10002 --gid stackd --home-dir /home/stackd --create-home \
          --shell /usr/sbin/nologin stackd
 
+COPY --from=passcli /out/ /usr/local/bin/
 COPY --from=build /opt/venv /opt/venv
 COPY --from=build --chown=root:root /app /app
 

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import threading
 import time
 from collections import OrderedDict
@@ -40,11 +41,24 @@ def _reset() -> None:
         _buckets.clear()
 
 
+def _processes() -> int:
+    """Worker processes of this replica (uvicorn's WEB_CONCURRENCY, as the production image runs
+    it). Each process holds its own buckets, so each enforces its share of the limit: the replica
+    as a whole then allows about the configured rate, not N times it. A client whose connections
+    all land on one process gets its share only — stricter, never looser (§20.3)."""
+    try:
+        return max(1, int(os.environ.get("WEB_CONCURRENCY", "1")))
+    except ValueError:
+        return 1
+
+
 def rate_limit(name: str, per_minute: int, burst: int | None = None) -> Callable[[Request], None]:
     """A FastAPI dependency that allows `per_minute` requests per client IP for `name`, tolerating
-    a short `burst`. Returns 429 (problem+json) when the bucket is empty."""
-    capacity = float(burst if burst is not None else per_minute)
-    refill_per_sec = per_minute / 60.0
+    a short `burst`, across the replica's processes. Returns 429 (problem+json) when the bucket is
+    empty."""
+    share = _processes()
+    capacity = max(1.0, float(burst if burst is not None else per_minute) / share)
+    refill_per_sec = per_minute / 60.0 / share
 
     def _dep(request: Request) -> None:
         ip = request.client.host if request.client else "?"

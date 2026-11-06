@@ -52,10 +52,19 @@ export function EnvPage() {
   const qc = useQueryClient();
   const navigate = useNavigate();
   const [params, setParams] = useSearchParams();
-  const [dialog, setDialog] = useState<null | "promote" | "command" | "destroy" | "clone" | "options">(null);
+  const [dialog, setDialogState] = useState<null | "promote" | "command" | "destroy" | "clone" | "options">(
+    null,
+  );
   // Plan options (SPECS §3.5) typed in the "Plan with options…" / destroy dialogs: one address per line.
   const [targets, setTargets] = useState("");
   const [replace, setReplace] = useState("");
+  // Every dialog opens (and closes) with empty plan options: addresses typed then cancelled in one
+  // dialog must never pre-fill the other — a destroy would silently become targeted.
+  const setDialog = (next: typeof dialog) => {
+    setTargets("");
+    setReplace("");
+    setDialogState(next);
+  };
 
   const stackList = useQuery({ queryKey: ["stacks"], queryFn: stacks.list });
   const stack = stackList.data?.find((s) => s.space_id === space?.id && s.name === stackName);

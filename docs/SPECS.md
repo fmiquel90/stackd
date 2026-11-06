@@ -126,7 +126,7 @@ On each `/auth/refresh`: the presented token must exist, not be revoked, not be 
 
 ### 3.0 `spaces` — the root container
 
-First level of the hierarchy (breadcrumb `space / stack / env / run`, DESIGN §4) and parent of `stacks`, `variable_sets`, `worker_pools`, `secret_sources`. The bootstrap seed (`app.seed`, with the default tier catalog) creates a `default` space — and, outside production (`STACKD_ENV` ≠ `production`), a `demo` space used by the dev demo data (DEV §7); a create request without `space_id` lands in `default`. **Per-space RBAC** shipped in Phase F (§2.4): `space_memberships`, `GET|POST /api/v1/spaces` (create = instance admin, who becomes the new space's first `admin` member) and member management. Space rename/delete and Google group mapping are not exposed; per-stack grants and OPA stay Phase 7. All `space_id` FKs point to a space from Phase 1.
+First level of the hierarchy (breadcrumb `space / stack / env / run`, DESIGN §4) and parent of `stacks`, `variable_sets`, `worker_pools`, `secret_sources`. The bootstrap seed (`app.seed`, with the default tier catalog) creates a `default` space — and, outside production (`STACKD_ENV` ≠ `production`), a `demo` space used by the dev demo data (DEV §7); the default tier catalog is seeded into an **empty** catalog only, so re-running the bootstrap (every upgrade) never re-creates a tier an admin deleted; a create request without `space_id` lands in `default`. **Per-space RBAC** shipped in Phase F (§2.4): `space_memberships`, `GET|POST /api/v1/spaces` (create = instance admin, who becomes the new space's first `admin` member) and member management. Space rename/delete and Google group mapping are not exposed; per-stack grants and OPA stay Phase 7. All `space_id` FKs point to a space from Phase 1.
 
 ```sql
 spaces (
@@ -740,6 +740,15 @@ POST /worker/v1/register   (Bearer pool_token) { "name", "labels"?, "version"?, 
 POST /worker/v1/heartbeat  (20 s) { "in_flight": N, "capacity": M } → { "commands": [{"id": ..., "type": "diagnostics"|"cancel_job", "payload": ...}] }
 POST /worker/v1/commands/{id}/result   { "status": "done"|"failed", "result": {...} }
 ```
+
+**Version compatibility (worker ↔ API).** The worker protocol (`/worker/v1`) evolves **additively**:
+a new claim-payload field is optional for the agent, a new event or report field is optional for
+the API, and a field's meaning never changes within `v1` (a breaking change would be `/worker/v2`,
+served alongside `v1` for one release). Hence the upgrade order: **API first, then the workers** —
+an API serves the agents of the previous release; an agent newer than its API is not supported.
+Where an older payload lacks a field a newer agent needs, the agent **fails closed** (e.g. a missing
+`cred_phase` gets the apply budget, §4.3). The agent reports its `version` at registration; it is
+shown on the Workers page to spot a lagging host.
 
 **Labels.** The agent sends its own labels from `STACKD_WORKER_LABELS`: comma-separated `key=value` pairs (`tier=prod,region=eu-west-3`; blanks trimmed, values are strings, unset or empty = none). A malformed entry (no `=`, an empty key) or a key set twice refuses to start the agent. The API stores the worker's effective labels — the worker's, the pool's on top, the pool winning on a shared key (§3.7) — which the claim matches environments against (§7.2). They are recomputed on every (re-)registration: a changed `STACKD_WORKER_LABELS` takes effect when the agent restarts.
 
@@ -1830,7 +1839,9 @@ Successful live resolutions are intentionally **not** audited (volume); the run'
   **Personal Access Token** or **AI Access Token**, scoped to the relevant vault/items (no account
   password). `secret_ref` uses Proton's URI form `pass://vault/item/field`.
 - Integration runs `pass-cli` on the resolver host (API for v1); the binary must be present in the
-  API image and is verified by checksum (supply-chain, §7.4).
+  API image and is verified by checksum (supply-chain, §7.4). The production image installs it when built with
+  `PASS_CLI_URL` + `PASS_CLI_SHA256` (both, or the build fails; a checksum mismatch fails it too);
+  built without, it has no `pass-cli` and a `proton_pass` reference fails closed (§15.2).
 - The Proton end-to-end model is preserved: decryption happens client-side via the token, Stackd
   only ever holds the (encrypted-at-rest) token and the reference, never the user's master key.
 
@@ -2131,7 +2142,9 @@ span is emitted.
 
 ### 20.3 Guardrails
 - **Rate limiting** (`app/ratelimit.py`): an in-process token bucket per (limiter, client IP),
-  per-replica (no Redis in the MVP). The buckets live in an LRU hard-capped at 10 000 keys under a
+  per-replica (no Redis in the MVP), shared across the replica's uvicorn processes: each process
+  holds 1/`WEB_CONCURRENCY` of the rate and burst, so a replica allows about the configured limit,
+  not N times it (a client pinned to one process gets its share — stricter, never looser). The buckets live in an LRU hard-capped at 10 000 keys under a
   lock (the least recently used bucket is evicted at the cap), so memory stays bounded. Applied to `auth/google/callback` + `auth/refresh` (one shared
   bucket, 30/min, burst 15), `webhooks/github` (120/min, burst 40), and `discover-inputs` (10/min, burst 5). 429
   problem+json when empty. `/me` is intentionally unthrottled (the UI polls it). Dev login is not
@@ -2612,6 +2625,9 @@ JSON (the API's own format; it converts to YAML losslessly). Every object is ide
   `space` is in the imported space).
 - `stacks[].id` / `environments[].id` are the source's ids — informational, they only feed the
   import's `id_map` (to move managed state, §22.4).
+- A variable referencing **another space's** secret source (a row predating the §15.1 check; the
+  claim fails it closed) is left out, listed as `secret_reference_out_of_space` without naming that
+  source.
 - `missing_secrets` lists what the export left out (for the reader); the import ignores it and
   computes its own against the target.
 - The document is strict (`extra="forbid"`): an unknown field — a typo in a hand-edited file — is a
@@ -2651,13 +2667,17 @@ deleted** (a deletion stays an explicit act through the API). All or nothing, in
   falling back to another layer's value. `protected` still forces `autodeploy` off (§3.2).
 - **Instance-wide items** follow their own endpoints' gates. Creating a **tier** needs the instance
   admin role (403 otherwise — the catalog governs every space); an existing tier is **never
-  modified** by an import (a difference is a `tier_differs` warning). **Cloud integrations** and
-  **worker pools** need the instance admin role; for a space admin they are skipped
+  modified** by an import (a difference is a `tier_differs` warning). **Cloud integrations**,
+  **worker pools** and a change to a **secret source's `config`** (PATCH …/secret-sources is
+  instance admin, §15) need the instance admin role; for a space admin they are skipped
   (`instance_admin_required`), never forced. A created pool's token is returned once in
   `worker_pool_tokens` (never in a dry run); an existing pool's labels are not changed (warning),
   and a pool name taken by another space is skipped.
 - **Platform hooks** are matched by (stage, name) on their stack/env, **notification targets** by
   name; a name held twice on the target is ambiguous → skipped.
+- A notification URL is SSRF-checked (DNS included) only when it is written (new or changed): an
+  unchanged URL was vetted when stored. An upstream of another space that is missing **or** not
+  writable gets the same `upstream_not_found` — an import reveals no other space's names.
 - **Audit**: every write is audited with the action its endpoint uses (`stack.created`,
   `environment.updated`, `variable.created`, `hook.updated`, `dependency.created`…) plus context
   `via: import`, in the same transaction (§6.3); new: `variable_set.attachment_updated` (an

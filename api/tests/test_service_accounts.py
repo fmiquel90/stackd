@@ -169,13 +169,13 @@ async def test_plans_and_exports_but_never_confirms(client: httpx.AsyncClient) -
 async def test_bootstrap_admin_emails(monkeypatch) -> None:  # type: ignore[no-untyped-def]
     """§2.1: with STACKD_BOOTSTRAP_ADMIN_EMAILS set, only the listed emails become admin on first
     sign-in — there is no first-come admin seat."""
+    from types import SimpleNamespace
+
     from app.auth import provisioning
     from app.enums import Role
 
-    class _S:
-        bootstrap_admin_emails = {"ops@corp.example"}
-
-    monkeypatch.setattr(provisioning, "get_settings", lambda: _S())
+    settings = SimpleNamespace(bootstrap_admin_emails={"ops@corp.example"})
+    monkeypatch.setattr(provisioning, "get_settings", lambda: settings)
     async with SessionLocal() as s:
         stranger = await provisioning.upsert_user(
             s, google_sub=f"g-{uuid.uuid4()}", email="someone@corp.example"
