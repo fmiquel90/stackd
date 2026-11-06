@@ -625,8 +625,8 @@ bypasses the apply gate.
   run: a read-only `proposed` run (`triggered_by=schedule`) planning that commit with `-refresh-only`,
   claimed after any user run. Unlike a PR plan it keeps the environment's secrets (it runs code that
   already ran with them). The outcome lands on the environment's `drift_status` — `drifted` (eligible
-  approvers get an inbox alert), `in_sync` or `error` — and a successful apply clears it. Drift is
-  never auto-remediated.
+  approvers get an inbox alert), `in_sync` or `error` — and a successful apply clears it (not a
+  targeted `-target` apply, which is partial). Drift is never auto-remediated.
 - **Environment clones & rollouts.** `POST /api/v1/spaces/{space_id}/environment-clones` creates, in
   several stacks of a space at once, an environment modelled on an existing one — settings,
   governance and dependency edges. A **rollout** then plans and applies a set of environments along
@@ -665,7 +665,8 @@ bypasses the apply gate.
 | **Provenance** | where a resolved variable came from (`set:…`, `stack`, `env`, `dependency:…`, `mock`, `secret:…`) |
 | **Run** | one change to one environment, from plan to apply, driven by the state machine |
 | **Job** | what a worker executes for a run: the plan job, the apply job, or a command job |
-| **Command run** | one allowlisted tofu subcommand (`import`, `state rm`…) instead of plan → apply |
+| **Command run** | one allowlisted tofu subcommand (`import`, `state rm`, `force-unlock`…) instead of plan → apply; options limited to a per-command allowlist |
+| **Plan options** | `targets` / `replace` addresses on a run (`-target=` / `-replace=` on the plan only); never auto-confirmed; a targeted apply is partial (keeps drift, not a promotion source) |
 | **`transition()`** | the only thing that changes a run's state |
 | **Tier** | configurable catalog; gates apply via the user's `allowed_tiers` set (not ordered) |
 | **Four-eyes** | the person who triggered a run can't confirm it, on a `requires_four_eyes` tier, a `protected` environment, or when the environment requires it |

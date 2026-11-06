@@ -100,7 +100,7 @@ is a misclick safeguard only — it never bypasses `can_apply` (still evaluated 
 An environment with `autodeploy` auto-confirms when the plan is clean — **but a `warn` check forces
 `unconfirmed`** so a human still sees it, and so does a run that consumed a mock or resolved a
 secret through a fallback (even where the env sets `allow_fallback_apply`, which only lets an approver
-confirm it). A `destroy` run never
+confirm it), and a [targeted or replace plan](#targeted-and-replace-plans). A `destroy` run never
 autodeploys: an approver with the destroy right confirms it. A `protected`
 environment can never autodeploy, and requires four-eyes. A rollout's run never autodeploys: it
 follows the [rollout gate](#rollouts).
@@ -111,6 +111,39 @@ page shows, with each one's stage — and `check_results.checks` only the ones t
 failed. A `fail`
 check fails the run at its stage; a failing `before_apply` check means nothing is applied. See
 [Hooks — check results](hooks.md#check-results).
+
+## Targeted and replace plans
+
+Sometimes a full plan is not what you need: one resource must be re-created (`-replace`), or a
+broken dependency forces you to plan a subset (`-target`). A tracked run can carry **plan
+options** — on the environment page, **More → Plan with options…** (the destroy dialog has the
+same *Advanced options* for targets), one address per line — or over the API:
+
+```bash
+curl -s -X POST localhost:8000/api/v1/environments/$ENV_ID/runs -H "$AUTH" \
+  -H 'content-type: application/json' -d '{
+  "targets": ["module.net[\"eu-west-1\"].aws_subnet.a"],
+  "replace": ["aws_instance.web"]
+}'
+```
+
+- `targets` (`-target=`) works on `tracked` and `destroy` runs; `replace` (`-replace=`) on
+  `tracked` runs only. Each address must look like a resource address — no whitespace, `=` or
+  leading `-` — at most 50 per list; duplicates are dropped. Otherwise: `422`.
+- The options go to the **plan** only. The apply applies the saved plan, which already carries
+  them — it never re-plans.
+- Permissions are those of any plan: `writer` to trigger (`can_destroy` for a destroy), and the
+  usual `can_apply` + four-eyes to confirm.
+- The run page shows a **Targeted** / **Replace** chip with the addresses, and a re-plan keeps
+  them. The run's `plan_options` field holds them, and the `run.triggered` audit event records them.
+
+!!! warning "Safety rules"
+    - A run with plan options **never auto-confirms**, even on an autodeploy environment or in a
+      rollout: a human always confirms it.
+    - A **targeted** apply is **partial**: it does **not** clear the environment's
+      drift status (`drift_status`, see [Environments](stacks-and-environments.md)), and it is **not** used as the commit to
+      [promote](#promotion-trunk-based) — the promotion takes the last full apply. A replace-only
+      apply plans the whole configuration and counts as a full apply.
 
 ## Mock block
 
@@ -128,7 +161,8 @@ curl -s -X POST localhost:8000/api/v1/environments/$STAGING_ID/promote -H "$AUTH
 ```
 
 It pins a new tracked run on the target to the commit of the source's last **apply** — a pull
-request's plan, a drift check, a command or an empty plan does not count — so you deploy *what
+request's plan, a drift check, a command, an empty plan or a
+[targeted](#targeted-and-replace-plans) apply does not count — so you deploy *what
 was tested* — not whatever HEAD happens to be. The apply is gated as usual (tier + four-eyes) at
 confirm. This is the same-stack counterpart to the cross-stack [cascade](dependencies-and-mocks.md).
 
@@ -214,8 +248,9 @@ curl -s -X POST localhost:8000/api/v1/runs/$RUN_ID/cancel -H "$AUTH"            
 A `destroy` run is triggered with `-d '{"type":"destroy"}'` (`tracked`, the default, and `destroy` are
 the only types this endpoint takes — 422 otherwise: a command runs through
 [`…/commands`](commands.md), a pull request's plan comes from its webhook); `commit_sha` (a full SHA, a branch or
-a tag) pins the plan to that commit, and `with_downstream: true` starts a
-[cascade](dependencies-and-mocks.md) group.
+a tag) pins the plan to that commit, `with_downstream: true` starts a
+[cascade](dependencies-and-mocks.md) group, and `targets` / `replace` make a
+[targeted or replace plan](#targeted-and-replace-plans).
 
 ## See also
 

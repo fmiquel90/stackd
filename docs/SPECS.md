@@ -261,6 +261,12 @@ commit_sha,                          -- pinned by the plan job's report (§7.3) 
                                      -- none or a ref; the apply clones exactly this commit
 commit_message, commit_author,
 command jsonb nullable,              -- command runs only: {name, args} (§4.3)
+plan_options jsonb nullable,         -- targeted / replace plan (migration 0034): {targets: [addr],
+                                     --   replace: [addr]}, only the non-empty keys; SQL NULL for a
+                                     --   full plan. Set only by a human trigger (POST …/runs) of a
+                                     --   tracked (targets, replace) or destroy (targets) run — never
+                                     --   on a proposed, drift, cascade, promotion or rollout run.
+                                     --   See "Targeted and replace plans" below
 triggered_by enum(manual|webhook|dependency|api|schedule|rollout), trigger_user_id nullable,
                                      -- 'api' reserved: no application tokens/PAT at MVP (auth = human
                                      -- Google + worker), set when programmatic triggering arrives
@@ -294,6 +300,24 @@ error nullable, created_at
 ```
 
 The drift (§19), VCS (§18) and external-secret (§15.5) columns are listed in their own sections.
+
+**Targeted and replace plans (`plan_options`).** `POST /environments/{id}/runs` accepts optional
+`targets` and `replace` lists of resource addresses, passed to the plan as `-target=<addr>` /
+`-replace=<addr>` (§7.2, §7.4). Validation (422 problem+json): each address non-empty, at most 512
+characters, starting with a letter or `_`, within `[A-Za-z0-9_.-[]"/:@]` — so no whitespace, control
+character, `=` or leading `-`; at most 50 per list, deduplicated (first kept); an empty list is no
+option; `replace` on a `tracked` run only. Permissions are unchanged: triggering is a plan (writer+,
+a destroy needs `can_destroy`), confirming goes through `can_apply` + four-eyes as usual. Decided
+safety rules:
+
+1. A run with plan options **never auto-confirms** — not on an autodeploy environment, not under a
+   rollout's approval: it always stops at `unconfirmed` for a human (§4.2).
+2. A **targeted** apply (`targets` non-empty) is **partial**: it does not reset drift to `in_sync`
+   (§19.4) and is never the source commit of a promotion (§9.7) — the source is the last full apply.
+   A replace-only plan plans the whole configuration: its apply counts as a full one. Outputs capture
+   (§9.1, `tofu output` reads the whole state) and the cascade (§9.2) are unchanged.
+3. The apply job applies the saved plan, which already carries the options: it never re-plans and
+   gets no options (`plan_options` is null in an apply job's payload).
 
 Concurrency — 1 active run per environment:
 
@@ -495,7 +519,7 @@ Command runs (§4.3) take a shorter path: `queued → preparing → running → 
 | `queued → preparing` | worker (claim) | no active run on the env, env not locked, compatible labels |
 | `planning → checking` | worker | plan OK **and ≥ 1 after_plan hook**. Without an after_plan hook, `checking` is skipped: the transitions `planning → unconfirmed / confirmed / finished` exist, with exactly the same conditions as their equivalents from `checking` |
 | `checking → unconfirmed` | worker | checks OK or warn; non-empty diff. A warn **forces** confirmation even if autodeploy |
-| `checking → confirmed` | system | all checks OK, non-empty diff, `autodeploy=true`, env not protected, a `tracked` run (a `destroy` never autodeploys: only an approver passing `can_apply` + `can_destroy` confirms it), `used_mocks=false`, `used_secret_fallback=false` (§15.5 — such a plan stops at `unconfirmed`, never fails at the apply claim; `allow_fallback_apply` lets an approver confirm it, never autodeploy), the run belongs to no rollout — **or** the run belongs to a started rollout whose gate is open and passes its gate (§21.5) |
+| `checking → confirmed` | system | all checks OK, non-empty diff, `autodeploy=true`, env not protected, a `tracked` run (a `destroy` never autodeploys: only an approver passing `can_apply` + `can_destroy` confirms it), `used_mocks=false`, `used_secret_fallback=false` (§15.5 — such a plan stops at `unconfirmed`, never fails at the apply claim; `allow_fallback_apply` lets an approver confirm it, never autodeploy), no `plan_options` (a targeted / replace plan is always confirmed by a human, §3.5), the run belongs to no rollout — **or** the run belongs to a started rollout whose gate is open and passes its gate (§21.5) |
 | `planning/checking → finished` | worker | empty diff, or a `proposed` run whatever its diff (plan-only). No outputs are captured here: only `applying → finished` records them (§9.1) |
 | `unconfirmed → discarded` | user (`writer`) | `POST /runs/{id}/discard` — the plan is dropped, never applied. Only from `unconfirmed` (409 otherwise): a run in any other state is canceled or stopped instead |
 | `queued / confirmed / unconfirmed → canceled` | user, or system | a user's cancel (a `confirmed` run is not claimed yet); the system when a PR closes (its proposed runs not claimed yet, §18.3) or a rollout is canceled (its member runs not claimed yet, §21.4 step 8) |
@@ -510,7 +534,19 @@ Single function `transition(run, to_state, actor, payload)` (`app/runs/transitio
 
 ### 4.3 Command runs
 
-A `RunType.command` run executes **one allowlisted tofu/terraform subcommand** (`import`, `state list/show/rm/mv`, `taint`, `untaint`, `output`, `show`, `validate`, `providers`, `refresh`) instead of the plan→apply flow — for state surgery and adoption that `plan`/`apply` can't express. It is **not** arbitrary shell: the worker runs `<tool> <command> <args>` with the command taken verbatim from the allowlist; an arg starting with `-` (`-chdir`, `-state`, …) is refused (400). Lifecycle: `queued → preparing → running → finished | failed`. The subcommand + args live in `runs.command` (`{name, args}`). Endpoint: `POST /api/v1/environments/{env_id}/commands`. Permissions: read-only commands need `writer`; **mutating** commands (import, state rm/mv, taint, untaint, refresh) require `can_apply(user, env)` — the same gate as an apply. The worker receives the **apply** OIDC role for mutating commands and the (read-only) **plan** role otherwise. A mutating command, like an applying run, **holds apply credentials**: its state token TTL and OIDC cap are the apply window (`apply_reclaim_window_seconds`, §3.7), the worker hard-kills its subcommand past the apply budget (`apply_timeout_seconds` of the claim payload), and worker-lost detection only reclaims it after the apply window (§7.5). The trigger is audited (`run.command_triggered`) and so is completion (`run.command_executed`). `force-unlock` is **not** a command — it has its own endpoint (`DELETE …/state/lock`, §11.2).
+A `RunType.command` run executes **one allowlisted tofu/terraform subcommand** (`import`, `state list/show/rm/mv`, `taint`, `untaint`, `output`, `show`, `validate`, `providers`, `refresh`, `force-unlock`) instead of the plan→apply flow — for state surgery and adoption that `plan`/`apply` can't express. It is **not** arbitrary shell: the worker runs `<tool> <command> <args>` with the command taken verbatim from the allowlist.
+
+**Option allowlist** (`app/runs/commands.py`), closed by default: an arg starting with `-` is refused (400 problem+json) unless the command's allowlist names it:
+
+| Command | Allowed options |
+|---|---|
+| `refresh` | `-target=<addr>` — repeatable, same address validation as a targeted plan (§3.5), at most 50, deduplicated |
+| `state rm`, `state mv` | `-dry-run` |
+| any other | none |
+
+Never anything that could print values (`-json`, `-raw`), point the tool elsewhere (`-state`, `-chdir`, `-backend*`), skip the lock (`-lock=false`) or inject variables (`-var*`). The API stores the args **options first** (Go's flag parsing stops at the first positional), so the agent passes them verbatim.
+
+**`force-unlock`** releases a stuck lock on a backend Stackd does **not** manage (`managed_state=false`, e.g. S3 + DynamoDB): exactly one arg, the lock ID (`[A-Za-z0-9][A-Za-z0-9._:-]{0,127}`, 400 otherwise). It is **admin-only** (the instance `admin` role — parity with `DELETE …/state/lock`) on top of the mutating-command gate (`can_apply`), and holds apply credentials. On a `managed_state=true` environment it is refused with 409 problem+json pointing to `DELETE /api/v1/environments/{id}/state/lock`: the platform owns that lock (§11.2). The agent runs `<tool> force-unlock -force <LOCK_ID>` — it adds `-force` itself (non-interactive); the user never passes a flag. Lifecycle: `queued → preparing → running → finished | failed`. The subcommand + args live in `runs.command` (`{name, args}`). Endpoint: `POST /api/v1/environments/{env_id}/commands`. Permissions: read-only commands need `writer`; **mutating** commands (import, state rm/mv, taint, untaint, refresh, force-unlock) require `can_apply(user, env)` — the same gate as an apply; `force-unlock` also the admin role. The worker receives the **apply** OIDC role for mutating commands and the (read-only) **plan** role otherwise. A mutating command, like an applying run, **holds apply credentials**: its state token TTL and OIDC cap are the apply window (`apply_reclaim_window_seconds`, §3.7), the worker hard-kills its subcommand past the apply budget (`apply_timeout_seconds` of the claim payload), and worker-lost detection only reclaims it after the apply window (§7.5). The trigger is audited (`run.command_triggered`, context `command` and the stored `args`) and so is completion (`run.command_executed`). The Stackd-managed lock is released by its own endpoint (`DELETE …/state/lock`, §11.2), never by a command run.
 
 ---
 
@@ -617,6 +653,8 @@ hook.created / hook.updated / hook.deleted      # deleted: manual, or with its s
 notification_target.created / notification_target.updated / notification_target.deleted
                                                 # deleted: manual, or with its stack/env (reason, §3.2)
 run.triggered / run.destroy_triggered / run.command_triggered / run.promoted   # §4.3, §9.7
+                                  # triggered / destroy_triggered: context environment_id, type,
+                                  #   tier, + plan_options for a targeted / replace plan (§3.5)
                                   # run.triggered by the system: context via = cascade (§9.2) |
                                   #   rollout (§21.4: rollout_id, environment_id, commit)
 run.confirmed ⭐                  # a human confirm, or the system: on autodeploy (context
@@ -729,6 +767,9 @@ POST /worker/v1/jobs/claim?wait=25
     "save_plan": true,                     # plan job of a tracked/destroy run: upload plan.tfplan
                                            # when the plan has changes (§7.3); false for a proposed
                                            # run (never applied), an apply or a command job
+    "plan_options": {"targets": ["aws_s3_bucket.logs"], "replace": ["aws_instance.web"]},
+                                           # §3.5: plan job of a tracked/destroy run only, else null
+                                           # (an apply job applies the saved plan: never re-plans)
     "command": {"name": "state rm", "args": ["aws_s3_bucket.old"]},   # command jobs only, else null
     "environment": { "id", "name": "prod", "stack_name": "core-network",
       "repo_url", "commit_sha", "branch", "project_root",
@@ -902,7 +943,9 @@ if job.phase == "plan":
     with with_files():
         code, events = run_json(tf, "plan", "-input=false", "-json", "-detailed-exitcode",
                                 f"-out={plan_file}", *(["-destroy"] if job.destroy else []),
-                                *(["-refresh-only"] if job.refresh_only else []))   # drift, §19
+                                *(["-refresh-only"] if job.refresh_only else []),   # drift, §19
+                                *[f"-target={a}" for a in job.plan_options.targets],  # §3.5, one
+                                *[f"-replace={a}" for a in job.plan_options.replace]) # argv each
     # 0 = no changes, 2 = changes; anything else (1 = error, 124 = killed past its time budget, a
     # signal) → job_failed with the reason — never "no changes". apply/commands: any non-zero fails.
     with with_files(tfvars=False):
@@ -944,7 +987,9 @@ else:                                        # command job (§4.3): no hooks, no
     report(phase_started, phase="running")
     with with_files(): run(tf, "init", "-input=false")
     with with_files():
-        run(tf, *job.command.name.split(), *job.command.args,
+        run(tf, *job.command.name.split(),
+            *(["-force"] if job.command.name == "force-unlock" else []),  # never prompts
+            *job.command.args,                       # verbatim: the API validated and ordered them
             timeout=default_cap if job.cred_phase == "plan" else job.apply_timeout_seconds)
     report(phase_finished, command=job.command.name)
 
@@ -1254,7 +1299,9 @@ Changing an environment's `branch` (`PATCH`) clears `head_sha`, `head_updated_at
 `POST /api/v1/environments/{target_id}/promote` `{from_environment_id}` re-deploys the **exact commit
 currently applied** on a sibling environment (same stack) to the target: it takes the `commit_sha` of
 the source's last **applied** run — a confirmed `tracked` run that finished, never a PR or drift plan
-(`proposed`), a command run or an empty plan — and creates a **tracked** run on the target pinned to
+(`proposed`), a command run, an empty plan or a **targeted** apply (`plan_options.targets`, §3.5: it
+applied only part of its commit, so it is skipped and the last full apply is the source; a
+replace-only apply counts) — and creates a **tracked** run on the target pinned to
 that commit (409 if that last apply was a `destroy`: nothing is applied any more). This
 is the trunk-based promotion primitive (dev → staging → prod of the *same* stack, as opposed to the
 cross-stack §9.2 cascade). Triggering needs `writer`; the apply is gated as usual at confirm
@@ -1458,12 +1505,17 @@ GET|PUT|DELETE /api/v1/environments/{id}/cloud-integration   # PUT/DELETE: admin
 POST /api/v1/environments/{id}/cloud-integration/test    # admin; verification AssumeRole
 
 # Runs
-POST /api/v1/environments/{id}/runs      { type?, with_downstream?, commit_sha?, secret_overrides? }
-                                         # type: tracked (default) | destroy — 422 otherwise
-POST /api/v1/environments/{id}/commands  { command, args, commit_sha? }     # §4.3
+POST /api/v1/environments/{id}/runs      { type?, with_downstream?, commit_sha?, secret_overrides?,
+                                           targets?, replace? }
+                                         # type: tracked (default) | destroy — 422 otherwise;
+                                         # targets/replace: resource addresses (§3.5), replace
+                                         # tracked only — 422 on an invalid list
+POST /api/v1/environments/{id}/commands  { command, args, commit_sha? }     # §4.3 — 400 outside
+                                         # the allowlists; force-unlock: admin, 409 on managed state
 POST /api/v1/environments/{id}/promote   { from_environment_id }           # §9.7
 GET  /api/v1/environments/{id}/runs ; GET /api/v1/runs/{id}   # the latter adds run_group (§9.2) and
-                                    # confirmed_via: user | autodeploy | rollout (§21.5)
+                                    # confirmed_via: user | autodeploy | rollout (§21.5); both
+                                    # carry plan_options (§3.5)
 POST /api/v1/runs/{id}/confirm | /discard | /cancel   # cancel of an executing run = a stop
                                     # request to its worker (§4.1); can_apply if it holds apply creds
 POST /api/v1/runs/{id}/vcs/resync                                          # §18.5
@@ -2016,7 +2068,9 @@ On the drift run completing: changes → `drifted` (set `drift_run_id`, audit `e
 with effective space membership), **once** per edge into drift — debounced while it
 stays drifted); no changes → `in_sync`; the plan itself failing → `error`. A successful **apply**
 on the env reconciles state with reality → back to `in_sync`, `drift_run_id` cleared
-(`environment.drift_cleared`).
+(`environment.drift_cleared`) — except a **targeted** apply (`plan_options.targets`, §3.5): it
+reconciled only its targets, so the drift status is left as it is (also on the after_apply-failure
+path, §8.3). A replace-only apply clears it like any apply.
 
 ### 19.5 API / front
 
