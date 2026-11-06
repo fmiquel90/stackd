@@ -418,6 +418,17 @@ def _job_failed(
     client.event(job_id, "job_failed", phase=phase, result={**result, "checks": checks})
 
 
+def _plan_option_flags(opts: dict | None) -> list[str]:
+    """`-target=`/`-replace=` flags for a plan job's `plan_options` (§7.2), addresses as the API
+    validated them. Each is one argv element (no shell), never a bare option."""
+    flags: list[str] = []
+    for key, flag in (("targets", "-target"), ("replace", "-replace")):
+        for addr in (opts or {}).get(key) or []:
+            if isinstance(addr, str) and addr and not addr.startswith("-"):
+                flags.append(f"{flag}={addr}")
+    return flags
+
+
 def handle_plan(
     client: ApiClient, job: dict, settings: Settings, checks: list[dict[str, Any]] | None = None
 ) -> None:
@@ -511,6 +522,9 @@ def handle_plan(
             plan_cmd.insert(2, "-refresh-only")
         if job.get("destroy"):
             plan_cmd.insert(2, "-destroy")
+        # A targeted / replace plan (§3.5): the API validated the addresses; they reach the plan
+        # only — the saved plan carries them to the apply, which never re-plans.
+        plan_cmd[2:2] = _plan_option_flags(job.get("plan_options"))
         with _tofu_files(ws, cwd, job):
             code, events = stream_json_command(
                 plan_cmd,
@@ -765,6 +779,17 @@ def _command_timeout(job: dict) -> int:
     return job.get("apply_timeout_seconds") or _DEFAULT_TIMEOUT_SECONDS
 
 
+# Flags the agent adds to a subcommand so it never waits on a prompt: `force-unlock` asks for a
+# confirmation otherwise. The user never passes these (§4.3) — the API refuses a leading `-` arg
+# outside its per-command option allowlist.
+_NON_INTERACTIVE: dict[str, list[str]] = {"force-unlock": ["-force"]}
+
+
+def _command_argv(tool: str, cmd: dict) -> list[str]:
+    name = str(cmd.get("name", ""))
+    return [tool, *name.split(), *_NON_INTERACTIVE.get(name, []), *(cmd.get("args") or [])]
+
+
 def handle_command_run(client: ApiClient, job: dict, settings: Settings) -> None:
     """Run one allowlisted tofu/terraform subcommand (RunType.command): clone, init, run it.
     No hooks, no plan/apply phases — a one-off operation (import, state rm, …)."""
@@ -804,7 +829,7 @@ def handle_command_run(client: ApiClient, job: dict, settings: Settings) -> None
         if init_rc != 0:
             return client.event(job_id, "job_failed", phase="init", result={"error": "init failed"})
 
-        argv = [tool, *str(cmd.get("name", "")).split(), *(cmd.get("args") or [])]
+        argv = _command_argv(tool, cmd)
         timeout = _command_timeout(job)
         with _tofu_files(ws, cwd, job):
             code = run_command(
