@@ -87,6 +87,27 @@ jobs:
       - name: Tests (pytest)
         run: uv run pytest -q
 
+  # The production images (docs/guide/installing.md) must keep building: no push, build only.
+  # Also asserts the dev login module is absent from the API image (DEV §3).
+  images:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        component: [api, front, worker]
+    steps:
+      - uses: actions/checkout@v6
+      - name: Build ${{ matrix.component }} image
+        run: docker build -f ${{ matrix.component }}/Dockerfile -t stackd/${{ matrix.component }}:ci ${{ matrix.component }}
+      - name: The API image has no dev login
+        if: matrix.component == 'api'
+        run: |
+          docker run --rm stackd/api:ci sh -c 'test ! -e /app/app/auth/dev.py'
+          if docker run --rm stackd/api:ci python -c 'import app.auth.dev'; then
+            echo "app.auth.dev is importable in the production image" >&2
+            exit 1
+          fi
+
   front:
     runs-on: ubuntu-latest
     defaults:
