@@ -1,15 +1,17 @@
 from __future__ import annotations
 
 import json
+import logging
 
 import httpx
 import os
 import signal
 import subprocess
+import sys
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from contextlib import AbstractContextManager, ExitStack, contextmanager, nullcontext
 from pathlib import Path
 from typing import Any
@@ -17,6 +19,7 @@ from typing import Any
 from agent import cancel
 from agent.client import ApiClient
 from agent.config import Settings
+from agent.drain import EXIT_CODES, Drain, supervise
 from agent.logging import get_logger, setup as setup_logging
 from agent.masking import Masker, mask_plan_json
 from agent.docker_engine import DockerEngine
@@ -927,6 +930,12 @@ def _heartbeat_loop(
         time.sleep(settings.heartbeat_interval)
 
 
+_SHUTDOWN_ERROR = (
+    "worker_shutdown: the worker was stopped before the job finished (drain timeout or a second "
+    "stop signal); the job was interrupted"
+)
+
+
 def _run_job(client: ApiClient, job: dict, settings: Settings) -> None:
     """Execute one claimed job to completion, reporting a job_failed on any uncaught error."""
     log.info(
@@ -947,6 +956,23 @@ def _run_job(client: ApiClient, job: dict, settings: Settings) -> None:
             handle_command_run(client, job, settings)
         log.info("job done", extra={"event": "agent.done", "run_id": job["job_id"]})
     except cancel.JobCanceled:
+        token = cancel.current()
+        if token is not None and token.by_shutdown_only:
+            # Stopped by this worker's own shutdown (the drain gave up, §7.1), not on request: the
+            # API never asked to cancel the run, so it is a failure — reported now rather than left
+            # to the `worker_lost` reclaim.
+            jid = job["job_id"]
+            log.warning(
+                "job stopped by shutdown", extra={"event": "agent.shutdown_stopped", "run_id": jid}
+            )
+            try:
+                _job_failed(client, jid, job.get("phase"), checks, error=_SHUTDOWN_ERROR)
+            except Exception as report_exc:  # noqa: BLE001 — e.g. the API already ended the run
+                log.warning(
+                    "job_failed not accepted",
+                    extra={"event": "agent.report_error", "run_id": jid, "error": str(report_exc)},
+                )
+            return
         # Stopped on a user's request (§4.1): the tool was interrupted, the workspace is gone
         # (`finally: ws.cleanup()` ran). With the checks run so far, like a failure's.
         log.info("job canceled", extra={"event": "agent.canceled", "run_id": job["job_id"]})
@@ -980,14 +1006,53 @@ def _run_job(client: ApiClient, job: dict, settings: Settings) -> None:
                 )
 
 
-def run() -> None:
+def _claim_loop(
+    client: ApiClient,
+    settings: Settings,
+    drain: Drain,
+    slots: threading.Semaphore,
+    start: Callable[[dict], None],
+) -> None:
+    """Claim jobs until a drain starts (§7.1). No claim starts once draining; a long-poll already in
+    flight is let through and a job it returns is started — it is claimed, the run is this worker's
+    now: dropping it would leave the run to the `worker_lost` reclaim. `start` takes over the slot
+    it is handed."""
+    while not drain.draining:
+        if not slots.acquire(timeout=0.5):  # every slot busy: look at the drain now and then
+            continue
+        if drain.draining:
+            slots.release()
+            break
+        try:
+            job = client.claim(wait=settings.poll_wait)
+        except Exception as exc:  # noqa: BLE001 — a transient claim error must not kill the worker
+            log.warning("claim failed", extra={"event": "agent.claim_error", "error": str(exc)})
+            slots.release()
+            drain.sleep(settings.heartbeat_interval)
+            continue
+        if job is None:
+            slots.release()
+            continue
+        start(job)
+
+
+def run() -> int:
     setup_logging()
+    # First SIGTERM/SIGINT: drain; second: stop now (§7.1). Installed before anything else so a
+    # stop while waiting for the token or the registration ends the agent at once.
+    drain = Drain()
+    signal.signal(signal.SIGTERM, drain.on_signal)
+    signal.signal(signal.SIGINT, drain.on_signal)
+
     settings = Settings.from_env()
+    drain.timeout = settings.drain_timeout_seconds
     # Token may be delivered via a file the platform seed writes after the worker boots; re-read
     # until it appears rather than idling forever (handles boot order + token rotation).
     while not settings.pool_token:
         log.warning("waiting for STACKD_POOL_TOKEN", extra={"event": "agent.idle"})
-        time.sleep(settings.heartbeat_interval)
+        drain.sleep(settings.heartbeat_interval)
+        if drain.draining:
+            return 0
         settings = Settings.from_env()
 
     client = ApiClient(settings.api_url)
@@ -995,6 +1060,8 @@ def run() -> None:
     # before the API has migrated/seeded). Retry instead of crashing — otherwise the worker dies on
     # the first 5xx and never comes back without a restart.
     while True:
+        if drain.draining:
+            return 0
         try:
             client.register(
                 settings.pool_token,
@@ -1018,7 +1085,7 @@ def run() -> None:
                     "register failed, retrying",
                     extra={"event": "agent.register_error", "error": str(exc)},
                 )
-            time.sleep(
+            drain.sleep(
                 max(settings.heartbeat_interval, 300) if refused else settings.heartbeat_interval
             )
             # Re-read the token: the seed rotates the pool token on a reset (DB wiped → fresh token
@@ -1035,7 +1102,8 @@ def run() -> None:
 
     inflight = _InFlight()
     # Heartbeat runs on its own daemon thread so neither the claim long-poll nor a long-running job
-    # can starve it (fixes the worker flickering offline between claims / during plan & apply).
+    # can starve it (fixes the worker flickering offline between claims / during plan & apply). It
+    # keeps beating through a drain: the worker stays online while its jobs finish.
     jobs = cancel.JobRegistry(settings.cancel_grace_seconds)
     threading.Thread(
         target=_heartbeat_loop, args=(client, settings, inflight, jobs), daemon=True
@@ -1050,29 +1118,43 @@ def run() -> None:
     def _execute(job: dict, token: cancel.CancelToken) -> None:
         cancel.bind(token)  # this job's thread: the runners find its token here
         try:
-            _run_job(client, job, settings)
+            _run_job(client, job, settings)  # reports the job's end before the slot is freed
         finally:
             cancel.bind(None)
             jobs.unregister(job["job_id"])
             inflight.dec()
             slots.release()
 
-    while True:
-        slots.acquire()  # block until a slot frees up (serial when max_concurrent_jobs=1)
-        try:
-            job = client.claim(wait=settings.poll_wait)
-        except Exception as exc:  # noqa: BLE001 — a transient claim error must not kill the worker
-            log.warning("claim failed", extra={"event": "agent.claim_error", "error": str(exc)})
-            slots.release()
-            time.sleep(settings.heartbeat_interval)
-            continue
-        if job is None:
-            slots.release()
-            continue
+    def _start(job: dict) -> None:
         inflight.inc()
         # Registered before the job starts, so a cancel that arrives first still finds it.
         pool.submit(_execute, job, jobs.register(job["job_id"]))
 
+    outcome: list[str] = []
+
+    def _supervisor() -> None:
+        result = supervise(
+            drain,
+            in_flight=inflight.count,
+            stop_all=jobs.shutdown,
+            cancel_grace=settings.cancel_grace_seconds,
+        )
+        if result == "abandoned":
+            # A job did not end even after its stop (or the claim in flight never returned): exit
+            # without waiting for its thread. Its run goes to the API's `worker_lost` reclaim.
+            logging.shutdown()
+            os._exit(EXIT_CODES[result])
+        outcome.append(result)
+
+    supervisor = threading.Thread(target=_supervisor, name="drain-supervisor", daemon=True)
+    supervisor.start()
+
+    _claim_loop(client, settings, drain, slots, _start)
+    drain.claims_stopped = True
+    supervisor.join()
+    pool.shutdown(wait=True)  # every job already reported (the supervisor waited for them)
+    return EXIT_CODES["drained" if outcome == ["drained"] else "stopped"]
+
 
 if __name__ == "__main__":
-    run()
+    sys.exit(run())

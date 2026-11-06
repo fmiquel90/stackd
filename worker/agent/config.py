@@ -4,6 +4,7 @@ import os
 from dataclasses import dataclass, field
 
 from agent.docker_runner import DockerLimits
+from agent.drain import DEFAULT_DRAIN_TIMEOUT_SECONDS
 from agent.tools import parse_runner_images, probe_local, tools_from_images
 
 
@@ -65,6 +66,8 @@ class Settings:
     max_concurrent_jobs: int  # in-flight jobs across environments (§7, Phase E; default 1)
     # After a stop request's SIGINT, how long the tool gets to stop before SIGKILL (§4.1)
     cancel_grace_seconds: int = 120
+    # On SIGTERM/SIGINT, how long running jobs get to finish before they are stopped (§7.1 "Drain")
+    drain_timeout_seconds: int = DEFAULT_DRAIN_TIMEOUT_SECONDS
     # STACKD_WORKER_LABELS (§7.1): this worker's own labels; the API adds its pool's under them
     labels: dict[str, str] = field(default_factory=dict)
     # docker runner (§7.4): {"opentofu:1.12.2": "<repo>@sha256:<digest>"}, from STACKD_RUNNER_IMAGES
@@ -99,6 +102,12 @@ class Settings:
             else "warn",
             max_concurrent_jobs=max(1, int(os.environ.get("STACKD_MAX_CONCURRENT_JOBS", "1"))),
             cancel_grace_seconds=max(1, int(os.environ.get("STACKD_CANCEL_GRACE_SECONDS", "120"))),
+            drain_timeout_seconds=max(
+                0,
+                int(
+                    os.environ.get("STACKD_DRAIN_TIMEOUT_SECONDS") or DEFAULT_DRAIN_TIMEOUT_SECONDS
+                ),
+            ),
             labels=parse_labels(os.environ.get("STACKD_WORKER_LABELS", "")),
             runner_images=parse_runner_images(os.environ.get("STACKD_RUNNER_IMAGES", "")),
             docker_host=os.environ.get("STACKD_DOCKER_HOST") or None,
