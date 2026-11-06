@@ -36,7 +36,7 @@ from app.models.user import User
 from app.models.variable import Variable
 from app.models.variable_set import VariableSet, VariableSetAttachment
 from app.models.worker import WorkerPool
-from app.notifications.dispatcher import check_url_safe
+from app.notifications.dispatcher import ensure_url_safe
 from app.portability.schemas import (
     AttachmentDoc,
     CloudIntegrationDoc,
@@ -753,12 +753,7 @@ class Importer:
                 # The SSRF half the schema can't do (§14) — for a URL being written only: an
                 # unchanged one was vetted when it was stored, and a transient DNS failure on it
                 # must not abort the import.
-                try:
-                    await check_url_safe(doc.url)
-                except ValueError as exc:
-                    raise ProblemException(
-                        422, "Unsafe notification URL", f"{path}: {exc}"
-                    ) from exc
+                await ensure_url_safe(doc.url, ("body", *path.split("/"), "url"))
             values = {
                 "kind": doc.kind,
                 "url": doc.url,

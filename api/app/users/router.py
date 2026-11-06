@@ -11,7 +11,7 @@ from app.audit import record_audit
 from app.auth.deps import CurrentUser, require_role
 from app.auth.schemas import MentionableUser, UserOut, UserUpdate
 from app.db import get_session
-from app.enums import AuditActorKind, Role
+from app.enums import AuditActorKind, Role, UserKind
 from app.errors import ProblemException
 from app.models.user import User
 
@@ -39,7 +39,13 @@ async def list_mentionable(
     """A minimal directory (id/email/display_name) for @mention autocomplete in comments — readable
     by any authenticated user (collaboration), unlike the admin-only full user list."""
     rows = (
-        (await session.execute(select(User).where(User.disabled.is_(False)).order_by(User.email)))
+        (
+            await session.execute(
+                select(User)
+                .where(User.disabled.is_(False), User.kind == UserKind.human)  # §23: no SA
+                .order_by(User.email)
+            )
+        )
         .scalars()
         .all()
     )

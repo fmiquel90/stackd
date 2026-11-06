@@ -185,3 +185,39 @@ async def test_bootstrap_admin_emails(monkeypatch) -> None:  # type: ignore[no-u
         )
         assert stranger.role == Role.reader and ops.role == Role.admin
         await s.rollback()
+
+
+async def test_no_inbox_no_mention_and_a_unique_name(client: httpx.AsyncClient) -> None:
+    """A service account is no @mention target and gets no inbox row; its name is unique at the
+    database level (a concurrent create can't slip past the check)."""
+    import pytest
+    from sqlalchemy.exc import IntegrityError
+
+    from app.enums import Role, UserKind
+    from app.inbox.service import notify
+    from app.models.user import User
+    from app.models.user_notification import UserNotification
+
+    admin = await login(client, "admin")
+    sa = await _account(client, admin)
+    mentionable = (await client.get("/api/v1/users/mentionable", headers=admin)).json()
+    assert sa["id"] not in {u["id"] for u in mentionable}
+
+    async with SessionLocal() as s:
+        await notify(s, uuid.UUID(sa["id"]), "run_finished")
+        await s.commit()
+        rows = (
+            (
+                await s.execute(
+                    select(UserNotification).where(UserNotification.user_id == uuid.UUID(sa["id"]))
+                )
+            )
+            .scalars()
+            .all()
+        )
+        assert rows == []
+
+    async with SessionLocal() as s:
+        s.add(User(kind=UserKind.service, email=sa["email"], display_name="dup", role=Role.reader))
+        with pytest.raises(IntegrityError):
+            await s.flush()

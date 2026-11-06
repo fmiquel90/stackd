@@ -29,8 +29,10 @@ services:
       # - /etc/stackd/registry-auth.json:/run/secrets/registry-auth.json:ro
     init: true # forwards SIGTERM to the agent, which drains (SPECS §7.1)
     # On stop, the agent drains: no new job, the running ones finish (up to
-    # STACKD_DRAIN_TIMEOUT_SECONDS, default 1200), then the rest are stopped (SIGINT, SIGKILL after
-    # STACKD_CANCEL_GRACE_SECONDS, 120) and report. Docker must not kill it before:
-    # 1200 + 120 + 30 s to report < 23 min. Raise it with either setting.
-    stop_grace_period: 23m
+    # STACKD_DRAIN_TIMEOUT_SECONDS, default 1200 — and never before a running apply's own budget,
+    # STACKD_APPLY_TIMEOUT_SECONDS on the API, + 300 s), then the rest are stopped (SIGINT, SIGKILL
+    # after STACKD_CANCEL_GRACE_SECONDS, 120) and report. Docker must not kill it before:
+    # max(drain timeout, apply budget + 300) + 120 + 30 s — 1350 s with the defaults. Set
+    # STACKD_WORKER_STOP_GRACE (.env, compose duration) when you raise any of those.
+    stop_grace_period: ${STACKD_WORKER_STOP_GRACE:-23m}
     restart: unless-stopped

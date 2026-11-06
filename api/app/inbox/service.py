@@ -11,6 +11,7 @@ from app.enums import RunState, RunType, TriggeredBy
 from app.models.environment import Environment
 from app.models.run import Run
 from app.models.stack import Stack
+from app.models.user import User
 from app.models.user_notification import UserNotification
 from app.permissions import can_apply
 from app.spaces.service import users_with_space_access
@@ -28,7 +29,11 @@ async def notify(
     context: dict | None = None,
 ) -> None:
     """Add one in-app notification + emit a private WS signal on the user's channel (§17). Same txn
-    as the trigger; NOTIFY is transactional so a rolled-back action never notifies."""
+    as the trigger; NOTIFY is transactional so a rolled-back action never notifies. A service
+    account (§23) has no inbox: nobody would read it (a run it triggered, a mention of it)."""
+    recipient = await session.get(User, user_id)
+    if recipient is None or recipient.is_service_account:
+        return
     session.add(
         UserNotification(
             user_id=user_id, kind=kind, run_id=run_id, comment_id=comment_id, context=context

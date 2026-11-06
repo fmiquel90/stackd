@@ -361,3 +361,79 @@ def test_a_second_sigterm_stops_at_once(agent_env: threading.Event) -> None:
     assert [e[0] for e in api.events] == ["job_failed"]
     assert api.events[0][2] - second < 2
     assert time.monotonic() - started < 10
+
+
+def test_an_apply_in_its_budget_outlives_the_drain_timeout() -> None:
+    """The timeout never cuts an apply short: the drain waits for the hold (claim + the apply budget
+    the API sent + margin), then falls back to the cancel path."""
+    d, jobs = Drain(timeout=0.1), Counter(1)
+    d.claims_stopped = True
+    hold = time.monotonic() + 0.6
+    out: dict[str, Any] = {}
+
+    def stop_all() -> int:  # the cancel path ends the job, which then reports
+        n = Counter.stop_all(jobs)
+        jobs.n = 0
+        return n
+
+    def target() -> None:
+        out["outcome"] = supervise(
+            d,
+            in_flight=jobs.count,
+            stop_all=stop_all,
+            cancel_grace=0.1,
+            poll=0.02,
+            hold_until=lambda: hold,
+        )
+
+    t = threading.Thread(target=target)
+    t.start()
+    d.on_signal(signal.SIGTERM)
+    time.sleep(0.4)
+    assert jobs.stops == 0  # past the drain timeout, still inside the apply's hold
+    t.join(5)
+    assert jobs.stops == 1 and out["outcome"] == "stopped"
+
+
+def test_a_second_signal_overrides_the_apply_hold() -> None:
+    d, jobs = Drain(timeout=0.1), Counter(1)
+    d.claims_stopped = True
+    out: dict[str, Any] = {}
+
+    def stop_all() -> int:
+        n = Counter.stop_all(jobs)
+        jobs.n = 0
+        return n
+
+    def target() -> None:
+        out["outcome"] = supervise(
+            d,
+            in_flight=jobs.count,
+            stop_all=stop_all,
+            cancel_grace=0.1,
+            poll=0.02,
+            hold_until=lambda: time.monotonic() + 3600,
+        )
+
+    t = threading.Thread(target=target)
+    t.start()
+    d.on_signal(signal.SIGTERM)
+    d.on_signal(signal.SIGTERM)
+    t.join(5)
+    assert jobs.stops == 1
+
+
+def test_which_jobs_hold_apply_credentials() -> None:
+    from agent.main import _holds_apply_credentials
+
+    assert _holds_apply_credentials({"phase": "apply"})
+    assert not _holds_apply_credentials({"phase": "plan"})
+    assert _holds_apply_credentials(
+        {"phase": "command", "command": {"name": "import"}, "cred_phase": "apply"}
+    )
+    assert _holds_apply_credentials(
+        {"phase": "command", "command": {"name": "import"}}
+    )  # fail closed
+    assert not _holds_apply_credentials(
+        {"phase": "command", "command": {"name": "show"}, "cred_phase": "plan"}
+    )

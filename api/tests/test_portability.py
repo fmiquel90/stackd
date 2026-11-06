@@ -565,3 +565,31 @@ async def test_export_skips_a_reference_to_another_spaces_source(client: httpx.A
         "missing_secrets"
     ]
     assert "other-vault" not in str(doc)
+
+
+async def test_import_refuses_an_unsafe_notification_url(client: httpx.AsyncClient) -> None:
+    """The import runs the routes' SSRF check (shared `ensure_url_safe`): same 422 shape, located
+    at the target in the document, nothing written."""
+    admin = await login(client, "admin")
+    sp = await _space(client, admin, f"ssrf-{uuid.uuid4().hex[:6]}")
+    doc = {
+        "stacks": [
+            {
+                "name": "s",
+                "repo_url": "file:///r",
+                "tool_version": "1.12",
+                "notification_targets": [
+                    {
+                        "name": "evil",
+                        "kind": "webhook",
+                        "url": "https://127.0.0.1/hook",
+                        "on_states": ["failed"],
+                    }
+                ],
+            }
+        ]
+    }
+    r = await _import(client, admin, sp, doc)
+    assert r.status_code == 422, r.text
+    assert "notification_targets" in r.text
+    assert (await _export(client, admin, sp))["stacks"] == []

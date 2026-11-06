@@ -10,6 +10,7 @@ from typing import Annotated
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel, Field, field_validator
 from sqlalchemy import func, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.audit import record_audit
@@ -100,18 +101,23 @@ async def _account(session: AsyncSession, account_id: uuid.UUID) -> User:
     return user
 
 
-async def _out(session: AsyncSession, u: User) -> ServiceAccountOut:
-    active = (
-        await session.execute(
-            select(func.count())
-            .select_from(ApiToken)
-            .where(
-                ApiToken.user_id == u.id,
-                ApiToken.revoked_at.is_(None),
-                ApiToken.expires_at > datetime.now(UTC),
-            )
+async def _active_tokens(session: AsyncSession, user_ids: list[uuid.UUID]) -> dict[uuid.UUID, int]:
+    """Active (unrevoked, unexpired) token count per account — one grouped query for a list."""
+    if not user_ids:
+        return {}
+    rows = await session.execute(
+        select(ApiToken.user_id, func.count())
+        .where(
+            ApiToken.user_id.in_(user_ids),
+            ApiToken.revoked_at.is_(None),
+            ApiToken.expires_at > datetime.now(UTC),
         )
-    ).scalar_one()
+        .group_by(ApiToken.user_id)
+    )
+    return {uid: n for uid, n in rows.all()}
+
+
+def _out(u: User, active_tokens: int) -> ServiceAccountOut:
     return ServiceAccountOut(
         id=u.id,
         name=u.display_name or u.email.split("@")[0],
@@ -119,7 +125,7 @@ async def _out(session: AsyncSession, u: User) -> ServiceAccountOut:
         role=u.role,
         disabled=u.disabled,
         created_at=u.created_at,
-        active_tokens=active,
+        active_tokens=active_tokens,
     )
 
 
@@ -138,7 +144,8 @@ async def list_accounts(_: Admin, session: DbSession) -> list[ServiceAccountOut]
         .scalars()
         .all()
     )
-    return [await _out(session, u) for u in rows]
+    counts = await _active_tokens(session, [u.id for u in rows])
+    return [_out(u, counts.get(u.id, 0)) for u in rows]
 
 
 @router.post("", response_model=ServiceAccountOut, status_code=201)
@@ -162,7 +169,12 @@ async def create_account(
         can_destroy=False,
     )
     session.add(user)
-    await session.flush()
+    try:
+        await session.flush()
+    except IntegrityError as exc:  # a concurrent create of the same name (unique index, 0036)
+        raise ProblemException(
+            409, "Service account exists", f"'{body.name}' already exists."
+        ) from exc
     await record_audit(
         session,
         action="service_account.created",
@@ -173,7 +185,7 @@ async def create_account(
     )
     await session.commit()
     await session.refresh(user)
-    return await _out(session, user)
+    return _out(user, 0)
 
 
 @router.get("/{account_id}/tokens", response_model=list[TokenOut])

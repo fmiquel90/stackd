@@ -59,11 +59,13 @@ A worker **drains** on its first SIGTERM or SIGINT (`docker stop`, a pod's termi
 
 Past `STACKD_DRAIN_TIMEOUT_SECONDS` (default **1200 s**), or at once on a **second** signal, it stops the jobs still running the way a user's stop does — SIGINT to the tool, SIGKILL after `STACKD_CANCEL_GRACE_SECONDS` — waits for them to report, and exits `1`. Those runs fail with `worker_shutdown: …` (an interrupted apply may have changed part of the infrastructure, as with any stopped apply). The default is the API's apply window — the 15 min apply budget plus the 5 min grace: an apply that started just before the signal can still use its whole budget, and a run held longer than that would be reclaimed by the API (`worker_lost`) anyway. If you raise the API's `STACKD_APPLY_TIMEOUT_SECONDS`, raise it too.
 
-**The process manager must wait longer than the drain**, or it kills the worker mid-job — the very thing draining avoids. Allow drain timeout + cancel grace + 30 s to report, **1380 s** with the defaults:
+A running **apply** (or mutating command) is never stopped before its own apply budget — as the API sent it in the claim — plus 300 s, even past the drain timeout; a second signal still stops it at once.
+
+**The process manager must wait longer than the drain**, or it kills the worker mid-job — the very thing draining avoids. Allow max(drain timeout, apply budget + 300 s) + cancel grace + 30 s to report, **1380 s** with the defaults (raise it with `STACKD_APPLY_TIMEOUT_SECONDS`):
 
 | Where | Setting |
 |---|---|
-| Docker Compose | `stop_grace_period: 23m` (set in `deploy/production/worker.compose.yml`) |
+| Docker Compose | `stop_grace_period` in `deploy/production/worker.compose.yml`: `STACKD_WORKER_STOP_GRACE` in `.env` (default `23m`) |
 | plain Docker | `docker stop -t 1380 <container>` (default 10 s); the agent needs an init forwarding the signal (`--init`) |
 | Kubernetes | `terminationGracePeriodSeconds: 1380` on the worker pod (default 30 s) |
 | systemd | `TimeoutStopSec=1380` (default 90 s), `KillMode=mixed` |

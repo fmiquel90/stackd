@@ -4,7 +4,6 @@ import uuid
 from typing import Annotated
 
 from fastapi import APIRouter, Depends
-from fastapi.exceptions import RequestValidationError
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -15,7 +14,7 @@ from app.enums import AttachmentTarget, AuditActorKind, Role
 from app.environments.router import lock_attach_target
 from app.errors import ProblemException
 from app.models.notification import NotificationTarget
-from app.notifications.dispatcher import check_url_safe, deliver
+from app.notifications.dispatcher import deliver, ensure_url_safe
 from app.notifications.schemas import NotificationCreate, NotificationOut, NotificationUpdate
 from app.spaces import guard_env_id, guard_stack_id
 
@@ -48,20 +47,7 @@ async def _list(
 async def _check_url(url: str) -> None:
     """The DNS-resolving half of the URL check, which the body validators can't do without blocking
     the event loop. Reported exactly like a failed body validator (422 problem+json)."""
-    try:
-        await check_url_safe(url)
-    except ValueError as exc:
-        raise RequestValidationError(
-            [
-                {
-                    "type": "value_error",
-                    "loc": ("body", "url"),
-                    "msg": f"Value error, {exc}",
-                    "input": url,
-                    "ctx": {"error": exc},
-                }
-            ]
-        ) from exc
+    await ensure_url_safe(url)
 
 
 async def _create(

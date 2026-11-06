@@ -31,6 +31,11 @@ log = get_logger()
 DEFAULT_DRAIN_TIMEOUT_SECONDS = 1200
 # After the fallback stop, on top of the cancel grace: time for the job to report its end.
 REPORT_MARGIN_SECONDS = 30
+# A job holding apply credentials (an apply, a mutating command) is never stopped by the drain
+# before its own apply budget — the one the API set in its claim (`apply_timeout_seconds`, which an
+# operator may raise well past the default) — plus this margin, the API's default lost-worker grace
+# (`stackd_apply_lost_grace_seconds`): interrupting an apply leaves the infrastructure half changed.
+APPLY_HOLD_MARGIN_SECONDS = 300
 
 Outcome = Literal["drained", "stopped", "abandoned"]
 
@@ -73,10 +78,16 @@ def supervise(
     poll: float = 0.2,
     clock: Callable[[], float] = time.monotonic,
     sleep: Callable[[float], None] = time.sleep,
+    hold_until: Callable[[], float | None] = lambda: None,
 ) -> Outcome:
     """Wait for a drain to start, then for it to end. `drained`: every job finished and reported;
     `stopped`: the rest were stopped through the cancel path and have reported; `abandoned`: some
-    job still had not ended `cancel_grace` + a margin after being stopped."""
+    job still had not ended `cancel_grace` + a margin after being stopped.
+
+    The timeout never cuts an apply short: `hold_until` gives the latest `clock()` time up to which
+    a running job holding apply credentials must be let run (its claim + its apply budget + a
+    margin); the drain waits until then when that is later than its own timeout. A second signal
+    still stops everything at once."""
     while not drain.draining:
         sleep(poll)
 
@@ -107,7 +118,8 @@ def supervise(
                 extra={"event": "agent.drain_forced", "in_flight": in_flight()},
             )
             break
-        if clock() >= deadline:
+        hold = hold_until()
+        if clock() >= max(deadline, hold if hold is not None else deadline):
             log.warning(
                 "drain timed out: stopping the running jobs",
                 extra={

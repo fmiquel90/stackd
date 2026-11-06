@@ -19,7 +19,7 @@ from typing import Any
 from agent import cancel
 from agent.client import ApiClient
 from agent.config import Settings
-from agent.drain import EXIT_CODES, Drain, supervise
+from agent.drain import APPLY_HOLD_MARGIN_SECONDS, EXIT_CODES, Drain, supervise
 from agent.logging import get_logger, setup as setup_logging
 from agent.masking import Masker, mask_plan_json
 from agent.docker_engine import DockerEngine
@@ -782,6 +782,13 @@ def handle_apply(
         ws.cleanup()
 
 
+def _holds_apply_credentials(job: dict) -> bool:
+    """An apply job, or a mutating command (`cred_phase` "apply", or absent: fail closed, §4.3)."""
+    if job.get("phase") == "apply":
+        return True
+    return job.get("command") is not None and job.get("cred_phase") != "plan"
+
+
 def _command_timeout(job: dict) -> int:
     """Wall-clock cap for a command run's subcommand, from the job's credential phase as the API
     sent it (`cred_phase`, §7.2). A mutating command holds apply credentials (apply OIDC role,
@@ -1127,17 +1134,35 @@ def run() -> int:
     pool = ThreadPoolExecutor(max_workers=settings.max_concurrent_jobs)
     slots = threading.Semaphore(settings.max_concurrent_jobs)
 
+    # Jobs holding apply credentials → the monotonic time the drain must let them run until
+    # (claim + their apply budget + margin, §7.1): a drain never interrupts an apply in its budget.
+    holds: dict[str, float] = {}
+    holds_lock = threading.Lock()
+
+    def _hold_until() -> float | None:
+        with holds_lock:
+            return max(holds.values(), default=None)
+
     def _execute(job: dict, token: cancel.CancelToken) -> None:
         cancel.bind(token)  # this job's thread: the runners find its token here
         try:
             _run_job(client, job, settings)  # reports the job's end before the slot is freed
         finally:
+            with holds_lock:
+                holds.pop(job["job_id"], None)
             cancel.bind(None)
             jobs.unregister(job["job_id"])
             inflight.dec()
             slots.release()
 
     def _start(job: dict) -> None:
+        if _holds_apply_credentials(job):
+            with holds_lock:
+                holds[job["job_id"]] = (
+                    time.monotonic()
+                    + (job.get("apply_timeout_seconds") or _DEFAULT_TIMEOUT_SECONDS)
+                    + APPLY_HOLD_MARGIN_SECONDS
+                )
         inflight.inc()
         # Registered before the job starts, so a cancel that arrives first still finds it.
         pool.submit(_execute, job, jobs.register(job["job_id"]))
@@ -1150,6 +1175,7 @@ def run() -> int:
             in_flight=inflight.count,
             stop_all=jobs.shutdown,
             cancel_grace=settings.cancel_grace_seconds,
+            hold_until=_hold_until,
         )
         if result == "abandoned":
             # A job did not end even after its stop (or the claim in flight never returned): exit

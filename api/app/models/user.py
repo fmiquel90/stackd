@@ -3,7 +3,7 @@ from __future__ import annotations
 import uuid
 from datetime import datetime
 
-from sqlalchemy import Boolean, Enum, ForeignKey, String, UniqueConstraint
+from sqlalchemy import Boolean, Enum, ForeignKey, Index, String, UniqueConstraint, text
 from sqlalchemy.dialects.postgresql import ARRAY
 from sqlalchemy.dialects.postgresql import UUID as PGUUID
 from sqlalchemy.orm import Mapped, mapped_column
@@ -17,6 +17,15 @@ class User(Base):
     gate per-env apply (§2.4) — a user may apply to any environment whose tier is in the set."""
 
     __tablename__ = "users"
+    # §23: a service account's name (its email) is unique — migration 0036.
+    __table_args__ = (
+        Index(
+            "uq_users_service_account_email",
+            "email",
+            unique=True,
+            postgresql_where=text("kind = 'service'"),
+        ),
+    )
 
     id: Mapped[uuid.UUID] = pk_uuid()
     # NULL for a service account (§23): it never signs in with Google.

@@ -324,7 +324,7 @@ Stackd upgrades are **migrate, then restart**; the migration runs before the new
    job, lets its running ones finish and report, then exits — so `stop` can take as long as the
    longest running job, up to `STACKD_DRAIN_TIMEOUT_SECONDS` (20 min by default); past it, the
    remaining jobs are stopped and their runs fail with `worker_shutdown`. The compose files give
-   the worker `stop_grace_period: 23m` so Docker does not kill it first; with plain Docker use
+   the worker a `stop_grace_period` (`STACKD_WORKER_STOP_GRACE` in `.env`, default `23m` — raise it with the apply budget) so Docker does not kill it first; with plain Docker use
    `docker stop -t 1380 <container>` (the default 10 s would kill a running apply). Stop the
    workers **before** the API: a draining worker reports to it. A second `Ctrl-C`/signal stops
    the running jobs at once. See [Workers & scaling](workers-and-scaling.md#stopping-a-worker).
