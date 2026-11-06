@@ -115,7 +115,15 @@ bucket versioning on, any combination is consistent.
 ## Configuration export: the logical complement
 
 Besides the physical backup, each space's configuration can be exported as a JSON document and
-imported back ([SPECS §22](../SPECS.md)):
+imported back ([SPECS §22](../SPECS.md)).
+
+**In the UI** (space admin): **Settings → Space configuration**, pick the space, then **Export
+configuration** downloads the document; **Import configuration…** reads a `.json` file, runs a
+**dry run** and shows its report (what would be created or updated, secrets to fill, what would be
+skipped and why), and only then offers **Apply import**. A worker pool the import creates shows
+its agent token once, in that dialog.
+
+**Over the API** (scripts, a scheduled export with a [service account](../api.md#authentication)):
 
 ```bash
 # export (space admin)

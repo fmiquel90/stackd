@@ -2581,8 +2581,8 @@ run.canceled                # user (the canceller), target each member run a can
 
 ## 22. Configuration export & import (post-MVP)
 
-> **Status:** shipped (API; no UI yet). Module `app/portability/`. Extends §12 (two routes), §6.2
-> (four actions). A **logical** copy of a space's configuration, not a backup: it carries no
+> **Status:** shipped (API, and UI in Settings → Space configuration). Module `app/portability/`.
+> Extends §12 (two routes), §6.2 (four actions). A **logical** copy of a space's configuration, not a backup: it carries no
 > secret, no history (runs, logs, audit), no state, no users. The physical backup — Postgres + S3 +
 > the master key — is the operator's ([backup & restore guide](guide/backup-restore.md)).
 
@@ -2691,8 +2691,8 @@ an environment is keyed by its id: an environment re-created by an import starts
 
 ## 23. Service accounts & API tokens (post-MVP)
 
-> **Status:** shipped (API; no UI yet). Module `app/service_accounts/`, migration 0035. Extends
-> §2.2 (`users.kind`), §2.4 (`can_apply`), §6.2, §12.
+> **Status:** shipped (API, and UI in Settings → Service accounts). Module `app/service_accounts/`,
+> migration 0035. Extends §2.2 (`users.kind`), §2.4 (`can_apply`), §6.2, §12.
 
 **Need.** The human API only accepted Google sessions (15-min access tokens): nothing could be
 automated — a CI job triggering a plan, a scheduled configuration export (§22), a script reading
