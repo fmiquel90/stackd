@@ -1,0 +1,29 @@
+# Stackd worker — for a dedicated worker host (docs/guide/installing.md). Copy this file,
+# worker.env.example (as worker.env) and the "worker host" part of .env.example (as .env) to the
+# host, then `docker compose -f worker.compose.yml up -d`. compose.yml reuses this service for a
+# worker on the main host (profile `worker`).
+#
+# The agent drives the host's Docker Engine (STACKD_RUNNER=docker, SPECS §7.4): each tofu command
+# and hook runs in a fresh container of a runner image (deploy/images/). The Docker socket is
+# root-equivalent on this host: keep the host dedicated to workers.
+
+name: stackd-worker
+
+services:
+  worker:
+    image: ${STACKD_WORKER_IMAGE:-stackd/worker:latest}
+    # Only worker.env: no database, S3, master key, JWT or Google secret ever reaches the worker
+    # (tofu and platform hooks inherit its environment, minus STACKD_*).
+    env_file: worker.env
+    environment:
+      STACKD_RUNNER: docker
+      # The job containers bind-mount each workspace by its *host* path: the directory must be
+      # mounted at the identical path here (see volumes).
+      STACKD_WORKSPACE_ROOT: ${STACKD_WORKSPACE_ROOT:-/var/lib/stackd/workspaces}
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ${STACKD_WORKSPACE_ROOT:-/var/lib/stackd/workspaces}:${STACKD_WORKSPACE_ROOT:-/var/lib/stackd/workspaces}
+    init: true
+    # A running job is not drained on stop (no drain mode yet): stop workers while idle.
+    stop_grace_period: 30s
+    restart: unless-stopped

@@ -1,0 +1,12 @@
+# Ignore file for front/Dockerfile only (BuildKit reads <Dockerfile>.dockerignore).
+node_modules/
+dist/
+build/
+coverage/
+test-results/
+playwright-report/
+e2e/
+*.tsbuildinfo
+.vite/
+.env
+.env.*
