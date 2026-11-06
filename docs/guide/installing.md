@@ -65,8 +65,10 @@ API refuses to start in production on dev-grade settings (see [Configure](#3-con
   for small installs, but backups and upgrades are then yours.
 - **An S3 bucket** on any S3-compatible service (AWS S3, MinIO, Ceph, Garage, R2…), dedicated to
   Stackd, with **versioning on** and default encryption. It holds the managed states, the
-  encrypted saved plans, archived logs and artifacts. The API uses a **static access key**
-  (`S3_ACCESS_KEY`/`S3_SECRET_KEY`) — give it to a principal limited to that bucket. If the bucket
+  encrypted saved plans, archived logs and artifacts. On AWS, leave `S3_ACCESS_KEY`/`S3_SECRET_KEY`
+  empty and the API uses the **AWS default credential chain** (instance profile, ECS task role,
+  EKS IRSA / web identity…) — no long-lived key; elsewhere set a **static access key**. Either
+  way, give it to a principal limited to that bucket. If the bucket
   does not exist, the API creates it on first write with versioning and SSE-S3 on.
 - **A Google OAuth client** (Google Cloud console → *APIs & Services* → *Credentials* → *OAuth
   client ID*, type *Web application*) with the authorized redirect URI

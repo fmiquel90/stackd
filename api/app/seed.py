@@ -7,6 +7,7 @@ import secrets
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.config import get_settings
 from app.db import SessionLocal
 from app.enums import (
     DEFAULT_TIERS,
@@ -32,10 +33,15 @@ REPO_BASE = os.environ.get("STACKD_SEED_REPO_BASE", "file:///stackd-dev/repos")
 
 
 async def seed() -> None:
-    """Idempotent base data the app (and tests) require: the spaces (SPECS §3.0) and the default
-    tier catalog (§2.4) — dev/staging/prod, prod requiring four-eyes (old hardcoded behavior)."""
+    """Idempotent base data the app (and tests) require: the spaces (SPECS §3.0 — `demo` outside
+    production only) and the default tier catalog (§2.4) — dev/staging/prod, prod requiring
+    four-eyes (old hardcoded behavior)."""
     async with SessionLocal() as session:
-        for name, desc in (("default", "Default space"), ("demo", "Demo space")):
+        spaces = [("default", "Default space")]
+        if not get_settings().is_production:
+            # The demo graph (DEV §7) is dev-only: a production bootstrap gets no empty `demo`.
+            spaces.append(("demo", "Demo space"))
+        for name, desc in spaces:
             exists = (
                 await session.execute(select(Space).where(Space.name == name))
             ).scalar_one_or_none()

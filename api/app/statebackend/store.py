@@ -15,12 +15,19 @@ _log = get_logger("stackd.statebackend")
 
 def _client():  # type: ignore[no-untyped-def]
     s = get_settings()
+    if s.s3_access_key or s.s3_secret_key:
+        creds = {"aws_access_key_id": s.s3_access_key, "aws_secret_access_key": s.s3_secret_key}
+    elif s.is_production:
+        # No static keys: the AWS default credential chain (instance profile, ECS task role, IRSA /
+        # web identity, environment, shared config) — no long-lived key to store or rotate.
+        creds = {}
+    else:
+        creds = {"aws_access_key_id": "test", "aws_secret_access_key": "test"}  # dev/moto
     return boto3.client(
         "s3",
         endpoint_url=s.s3_endpoint_url,
-        aws_access_key_id=s.s3_access_key or "test",
-        aws_secret_access_key=s.s3_secret_key or "test",
         region_name=s.aws_region or "us-east-1",
+        **creds,
     )
 
 

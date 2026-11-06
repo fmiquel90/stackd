@@ -124,7 +124,7 @@ On each `/auth/refresh`: the presented token must exist, not be revoked, not be 
 
 ### 3.0 `spaces` — the root container
 
-First level of the hierarchy (breadcrumb `space / stack / env / run`, DESIGN §4) and parent of `stacks`, `variable_sets`, `worker_pools`, `secret_sources`. The bootstrap seed (`app.seed`, with the default tier catalog) creates a `default` space — and a `demo` space, used by the dev demo data (DEV §7); a create request without `space_id` lands in `default`. **Per-space RBAC** shipped in Phase F (§2.4): `space_memberships`, `GET|POST /api/v1/spaces` (create = instance admin, who becomes the new space's first `admin` member) and member management. Space rename/delete and Google group mapping are not exposed; per-stack grants and OPA stay Phase 7. All `space_id` FKs point to a space from Phase 1.
+First level of the hierarchy (breadcrumb `space / stack / env / run`, DESIGN §4) and parent of `stacks`, `variable_sets`, `worker_pools`, `secret_sources`. The bootstrap seed (`app.seed`, with the default tier catalog) creates a `default` space — and, outside production (`STACKD_ENV` ≠ `production`), a `demo` space used by the dev demo data (DEV §7); a create request without `space_id` lands in `default`. **Per-space RBAC** shipped in Phase F (§2.4): `space_memberships`, `GET|POST /api/v1/spaces` (create = instance admin, who becomes the new space's first `admin` member) and member management. Space rename/delete and Google group mapping are not exposed; per-stack grants and OPA stay Phase 7. All `space_id` FKs point to a space from Phase 1.
 
 ```sql
 spaces (
@@ -313,7 +313,9 @@ safety rules:
 1. A run with plan options **never auto-confirms** — not on an autodeploy environment, not under a
    rollout's approval: it always stops at `unconfirmed` for a human (§4.2).
 2. A **targeted** apply (`targets` non-empty) is **partial**: it does not reset drift to `in_sync`
-   (§19.4) and is never the source commit of a promotion (§9.7) — the source is the last full apply.
+   (§19.4), and it is never *the environment's applied commit*: not the source of a promotion
+   (§9.7), not the `last_applied_sha` of git staleness (§9.6 — the env stays stale), not the commit a
+   drift plan refreshes (§19.2) — each takes the last full apply.
    A replace-only plan plans the whole configuration: its apply counts as a full one. Outputs capture
    (§9.1, `tofu output` reads the whole state) and the cascade (§9.2) are unchanged.
 3. The apply job applies the saved plan, which already carries the options: it never re-plans and
@@ -1274,7 +1276,8 @@ network/prod-eu-primary ──▶ network/prod-us-secondary
 **Computation**:
 
 ```
-last_applied_sha = commit_sha of the last finished run (type tracked, with apply or no-change)
+last_applied_sha = commit_sha of the last finished run (type tracked, with apply or no-change;
+                   never a targeted apply, §3.5)
 env.head_sha     = known head of env.branch
 stale            = head_sha present AND last_applied_sha present AND head_sha ≠ last_applied_sha
 ```
@@ -2057,7 +2060,7 @@ Config: `STACKD_DRIFT_INTERVAL_SECONDS = 21600` (6h) — per-env minimum spacing
 
 On the 10s loop, gated on `last_drift_checked_at + interval`: for each `drift_check_enabled`,
 unlocked env with **no active run**, bump `last_drift_checked_at` (so a no-op env isn't retried
-every tick) and — if the env has an applied commit — enqueue a read-only `proposed` run pinned to
+every tick) and — if the env has an applied commit (the last full apply — never a targeted one, §3.5) — enqueue a read-only `proposed` run pinned to
 that commit (`is_drift=true`, `triggered_by=schedule`). An env with nothing applied stays `unknown`.
 
 ### 19.3 Worker & claim
