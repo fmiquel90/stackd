@@ -164,6 +164,7 @@ Drift detection adds background load: every environment with `drift_check_enable
 
 ## See also
 
+- [Installing in production](installing.md#7-workers) — the production worker image and its compose file
 - [Cloud credentials](cloud-credentials.md)
 - [Observability](observability.md)
 - [SPECS — worker protocol (§7)](../SPECS.md)

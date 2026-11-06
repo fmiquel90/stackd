@@ -139,7 +139,7 @@ STACKD_DEV_AUTH=true        # rejected if STACKD_ENV=production (assert at start
 - Sessions, roles and audit events are strictly the same as with Google — only the `google_sub` is synthetic (`dev:admin`).
 - The real Google flow remains testable in dev by setting `GOOGLE_CLIENT_ID/SECRET` (the two coexist), with `STACKD_ALLOWED_DOMAINS` listing the account's Workspace domain: an empty list admits no Google login (SPECS §2.1), and dev login does not read it.
 
-Safeguard: the API refuses to start with `STACKD_DEV_AUTH=true` and `STACKD_ENV=production` (settings validator), and never mounts the dev-login router in production (`app/main.py`, plus a runtime check in `app/auth/dev.py`). The target is for the prod build of the API image to **remove the dev_auth module** (not just the flag); the repo has no production API image yet (only `api/Dockerfile.dev`).
+Safeguard: the API refuses to start with `STACKD_DEV_AUTH=true` and `STACKD_ENV=production` (settings validator), and never mounts the dev-login router in production (`app/main.py`, plus a runtime check in `app/auth/dev.py`). The production API image (`api/Dockerfile`) **removes the dev_auth module**: `app/auth/dev.py` is deleted at build time and the build fails if anything still imports it at module level, so the dev login is absent, not just disabled (the CI `images` job checks it). `api/Dockerfile.dev` keeps it. Production install: [Installing in production](guide/installing.md).
 
 ---
 

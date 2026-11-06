@@ -117,11 +117,16 @@ task reset  # start from scratch
 
 The worker agent has its own suite: `cd worker && uv run pytest`.
 
+This is the dev stack — never expose it. To run Stackd for real, follow
+[Installing in production](https://fmiquel90.github.io/stackd/guide/installing/): production
+images and a reference Docker Compose deployment (`deploy/production/`).
+
 ## Learn more
 
 | | |
 |---|---|
 | 🚀 [Getting started](https://fmiquel90.github.io/stackd/guide/getting-started/) | Bring the stack up and drive your first run |
+| 📦 [Installing in production](https://fmiquel90.github.io/stackd/guide/installing/) | Production images, the reference Docker Compose deployment, upgrades |
 | 🧠 [Concepts](docs/CONCEPTS.md) | Every concept, explained with examples |
 | 🏗️ [Architecture](docs/ARCHITECTURE.md) | How it works inside, with diagrams |
 | 📐 [Specification](docs/SPECS.md) | The technical source of truth |
@@ -135,7 +140,7 @@ The worker agent has its own suite: `cd worker && uv run pytest`.
 api/      FastAPI (Python 3.13) — REST + worker API, auth, audit, OIDC issuer, state backend
 worker/   Pull-model agent (Python)
 front/    React 19 + Vite 7 + TypeScript
-deploy/   Local stack (docker compose) and the OpenTofu/Terraform runner images (deploy/images)
+deploy/   Dev stack (docker compose), production deployment (deploy/production), runner images (deploy/images)
 docs/     User guide and reference docs (published with MkDocs)
 scripts/  Bootstrap and fixture scripts run by the Taskfile
 ```
