@@ -267,6 +267,7 @@ The platform becomes an **OIDC issuer** (the same mechanism as GitHub Actions OI
 - [x] Scheduled drift detection — *status: shipped (SPECS §19)*
 - [x] Automated retention/purge: hot logs, expired refresh-token families, audit > 2 years via a distinct DB role (SPECS §6.1, §7.5)
 - [ ] Audit export to an external system (SIEM)
+- [x] **Configuration export / import** per space (SPECS §22): a portable `stackd.config` JSON document by names, never a secret; merge import (never deletes), dry run, audited — *status: API only, no UI yet; automated (scheduled) exports wait for API service accounts*. Backup & restore guide (`docs/guide/backup-restore.md`)
 - [ ] Platform observability (Prometheus, OTel, Datadog dashboard) — *status: `/metrics` and optional OTLP tracing shipped (SPECS §20); no dashboard yet*
 - [ ] Helm chart / Terraform deployment module (dogfooding)
 - [ ] **Go rewrite of the worker** (single binary, easier distribution) — the MVP Python agent remains the functional reference; the Go port does not change the protocol (§7)

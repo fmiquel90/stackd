@@ -639,6 +639,10 @@ run.check_warned                  # a job (plan or apply) ended — finished, fa
 state.force_unlocked / state.import_session_created   # §11.2, §11.4
 dependency.created / dependency.deleted / dependency.mock_consumed   # created: also via link-by-name,
                                   #   or a clone (via = clone, upstream_kind, §21.2)
+dependency.updated                # policy / output references changed by a config import (§22.3)
+variable_set.attachment_updated   # an attachment's priority changed by a config import (§22.3)
+space.config_exported / space.config_imported   # §22 — every item an import writes is also
+                                  #   audited under its own action, context via = import
 cloud_integration.created / cloud_integration.updated / cloud_integration.deleted
 oidc_key.rotated / oidc_key.retired            # issuer signing key (§3.11)
 worker_pool.created / worker_pool.deleted
@@ -1419,6 +1423,10 @@ GET  /api/v1/oidc/keys ; POST /api/v1/oidc/keys/rotate { kms_key_arn? }   # admi
 # Spaces & memberships (§2.4, Phase F)
 GET|POST /api/v1/spaces                                  # create = instance admin
 GET|PUT  /api/v1/spaces/{id}/members ; DELETE /api/v1/spaces/{id}/members/{user_id}   # space admin
+
+# Configuration export / import (§22) — space admin
+GET  /api/v1/spaces/{id}/export                          # stackd.config document, never a secret
+POST /api/v1/spaces/{id}/import[?dry_run=true]           # merge by name, never deletes; report
 
 # External secret sources (§15) — writes admin
 GET|POST /api/v1/spaces/{id}/secret-sources ; PATCH|DELETE /api/v1/spaces/{id}/secret-sources/{sid}
@@ -2504,3 +2512,113 @@ run.canceled                # user (the canceller), target each member run a can
 - **Mocks** (§9.3): a member that consumed one never auto-confirms; its apply stays gated by
   `allow_mock_apply`, which a clone never turns on.
 - **Sensitive outputs** are never propagated (§9.1) — unchanged.
+
+---
+
+## 22. Configuration export & import (post-MVP)
+
+> **Status:** shipped (API; no UI yet). Module `app/portability/`. Extends §12 (two routes), §6.2
+> (four actions). A **logical** copy of a space's configuration, not a backup: it carries no
+> secret, no history (runs, logs, audit), no state, no users. The physical backup — Postgres + S3 +
+> the master key — is the operator's ([backup & restore guide](guide/backup-restore.md)).
+
+**Need.** Version a space's configuration in Git and review its changes as a diff; move a space to
+another instance; re-create a space after a mistake; seed a new instance from a reference one.
+
+### 22.1 The document (`stackd.config`, version 1)
+
+JSON (the API's own format; it converts to YAML losslessly). Every object is identified by its
+**natural key**, never by a database id, so a document is portable between instances:
+
+| Section | Key | Carries | Never carries |
+|---|---|---|---|
+| `tiers` | name | the tiers the space uses (`requires_four_eyes`, `repo_hooks_at_apply`, `position`) | — |
+| `secret_sources` | name | `provider`, `config` (non-sensitive) | the bootstrap credential |
+| `worker_pools` | name | `labels` | the pool token (stored hashed anyway) |
+| `variable_sets` | name | `description`, `auto_attach`, `selector`, `variables`, `attachments` (to a stack, an env or a tier, by name) | — |
+| `stacks` | name | repo, `repo_auth_kind`, `project_root`, tool, `labels`, `variables`, platform `hooks`, `notification_targets`, `environments`; `has_repo_secret` / `has_webhook_secret` flags | the repo token / deploy key, the webhook secret |
+| `stacks[].environments` | name in the stack | the settings of §3.2 (`tier`, `branch`, `autodeploy`, `protected`, four-eyes, `managed_state`, `allow_*_apply`, unmanaged backend config, `drift_check_enabled`, `labels`, `position`), `variables`, `hooks`, `notification_targets`, `cloud_integration` | operational columns: `locked`, head/staleness (§9.6), drift status (§19) |
+| `dependencies` | (upstream, downstream) | `trigger_policy`, `references` (output → input, `mock_value`) | — |
+
+- **Variables**: `{kind, name, hcl, sensitive, value, secret}`. A **sensitive value is never
+  exported** (CLAUDE.md invariant 3): `value: null`. A secret reference (§15) exports its locator
+  `{source, ref, fallback_mode}` — never a static fallback value.
+- **Edges belong to their downstream's space**: a space's document carries every edge *into* its
+  environments; an upstream of another space is named `{space, stack, environment}` (a ref without
+  `space` is in the imported space).
+- `stacks[].id` / `environments[].id` are the source's ids — informational, they only feed the
+  import's `id_map` (to move managed state, §22.4).
+- `missing_secrets` lists what the export left out (for the reader); the import ignores it and
+  computes its own against the target.
+- The document is strict (`extra="forbid"`): an unknown field — a typo in a hand-edited file — is a
+  **422**, never silently dropped. Natural keys must be unique (422 otherwise).
+- Notification target URLs are exported as the notification routes return them: a Slack incoming-webhook URL
+  is a credential of its own — treat an exported file as confidential.
+
+### 22.2 Export — `GET /api/v1/spaces/{id}/export`
+
+**Space admin** (effective role, §2.4; an instance admin reaches every space). Returns the
+document (`Content-Disposition: attachment`), sorted by name so two exports of an unchanged space
+are identical but for `exported_at`. Audited `space.config_exported` (context: counts) — reading a
+whole space's configuration at once is worth a line in the journal.
+
+### 22.3 Import — `POST /api/v1/spaces/{id}/import[?dry_run=true]`
+
+**Space admin.** Body: a document. **Merge semantics** — each object is created when missing,
+updated when it differs (matched by its natural key), and **nothing absent from the document is
+deleted** (a deletion stays an explicit act through the API). All or nothing, in one transaction;
+`dry_run=true` computes the same report and rolls back.
+
+- **Validation reuses the endpoints' rules**: the tier catalog, tool version syntax, the
+  notification URL SSRF check (§14, its DNS half included), the dependency cycle check (§3.8,
+  422 aborts the whole import), a secret reference staying in its space (§15.1), an upstream of
+  another space requiring `writer` there (§3.8).
+- **Secrets are never invented.** A sensitive variable without a value in the document keeps the
+  target's existing value (unchanged), is flagged sensitive if the target held it in clear, and is
+  **not created** when missing (`skipped: value_required` + `missing_secrets`). An operator may
+  fill a value in by hand before importing: it is then stored encrypted, like a write through the
+  API. A missing secret source can't be created (no bootstrap credential): reported, and the
+  variables referencing it are skipped. A static fallback is never in a document: a reference
+  imported with `fallback_mode: static` and no stored fallback falls back to `error` (fail closed,
+  §15.2) and is reported.
+- **Autodeploy waits for secrets** (as a clone, §21.2): an environment the import *creates* with
+  `autodeploy: true` stays `autodeploy: false` when the import reports any missing secret
+  (warning `autodeploy_off`, reason `left_to_fill`) — a push must not plan and apply with an input
+  falling back to another layer's value. `protected` still forces `autodeploy` off (§3.2).
+- **Instance-wide items** follow their own endpoints' gates. Creating a **tier** needs the instance
+  admin role (403 otherwise — the catalog governs every space); an existing tier is **never
+  modified** by an import (a difference is a `tier_differs` warning). **Cloud integrations** and
+  **worker pools** need the instance admin role; for a space admin they are skipped
+  (`instance_admin_required`), never forced. A created pool's token is returned once in
+  `worker_pool_tokens` (never in a dry run); an existing pool's labels are not changed (warning),
+  and a pool name taken by another space is skipped.
+- **Platform hooks** are matched by (stage, name) on their stack/env, **notification targets** by
+  name; a name held twice on the target is ambiguous → skipped.
+- **Audit**: every write is audited with the action its endpoint uses (`stack.created`,
+  `environment.updated`, `variable.created`, `hook.updated`, `dependency.created`…) plus context
+  `via: import`, in the same transaction (§6.3); new: `variable_set.attachment_updated` (an
+  attachment's priority) and `dependency.updated` (policy / references); the import itself is
+  `space.config_imported` (summary, source).
+
+**Response**: `{dry_run, summary {created, updated, unchanged, skipped}, changes [{op, kind, path,
+fields?}], skipped [{kind, path, reason}], missing_secrets [{path, item}], warnings [...], id_map
+{stacks, environments}: {source id → target id}, worker_pool_tokens [{name, token}]}`. `path` names
+the object in the document (`stacks/network/environments/prod/variables/terraform/region`).
+
+### 22.4 What an import does not move
+
+Managed state, run history, logs, audit, users and memberships. To move a space between instances:
+export → create the secret sources on the target → import (dry run first) → fill
+`missing_secrets` → for each managed-state environment, move its state with the import session
+(§11.4) using `id_map` → only then let runs flow. Within one instance (same S3 bucket), the state of
+an environment is keyed by its id: an environment re-created by an import starts with no state.
+
+### 22.5 Invariants preserved
+
+- **Secrets** (CLAUDE §4.3): no sensitive value, credential, token or static fallback is ever
+  written to a document; an import never creates a secret it was not given.
+- **Same-transaction audit** for every write (§6.3).
+- **Permissions**: nothing an import does is allowed that its endpoint would refuse the same user
+  (space admin floor; instance admin for tiers, cloud integrations, pools).
+- **No silent loss**: nothing is deleted; whatever could not be imported is in `skipped` /
+  `missing_secrets`.

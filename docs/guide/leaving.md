@@ -17,10 +17,12 @@ how to leave and get everything back.
 
 ## What lives only in Stackd (but is exportable)
 
-- **Orchestration config** — stacks, environments, tiers, dependencies, variable sets. Exportable
-  via the API (`GET /stacks`, `/stacks/{id}/environments`, `/environments/{id}`,
-  `/environments/{id}/dependencies`, `/graph`, `/variable-sets`,
-  `/environments/{id}/resolved-variables`). Re-creatable; it isn't infrastructure.
+- **Orchestration config** — stacks, environments, tiers, dependencies, variable sets, hooks,
+  notification targets, cloud integrations. One call exports a whole space as a portable JSON
+  document (`GET /api/v1/spaces/{id}/export`, space admin) that another instance imports back
+  (`POST /api/v1/spaces/{id}/import`) — never a secret value; see
+  [Backup & restore](backup-restore.md#configuration-export-the-logical-complement).
+  Re-creatable; it isn't infrastructure.
 - **History** — runs, logs, audit. Runs list per environment (`GET /environments/{id}/runs`); a
   run's logs download as plain text (`GET /runs/{id}/logs/download`), and once archived they also
   sit in your bucket under `logs/<run_id>/<phase>.log.gz`. The audit trail exports to CSV
@@ -78,7 +80,7 @@ Export the non-sensitive resolved variables; re-provide sensitive ones from your
 
 ```bash
 curl -s localhost:8000/api/v1/audit/export -H "$AUTH" > audit.csv
-curl -s localhost:8000/api/v1/stacks -H "$AUTH" > stacks.json
+curl -s localhost:8000/api/v1/spaces/$SPACE_ID/export -H "$AUTH" > space.json   # per space
 ```
 
 ### 5. Decommission

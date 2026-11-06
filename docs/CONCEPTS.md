@@ -688,3 +688,4 @@ bypasses the apply gate.
 | **Plan comment** | threaded, optionally anchored review comment on a run; advisory |
 | **Inbox** | per-user in-app notifications (approval requests, run outcomes, mentions, drift, rollouts) |
 | **Secret source** | external secrets manager a variable references; fetched at claim, never stored |
+| **Config export / import** | a space's configuration as a JSON document by names (no secret); imported back by merge, never deleting (SPECS §22) |

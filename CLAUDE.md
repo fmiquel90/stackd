@@ -39,7 +39,7 @@ scripts/    bootstrap-env.sh, bootstrap-s3.sh, seed-fixtures.sh (called by the T
 Taskfile.yml  orchestration (see DEV.md)
 ```
 
-API modules (`api/app/`, cf. PLAN §2.1): `auth/ users/ spaces/ tiers/ stacks/ environments/ variables/ variable_sets/ secret_sources/ runs/ comments/ workers/ scheduler/ audit/ oidc/ statebackend/ dependencies/ drift/ rollouts/ hooks/ webhooks/ vcs/ notifications/ inbox/ observability/ ws/`, plus `models/` (the SQLAlchemy models, one file per aggregate) and a few cross-cutting top-level files (`config.py`, `db.py`, `errors.py`, `permissions.py`, `crypto.py`, `ratelimit.py`, `seed.py`…). One module = one domain, with its routes, Pydantic schemas, and logic. No catch-all `utils/` that grows endlessly.
+API modules (`api/app/`, cf. PLAN §2.1): `auth/ users/ spaces/ tiers/ stacks/ environments/ variables/ variable_sets/ secret_sources/ runs/ comments/ workers/ scheduler/ audit/ oidc/ statebackend/ dependencies/ drift/ rollouts/ portability/ hooks/ webhooks/ vcs/ notifications/ inbox/ observability/ ws/`, plus `models/` (the SQLAlchemy models, one file per aggregate) and a few cross-cutting top-level files (`config.py`, `db.py`, `errors.py`, `permissions.py`, `crypto.py`, `ratelimit.py`, `seed.py`…). One module = one domain, with its routes, Pydantic schemas, and logic. No catch-all `utils/` that grows endlessly.
 
 ---
 
