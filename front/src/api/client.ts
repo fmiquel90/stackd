@@ -95,6 +95,16 @@ export async function apiBlob(path: string): Promise<Blob> {
 
 /** The file name a `Content-Disposition: attachment; filename="…"` header gives, if any. */
 export function attachmentName(header: string | null): string | null {
+  // RFC 5987 `filename*=UTF-8''…` first: it carries the exact name (any script); `filename="…"`
+  // is the server's ASCII-safe fallback (RFC 6266).
+  const exact = header?.match(/filename\*=UTF-8''([^;\s]+)/i);
+  if (exact) {
+    try {
+      return decodeURIComponent(exact[1]);
+    } catch {
+      // malformed percent-encoding: fall back to the plain name
+    }
+  }
   const m = header?.match(/filename="?([^";]+)"?/i);
   return m ? m[1] : null;
 }

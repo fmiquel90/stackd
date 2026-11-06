@@ -46,6 +46,11 @@ describe("downloads", () => {
     expect(attachmentName('attachment; filename="stackd-payments-20261106T120000Z.json"')).toBe(
       "stackd-payments-20261106T120000Z.json",
     );
+    expect(
+      attachmentName(
+        "attachment; filename=\"stackd-space-x.json\"; filename*=UTF-8''stackd-%E7%94%9F%E4%BA%A7-x.json",
+      ),
+    ).toBe("stackd-生产-x.json");
     expect(attachmentName("attachment")).toBeNull();
     expect(attachmentName(null)).toBeNull();
   });
