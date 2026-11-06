@@ -1,7 +1,8 @@
 import { useState, type ReactNode } from "react";
+import { Bot } from "lucide-react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { spaces as spacesApi, users, type UserUpdate } from "@/api/resources";
-import type { Role } from "@/api/types";
+import type { Role, UserKind } from "@/api/types";
 import { useSpaces } from "@/app/SpaceContext";
 import { useSession } from "@/auth/session";
 import { Button } from "@/ui/Button";
@@ -11,8 +12,23 @@ import { describeChange, diffUser, type Grant } from "./userChanges";
 
 // Who may do what (DESIGN §5.7, §5.10): instance users and space members share one editor. Edits are
 // staged and saved together behind a summary in words — a role or tier change is never one misclick.
+// A service account (SPECS §23) holds reader or writer at instance level and never applies: no tier
+// or destroy right is offered for it.
 
 const ROLES: Role[] = ["reader", "writer", "approver", "admin"];
+const SERVICE_INSTANCE_ROLES: Role[] = ["reader", "writer"];
+
+/** The roles offered on a grant: a service account's instance role is reader or writer only. */
+export function rolesFor(kind: UserKind, scope: "instance" | "space", current: Role): Role[] {
+  if (kind !== "service" || scope === "space") return ROLES;
+  return SERVICE_INSTANCE_ROLES.includes(current)
+    ? SERVICE_INSTANCE_ROLES
+    : [...SERVICE_INSTANCE_ROLES, current];
+}
+
+export function ServiceAccountBadge() {
+  return <Badge glyph={<Bot size={12} strokeWidth={1.5} />}>service account</Badge>;
+}
 
 function GrantCard({
   grant,
@@ -22,6 +38,8 @@ function GrantCard({
   badges,
   canDisable,
   actions,
+  kind = "human",
+  scope,
 }: {
   grant: Grant;
   draft: UserUpdate;
@@ -31,6 +49,8 @@ function GrantCard({
   /** Instance users can be disabled (not oneself); space members cannot. */
   canDisable?: boolean;
   actions?: ReactNode;
+  kind?: UserKind;
+  scope: "instance" | "space";
 }) {
   const role = draft.role ?? grant.role;
   const allowed = draft.allowed_tiers ?? grant.allowed_tiers;
@@ -52,39 +72,47 @@ function GrantCard({
         <label className="flex flex-col gap-1">
           <span className="eyebrow text-muted">Role</span>
           <NativeSelect value={role} onChange={(e) => onDraft({ ...draft, role: e.target.value as Role })}>
-            {ROLES.map((r) => (
+            {rolesFor(kind, scope, grant.role).map((r) => (
               <option key={r} value={r}>
                 {r}
               </option>
             ))}
           </NativeSelect>
         </label>
-        <fieldset className="flex flex-col gap-1">
-          <legend className="eyebrow mb-1 text-muted">Allowed tiers</legend>
-          <div className="flex h-8 flex-wrap items-center gap-3">
-            {tierNames.map((t) => (
-              <label key={t} className="flex items-center gap-1.5 font-data text-[12px]">
-                <Checkbox
-                  checked={allowed.includes(t)}
-                  onChange={(e) =>
-                    onDraft({
-                      ...draft,
-                      allowed_tiers: e.target.checked ? [...allowed, t] : allowed.filter((x) => x !== t),
-                    })
-                  }
-                />
-                {t}
-              </label>
-            ))}
-          </div>
-        </fieldset>
-        <label className="flex h-8 items-center gap-1.5 text-ui">
-          <Checkbox
-            checked={canDestroy}
-            onChange={(e) => onDraft({ ...draft, can_destroy: e.target.checked })}
-          />
-          May destroy
-        </label>
+        {kind === "service" ? (
+          <p className="flex h-8 items-center text-[12px] text-muted">
+            Never confirms an apply or destroys, whatever its role: no tier to grant.
+          </p>
+        ) : (
+          <>
+            <fieldset className="flex flex-col gap-1">
+              <legend className="eyebrow mb-1 text-muted">Allowed tiers</legend>
+              <div className="flex h-8 flex-wrap items-center gap-3">
+                {tierNames.map((t) => (
+                  <label key={t} className="flex items-center gap-1.5 font-data text-[12px]">
+                    <Checkbox
+                      checked={allowed.includes(t)}
+                      onChange={(e) =>
+                        onDraft({
+                          ...draft,
+                          allowed_tiers: e.target.checked ? [...allowed, t] : allowed.filter((x) => x !== t),
+                        })
+                      }
+                    />
+                    {t}
+                  </label>
+                ))}
+              </div>
+            </fieldset>
+            <label className="flex h-8 items-center gap-1.5 text-ui">
+              <Checkbox
+                checked={canDestroy}
+                onChange={(e) => onDraft({ ...draft, can_destroy: e.target.checked })}
+              />
+              May destroy
+            </label>
+          </>
+        )}
         {canDisable !== undefined && (
           <label className="flex h-8 items-center gap-1.5 text-ui">
             <Checkbox
@@ -169,16 +197,24 @@ function useStaged<T extends Grant & { id: string }>(
   return { drafts, setDraft: (id, d) => setDrafts((all) => ({ ...all, [id]: d })), bar };
 }
 
+type KindFilter = "all" | UserKind;
+
 export function Users({ tierNames }: { tierNames: string[] }) {
   const qc = useQueryClient();
   const { data: me } = useSession();
   const { data, isLoading } = useQuery({ queryKey: ["users"], queryFn: users.list });
-  const list = [...(data ?? [])].sort((a, b) => a.email.localeCompare(b.email));
+  const [filter, setFilter] = useState<KindFilter>("all");
+  const all = [...(data ?? [])].sort((a, b) => a.email.localeCompare(b.email));
+  const count = (k: UserKind) => all.filter((u) => u.kind === k).length;
+  const list = filter === "all" ? all : all.filter((u) => u.kind === filter);
   const staged = useStaged(
-    list,
+    all,
     "Unsaved user changes",
     (u, change) => users.update(u.id, change),
-    () => qc.invalidateQueries({ queryKey: ["users"] }),
+    () => {
+      qc.invalidateQueries({ queryKey: ["users"] });
+      qc.invalidateQueries({ queryKey: ["service-accounts"] });
+    },
   );
   return (
     <section aria-labelledby="users" className="flex flex-col gap-2">
@@ -189,8 +225,18 @@ export function Users({ tierNames }: { tierNames: string[] }) {
         Instance-wide grants. Role gates what a user may do; allowed tiers are where they may confirm an
         apply. Changes are staged: review the summary, then save. Every change is audited.
       </p>
+      <label className="flex flex-col gap-1 self-start">
+        <span className="eyebrow text-muted">Show</span>
+        <NativeSelect value={filter} onChange={(e) => setFilter(e.target.value as KindFilter)}>
+          <option value="all">Everyone ({all.length})</option>
+          <option value="human">People ({count("human")})</option>
+          <option value="service">Service accounts ({count("service")})</option>
+        </NativeSelect>
+      </label>
       {isLoading ? (
         <Skeleton className="h-40 w-full max-w-[960px]" />
+      ) : list.length === 0 ? (
+        <p className="text-muted">Nobody here.</p>
       ) : (
         <ul className="flex max-w-[960px] flex-col gap-2">
           {list.map((u) => (
@@ -201,8 +247,11 @@ export function Users({ tierNames }: { tierNames: string[] }) {
               tierNames={tierNames}
               onDraft={(d) => staged.setDraft(u.id, d)}
               canDisable={u.id !== me?.id}
+              kind={u.kind}
+              scope="instance"
               badges={
                 <>
+                  {u.kind === "service" && <ServiceAccountBadge />}
                   {u.id === me?.id && <Badge>you</Badge>}
                   {u.disabled && <Badge glyph="⊘">disabled</Badge>}
                 </>
@@ -229,6 +278,7 @@ export function SpaceMembers({ tierNames }: { tierNames: string[] }) {
     enabled: !!space,
   });
   const userList = useQuery({ queryKey: ["users"], queryFn: users.list });
+  const kindOf = (id: string): UserKind => userList.data?.find((u) => u.id === id)?.kind ?? "human";
   const rows = (members.data ?? []).map((m) => ({ ...m, id: m.user_id }));
   const invalidate = () => qc.invalidateQueries({ queryKey: key });
   const staged = useStaged(
@@ -261,7 +311,11 @@ export function SpaceMembers({ tierNames }: { tierNames: string[] }) {
       invalidate();
     },
   });
-  const outsiders = (userList.data ?? []).filter((u) => !rows.some((m) => m.user_id === u.id));
+  const outsiders = (userList.data ?? [])
+    .filter((u) => !rows.some((m) => m.user_id === u.id))
+    .sort((a, b) => a.email.localeCompare(b.email));
+  const people = outsiders.filter((u) => u.kind !== "service");
+  const services = outsiders.filter((u) => u.kind === "service");
 
   if (!space) return null;
   return (
@@ -270,7 +324,9 @@ export function SpaceMembers({ tierNames }: { tierNames: string[] }) {
         Spaces
       </h2>
       <p className="max-w-[720px] text-[12px] text-muted">
-        A member&apos;s grants inside one space. New members start as readers with no tier: raise them here.
+        A member&apos;s grants inside one space. New members start as readers with no tier: raise them here. A
+        service account reaches a space only once added here — admin of the space for configuration export /
+        import.
       </p>
       <label className="flex flex-col gap-1 self-start">
         <span className="eyebrow text-muted">Space</span>
@@ -295,6 +351,9 @@ export function SpaceMembers({ tierNames }: { tierNames: string[] }) {
               draft={staged.drafts[m.id] ?? {}}
               tierNames={tierNames}
               onDraft={(d) => staged.setDraft(m.id, d)}
+              kind={kindOf(m.user_id)}
+              scope="space"
+              badges={kindOf(m.user_id) === "service" ? <ServiceAccountBadge /> : undefined}
               actions={
                 <ConfirmPopover
                   trigger={
@@ -328,12 +387,25 @@ export function SpaceMembers({ tierNames }: { tierNames: string[] }) {
           <label className="flex flex-col gap-1">
             <span className="eyebrow text-muted">Add a member</span>
             <NativeSelect value={newUser} onChange={(e) => setNewUser(e.target.value)}>
-              <option value="">Pick a user…</option>
-              {outsiders.map((u) => (
-                <option key={u.id} value={u.id}>
-                  {u.email}
-                </option>
-              ))}
+              <option value="">Pick a user or a service account…</option>
+              {people.length > 0 && (
+                <optgroup label="People">
+                  {people.map((u) => (
+                    <option key={u.id} value={u.id}>
+                      {u.email}
+                    </option>
+                  ))}
+                </optgroup>
+              )}
+              {services.length > 0 && (
+                <optgroup label="Service accounts">
+                  {services.map((u) => (
+                    <option key={u.id} value={u.id}>
+                      {u.display_name ?? u.email} (service account)
+                    </option>
+                  ))}
+                </optgroup>
+              )}
             </NativeSelect>
           </label>
           <Button type="submit" disabled={!newUser} loading={add.isPending}>
