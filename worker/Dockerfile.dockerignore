@@ -1,0 +1,11 @@
+# Ignore file for worker/Dockerfile only (BuildKit reads <Dockerfile>.dockerignore), so the dev
+# image build (Dockerfile.dev) is unaffected. The production build copies pyproject.toml, uv.lock
+# and agent/ only.
+.venv/
+**/__pycache__/
+**/*.py[cod]
+.pytest_cache/
+.ruff_cache/
+tests/
+.env
+.env.*
