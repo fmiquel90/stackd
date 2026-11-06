@@ -344,6 +344,13 @@ async def build_job_payload(session: AsyncSession, run: Run) -> dict:
         # §7.4: the plan job uploads its plan file (when it has changes) for every run that can
         # later be applied; the apply job downloads and applies exactly it.
         "save_plan": phase == JobPhase.plan and run.type in SAVED_PLAN_TYPES,
+        # §3.5/§7.4: a targeted / replace plan's `-target=`/`-replace=` addresses — the plan job
+        # only. The apply job applies the saved plan, which already carries them: it never re-plans.
+        "plan_options": (
+            run.plan_options
+            if phase == JobPhase.plan and run.type in (RunType.tracked, RunType.destroy)
+            else None
+        ),
         "command": run.command,  # set only for RunType.command jobs
         "environment": {
             "id": str(env.id),
