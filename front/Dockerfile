@@ -11,7 +11,9 @@
 ARG NODE_IMAGE=node:22.23.4-bookworm-slim@sha256:5ec23b7c622b00547753bc6ffd78085dd868a68aeb41c8e0a1418f033e13d96d
 ARG CADDY_IMAGE=caddy:2.11.9-alpine@sha256:71d41fe4b1ae92a058abc87afe614178b996d8a6b96d0f4c71ae30606e5927e3
 
-FROM ${NODE_IMAGE} AS build
+# The build stage runs on the build host's platform: its output (static files) is the same for
+# every target, so a multi-arch build (release.yml) compiles the SPA once, natively, not under QEMU.
+FROM --platform=$BUILDPLATFORM ${NODE_IMAGE} AS build
 
 # pnpm comes from package.json's `packageManager` via corepack (pinned version, no global install).
 ENV COREPACK_ENABLE_DOWNLOAD_PROMPT=0 \

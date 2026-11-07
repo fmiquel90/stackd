@@ -1,14 +1,20 @@
 name: e2e
 
-# The full live scenario builds images and runs a real worker executing OpenTofu (~minutes), so it
-# runs on main and on demand rather than on every PR. Trigger manually from the Actions tab.
+# The full live scenario (CLAUDE §6: the functional contract): builds images and runs a real worker
+# executing OpenTofu (~minutes). It runs on every pull request — make the `e2e` check required in
+# the branch protection of main — on main, on demand, and from release.yml before any image is
+# published.
 on:
+  pull_request:
   push:
     branches: [main]
   workflow_dispatch:
+  workflow_call:
 
+# A new push to a PR cancels its running scenario. Under workflow_call, github.workflow is the
+# caller's name: the group stays distinct from the caller's own.
 concurrency:
-  group: e2e-${{ github.ref }}
+  group: e2e-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
 permissions:
