@@ -2763,3 +2763,64 @@ the service account as actor.
 
 **Invariants preserved**: the apply gate (CLAUDE §4.4) — a service account never passes it; secrets
 (§4.3) — a token is stored hashed and shown once, never logged or audited; same-transaction audit.
+
+---
+
+## 24. `stackd` CLI (post-MVP)
+
+> **Status:** shipped (v1). Module `cli/` (Go, cobra), user guide `docs/guide/cli.md`. Adds no
+> endpoint and changes no permission: it is a client of §12 and §22, authenticated as in §23.
+
+**Need.** Scripting Stackd from a CI job or a terminal meant hand-written `curl` + `jq` (name →
+id lookups, polling a run, problem+json errors). A single static binary is easy to drop into a CI
+image or a laptop — hence Go rather than the Python of `api/` and `worker/`.
+
+**Boundaries.**
+
+- **Public API only.** The CLI imports no API code and calls nothing outside `/api/v1`: it works
+  against any instance, and an API change that breaks it is an API compatibility break.
+- **No new right.** It can do exactly what its token can. A service-account token (§23) creates no
+  space (instance admin), confirms no apply/destroy and runs no mutating command. So the CLI has
+  **no `confirm`** (nor `approve`, nor mutating `commands`): applying stays a named human's act,
+  in the UI where the plan is shown.
+- **Secrets.** The token is read from `STACKD_TOKEN` or `--token`, never printed (not even as a
+  flag default in `--help`), never written to disk by the CLI. A repo secret is read from stdin
+  (`--repo-secret-stdin`), never from a flag value (shell history, `ps`). The only secrets the CLI
+  prints are those the API returns once by design (worker-pool tokens of a `config import`).
+- **No local state.** No config file, no cache: `STACKD_URL`, `STACKD_TOKEN`, `STACKD_OUTPUT`
+  (`text` | `json`) or the matching flags.
+
+**Commands (v1).**
+
+```
+stackd spaces  list | create <name>
+stackd stacks  list [--space] | get | create <name> --space … --repo-url … --tool-version … | update | delete --yes
+stackd envs    list <stack> | get | create <stack> <name> --tier … --branch … | update | delete --yes
+stackd runs    list <env> | plan <env> [--destroy] [--target]… [--replace]… [--commit] [--with-downstream]
+               [--wait [--logs] [--timeout]] | get <run> | logs <run> [-f] | cancel <run> | discard <run>
+stackd config  export <space> [-f file] | import <space> <file|-> [--dry-run]
+stackd version | completion
+```
+
+- **References.** A space by id or name; a stack by id or name (`--space` when the name exists in
+  several spaces — names are unique per space only); an environment by id or `<stack>/<env>`. Names
+  are resolved through the list endpoints, so resolution sees only what the token can read.
+- **Writes** send only the flags given: `update` is a PATCH of those fields; `create` leaves the
+  rest to the API's defaults (§3).
+- **Output.** `text` (tables, key/value) or `json` — the API's own response body, unmodified (a
+  `--space` filter keeps the API's objects), so a script never depends on the CLI's rendering.
+- **`runs plan --wait`** polls `GET /runs/{id}` (every 2 s) until the run is `unconfirmed` (what
+  automation can reach: the plan awaits a human) or terminal (§4.1). `--logs` streams new log
+  chunks (each `(phase, seq)` once, phases in run order). Exit status: **0** at `unconfirmed` or
+  `finished`, **2** at `failed`, `canceled` or `discarded`, **1** for any other error (API problem,
+  timeout). A plan that consumed mocks is flagged (it can't be applied by default, §9.3).
+- **Errors.** problem+json is rendered as `<status> <title>: <detail>` plus the validation details
+  of a 422; a 401 without a token says so.
+
+**Distribution.** `task cli-build` → `bin/stackd`. A `cli-vX.Y.Z` tag runs
+`.github/workflows/cli-release.yml`: static binaries (`CGO_ENABLED=0`) for linux/darwin/windows ×
+amd64/arm64, archives + `SHA256SUMS`, as a GitHub release. The CLI is versioned on its own.
+
+**Not in v1.** An interactive login for humans (would need a public OAuth client and a loopback
+redirect on the API side — §2.1); variables and variable sets, hooks, dependencies, notifications,
+rollouts (reachable through `config import`, or the API directly); a Terraform provider.

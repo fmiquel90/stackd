@@ -75,6 +75,7 @@ nav:
       - Workers & scaling: guide/workers-and-scaling.md
       - Notifications: guide/notifications.md
       - Observability: guide/observability.md
+      - Command-line client: guide/cli.md
   - Concepts: CONCEPTS.md
   - Architecture: ARCHITECTURE.md
   - API: api.md

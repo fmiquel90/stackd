@@ -68,3 +68,7 @@ docs/showcase/*.mp4
 
 # Production compose deployment: real env files (examples are committed)
 deploy/production/*.env
+
+# ── Go (cli) ───────────────────────────────────────────────────────────────
+/bin/
+cli/dist/

@@ -52,6 +52,12 @@ docker-runner tests also want a Docker daemon and their images, §3, and skip wi
 cd worker && uv run pytest
 ```
 
+Nor the CLI's (Go, SPECS §24) — no DB, no stack, just a Go toolchain:
+
+```bash
+task cli-test        # gofmt check + go vet + go test -race (in cli/)
+```
+
 Run an API subset inside the api container:
 
 ```bash
@@ -63,7 +69,7 @@ CI (`.github/workflows/ci.yml`) runs pre-commit; ruff (check + format), pytest a
 to fail for now) for the API; ruff (check + format) and pytest for the worker, after pulling
 `alpine:3.20` and building the tofu test image for the docker-runner tests; eslint, prettier, the
 invariants check (no browser storage, no hard-coded colour), typecheck, vitest and build for the
-front. `e2e.yml` runs the live scenario.
+front; gofmt, go vet, `go test -race` and a static build for the CLI. `e2e.yml` runs the live scenario.
 
 ### pytest configuration (`api/pyproject.toml`)
 
@@ -256,6 +262,16 @@ The tier gate (an approver without `prod`) and staleness stay manual checks (DEV
 | `src/features/rollouts/CloneNotes.test.tsx` (4) | Clone notes and warnings (label-attached sets, what is not copied, uncloned upstream, tier change), in words. |
 | `src/features/settings/userChanges.test.ts` (2) | Staged user changes: only real differences, summarised in words. |
 | `src/components/StackGeneralPanel.test.tsx` (2) | The webhook secret field follows the API's writer gate: shown to a writer, hidden from a reader. |
+
+### CLI (`cli/`)
+
+- **go test** (`task cli-test`). `internal/cmd/cmd_test.go` drives the command tree against an
+  in-process fake API (`httptest`): bearer token and user agent, a URL given with `/api/v1`,
+  `--help` never printing the token, name resolution (a stack name in two spaces needs `--space`),
+  request bodies carrying only the flags given, a repo secret read from stdin and never echoed,
+  `--output json` passing the API's body through, `runs plan --wait` (log lines once, exit 0 at
+  `unconfirmed`, exit 2 on `failed`), `config import --dry-run`, problem+json rendering (422
+  details, a 403 on `spaces create` explained). It does not run against a live API.
 
 - **Playwright** (`pnpm e2e`, `e2e/happy-path.spec.ts`): one smoke test — dev login as admin
   reaches the overview of a space (`/s/<space>`) — against a running dev stack (`PW_BASE_URL`,
