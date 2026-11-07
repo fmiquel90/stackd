@@ -369,6 +369,34 @@
   
   
     <li class="md-nav__item">
+      <a href="../installing/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Installing in production
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../stacks-and-environments/" class="md-nav__link">
         
   
@@ -572,6 +600,17 @@
     <span class="md-ellipsis">
       
         Autodeploy &amp; checks
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#targeted-and-replace-plans" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Targeted and replace plans
       
     </span>
   </a>
@@ -791,6 +830,34 @@
     
   
     Exit & data portability
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../backup-restore/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Backup & restore
   
 
     
@@ -1296,6 +1363,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#targeted-and-replace-plans" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Targeted and replace plans
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#mock-block" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -1503,7 +1581,7 @@ is a misclick safeguard only — it never bypasses <code>can_apply</code> (still
 <p>An environment with <code>autodeploy</code> auto-confirms when the plan is clean — <strong>but a <code>warn</code> check forces
 <code>unconfirmed</code></strong> so a human still sees it, and so does a run that consumed a mock or resolved a
 secret through a fallback (even where the env sets <code>allow_fallback_apply</code>, which only lets an approver
-confirm it). A <code>destroy</code> run never
+confirm it), and a <a href="#targeted-and-replace-plans">targeted or replace plan</a>. A <code>destroy</code> run never
 autodeploys: an approver with the destroy right confirms it. A <code>protected</code>
 environment can never autodeploy, and requires four-eyes. A rollout's run never autodeploys: it
 follows the <a href="#rollouts">rollout gate</a>.</p>
@@ -1513,17 +1591,51 @@ page shows, with each one's stage — and <code>check_results.checks</code> only
 failed. A <code>fail</code>
 check fails the run at its stage; a failing <code>before_apply</code> check means nothing is applied. See
 <a href="../hooks/#check-results">Hooks — check results</a>.</p>
+<h2 id="targeted-and-replace-plans">Targeted and replace plans<a class="headerlink" href="#targeted-and-replace-plans" title="Permanent link">&para;</a></h2>
+<p>Sometimes a full plan is not what you need: one resource must be re-created (<code>-replace</code>), or a
+broken dependency forces you to plan a subset (<code>-target</code>). A tracked run can carry <strong>plan
+options</strong> — on the environment page, <strong>More → Plan with options…</strong> (the destroy dialog has the
+same <em>Advanced options</em> for targets), one address per line — or over the API:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>curl<span class="w"> </span>-s<span class="w"> </span>-X<span class="w"> </span>POST<span class="w"> </span>localhost:8000/api/v1/environments/<span class="nv">$ENV_ID</span>/runs<span class="w"> </span>-H<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$AUTH</span><span class="s2">&quot;</span><span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="w">  </span>-H<span class="w"> </span><span class="s1">&#39;content-type: application/json&#39;</span><span class="w"> </span>-d<span class="w"> </span><span class="s1">&#39;{</span>
+<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a><span class="s1">  &quot;targets&quot;: [&quot;module.net[\&quot;eu-west-1\&quot;].aws_subnet.a&quot;],</span>
+<a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a><span class="s1">  &quot;replace&quot;: [&quot;aws_instance.web&quot;]</span>
+<a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a><span class="s1">}&#39;</span>
+</code></pre></div>
+<ul>
+<li><code>targets</code> (<code>-target=</code>) works on <code>tracked</code> and <code>destroy</code> runs; <code>replace</code> (<code>-replace=</code>) on
+  <code>tracked</code> runs only. Each address must look like a resource address — no whitespace, <code>=</code> or
+  leading <code>-</code> — at most 50 per list; duplicates are dropped. Otherwise: <code>422</code>.</li>
+<li>The options go to the <strong>plan</strong> only. The apply applies the saved plan, which already carries
+  them — it never re-plans.</li>
+<li>Permissions are those of any plan: <code>writer</code> to trigger (<code>can_destroy</code> for a destroy), and the
+  usual <code>can_apply</code> + four-eyes to confirm.</li>
+<li>The run page shows a <strong>Targeted</strong> / <strong>Replace</strong> chip with the addresses, and a re-plan keeps
+  them. The run's <code>plan_options</code> field holds them, and the <code>run.triggered</code> audit event records them.</li>
+</ul>
+<div class="admonition warning">
+<p class="admonition-title">Safety rules</p>
+<ul>
+<li>A run with plan options <strong>never auto-confirms</strong>, even on an autodeploy environment or in a
+  rollout: a human always confirms it.</li>
+<li>A <strong>targeted</strong> apply is <strong>partial</strong>: it does <strong>not</strong> clear the environment's
+  drift status (<code>drift_status</code>, see <a href="../stacks-and-environments/">Environments</a>), and it is <strong>not</strong> used as the commit to
+  <a href="#promotion-trunk-based">promote</a> — the promotion takes the last full apply. A replace-only
+  apply plans the whole configuration and counts as a full apply.</li>
+</ul>
+</div>
 <h2 id="mock-block">Mock block<a class="headerlink" href="#mock-block" title="Permanent link">&para;</a></h2>
 <p>A run that consumed a mock upstream output (<code>used_mocks=true</code>) <strong>cannot be applied</strong> unless the env
 sets <code>allow_mock_apply=true</code> — see <a href="../dependencies-and-mocks/">Dependencies &amp; mocks</a>.</p>
 <h2 id="promotion-trunk-based">Promotion (trunk-based)<a class="headerlink" href="#promotion-trunk-based" title="Permanent link">&para;</a></h2>
 <p>To roll out the <strong>exact commit</strong> running on one environment to another of the same stack
 (dev → staging → prod), use <strong>promote</strong> — on the target env, <strong>More → Promote from a sibling…</strong>, or:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>curl<span class="w"> </span>-s<span class="w"> </span>-X<span class="w"> </span>POST<span class="w"> </span>localhost:8000/api/v1/environments/<span class="nv">$STAGING_ID</span>/promote<span class="w"> </span>-H<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$AUTH</span><span class="s2">&quot;</span><span class="w"> </span><span class="se">\</span>
-<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="w">  </span>-H<span class="w"> </span><span class="s1">&#39;content-type: application/json&#39;</span><span class="w"> </span>-d<span class="w"> </span><span class="s1">&#39;{&quot;from_environment_id&quot;: &quot;&#39;</span><span class="nv">$DEV_ID</span><span class="s1">&#39;&quot;}&#39;</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>curl<span class="w"> </span>-s<span class="w"> </span>-X<span class="w"> </span>POST<span class="w"> </span>localhost:8000/api/v1/environments/<span class="nv">$STAGING_ID</span>/promote<span class="w"> </span>-H<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$AUTH</span><span class="s2">&quot;</span><span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="w">  </span>-H<span class="w"> </span><span class="s1">&#39;content-type: application/json&#39;</span><span class="w"> </span>-d<span class="w"> </span><span class="s1">&#39;{&quot;from_environment_id&quot;: &quot;&#39;</span><span class="nv">$DEV_ID</span><span class="s1">&#39;&quot;}&#39;</span>
 </code></pre></div>
 <p>It pins a new tracked run on the target to the commit of the source's last <strong>apply</strong> — a pull
-request's plan, a drift check, a command or an empty plan does not count — so you deploy <em>what
+request's plan, a drift check, a command, an empty plan or a
+<a href="#targeted-and-replace-plans">targeted</a> apply does not count — so you deploy <em>what
 was tested</em> — not whatever HEAD happens to be. The apply is gated as usual (tier + four-eyes) at
 confirm. This is the same-stack counterpart to the cross-stack <a href="../dependencies-and-mocks/">cascade</a>.</p>
 <h2 id="rollouts">Rollouts<a class="headerlink" href="#rollouts" title="Permanent link">&para;</a></h2>
@@ -1532,8 +1644,8 @@ confirm. This is the same-stack counterpart to the cross-stack <a href="../depen
 dependency order, under <strong>one approval</strong>. Start one from an environment's <strong>More → Roll out every
 “name” environment…</strong> (every environment of that name in the space), from the clone dialog once it
 is done, or:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>curl<span class="w"> </span>-s<span class="w"> </span>-X<span class="w"> </span>POST<span class="w"> </span>localhost:8000/api/v1/rollouts<span class="w"> </span>-H<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$AUTH</span><span class="s2">&quot;</span><span class="w"> </span>-H<span class="w"> </span><span class="s1">&#39;content-type: application/json&#39;</span><span class="w"> </span><span class="se">\</span>
-<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="w">  </span>-d<span class="w"> </span><span class="s1">&#39;{&quot;space_id&quot;: &quot;&#39;</span><span class="nv">$SPACE_ID</span><span class="s1">&#39;&quot;, &quot;env_name&quot;: &quot;prod-euw3&quot;}&#39;</span><span class="w">    </span><span class="c1"># or &quot;environment_ids&quot;: [...]</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a>curl<span class="w"> </span>-s<span class="w"> </span>-X<span class="w"> </span>POST<span class="w"> </span>localhost:8000/api/v1/rollouts<span class="w"> </span>-H<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$AUTH</span><span class="s2">&quot;</span><span class="w"> </span>-H<span class="w"> </span><span class="s1">&#39;content-type: application/json&#39;</span><span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a><span class="w">  </span>-d<span class="w"> </span><span class="s1">&#39;{&quot;space_id&quot;: &quot;&#39;</span><span class="nv">$SPACE_ID</span><span class="s1">&#39;&quot;, &quot;env_name&quot;: &quot;prod-euw3&quot;}&#39;</span><span class="w">    </span><span class="c1"># or &quot;environment_ids&quot;: [...]</span>
 </code></pre></div>
 <ul>
 <li>A rollout is created <code>awaiting_approval</code> (<code>writer</code> in the space): nothing runs until an approver
@@ -1564,7 +1676,7 @@ object store (<code>logs/{run_id}/{phase}.log.gz</code>) and the database copy i
 <code>LOG_HOT_RETENTION_DAYS</code> (7 by default) later; reads switch to the archive transparently. The log
 viewer's <strong>Save</strong> button saves the lines it shows as <code>run.log</code>; the API serves the whole log as
 plain text, ANSI colours kept:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a>curl<span class="w"> </span>-s<span class="w"> </span><span class="s2">&quot;localhost:8000/api/v1/runs/</span><span class="nv">$RUN_ID</span><span class="s2">/logs/download?phase=all&quot;</span><span class="w"> </span>-H<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$AUTH</span><span class="s2">&quot;</span><span class="w"> </span>-o<span class="w"> </span>run.log
+<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a>curl<span class="w"> </span>-s<span class="w"> </span><span class="s2">&quot;localhost:8000/api/v1/runs/</span><span class="nv">$RUN_ID</span><span class="s2">/logs/download?phase=all&quot;</span><span class="w"> </span>-H<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$AUTH</span><span class="s2">&quot;</span><span class="w"> </span>-o<span class="w"> </span>run.log
 </code></pre></div>
 <p><code>phase=all</code> (the default) or one phase name; <code>404</code> when the run has no logs for it.</p>
 <h2 id="proposed-runs-from-a-pr">Proposed runs (from a PR)<a class="headerlink" href="#proposed-runs-from-a-pr" title="Permanent link">&para;</a></h2>
@@ -1585,17 +1697,18 @@ away from secret stores. There is no opt-in giving proposed runs the secrets: th
 withheld. A drift check is a proposed run too, of the last applied commit: it keeps the secrets.</p>
 </div>
 <h2 id="triggering-over-the-api">Triggering over the API<a class="headerlink" href="#triggering-over-the-api" title="Permanent link">&para;</a></h2>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a>curl<span class="w"> </span>-s<span class="w"> </span>-X<span class="w"> </span>POST<span class="w"> </span>localhost:8000/api/v1/environments/<span class="nv">$ENV_ID</span>/runs<span class="w"> </span>-H<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$AUTH</span><span class="s2">&quot;</span><span class="w"> </span><span class="se">\</span>
-<a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a><span class="w">  </span>-H<span class="w"> </span><span class="s1">&#39;content-type: application/json&#39;</span><span class="w"> </span>-d<span class="w"> </span><span class="s1">&#39;{}&#39;</span><span class="w">                                         </span><span class="c1"># trigger plan</span>
-<a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a>curl<span class="w"> </span>-s<span class="w"> </span>-X<span class="w"> </span>POST<span class="w"> </span>localhost:8000/api/v1/runs/<span class="nv">$RUN_ID</span>/confirm<span class="w"> </span>-H<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$AUTH</span><span class="s2">&quot;</span><span class="w">                 </span><span class="c1"># approve → apply</span>
-<a id="__codelineno-4-4" name="__codelineno-4-4" href="#__codelineno-4-4"></a>curl<span class="w"> </span>-s<span class="w"> </span>-X<span class="w"> </span>POST<span class="w"> </span>localhost:8000/api/v1/runs/<span class="nv">$RUN_ID</span>/discard<span class="w"> </span>-H<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$AUTH</span><span class="s2">&quot;</span><span class="w">                 </span><span class="c1"># discard</span>
-<a id="__codelineno-4-5" name="__codelineno-4-5" href="#__codelineno-4-5"></a>curl<span class="w"> </span>-s<span class="w"> </span>-X<span class="w"> </span>POST<span class="w"> </span>localhost:8000/api/v1/runs/<span class="nv">$RUN_ID</span>/cancel<span class="w"> </span>-H<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$AUTH</span><span class="s2">&quot;</span><span class="w">                  </span><span class="c1"># cancel / stop</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a>curl<span class="w"> </span>-s<span class="w"> </span>-X<span class="w"> </span>POST<span class="w"> </span>localhost:8000/api/v1/environments/<span class="nv">$ENV_ID</span>/runs<span class="w"> </span>-H<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$AUTH</span><span class="s2">&quot;</span><span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a><span class="w">  </span>-H<span class="w"> </span><span class="s1">&#39;content-type: application/json&#39;</span><span class="w"> </span>-d<span class="w"> </span><span class="s1">&#39;{}&#39;</span><span class="w">                                         </span><span class="c1"># trigger plan</span>
+<a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a>curl<span class="w"> </span>-s<span class="w"> </span>-X<span class="w"> </span>POST<span class="w"> </span>localhost:8000/api/v1/runs/<span class="nv">$RUN_ID</span>/confirm<span class="w"> </span>-H<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$AUTH</span><span class="s2">&quot;</span><span class="w">                 </span><span class="c1"># approve → apply</span>
+<a id="__codelineno-5-4" name="__codelineno-5-4" href="#__codelineno-5-4"></a>curl<span class="w"> </span>-s<span class="w"> </span>-X<span class="w"> </span>POST<span class="w"> </span>localhost:8000/api/v1/runs/<span class="nv">$RUN_ID</span>/discard<span class="w"> </span>-H<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$AUTH</span><span class="s2">&quot;</span><span class="w">                 </span><span class="c1"># discard</span>
+<a id="__codelineno-5-5" name="__codelineno-5-5" href="#__codelineno-5-5"></a>curl<span class="w"> </span>-s<span class="w"> </span>-X<span class="w"> </span>POST<span class="w"> </span>localhost:8000/api/v1/runs/<span class="nv">$RUN_ID</span>/cancel<span class="w"> </span>-H<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$AUTH</span><span class="s2">&quot;</span><span class="w">                  </span><span class="c1"># cancel / stop</span>
 </code></pre></div>
 <p>A <code>destroy</code> run is triggered with <code>-d '{"type":"destroy"}'</code> (<code>tracked</code>, the default, and <code>destroy</code> are
 the only types this endpoint takes — 422 otherwise: a command runs through
 <a href="../commands/"><code>…/commands</code></a>, a pull request's plan comes from its webhook); <code>commit_sha</code> (a full SHA, a branch or
-a tag) pins the plan to that commit, and <code>with_downstream: true</code> starts a
-<a href="../dependencies-and-mocks/">cascade</a> group.</p>
+a tag) pins the plan to that commit, <code>with_downstream: true</code> starts a
+<a href="../dependencies-and-mocks/">cascade</a> group, and <code>targets</code> / <code>replace</code> make a
+<a href="#targeted-and-replace-plans">targeted or replace plan</a>.</p>
 <h2 id="see-also">See also<a class="headerlink" href="#see-also" title="Permanent link">&para;</a></h2>
 <ul>
 <li><a href="../variables/">Variables &amp; secrets</a> · <a href="../hooks/">Hooks &amp; <code>.stackd.yml</code></a> · <a href="../notifications/">Notifications</a></li>

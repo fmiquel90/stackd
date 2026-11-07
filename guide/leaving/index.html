@@ -14,7 +14,7 @@
         <link rel="prev" href="../importing-existing-state/">
       
       
-        <link rel="next" href="../cloud-credentials/">
+        <link rel="next" href="../backup-restore/">
       
       
         
@@ -349,6 +349,34 @@
     
   
     Getting started
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../installing/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Installing in production
   
 
     
@@ -772,6 +800,34 @@
   
 </nav>
       
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../backup-restore/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Backup & restore
+  
+
+    
+  </span>
+  
+  
+
+      </a>
     </li>
   
 
@@ -1382,10 +1438,12 @@ how to leave and get everything back.</p>
 </table>
 <h2 id="what-lives-only-in-stackd-but-is-exportable">What lives only in Stackd (but is exportable)<a class="headerlink" href="#what-lives-only-in-stackd-but-is-exportable" title="Permanent link">&para;</a></h2>
 <ul>
-<li><strong>Orchestration config</strong> — stacks, environments, tiers, dependencies, variable sets. Exportable
-  via the API (<code>GET /stacks</code>, <code>/stacks/{id}/environments</code>, <code>/environments/{id}</code>,
-  <code>/environments/{id}/dependencies</code>, <code>/graph</code>, <code>/variable-sets</code>,
-  <code>/environments/{id}/resolved-variables</code>). Re-creatable; it isn't infrastructure.</li>
+<li><strong>Orchestration config</strong> — stacks, environments, tiers, dependencies, variable sets, hooks,
+  notification targets, cloud integrations. One call exports a whole space as a portable JSON
+  document (<code>GET /api/v1/spaces/{id}/export</code>, space admin) that another instance imports back
+  (<code>POST /api/v1/spaces/{id}/import</code>) — never a secret value; see
+  <a href="../backup-restore/#configuration-export-the-logical-complement">Backup &amp; restore</a>.
+  Re-creatable; it isn't infrastructure.</li>
 <li><strong>History</strong> — runs, logs, audit. Runs list per environment (<code>GET /environments/{id}/runs</code>); a
   run's logs download as plain text (<code>GET /runs/{id}/logs/download</code>), and once archived they also
   sit in your bucket under <code>logs/&lt;run_id&gt;/&lt;phase&gt;.log.gz</code>. The audit trail exports to CSV
@@ -1431,7 +1489,7 @@ running on your own again.</p>
 (Stackd can't hand them back in clear — by design).</p>
 <h3 id="4-optional-archive-config-audit">4. (Optional) Archive config &amp; audit<a class="headerlink" href="#4-optional-archive-config-audit" title="Permanent link">&para;</a></h3>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>curl<span class="w"> </span>-s<span class="w"> </span>localhost:8000/api/v1/audit/export<span class="w"> </span>-H<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$AUTH</span><span class="s2">&quot;</span><span class="w"> </span>&gt;<span class="w"> </span>audit.csv
-<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a>curl<span class="w"> </span>-s<span class="w"> </span>localhost:8000/api/v1/stacks<span class="w"> </span>-H<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$AUTH</span><span class="s2">&quot;</span><span class="w"> </span>&gt;<span class="w"> </span>stacks.json
+<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a>curl<span class="w"> </span>-s<span class="w"> </span>localhost:8000/api/v1/spaces/<span class="nv">$SPACE_ID</span>/export<span class="w"> </span>-H<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$AUTH</span><span class="s2">&quot;</span><span class="w"> </span>&gt;<span class="w"> </span>space.json<span class="w">   </span><span class="c1"># per space</span>
 </code></pre></div>
 <h3 id="5-decommission">5. Decommission<a class="headerlink" href="#5-decommission" title="Permanent link">&para;</a></h3>
 <p>Delete the IAM OIDC provider + roles in your cloud account if you no longer want them, then stop

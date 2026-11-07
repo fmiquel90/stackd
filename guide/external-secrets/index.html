@@ -369,6 +369,34 @@
   
   
     <li class="md-nav__item">
+      <a href="../installing/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Installing in production
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../stacks-and-environments/" class="md-nav__link">
         
   
@@ -753,6 +781,34 @@
     
   
     Exit & data portability
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../backup-restore/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Backup & restore
   
 
     
@@ -1334,6 +1390,13 @@
 <li><strong>Provider unreachable</strong>, or the entry can't be fetched (timeout, not found) → the configured <a href="#fallback-when-the-source-is-down">fallback</a> applies, or the run fails closed.</li>
 </ol>
 <p>The fetched value flows into the run exactly like a stored sensitive variable: it lands in the worker's <code>tfvars</code>/<code>sensitive_env</code> and the agent masks it in all logs.</p>
+<div class="admonition note">
+<p class="admonition-title"><code>pass-cli</code> on the API</p>
+<p>The API resolves references by running <code>pass-cli</code>. The production image ships it only when
+built with its release binary and checksum:
+<code>docker build -f api/Dockerfile --build-arg PASS_CLI_URL=&lt;binary URL&gt; --build-arg PASS_CLI_SHA256=&lt;sha256&gt; api</code>
+(<code>task build-images -- --build-arg …</code>). Without it, every Proton Pass reference fails closed.</p>
+</div>
 <h2 id="1-create-a-secret-source">1. Create a secret source<a class="headerlink" href="#1-create-a-secret-source" title="Permanent link">&para;</a></h2>
 <p>A secret source is <strong>scoped to a space</strong> and holds the machine credential used to fetch secrets. The credential is AES-256-GCM encrypted at rest and <strong>write-only</strong> — it is never returned by the API. Creating one requires the <strong>admin</strong> role.</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="nv">SRC</span><span class="o">=</span><span class="k">$(</span>curl<span class="w"> </span>-s<span class="w"> </span>-X<span class="w"> </span>POST<span class="w"> </span>localhost:8000/api/v1/spaces/<span class="nv">$SPACE</span>/secret-sources<span class="w"> </span><span class="se">\</span>

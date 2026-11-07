@@ -367,6 +367,34 @@
   
   
     <li class="md-nav__item">
+      <a href="../guide/installing/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Installing in production
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../guide/stacks-and-environments/" class="md-nav__link">
         
   
@@ -599,6 +627,34 @@
     
   
     Exit & data portability
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../guide/backup-restore/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Backup & restore
   
 
     
@@ -2106,8 +2162,10 @@ Goal: a self-hostable Terraform orchestration platform with multi-environment st
 <li>[x] Scheduled drift detection — <em>status: shipped (SPECS §19)</em></li>
 <li>[x] Automated retention/purge: hot logs, expired refresh-token families, audit &gt; 2 years via a distinct DB role (SPECS §6.1, §7.5)</li>
 <li>[ ] Audit export to an external system (SIEM)</li>
+<li>[x] <strong>Service accounts &amp; API tokens</strong> (SPECS §23): automation reads and plans with an expiring, revocable token — never confirms an apply — <em>status: API + UI (Settings → Service accounts: accounts, tokens shown once, revoke, disable; service accounts listed and grantable under Users / Spaces)</em></li>
+<li>[x] <strong>Configuration export / import</strong> per space (SPECS §22): a portable <code>stackd.config</code> JSON document by names, never a secret; merge import (never deletes), dry run, audited — <em>status: API + UI (Settings → Space configuration: export download, import with dry-run report then apply)</em>. Backup &amp; restore guide (<code>docs/guide/backup-restore.md</code>)</li>
 <li>[ ] Platform observability (Prometheus, OTel, Datadog dashboard) — <em>status: <code>/metrics</code> and optional OTLP tracing shipped (SPECS §20); no dashboard yet</em></li>
-<li>[ ] Helm chart / Terraform deployment module (dogfooding)</li>
+<li>[ ] Helm chart / Terraform deployment module (dogfooding) — <em>status: production images (<code>api/</code>, <code>front/</code>, <code>worker/</code> <code>Dockerfile</code>) and the single-host Docker Compose reference deployment shipped (<code>deploy/production/</code>, <a href="../guide/installing/">Installing in production</a>); Helm chart and Terraform module pending</em></li>
 <li>[ ] <strong>Go rewrite of the worker</strong> (single binary, easier distribution) — the MVP Python agent remains the functional reference; the Go port does not change the protocol (§7)</li>
 </ul>
 <hr />

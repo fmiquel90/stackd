@@ -365,6 +365,34 @@
   
   
     <li class="md-nav__item">
+      <a href="../guide/installing/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Installing in production
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../guide/stacks-and-environments/" class="md-nav__link">
         
   
@@ -597,6 +625,34 @@
     
   
     Exit & data portability
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../guide/backup-restore/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Backup & restore
   
 
     
@@ -1695,12 +1751,16 @@ all. Counts in parentheses include parametrized cases and drift as tests are add
 <td>The plan is stored encrypted and served only to the run's apply job; it can't be replaced after the plan phase; a blob moved to another run's key doesn't decrypt; no saved plan → nothing served; proposed runs save none; destroy runs plan with <code>-destroy</code>; 64 MiB cap; deleted once the run is terminal, kept if that transition rolls back.</td>
 </tr>
 <tr>
-<td><code>test_commands.py</code> (8)</td>
-<td>Command runs: allowlist, read-only for writers, mutating needs <code>can_apply</code>, lifecycle + audit; mutating → <code>rw</code> token with the apply-window TTL, read-only → <code>ro</code> token with the 6 h TTL.</td>
+<td><code>test_commands.py</code> (13)</td>
+<td>Command runs: allowlist, read-only for writers, mutating needs <code>can_apply</code>, lifecycle + audit; mutating → <code>rw</code> token with the apply-window TTL, read-only → <code>ro</code> token with the 6 h TTL; the per-command option allowlist (<code>refresh -target=</code>, <code>state rm/mv -dry-run</code>, options stored first; <code>-json</code>/<code>-raw</code>/<code>-state</code>/<code>-chdir</code>/<code>-lock=false</code>/<code>-var*</code>… refused); <code>force-unlock</code> admin-only, one validated lock ID, 409 on managed state, apply credentials on an unmanaged backend.</td>
 </tr>
 <tr>
-<td><code>test_promote.py</code> (6)</td>
-<td>Promotion pins the source's applied commit (audited) — its last apply, never a later PR plan or empty plan; needs an applied source; refuses cross-stack; distinct 404 for a missing source vs target; the source stays space-gated.</td>
+<td><code>test_plan_options.py</code> (19)</td>
+<td>Targeted / replace plans: address validation (422 problem+json), persistence + dedup on <code>RunOut</code>, <code>plan_options</code> in the <code>run.triggered</code> / <code>run.destroy_triggered</code> audit context, targeted destroy needs <code>can_destroy</code>, the claim carries the options to the plan job only (never the apply), no auto-confirm on an autodeploy env, refused on other run types.</td>
+</tr>
+<tr>
+<td><code>test_promote.py</code> (7)</td>
+<td>Promotion pins the source's applied commit (audited) — its last apply, never a later PR plan, empty plan or targeted apply (a replace-only apply counts); needs an applied source; refuses cross-stack; distinct 404 for a missing source vs target; the source stays space-gated.</td>
 </tr>
 <tr>
 <td><code>test_deletion.py</code> (7)</td>
@@ -1783,8 +1843,8 @@ all. Counts in parentheses include parametrized cases and drift as tests are add
 <td>GitHub post-back: owner/repo parsing, PR metadata persisted, PR close cancels proposed runs, status + one comment per run, a bad secret fails only its row, resync.</td>
 </tr>
 <tr>
-<td><code>test_drift.py</code> (6)</td>
-<td>Drift runs enqueued only for envs with an applied commit; status flips and approvers (by space membership) are notified once; an apply clears drift; user runs are claimed first.</td>
+<td><code>test_drift.py</code> (8)</td>
+<td>Drift runs enqueued only for envs with an applied commit; status flips and approvers (by space membership) are notified once; an apply clears drift — not a targeted one (also on the after_apply-failure path), a replace-only one does; user runs are claimed first.</td>
 </tr>
 <tr>
 <td><code>test_repo_safety.py</code> (65)</td>
@@ -1797,6 +1857,14 @@ all. Counts in parentheses include parametrized cases and drift as tests are add
 <tr>
 <td><code>test_rollouts.py</code> (29)</td>
 <td>Environment rollouts (SPECS §21): the graph applied under one approval; the creator, as triggerer, gets <code>run_finished</code>/<code>run_failed</code> for member runs; a plan that changes, forgets or does anything beyond creates, or an env that already has infrastructure, waits for a human; a failure skips its branch and can be retried; an expired approval pauses (also from the scheduler) and a re-approval resumes, audited as such; approval needs apply rights on every member, four-eyes vs the creator where it applies; one active rollout per env, cancel (a confirmed unclaimed run too, a cancel during the gate wins); preview flags mock plans and members no worker can take; members never fall back to autodeploy; a member made protected or moved to another tier after approval is not auto-confirmed, an approver removed from the space loses the gate; the pinned commit per stack; lock order; the cascade leaves active members alone; an active member can't be deleted.</td>
+</tr>
+<tr>
+<td><code>test_portability.py</code> (7)</td>
+<td>Configuration export / import (SPECS §22): the export is by name and never carries a secret (sensitive values, repo token, source credential), audited; a round trip into a new space re-creates the configuration and reports what it could not (sensitive values, a missing secret source), keeps a new autodeploy env off while secrets are missing, every write audited <code>via: import</code>; re-importing the same document changes nothing and keeps existing secrets, a changed setting is applied; dry run writes nothing; a hand-filled secret is stored encrypted; strict validation (unknown field, duplicate keys, unknown tier, a dependency cycle) aborts with nothing written; permissions (space admin; tiers, cloud integrations and pools reserved to an instance admin; a pool token returned once).</td>
+</tr>
+<tr>
+<td><code>test_service_accounts.py</code> (4)</td>
+<td>Service accounts &amp; API tokens (SPECS §23): a token authenticates, is shown once and stored hashed, never in the audit; revoked, expired, unknown tokens and a disabled account get 401; the instance role is capped at writer (create and PATCH), management is instance-admin only; no space by default; with a space-admin membership it plans and exports but can't destroy, confirm an apply nor run a mutating command.</td>
 </tr>
 <tr>
 <td><code>test_notifications.py</code> (10)</td>
@@ -1870,8 +1938,8 @@ The tier gate (an approver without <code>prod</code>) and staleness stay manual 
 </thead>
 <tbody>
 <tr>
-<td><code>test_saved_plan.py</code> (10)</td>
-<td>The plan job uploads the plan it showed, before the <code>after_plan</code> hooks; destroy runs plan with <code>-destroy</code>; the apply job applies exactly the saved plan, fails closed without a usable one, reports a stale plan clearly; the plan file is never written through a checked-out symlink; the API's refusal reaches the job error.</td>
+<td><code>test_saved_plan.py</code> (15)</td>
+<td>The plan job uploads the plan it showed, before the <code>after_plan</code> hooks; destroy runs plan with <code>-destroy</code>; <code>plan_options</code> become one <code>-target=</code>/<code>-replace=</code> argv element each on the plan (tracked and destroy), never on the apply; the apply job applies exactly the saved plan, fails closed without a usable one, reports a stale plan clearly; the plan file is never written through a checked-out symlink; the API's refusal reaches the job error.</td>
 </tr>
 <tr>
 <td><code>test_commit_pin.py</code> (7)</td>
@@ -1894,8 +1962,8 @@ The tier gate (an approver without <code>prod</code>) and staleness stay manual 
 <td>A plan succeeds only on exit 0 or 2: an error, the watchdog's kill (124), a signal or any other code fails the job with the reason; an apply or command fails on any non-zero code; a plan without its JSON document (<code>show -json</code> failed or printed no JSON object) fails closed.</td>
 </tr>
 <tr>
-<td><code>test_command_run.py</code> (14)</td>
-<td>A command's time budget follows <code>cred_phase</code>: apply budget when mutating, default cap when read-only, apply budget when missing (fail closed); an over-budget command fails with a clear message.</td>
+<td><code>test_command_run.py</code> (16)</td>
+<td>A command's time budget follows <code>cred_phase</code>: apply budget when mutating, default cap when read-only, apply budget when missing (fail closed); an over-budget command fails with a clear message; <code>force-unlock</code> runs with <code>-force</code> added by the agent; args are passed in the API's order.</td>
 </tr>
 <tr>
 <td><code>test_authed_url.py</code> (45)</td>
@@ -1924,6 +1992,14 @@ The tier gate (an approver without <code>prod</code>) and staleness stay manual 
 <tr>
 <td><code>test_cancel.py</code> (8)</td>
 <td>Stopping a job (SPECS §4.1): SIGINT stops the tool, one ignoring it is killed after the grace period; a stop between two commands starts no next one; past the point of no return a stop no longer applies; a command completing despite the signal is not a stop; the registry finds the job (an early cancel remembered); a canceled job is reported <code>job_canceled</code>, not failed.</td>
+</tr>
+<tr>
+<td><code>test_drain.py</code> (17)</td>
+<td>Graceful drain on SIGTERM/SIGINT (SPECS §7.1): first signal drains, second forces; no claim once draining, a job claimed during the signal still runs, a full slot still notices the drain; in-flight jobs finish then exit 0, the claim in flight awaited; past the timeout or on a second signal the cancel path stops the jobs (a job registered after it too), reported <code>job_failed</code> <code>worker_shutdown</code> — <code>job_canceled</code> when the API also asked; a job that never ends is abandoned; <code>run()</code> end to end with real signals: drained → 0 with the job's report and heartbeats during the drain, timeout and second signal → 1.</td>
+</tr>
+<tr>
+<td><code>test_registry_auth.py</code> (32)</td>
+<td>Private registry pulls (SPECS §7.4): an image reference's registry host (port, <code>localhost</code>, Docker Hub defaults) and a config key's; <code>auth</code>, <code>username</code>/<code>password</code> and <code>identitytoken</code> entries → the base64url <code>X-Registry-Auth</code> JSON, sent on the pull only, none when anonymous; credential-helper entries skipped; a broken or missing file refuses to start, never quoting its content; secrets out of <code>repr</code>, logs and pull errors (stream and HTTP); the file never reaches a job's environment.</td>
 </tr>
 <tr>
 <td><code>test_docker_runner.py</code> (10)</td>
@@ -2007,6 +2083,10 @@ The tier gate (an approver without <code>prod</code>) and staleness stay manual 
 <tr>
 <td><code>src/features/queue/queueModel.test.ts</code> (8)</td>
 <td>Queue grouping and blocking reasons in words (holder run, no worker, apply reservation, a decision pending), filters, wait time.</td>
+</tr>
+<tr>
+<td><code>src/components/PlanOptions.test.tsx</code> (6)</td>
+<td>Plan-option addresses parsed one per line (deduplicated), null for a full plan; the Targeted / Replace chips carry a label and the addresses; command options built from the allowlist only, options first.</td>
 </tr>
 <tr>
 <td><code>src/features/runs/CheckList.test.tsx</code> (10)</td>

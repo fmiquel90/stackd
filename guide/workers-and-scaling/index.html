@@ -369,6 +369,34 @@
   
   
     <li class="md-nav__item">
+      <a href="../installing/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Installing in production
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../stacks-and-environments/" class="md-nav__link">
         
   
@@ -621,6 +649,34 @@
   
   
     <li class="md-nav__item">
+      <a href="../backup-restore/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Backup & restore
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../cloud-credentials/" class="md-nav__link">
         
   
@@ -747,6 +803,17 @@
     <span class="md-ellipsis">
       
         Worker loss
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#stopping-a-worker" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Stopping a worker
       
     </span>
   </a>
@@ -1276,6 +1343,17 @@
 </li>
         
           <li class="md-nav__item">
+  <a href="#stopping-a-worker" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Stopping a worker
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#time-budgets" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -1428,6 +1506,43 @@
 <p>A worker silent for &gt; 60s (<code>STACKD_WORKER_OFFLINE_SECONDS</code> on the API) is marked <code>offline</code>. The scheduler (every 10 s) then fails the runs whose job is <strong>executing</strong> on an offline worker — <code>preparing</code>, <code>planning</code>, <code>checking</code>, <code>running</code> (a command) or <code>applying</code> — as <code>failed (worker_lost)</code>, once the job was claimed more than 120s ago (<code>STACKD_WORKER_LOST_SECONDS</code>). No human action required.</p>
 <p>Runs that are <strong>not executing</strong> are never reclaimed: an <code>unconfirmed</code> run waits for a human and a <code>confirmed</code> one for the apply claim, and neither depends on the plan worker. Losing the worker that planned a run doesn't fail it; another worker applies the saved plan.</p>
 <p>A job holding <strong>apply credentials</strong> — an <code>applying</code> run, or a <strong>mutating command</strong> run (<code>import</code>, <code>state rm</code>/<code>mv</code>, <code>taint</code>, <code>untaint</code>, <code>refresh</code>) — is the exception: it is reclaimed only after the <strong>apply window</strong>, the apply budget plus a grace period (<code>stackd_apply_timeout_seconds</code> + <code>stackd_apply_lost_grace_seconds</code>, default 15 min + 5 min). The worker hard-kills its own apply or mutating command at the budget, and that job's state token and apply OIDC token expire at the end of the window. So a healthy long apply is never failed mid-flight, and by the time the environment is handed to another run, the lost worker can no longer write its state. As a second safeguard, the state backend refuses a write or a lock from any token whose run has already ended.</p>
+<h3 id="stopping-a-worker">Stopping a worker<a class="headerlink" href="#stopping-a-worker" title="Permanent link">&para;</a></h3>
+<p>A worker <strong>drains</strong> on its first SIGTERM or SIGINT (<code>docker stop</code>, a pod's termination, <code>Ctrl-C</code>):</p>
+<ol>
+<li>it claims no new job — a claim already waiting on the API is let through, and a job it returns is run, never dropped;</li>
+<li>it keeps heartbeating, so it stays online and a user's stop still reaches its jobs;</li>
+<li>its running jobs finish and report as usual; then it exits <code>0</code>.</li>
+</ol>
+<p>Past <code>STACKD_DRAIN_TIMEOUT_SECONDS</code> (default <strong>1200 s</strong>), or at once on a <strong>second</strong> signal, it stops the jobs still running the way a user's stop does — SIGINT to the tool, SIGKILL after <code>STACKD_CANCEL_GRACE_SECONDS</code> — waits for them to report, and exits <code>1</code>. Those runs fail with <code>worker_shutdown: …</code> (an interrupted apply may have changed part of the infrastructure, as with any stopped apply). The default is the API's apply window — the 15 min apply budget plus the 5 min grace: an apply that started just before the signal can still use its whole budget, and a run held longer than that would be reclaimed by the API (<code>worker_lost</code>) anyway. If you raise the API's <code>STACKD_APPLY_TIMEOUT_SECONDS</code>, raise it too.</p>
+<p>A running <strong>apply</strong> (or mutating command) is never stopped before its own apply budget — as the API sent it in the claim — plus 300 s, even past the drain timeout; a second signal still stops it at once.</p>
+<p><strong>The process manager must wait longer than the drain</strong>, or it kills the worker mid-job — the very thing draining avoids. Allow max(drain timeout, apply budget + 300 s) + cancel grace + 30 s to report, <strong>1380 s</strong> with the defaults (raise it with <code>STACKD_APPLY_TIMEOUT_SECONDS</code>):</p>
+<table>
+<thead>
+<tr>
+<th>Where</th>
+<th>Setting</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Docker Compose</td>
+<td><code>stop_grace_period</code> in <code>deploy/production/worker.compose.yml</code>: <code>STACKD_WORKER_STOP_GRACE</code> in <code>.env</code> (default <code>23m</code>)</td>
+</tr>
+<tr>
+<td>plain Docker</td>
+<td><code>docker stop -t 1380 &lt;container&gt;</code> (default 10 s); the agent needs an init forwarding the signal (<code>--init</code>)</td>
+</tr>
+<tr>
+<td>Kubernetes</td>
+<td><code>terminationGracePeriodSeconds: 1380</code> on the worker pod (default 30 s)</td>
+</tr>
+<tr>
+<td>systemd</td>
+<td><code>TimeoutStopSec=1380</code> (default 90 s), <code>KillMode=mixed</code></td>
+</tr>
+</tbody>
+</table>
+<p>Stop workers <strong>before</strong> the API: a draining worker reports its jobs to it. The dev stack's hot reload (watchfiles) still cuts a running job off after 5 s.</p>
 <h3 id="time-budgets">Time budgets<a class="headerlink" href="#time-budgets" title="Permanent link">&para;</a></h3>
 <p>Each job's subprocesses run in their own process group: whatever a hook or a tofu command leaves running there is killed once it exits, and a watchdog kills the whole group past its budget. A plan, an apply or a command killed this way fails the run with an "exceeded the …s time budget" error:</p>
 <table>
@@ -1517,6 +1632,11 @@
 <td>after a stop request interrupts the tool (SIGINT), how long it gets to stop by itself before it is killed</td>
 </tr>
 <tr>
+<td><code>STACKD_DRAIN_TIMEOUT_SECONDS</code></td>
+<td><code>1200</code></td>
+<td>when the worker is stopped, how long its running jobs get to finish before they are stopped, see <a href="#stopping-a-worker">Stopping a worker</a></td>
+</tr>
+<tr>
 <td><code>STACKD_HOOK_TIMEOUT_SECONDS</code></td>
 <td><code>600</code></td>
 <td>each hook's time budget</td>
@@ -1599,6 +1719,11 @@ can't read the pool token from its environment.</p>
 <td>unset</td>
 <td>an alternative OCI runtime, e.g. <code>runsc</code> (gVisor)</td>
 </tr>
+<tr>
+<td><code>STACKD_REGISTRY_AUTH_FILE</code></td>
+<td>unset</td>
+<td>a Docker <code>config.json</code> whose <code>auths</code> entry for the image's registry authenticates the pull of a runner image from a private registry (credential helpers not supported), see <a href="../installing/#6-runner-images">Installing</a></td>
+</tr>
 </tbody>
 </table>
 <div class="admonition warning">
@@ -1631,6 +1756,7 @@ can't read the pool token from its environment.</p>
 <p>Drift detection adds background load: every environment with <code>drift_check_enabled</code> gets a read-only plan every 6 h (<code>STACKD_DRIFT_INTERVAL_SECONDS</code> on the API). A claim always takes user runs before these drift plans, then the oldest first.</p>
 <h2 id="see-also">See also<a class="headerlink" href="#see-also" title="Permanent link">&para;</a></h2>
 <ul>
+<li><a href="../installing/#7-workers">Installing in production</a> — the production worker image and its compose file</li>
 <li><a href="../cloud-credentials/">Cloud credentials</a></li>
 <li><a href="../observability/">Observability</a></li>
 <li><a href="../../SPECS/">SPECS — worker protocol (§7)</a></li>

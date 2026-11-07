@@ -369,6 +369,34 @@
   
   
     <li class="md-nav__item">
+      <a href="../installing/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Installing in production
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../stacks-and-environments/" class="md-nav__link">
         
   
@@ -560,6 +588,34 @@
     </span>
   </a>
   
+    <nav class="md-nav" aria-label="Run one">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#allowed-options" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Allowed options
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#force-unlock-own-backend" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Force-unlock (own backend)
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
 </li>
       
         <li class="md-nav__item">
@@ -692,6 +748,34 @@
     
   
     Exit & data portability
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../backup-restore/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Backup & restore
   
 
     
@@ -1150,6 +1234,34 @@
     </span>
   </a>
   
+    <nav class="md-nav" aria-label="Run one">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#allowed-options" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Allowed options
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#force-unlock-own-backend" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Force-unlock (own backend)
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
 </li>
       
         <li class="md-nav__item">
@@ -1202,9 +1314,11 @@ managed backend as any other run.</p>
 <div class="admonition note">
 <p class="admonition-title">Note</p>
 <p>This is <strong>not</strong> arbitrary shell. The worker runs <code>&lt;tool&gt; &lt;command&gt; &lt;args&gt;</code> where <code>command</code> is
-taken verbatim from an allowlist. To remove a stuck lock, use the dedicated force-unlock
-(admin only: UI <strong>State</strong> tab → <strong>Force unlock…</strong>, or <code>DELETE /api/v1/environments/{id}/state/lock</code>)
-— it isn't a command.</p>
+taken verbatim from an allowlist, and options are limited to a short per-command allowlist.
+To remove a stuck lock on <strong>Stackd-managed state</strong>, use the dedicated force-unlock (admin only:
+UI <strong>State</strong> tab → <strong>Force unlock…</strong>, or <code>DELETE /api/v1/environments/{id}/state/lock</code>); the
+<code>force-unlock</code> command is for environments with their <strong>own</strong> backend (see
+<a href="#force-unlock-own-backend">below</a>).</p>
 </div>
 <h2 id="allowed-commands">Allowed commands<a class="headerlink" href="#allowed-commands" title="Permanent link">&para;</a></h2>
 <table>
@@ -1217,7 +1331,7 @@ taken verbatim from an allowlist. To remove a stuck lock, use the dedicated forc
 <tbody>
 <tr>
 <td><code>output</code>, <code>show</code>, <code>state list</code>, <code>state show</code>, <code>validate</code>, <code>providers</code></td>
-<td><code>import</code>, <code>state rm</code>, <code>state mv</code>, <code>taint</code>, <code>untaint</code>, <code>refresh</code></td>
+<td><code>import</code>, <code>state rm</code>, <code>state mv</code>, <code>taint</code>, <code>untaint</code>, <code>refresh</code>, <code>force-unlock</code> (also <strong>admin</strong>)</td>
 </tr>
 </tbody>
 </table>
@@ -1241,9 +1355,76 @@ You land on the run page with live logs.</p>
 <a id="__codelineno-0-11" name="__codelineno-0-11" href="#__codelineno-0-11"></a><span class="s1">  &quot;command&quot;: &quot;state rm&quot;, &quot;args&quot;: [&quot;aws_instance.old&quot;]</span>
 <a id="__codelineno-0-12" name="__codelineno-0-12" href="#__codelineno-0-12"></a><span class="s1">}&#39;</span>
 </code></pre></div>
-<p>Arguments are passed verbatim, one list item each; an argument starting with <code>-</code> (an option such
-as <code>-chdir</code> or <code>-state</code>) is refused (<code>400 Argument not allowed</code>), as is a command outside the
-allowlist (<code>400 Command not allowed</code>).</p>
+<p>Arguments are passed verbatim, one list item each. A command outside the allowlist is refused
+(<code>400 Command not allowed</code>).</p>
+<h3 id="allowed-options">Allowed options<a class="headerlink" href="#allowed-options" title="Permanent link">&para;</a></h3>
+<p>An argument starting with <code>-</code> is refused (<code>400 Argument not allowed</code>) unless the command's option
+allowlist names it:</p>
+<table>
+<thead>
+<tr>
+<th>Command</th>
+<th>Allowed options</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>refresh</code></td>
+<td><code>-target=&lt;address&gt;</code> — repeatable (at most 50), same address rules as a <a href="../runs-and-approvals/#targeted-and-replace-plans">targeted plan</a></td>
+</tr>
+<tr>
+<td><code>state rm</code>, <code>state mv</code></td>
+<td><code>-dry-run</code> — show what would change, without writing state</td>
+</tr>
+<tr>
+<td>every other command</td>
+<td>none</td>
+</tr>
+</tbody>
+</table>
+<p>Options that could print sensitive values (<code>-json</code>, <code>-raw</code>), point the tool elsewhere (<code>-state</code>,
+<code>-chdir</code>, <code>-backend-config</code>), skip the lock (<code>-lock=false</code>) or inject variables (<code>-var</code>,
+<code>-var-file</code>) are never accepted. Stackd puts the options before the positional arguments (where
+tofu expects them), whatever order you send:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="c1"># preview a state rm</span>
+<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a>curl<span class="w"> </span>-s<span class="w"> </span>-X<span class="w"> </span>POST<span class="w"> </span>localhost:8000/api/v1/environments/<span class="nv">$ENV_ID</span>/commands<span class="w"> </span>-H<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$AUTH</span><span class="s2">&quot;</span><span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a><span class="w">  </span>-H<span class="w"> </span><span class="s1">&#39;content-type: application/json&#39;</span><span class="w"> </span>-d<span class="w"> </span><span class="s1">&#39;{</span>
+<a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a><span class="s1">  &quot;command&quot;: &quot;state rm&quot;, &quot;args&quot;: [&quot;aws_instance.old&quot;, &quot;-dry-run&quot;]</span>
+<a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a><span class="s1">}&#39;</span><span class="w">   </span><span class="c1"># stored and run as: state rm -dry-run aws_instance.old</span>
+<a id="__codelineno-1-6" name="__codelineno-1-6" href="#__codelineno-1-6"></a>
+<a id="__codelineno-1-7" name="__codelineno-1-7" href="#__codelineno-1-7"></a><span class="c1"># refresh two resources only</span>
+<a id="__codelineno-1-8" name="__codelineno-1-8" href="#__codelineno-1-8"></a>curl<span class="w"> </span>-s<span class="w"> </span>-X<span class="w"> </span>POST<span class="w"> </span>localhost:8000/api/v1/environments/<span class="nv">$ENV_ID</span>/commands<span class="w"> </span>-H<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$AUTH</span><span class="s2">&quot;</span><span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-1-9" name="__codelineno-1-9" href="#__codelineno-1-9"></a><span class="w">  </span>-H<span class="w"> </span><span class="s1">&#39;content-type: application/json&#39;</span><span class="w"> </span>-d<span class="w"> </span><span class="s1">&#39;{</span>
+<a id="__codelineno-1-10" name="__codelineno-1-10" href="#__codelineno-1-10"></a><span class="s1">  &quot;command&quot;: &quot;refresh&quot;, &quot;args&quot;: [&quot;-target=aws_s3_bucket.logs&quot;, &quot;-target=aws_iam_role.ci&quot;]</span>
+<a id="__codelineno-1-11" name="__codelineno-1-11" href="#__codelineno-1-11"></a><span class="s1">}&#39;</span>
+</code></pre></div>
+<p>In the UI, <strong>Run a command…</strong> shows a <em>Dry run</em> checkbox for <code>state rm</code> / <code>state mv</code> and a
+<em>Target addresses</em> box (one per line) for <code>refresh</code>.</p>
+<h3 id="force-unlock-own-backend">Force-unlock (own backend)<a class="headerlink" href="#force-unlock-own-backend" title="Permanent link">&para;</a></h3>
+<p>An environment whose state lives in its <strong>own</strong> backend (<code>managed_state=false</code>, e.g. S3 +
+DynamoDB) can be left with a stale lock by a run that died mid-way, outside Stackd's view.
+<code>force-unlock</code> releases it:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>curl<span class="w"> </span>-s<span class="w"> </span>-X<span class="w"> </span>POST<span class="w"> </span>localhost:8000/api/v1/environments/<span class="nv">$ENV_ID</span>/commands<span class="w"> </span>-H<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$AUTH</span><span class="s2">&quot;</span><span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="w">  </span>-H<span class="w"> </span><span class="s1">&#39;content-type: application/json&#39;</span><span class="w"> </span>-d<span class="w"> </span><span class="s1">&#39;{</span>
+<a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a><span class="s1">  &quot;command&quot;: &quot;force-unlock&quot;, &quot;args&quot;: [&quot;3f2b8c1e-5a4d-4e7f-9b0a-1c2d3e4f5a6b&quot;]</span>
+<a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a><span class="s1">}&#39;</span>
+</code></pre></div>
+<ul>
+<li><strong>Exactly one argument</strong>: the lock ID tofu printed in its "Error acquiring the state lock"
+  message (letters, digits, <code>.</code>, <code>_</code>, <code>:</code>, <code>-</code>; <code>400</code> otherwise).</li>
+<li><strong>Admin only</strong> (like the managed lock's endpoint), and it is a mutating command: apply rights
+  on the environment too, and it runs with the apply credentials.</li>
+<li>The worker runs <code>&lt;tool&gt; force-unlock -force &lt;LOCK_ID&gt;</code> — it adds <code>-force</code> itself so tofu never
+  prompts; you never pass a flag.</li>
+<li>On an environment with <strong>Stackd-managed state</strong> it is refused with <code>409 Managed state lock</code>:
+  Stackd owns that lock — release it with <code>DELETE /api/v1/environments/{id}/state/lock</code> (UI
+  <strong>State</strong> tab → <strong>Force unlock…</strong>).</li>
+</ul>
+<div class="admonition warning">
+<p class="admonition-title">Warning</p>
+<p>Only unlock a lock you know is stale: releasing the lock of a run that is still writing state
+lets two writers race. Stackd itself never runs two jobs on one environment at once.</p>
+</div>
 <p>The response is a normal run (<code>type: command</code>). It flows <code>queued → preparing → running →
 finished/failed</code>, holds the <strong>one-active-run-per-env</strong> lock (no command races a plan/apply), streams
 logs, and uses the managed state backend. It can be stopped like any run

@@ -367,6 +367,34 @@
   
   
     <li class="md-nav__item">
+      <a href="../guide/installing/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Installing in production
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../guide/stacks-and-environments/" class="md-nav__link">
         
   
@@ -599,6 +627,34 @@
     
   
     Exit & data portability
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../guide/backup-restore/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Backup & restore
   
 
     
@@ -2138,6 +2194,10 @@ out to them.</p>
   environment variable <em>names</em> — never values, recent agent logs) and posts it back. It also carries
   <code>cancel_job</code>, which stops a job the worker is executing (§4): SIGINT to the tool, SIGKILL after
   <code>STACKD_CANCEL_GRACE_SECONDS</code> (120 s). Delivery latency is bounded by the heartbeat interval (~20 s).</li>
+<li><strong>Drain.</strong> A worker stopped with SIGTERM/SIGINT claims nothing more, keeps heartbeating, lets
+  its running jobs finish and report, then exits; past <code>STACKD_DRAIN_TIMEOUT_SECONDS</code> (20 min) or
+  on a second signal it stops them as <code>cancel_job</code> would, and their runs fail <code>worker_shutdown</code>
+  (SPECS §7.1). Give the container more stop time than that (<code>stop_grace_period</code>).</li>
 </ul>
 <p><strong>Run an agent:</strong></p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-11-1" name="__codelineno-11-1" href="#__codelineno-11-1"></a><span class="nv">POOL</span><span class="o">=</span><span class="k">$(</span>curl<span class="w"> </span>-s<span class="w"> </span>-X<span class="w"> </span>POST<span class="w"> </span>localhost:8000/api/v1/worker-pools<span class="w"> </span>-H<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$AUTH</span><span class="s2">&quot;</span><span class="w"> </span><span class="se">\</span>
@@ -2389,8 +2449,8 @@ bypasses the apply gate.</p>
   run: a read-only <code>proposed</code> run (<code>triggered_by=schedule</code>) planning that commit with <code>-refresh-only</code>,
   claimed after any user run. Unlike a PR plan it keeps the environment's secrets (it runs code that
   already ran with them). The outcome lands on the environment's <code>drift_status</code> — <code>drifted</code> (eligible
-  approvers get an inbox alert), <code>in_sync</code> or <code>error</code> — and a successful apply clears it. Drift is
-  never auto-remediated.</li>
+  approvers get an inbox alert), <code>in_sync</code> or <code>error</code> — and a successful apply clears it (not a
+  targeted <code>-target</code> apply, which is partial). Drift is never auto-remediated.</li>
 <li><strong>Environment clones &amp; rollouts.</strong> <code>POST /api/v1/spaces/{space_id}/environment-clones</code> creates, in
   several stacks of a space at once, an environment modelled on an existing one — settings,
   governance and dependency edges. A <strong>rollout</strong> then plans and applies a set of environments along
@@ -2456,7 +2516,11 @@ bypasses the apply gate.</p>
 </tr>
 <tr>
 <td><strong>Command run</strong></td>
-<td>one allowlisted tofu subcommand (<code>import</code>, <code>state rm</code>…) instead of plan → apply</td>
+<td>one allowlisted tofu subcommand (<code>import</code>, <code>state rm</code>, <code>force-unlock</code>…) instead of plan → apply; options limited to a per-command allowlist</td>
+</tr>
+<tr>
+<td><strong>Plan options</strong></td>
+<td><code>targets</code> / <code>replace</code> addresses on a run (<code>-target=</code> / <code>-replace=</code> on the plan only); never auto-confirmed; a targeted apply is partial (keeps drift, not a promotion source)</td>
 </tr>
 <tr>
 <td><strong><code>transition()</code></strong></td>
@@ -2545,6 +2609,14 @@ bypasses the apply gate.</p>
 <tr>
 <td><strong>Secret source</strong></td>
 <td>external secrets manager a variable references; fetched at claim, never stored</td>
+</tr>
+<tr>
+<td><strong>Service account</strong></td>
+<td>a non-human user for automation, with expiring API tokens; reads and plans, never confirms (SPECS §23)</td>
+</tr>
+<tr>
+<td><strong>Config export / import</strong></td>
+<td>a space's configuration as a JSON document by names (no secret); imported back by merge, never deleting (SPECS §22)</td>
 </tr>
 </tbody>
 </table>

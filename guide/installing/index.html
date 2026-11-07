@@ -1,0 +1,2145 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="Self-hostable Terraform/OpenTofu orchestration — plan → human approval → apply.">
+      
+      
+      
+      
+        <link rel="prev" href="../getting-started/">
+      
+      
+        <link rel="next" href="../stacks-and-environments/">
+      
+      
+        
+      
+      
+      <link rel="icon" href="../../assets/logo-mark.svg">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.6">
+    
+    
+      
+        <title>Installing in production - StackD</title>
+      
+    
+    
+      <link rel="stylesheet" href="../../assets/stylesheets/main.484c7ddc.min.css">
+      
+        
+        <link rel="stylesheet" href="../../assets/stylesheets/palette.ab4e12ef.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Roboto:300,300i,400,400i,700,700i%7CRoboto+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Roboto";--md-code-font:"Roboto Mono"}</style>
+      
+    
+    
+      <link rel="stylesheet" href="../../assets/brand.css">
+    
+    <script>__md_scope=new URL("../..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  </head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="slate" data-md-color-primary="deep-purple" data-md-color-accent="deep-purple">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#installing-in-production" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+    
+      
+
+  
+
+<header class="md-header md-header--shadow" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href="../.." title="StackD" class="md-header__button md-logo" aria-label="StackD" data-md-component="logo">
+      
+  <img src="../../assets/logo-mark-white.svg" alt="logo">
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            StackD
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              Installing in production
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: dark)" data-md-color-scheme="slate" data-md-color-primary="deep-purple" data-md-color-accent="deep-purple"  aria-label="Switch to light mode"  type="radio" name="__palette" id="__palette_0">
+    
+      <label class="md-header__button md-icon" title="Switch to light mode" for="__palette_1" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 7a5 5 0 0 1 5 5 5 5 0 0 1-5 5 5 5 0 0 1-5-5 5 5 0 0 1 5-5m0 2a3 3 0 0 0-3 3 3 3 0 0 0 3 3 3 3 0 0 0 3-3 3 3 0 0 0-3-3m0-7 2.39 3.42C13.65 5.15 12.84 5 12 5s-1.65.15-2.39.42zM3.34 7l4.16-.35A7.2 7.2 0 0 0 5.94 8.5c-.44.74-.69 1.5-.83 2.29zm.02 10 1.76-3.77a7.131 7.131 0 0 0 2.38 4.14zM20.65 7l-1.77 3.79a7.02 7.02 0 0 0-2.38-4.15zm-.01 10-4.14.36c.59-.51 1.12-1.14 1.54-1.86.42-.73.69-1.5.83-2.29zM12 22l-2.41-3.44c.74.27 1.55.44 2.41.44.82 0 1.63-.17 2.37-.44z"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: light)" data-md-color-scheme="default" data-md-color-primary="deep-purple" data-md-color-accent="deep-purple"  aria-label="Switch to dark mode"  type="radio" name="__palette" id="__palette_1">
+    
+      <label class="md-header__button md-icon" title="Switch to dark mode" for="__palette_0" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="m17.75 4.09-2.53 1.94.91 3.06-2.63-1.81-2.63 1.81.91-3.06-2.53-1.94L12.44 4l1.06-3 1.06 3zm3.5 6.91-1.64 1.25.59 1.98-1.7-1.17-1.7 1.17.59-1.98L15.75 11l2.06-.05L18.5 9l.69 1.95zm-2.28 4.95c.83-.08 1.72 1.1 1.19 1.85-.32.45-.66.87-1.08 1.27C15.17 23 8.84 23 4.94 19.07c-3.91-3.9-3.91-10.24 0-14.14.4-.4.82-.76 1.27-1.08.75-.53 1.93.36 1.85 1.19-.27 2.86.69 5.83 2.89 8.02a9.96 9.96 0 0 0 8.02 2.89m-1.64 2.02a12.08 12.08 0 0 1-7.8-3.47c-2.17-2.19-3.33-5-3.49-7.82-2.81 3.14-2.7 7.96.31 10.98 3.02 3.01 7.84 3.12 10.98.31"/></svg>
+      </label>
+    
+  
+</form>
+      
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+        <div class="md-search__suggest" data-md-component="search-suggest"></div>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+      <div class="md-header__source">
+        <a href="https://github.com/fmiquel90/stackd" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    fmiquel90/stackd
+  </div>
+</a>
+      </div>
+    
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+
+<nav class="md-nav md-nav--primary" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href="../.." title="StackD" class="md-nav__button md-logo" aria-label="StackD" data-md-component="logo">
+      
+  <img src="../../assets/logo-mark-white.svg" alt="logo">
+
+    </a>
+    StackD
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/fmiquel90/stackd" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    fmiquel90/stackd
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../.." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Home
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_2" checked>
+        
+          
+          <label class="md-nav__link" for="__nav_2" id="__nav_2_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Guide
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_2_label" aria-expanded="true">
+          <label class="md-nav__title" for="__nav_2">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Guide
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../getting-started/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Getting started
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Installing in production
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Installing in production
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#what-gets-deployed" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        What gets deployed
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#prerequisites" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Prerequisites
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#1-get-the-images" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        1. Get the images
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#2-prepare-the-database" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2. Prepare the database
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#3-configure" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3. Configure
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#4-start" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        4. Start
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#5-the-first-admin" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        5. The first admin
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#6-runner-images" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        6. Runner images
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#7-workers" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        7. Workers
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="7. Workers">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#create-a-pool" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Create a pool
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#a-worker-on-the-main-host" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        A worker on the main host
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#workers-on-other-hosts" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Workers on other hosts
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#what-the-docker-runner-needs" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        What the docker runner needs
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#monitoring" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Monitoring
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#upgrading" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Upgrading
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#tls-options" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        TLS options
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#security-checklist" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Security checklist
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#kubernetes-future-work" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Kubernetes (future work)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#troubleshooting" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Troubleshooting
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../stacks-and-environments/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Stacks & environments
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../variables/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Variables & secrets
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../external-secrets/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    External secret sources
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../runs-and-approvals/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Runs & approvals
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../commands/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Running commands
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../hooks/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Hooks & .stackd.yml
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../dependencies-and-mocks/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Dependencies & mocks
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../importing-existing-state/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Importing an existing stack
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../leaving/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Exit & data portability
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../backup-restore/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Backup & restore
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../cloud-credentials/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Cloud credentials (OIDC)
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../workers-and-scaling/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Workers & scaling
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../notifications/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Notifications
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../observability/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Observability
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../CONCEPTS/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Concepts
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../ARCHITECTURE/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Architecture
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    API
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_6" >
+        
+          
+          <label class="md-nav__link" for="__nav_6" id="__nav_6_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Reference
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_6_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_6">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Reference
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../SPECS/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Specification
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../PLAN/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Plan & scope
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../DESIGN/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Design
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../DEV/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Dev environment
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../TESTING/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Testing
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#what-gets-deployed" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        What gets deployed
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#prerequisites" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Prerequisites
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#1-get-the-images" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        1. Get the images
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#2-prepare-the-database" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2. Prepare the database
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#3-configure" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3. Configure
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#4-start" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        4. Start
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#5-the-first-admin" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        5. The first admin
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#6-runner-images" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        6. Runner images
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#7-workers" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        7. Workers
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="7. Workers">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#create-a-pool" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Create a pool
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#a-worker-on-the-main-host" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        A worker on the main host
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#workers-on-other-hosts" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Workers on other hosts
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#what-the-docker-runner-needs" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        What the docker runner needs
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#monitoring" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Monitoring
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#upgrading" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Upgrading
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#tls-options" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        TLS options
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#security-checklist" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Security checklist
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#kubernetes-future-work" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Kubernetes (future work)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#troubleshooting" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Troubleshooting
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+  
+  
+
+
+<h1 id="installing-in-production">Installing in production<a class="headerlink" href="#installing-in-production" title="Permanent link">&para;</a></h1>
+<p>This page installs Stackd on your own infrastructure with the <strong>reference deployment</strong>: production
+images and a single-host Docker Compose file (<code>deploy/production/</code>), with workers on the same host
+or on dedicated ones. For a local evaluation, use <a href="../getting-started/">Getting started</a> instead —
+it runs the dev stack, which must never be exposed.</p>
+<h2 id="what-gets-deployed">What gets deployed<a class="headerlink" href="#what-gets-deployed" title="Permanent link">&para;</a></h2>
+<pre class="mermaid"><code>flowchart LR
+    U[Browsers] --&gt;|https| P
+    AWS[AWS STS] --&gt;|https: OIDC discovery + JWKS| P
+    subgraph host[Main host — deploy/production/compose.yml]
+        P[proxy&lt;br/&gt;Caddy, TLS] --&gt;|/api /worker /state /oidc| A[api&lt;br/&gt;uvicorn]
+        P --&gt;|everything else| F[front&lt;br/&gt;static SPA]
+        M[migrate&lt;br/&gt;one-shot] --&gt; DB
+        A --&gt; DB[(PostgreSQL 18&lt;br/&gt;external or bundled)]
+        W1[worker&lt;br/&gt;optional] --&gt;|agents network| A
+    end
+    A --&gt;|S3 API| S3[(S3 bucket)]
+    subgraph whost[Worker host — worker.compose.yml]
+        W2[worker] --&gt;|https| P
+        W2 --&gt;|Docker socket| J[job containers&lt;br/&gt;runner images]
+    end
+    J --&gt;|https: state backend| P</code></pre>
+<table>
+<thead>
+<tr>
+<th>Service</th>
+<th>Image</th>
+<th>Role</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>proxy</code></td>
+<td><code>caddy</code> (official)</td>
+<td>TLS (automatic HTTPS), the single public origin, routes the API prefixes, blocks <code>/metrics</code></td>
+</tr>
+<tr>
+<td><code>front</code></td>
+<td><code>front/Dockerfile</code></td>
+<td>the built SPA served by Caddy on <code>:8080</code>, fallback to <code>index.html</code></td>
+</tr>
+<tr>
+<td><code>api</code></td>
+<td><code>api/Dockerfile</code></td>
+<td>the API (REST, WebSocket, worker protocol, state backend, OIDC issuer, scheduler)</td>
+</tr>
+<tr>
+<td><code>migrate</code></td>
+<td><code>api/Dockerfile</code></td>
+<td>one-shot: <code>alembic upgrade head</code>, then the bootstrap seed (<code>default</code> space + tier catalog)</td>
+</tr>
+<tr>
+<td><code>postgres</code></td>
+<td><code>postgres:18</code></td>
+<td>optional (profile <code>bundled-postgres</code>) — an external server is recommended</td>
+</tr>
+<tr>
+<td><code>worker</code></td>
+<td><code>worker/Dockerfile</code></td>
+<td>the agent; runs every tofu command in a container of a <a href="#6-runner-images">runner image</a></td>
+</tr>
+</tbody>
+</table>
+<p>The SPA and the API <strong>must share one origin</strong>: the session cookies are <code>SameSite=Strict</code> and
+<code>Secure</code>, the SPA calls <code>/api/v1/…</code> and opens its WebSocket on <code>/api/v1/ws</code> on its own host. The
+proxy routes by path:</p>
+<table>
+<thead>
+<tr>
+<th>Path</th>
+<th>Goes to</th>
+<th>Notes</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>/api/*</code></td>
+<td>api</td>
+<td>REST and the <code>/api/v1/ws</code> WebSocket</td>
+</tr>
+<tr>
+<td><code>/worker/*</code></td>
+<td>api</td>
+<td>worker protocol (long-poll claims)</td>
+</tr>
+<tr>
+<td><code>/state/*</code></td>
+<td>api</td>
+<td>Terraform/OpenTofu HTTP backend — uses the <code>LOCK</code>/<code>UNLOCK</code> methods</td>
+</tr>
+<tr>
+<td><code>/.well-known/openid-configuration</code>, <code>/oidc/*</code></td>
+<td>api</td>
+<td>the workload OIDC issuer: AWS fetches them over public https (<a href="../cloud-credentials/">Cloud credentials</a>)</td>
+</tr>
+<tr>
+<td><code>/healthz</code></td>
+<td>api</td>
+<td>liveness, for a load balancer or uptime check</td>
+</tr>
+<tr>
+<td><code>/metrics</code></td>
+<td><strong>404</strong></td>
+<td>unauthenticated Prometheus endpoint: <a href="#monitoring">scrape it internally</a></td>
+</tr>
+<tr>
+<td>everything else</td>
+<td>front</td>
+<td>the SPA</td>
+</tr>
+</tbody>
+</table>
+<p>The API image does not contain the dev login (<code>app/auth/dev.py</code> is deleted at build time), and the
+API refuses to start in production on dev-grade settings (see <a href="#3-configure">Configure</a>).</p>
+<h2 id="prerequisites">Prerequisites<a class="headerlink" href="#prerequisites" title="Permanent link">&para;</a></h2>
+<ul>
+<li><strong>A Linux host</strong> with Docker Engine 24+ and the Compose plugin <strong>2.24+</strong>. 2 vCPU / 4 GB is
+  plenty for the API, the proxy and the SPA; size worker hosts for your Terraform runs.</li>
+<li><strong>A domain name</strong> whose DNS points at the host, with ports <strong>80 and 443</strong> reachable from the
+  internet: Caddy obtains and renews the certificate itself (Let's Encrypt / ZeroSSL). Behind a
+  load balancer that terminates TLS, or with your own certificate, see <a href="#tls-options">TLS options</a>.
+  The issuer must be reachable over public https anyway if you use AWS OIDC federation.</li>
+<li><strong>PostgreSQL 18</strong> (the schema uses the native <code>uuidv7()</code>): a managed instance (RDS, Cloud SQL,
+  Azure Flexible Server…) or your own. The <code>bundled-postgres</code> profile runs one on the host — fine
+  for small installs, but backups and upgrades are then yours.</li>
+<li><strong>An S3 bucket</strong> on any S3-compatible service (AWS S3, MinIO, Ceph, Garage, R2…), dedicated to
+  Stackd, with <strong>versioning on</strong> and default encryption. It holds the managed states, the
+  encrypted saved plans, archived logs and artifacts. On AWS, leave <code>S3_ACCESS_KEY</code>/<code>S3_SECRET_KEY</code>
+  empty and the API uses the <strong>AWS default credential chain</strong> (instance profile, ECS task role,
+  EKS IRSA / web identity…) — no long-lived key; elsewhere set a <strong>static access key</strong>. Either
+  way, give it to a principal limited to that bucket. If the bucket
+  does not exist, the API creates it on first write with versioning and SSE-S3 on.</li>
+<li><strong>A Google OAuth client</strong> (Google Cloud console → <em>APIs &amp; Services</em> → <em>Credentials</em> → <em>OAuth
+  client ID</em>, type <em>Web application</em>) with the authorized redirect URI
+  <code>https://&lt;your domain&gt;/api/v1/auth/google/callback</code>, and the Google Workspace domain(s) allowed
+  to sign in. Google is the only login in production.</li>
+<li><strong>The OIDC signing key</strong> of the workload issuer: an <strong>AWS KMS</strong> asymmetric key (<code>RSA_2048</code>,
+  <code>SIGN_VERIFY</code>) with <code>kms:Sign</code> and <code>kms:GetPublicKey</code> for the API's AWS identity (an instance
+  role, or <code>AWS_ACCESS_KEY_ID</code>/<code>AWS_SECRET_ACCESS_KEY</code> in <code>stackd.env</code>). Without AWS, you may keep
+  the key in the database (encrypted with the master key) by acknowledging it:
+  <code>STACKD_OIDC_SIGNER=local</code> + <code>STACKD_ALLOW_LOCAL_SIGNER=true</code> — see
+  <a href="../cloud-credentials/#the-signing-key">Cloud credentials</a>.</li>
+<li><strong>Docker hosts for the workers</strong> — the main host, or dedicated VMs (recommended: access to the
+  Docker socket is root-equivalent, and the jobs run your repositories' code) — and <strong>a container
+  registry</strong> for the runner images.</li>
+</ul>
+<h2 id="1-get-the-images">1. Get the images<a class="headerlink" href="#1-get-the-images" title="Permanent link">&para;</a></h2>
+<p>Build the three production images from a checkout of the release you deploy, tag them with that
+version and push them to your registry:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>task<span class="w"> </span>build-images<span class="w"> </span><span class="nv">TAG</span><span class="o">=</span><span class="m">1</span>.4.0<span class="w"> </span><span class="nv">PREFIX</span><span class="o">=</span>registry.example.com/stackd
+<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>docker<span class="w"> </span>push<span class="w"> </span>registry.example.com/stackd/api:1.4.0
+<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>docker<span class="w"> </span>push<span class="w"> </span>registry.example.com/stackd/front:1.4.0
+<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a>docker<span class="w"> </span>push<span class="w"> </span>registry.example.com/stackd/worker:1.4.0
+</code></pre></div>
+<p><code>task build-images</code> builds <code>api/Dockerfile</code>, <code>front/Dockerfile</code> and <code>worker/Dockerfile</code> for the
+host's architecture (pass extra <code>docker build</code> arguments after <code>--</code>, e.g.
+<code>task build-images -- --platform linux/arm64</code>). The base images are pinned by digest; behind a
+registry mirror, override them with build arguments (<code>--build-arg PYTHON_IMAGE=…</code>, <code>UV_IMAGE</code>,
+<code>NODE_IMAGE</code>, <code>CADDY_IMAGE</code>).</p>
+<h2 id="2-prepare-the-database">2. Prepare the database<a class="headerlink" href="#2-prepare-the-database" title="Permanent link">&para;</a></h2>
+<p>With an external server, create the database and <strong>two roles</strong> — the schema owner, which runs the
+migrations, and the application role, which cannot alter the audit trail — plus the audit purge
+role (SPECS §6.1):</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="k">CREATE</span><span class="w"> </span><span class="k">ROLE</span><span class="w"> </span><span class="n">stackd_owner</span><span class="w"> </span><span class="n">LOGIN</span><span class="w"> </span><span class="n">PASSWORD</span><span class="w"> </span><span class="s1">&#39;…&#39;</span><span class="p">;</span>
+<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="k">CREATE</span><span class="w"> </span><span class="k">ROLE</span><span class="w"> </span><span class="n">stackd_app</span><span class="w"> </span><span class="n">LOGIN</span><span class="w"> </span><span class="n">PASSWORD</span><span class="w"> </span><span class="s1">&#39;…&#39;</span><span class="p">;</span>
+<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a><span class="c1">-- the audit retention purge (optional: without it the audit trail is kept forever)</span>
+<a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a><span class="k">CREATE</span><span class="w"> </span><span class="k">ROLE</span><span class="w"> </span><span class="n">stackd_audit_purge</span><span class="w"> </span><span class="n">LOGIN</span><span class="w"> </span><span class="n">PASSWORD</span><span class="w"> </span><span class="s1">&#39;…&#39;</span><span class="p">;</span>
+<a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a><span class="k">CREATE</span><span class="w"> </span><span class="k">DATABASE</span><span class="w"> </span><span class="n">stackd</span><span class="w"> </span><span class="k">OWNER</span><span class="w"> </span><span class="n">stackd_owner</span><span class="p">;</span>
+<a id="__codelineno-1-6" name="__codelineno-1-6" href="#__codelineno-1-6"></a>
+<a id="__codelineno-1-7" name="__codelineno-1-7" href="#__codelineno-1-7"></a><span class="err">\</span><span class="k">connect</span><span class="w"> </span><span class="n">stackd</span>
+<a id="__codelineno-1-8" name="__codelineno-1-8" href="#__codelineno-1-8"></a><span class="k">ALTER</span><span class="w"> </span><span class="k">SCHEMA</span><span class="w"> </span><span class="k">public</span><span class="w"> </span><span class="k">OWNER</span><span class="w"> </span><span class="k">TO</span><span class="w"> </span><span class="n">stackd_owner</span><span class="p">;</span>
+<a id="__codelineno-1-9" name="__codelineno-1-9" href="#__codelineno-1-9"></a><span class="k">GRANT</span><span class="w"> </span><span class="k">USAGE</span><span class="w"> </span><span class="k">ON</span><span class="w"> </span><span class="k">SCHEMA</span><span class="w"> </span><span class="k">public</span><span class="w"> </span><span class="k">TO</span><span class="w"> </span><span class="n">stackd_app</span><span class="p">;</span>
+<a id="__codelineno-1-10" name="__codelineno-1-10" href="#__codelineno-1-10"></a><span class="k">ALTER</span><span class="w"> </span><span class="k">DEFAULT</span><span class="w"> </span><span class="k">PRIVILEGES</span><span class="w"> </span><span class="k">FOR</span><span class="w"> </span><span class="k">ROLE</span><span class="w"> </span><span class="n">stackd_owner</span><span class="w"> </span><span class="k">IN</span><span class="w"> </span><span class="k">SCHEMA</span><span class="w"> </span><span class="k">public</span>
+<a id="__codelineno-1-11" name="__codelineno-1-11" href="#__codelineno-1-11"></a><span class="w">  </span><span class="k">GRANT</span><span class="w"> </span><span class="k">SELECT</span><span class="p">,</span><span class="w"> </span><span class="k">INSERT</span><span class="p">,</span><span class="w"> </span><span class="k">UPDATE</span><span class="p">,</span><span class="w"> </span><span class="k">DELETE</span><span class="w"> </span><span class="k">ON</span><span class="w"> </span><span class="n">TABLES</span><span class="w"> </span><span class="k">TO</span><span class="w"> </span><span class="n">stackd_app</span><span class="p">;</span>
+<a id="__codelineno-1-12" name="__codelineno-1-12" href="#__codelineno-1-12"></a><span class="k">ALTER</span><span class="w"> </span><span class="k">DEFAULT</span><span class="w"> </span><span class="k">PRIVILEGES</span><span class="w"> </span><span class="k">FOR</span><span class="w"> </span><span class="k">ROLE</span><span class="w"> </span><span class="n">stackd_owner</span><span class="w"> </span><span class="k">IN</span><span class="w"> </span><span class="k">SCHEMA</span><span class="w"> </span><span class="k">public</span>
+<a id="__codelineno-1-13" name="__codelineno-1-13" href="#__codelineno-1-13"></a><span class="w">  </span><span class="k">GRANT</span><span class="w"> </span><span class="k">USAGE</span><span class="p">,</span><span class="w"> </span><span class="k">SELECT</span><span class="w"> </span><span class="k">ON</span><span class="w"> </span><span class="n">SEQUENCES</span><span class="w"> </span><span class="k">TO</span><span class="w"> </span><span class="n">stackd_app</span><span class="p">;</span>
+</code></pre></div>
+<p>The migrations grant <code>stackd_audit_purge</code> what it needs on <code>audit_events</code>. After the <strong>first</strong>
+migration (step 4), revoke the application role's right to rewrite the audit trail — a deployment
+step no migration performs:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="k">REVOKE</span><span class="w"> </span><span class="k">UPDATE</span><span class="p">,</span><span class="w"> </span><span class="k">DELETE</span><span class="w"> </span><span class="k">ON</span><span class="w"> </span><span class="n">audit_events</span><span class="w"> </span><span class="k">FROM</span><span class="w"> </span><span class="n">stackd_app</span><span class="p">;</span>
+</code></pre></div>
+<p>Then <code>DATABASE_URL</code> (in <code>stackd.env</code>) uses <code>stackd_app</code>, <code>migrate.env</code> holds
+<code>DATABASE_URL=postgresql+asyncpg://stackd_owner:…@…/stackd</code> (read by the <code>migrate</code> service only),
+and <code>STACKD_AUDIT_PURGE_DATABASE_URL</code> uses <code>stackd_audit_purge</code>. URL-encode passwords that hold
+reserved characters.</p>
+<div class="admonition note">
+<p class="admonition-title">Single role</p>
+<p>One role for everything (as with the <code>bundled-postgres</code> profile, whose <code>stackd</code> user is a
+superuser) works: the append-only trigger still refuses any <code>UPDATE</code>/<code>DELETE</code> on
+<code>audit_events</code> by the application. The separate roles add the privilege boundary on top.
+The migrations create <code>stackd_audit_purge</code> without a login when it does not exist; to enable
+the purge there, <code>ALTER ROLE stackd_audit_purge LOGIN PASSWORD '…'</code> and set
+<code>STACKD_AUDIT_PURGE_DATABASE_URL</code>.</p>
+</div>
+<h2 id="3-configure">3. Configure<a class="headerlink" href="#3-configure" title="Permanent link">&para;</a></h2>
+<p>On the main host, from a checkout (or a copy of <code>deploy/production/</code>):</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="nb">cd</span><span class="w"> </span>deploy/production
+<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a>./init-env.sh
+</code></pre></div>
+<p><code>init-env.sh</code> creates the env files from their examples and generates <code>STACKD_ENCRYPTION_KEY</code>
+(AES-256 master key) and <code>STACKD_JWT_SECRET</code>; with the <code>bundled-postgres</code> profile in
+<code>COMPOSE_PROFILES</code>, also the database password and <code>DATABASE_URL</code>. It never overwrites a value
+already set. Then edit them — <strong>one file per recipient</strong>, so a secret cannot reach the wrong
+container:</p>
+<table>
+<thead>
+<tr>
+<th>File</th>
+<th>Read by</th>
+<th>Holds</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>.env</code></td>
+<td><code>docker compose</code> (interpolation)</td>
+<td><code>STACKD_DOMAIN</code>, image references, <code>COMPOSE_PROFILES</code>, <code>CADDY_GLOBAL_OPTIONS</code> (the ACME email), ports</td>
+</tr>
+<tr>
+<td><code>stackd.env</code></td>
+<td><code>api</code>, <code>migrate</code></td>
+<td>every platform setting and secret: database, S3, master key, JWT secret, Google client, OIDC signer, timings</td>
+</tr>
+<tr>
+<td><code>migrate.env</code> (optional)</td>
+<td><code>migrate</code></td>
+<td>the schema owner's <code>DATABASE_URL</code></td>
+</tr>
+<tr>
+<td><code>worker.env</code></td>
+<td><code>worker</code></td>
+<td>API URL, pool token, runner images, job container limits — <strong>never a platform secret</strong></td>
+</tr>
+</tbody>
+</table>
+<p>Each example file documents every variable. The API derives <code>STACKD_PUBLIC_URL</code> from
+<code>STACKD_DOMAIN</code> (<code>https://&lt;domain&gt;</code>). In production it refuses to start unless:
+<code>STACKD_ENCRYPTION_KEY</code> decodes to 32 bytes, <code>STACKD_JWT_SECRET</code> has at least 32 characters, the
+public URL is <code>https://</code>, <code>STACKD_ALLOWED_DOMAINS</code> lists at least one domain, and the signer is
+<code>kms</code> (or <code>local</code> with <code>STACKD_ALLOW_LOCAL_SIGNER=true</code>). The error names what is missing.</p>
+<div class="admonition danger">
+<p class="admonition-title">Back up <code>stackd.env</code></p>
+<p><code>STACKD_ENCRYPTION_KEY</code> encrypts the sensitive variables, the secret source credentials, the
+saved plans and a local OIDC key. Lost, they are unrecoverable; never change it in place.
+Keep a copy outside the host (a password manager, a secret store). The files are created mode
+<code>0600</code> and ignored by git.</p>
+</div>
+<h2 id="4-start">4. Start<a class="headerlink" href="#4-start" title="Permanent link">&para;</a></h2>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a>docker<span class="w"> </span>compose<span class="w"> </span>up<span class="w"> </span>-d
+<a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a>docker<span class="w"> </span>compose<span class="w"> </span>ps
+</code></pre></div>
+<p>Compose runs <code>migrate</code> first (migrations, then the idempotent bootstrap: the <code>default</code> space and
+the tier catalog — never the dev demo data), starts the <code>api</code> once it has succeeded, then the
+<code>front</code> and the <code>proxy</code> once they are healthy. The proxy obtains the certificate on first start
+(watch <code>docker compose logs proxy</code>).</p>
+<p>Check from outside:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a>curl<span class="w"> </span>-fsS<span class="w"> </span>https://stackd.example.com/healthz<span class="w">                          </span><span class="c1"># {&quot;status&quot;:&quot;ok&quot;}</span>
+<a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a>curl<span class="w"> </span>-fsS<span class="w"> </span>https://stackd.example.com/.well-known/openid-configuration<span class="w">  </span><span class="c1"># the issuer</span>
+<a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a>curl<span class="w"> </span>-s<span class="w"> </span>-o<span class="w"> </span>/dev/null<span class="w"> </span>-w<span class="w"> </span><span class="s1">&#39;%{http_code}\n&#39;</span><span class="w"> </span>https://stackd.example.com/metrics<span class="w">   </span><span class="c1"># 404</span>
+</code></pre></div>
+<h2 id="5-the-first-admin">5. The first admin<a class="headerlink" href="#5-the-first-admin" title="Permanent link">&para;</a></h2>
+<p>Set <strong><code>STACKD_BOOTSTRAP_ADMIN_EMAILS</code></strong> (in <code>stackd.env</code>) to the email(s) of the first
+administrator(s): they become <code>admin</code> at their first sign-in, everyone else <code>reader</code> (SPECS §2.1).
+Without it, the <strong>first user to sign in becomes <code>admin</code></strong> — then sign in right after the first
+start, before announcing the URL. Then promote the others in
+<strong>Settings → Users</strong> (role, allowed tiers, destroy right) and scope them per space with the space
+members. Only accounts of the <code>STACKD_ALLOWED_DOMAINS</code> Workspace domains can sign in at all.</p>
+<p>For automation (CI triggering plans, scheduled configuration exports), create a <strong>service
+account</strong> and an expiring API token (<strong>Settings → Service accounts</strong>) rather than using a
+person's session — see <a href="../../api/#authentication">API › Authentication</a>. It reads and plans; it
+never confirms an apply.</p>
+<h2 id="6-runner-images">6. Runner images<a class="headerlink" href="#6-runner-images" title="Permanent link">&para;</a></h2>
+<p>Workers run every tofu/terraform command and every hook in a fresh container of a <strong>runner
+image</strong> (<code>deploy/images/</code>: one IaC tool + git + jq, non-root, signature-verified downloads).
+Build them for your workers' architectures, push them, and note their <strong>digest</strong> — workers refuse
+tags:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a>docker<span class="w"> </span>buildx<span class="w"> </span>build<span class="w"> </span>-f<span class="w"> </span>deploy/images/opentofu.Dockerfile<span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a><span class="w">  </span>--build-arg<span class="w"> </span><span class="nv">OPENTOFU_VERSION</span><span class="o">=</span><span class="m">1</span>.12.2<span class="w"> </span>--platform<span class="w"> </span>linux/amd64,linux/arm64<span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-6-3" name="__codelineno-6-3" href="#__codelineno-6-3"></a><span class="w">  </span>-t<span class="w"> </span>registry.example.com/stackd/opentofu:1.12.2<span class="w"> </span>--push<span class="w"> </span>.
+<a id="__codelineno-6-4" name="__codelineno-6-4" href="#__codelineno-6-4"></a>docker<span class="w"> </span>buildx<span class="w"> </span>imagetools<span class="w"> </span>inspect<span class="w"> </span>registry.example.com/stackd/opentofu:1.12.2<span class="w">   </span><span class="c1"># Digest: sha256:…</span>
+</code></pre></div>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a><span class="c1"># worker.env</span>
+<a id="__codelineno-7-2" name="__codelineno-7-2" href="#__codelineno-7-2"></a><span class="nv">STACKD_RUNNER_IMAGES</span><span class="o">={</span><span class="s2">&quot;opentofu:1.12.2&quot;</span>:<span class="w"> </span><span class="s2">&quot;registry.example.com/stackd/opentofu@sha256:…&quot;</span><span class="o">}</span>
+</code></pre></div>
+<p>A worker only takes runs whose stack <code>tool_version</code> matches one of its images. Add one entry per
+version (and a Terraform image if you use it — BUSL, opt-in, see <code>deploy/images/README.md</code>).</p>
+<div class="admonition note">
+<p class="admonition-title">Private registry</p>
+<p>The agent pulls a missing image through the Docker Engine API. For a private registry, give
+it a Docker config file holding the credential in <code>auths</code> — e.g. one <code>docker login</code> writes
+when no credential helper is configured:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a><span class="p">{</span><span class="nt">&quot;auths&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">{</span><span class="nt">&quot;registry.example.com&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">{</span><span class="nt">&quot;auth&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;&lt;base64 of user:password&gt;&quot;</span><span class="p">}}}</span>
+</code></pre></div>
+<p>Mount it read-only into the worker (uncomment the volume in <code>worker.compose.yml</code>) and set
+<code>STACKD_REGISTRY_AUTH_FILE=/run/secrets/registry-auth.json</code> in <code>worker.env</code>. The entry
+matching the image's registry host (<code>registry.example.com:5000</code>, or Docker Hub's
+<code>https://index.docker.io/v1/</code>) is sent with that pull only; <code>username</code>/<code>password</code> and
+<code>identitytoken</code> entries work too. The file is re-read at each pull, so a job refreshing a
+short-lived token (ECR, GAR) can rewrite it. <strong>Credential helpers (<code>credsStore</code>,
+<code>credHelpers</code>) are not supported.</strong> The credential is never logged and never reaches a job
+container. Alternatively, pre-pull the images on each worker host
+(<code>docker pull &lt;ref&gt;@sha256:…</code>): the agent then finds them locally.</p>
+</div>
+<h2 id="7-workers">7. Workers<a class="headerlink" href="#7-workers" title="Permanent link">&para;</a></h2>
+<h3 id="create-a-pool">Create a pool<a class="headerlink" href="#create-a-pool" title="Permanent link">&para;</a></h3>
+<p>As an admin, open <strong>Workers</strong> → <em>New pool</em> → <em>Create pool</em>, and copy the <strong>pool token</strong>: it is
+shown once (stored hashed). Pools belong to a space; label one to dedicate its workers (e.g.
+production) — see <a href="../workers-and-scaling/#dedicate-a-pool-with-labels">Workers &amp; scaling</a>.</p>
+<h3 id="a-worker-on-the-main-host">A worker on the main host<a class="headerlink" href="#a-worker-on-the-main-host" title="Permanent link">&para;</a></h3>
+<p>Put the token and the runner images in <code>worker.env</code>, add <code>worker</code> to <code>COMPOSE_PROFILES</code> in <code>.env</code>
+(e.g. <code>COMPOSE_PROFILES=worker</code>), then <code>docker compose up -d</code>. This worker reaches the API over
+the internal <code>agents</code> network (<code>STACKD_API_URL=http://api:8000</code> is set by compose).</p>
+<h3 id="workers-on-other-hosts">Workers on other hosts<a class="headerlink" href="#workers-on-other-hosts" title="Permanent link">&para;</a></h3>
+<p>On each worker host (Docker Engine installed, nothing else):</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a>mkdir<span class="w"> </span>-p<span class="w"> </span>/opt/stackd<span class="w"> </span><span class="o">&amp;&amp;</span><span class="w"> </span><span class="nb">cd</span><span class="w"> </span>/opt/stackd
+<a id="__codelineno-9-2" name="__codelineno-9-2" href="#__codelineno-9-2"></a><span class="c1"># copy deploy/production/worker.compose.yml and worker.env.example (as worker.env)</span>
+<a id="__codelineno-9-3" name="__codelineno-9-3" href="#__codelineno-9-3"></a><span class="nv">$EDITOR</span><span class="w"> </span>worker.env<span class="w">    </span><span class="c1"># STACKD_API_URL=https://stackd.example.com, the pool token, the images</span>
+<a id="__codelineno-9-4" name="__codelineno-9-4" href="#__codelineno-9-4"></a>docker<span class="w"> </span>compose<span class="w"> </span>-f<span class="w"> </span>worker.compose.yml<span class="w"> </span>up<span class="w"> </span>-d
+<a id="__codelineno-9-5" name="__codelineno-9-5" href="#__codelineno-9-5"></a>docker<span class="w"> </span>compose<span class="w"> </span>-f<span class="w"> </span>worker.compose.yml<span class="w"> </span>logs<span class="w"> </span>-f<span class="w">    </span><span class="c1"># → &quot;registered&quot;</span>
+</code></pre></div>
+<p>Run as many as you need: they are stateless and only make outbound connections. The worker
+appears on the <strong>Workers</strong> page; <code>STACKD_WORKER_NAME</code> gives it a readable name (default: the
+container's hostname).</p>
+<h3 id="what-the-docker-runner-needs">What the docker runner needs<a class="headerlink" href="#what-the-docker-runner-needs" title="Permanent link">&para;</a></h3>
+<ul>
+<li><strong>The Docker socket</strong> (<code>/var/run/docker.sock</code>), mounted into the agent, which runs as root: it
+  hands each workspace to the runner images' unprivileged user (uid 10001). Treat the host as
+  privileged; rootless Docker and <code>STACKD_DOCKER_RUNTIME=runsc</code> (gVisor) harden it further.</li>
+<li><strong>The workspace root at the same path</strong> on the host and in the agent: the job containers
+  bind-mount each workspace by its host path. The compose files mount <code>STACKD_WORKSPACE_ROOT</code>
+  (default <code>/var/lib/stackd/workspaces</code>) at the identical path — change both together through
+  <code>.env</code>, never one side only.</li>
+<li><strong>A network that reaches the state backend.</strong> Tofu, inside the job container, reads and writes
+  the state through the API at <code>STACKD_INTERNAL_URL</code> — by default the public URL, which works from
+  any host. The job containers use <code>STACKD_DOCKER_NETWORK</code> (default <code>bridge</code>): it must reach that
+  URL and whatever your providers call; it is also where an egress allowlist belongs.
+  On a single host whose containers cannot reach its own public address (no hairpin NAT), set
+  <code>STACKD_INTERNAL_URL=http://api:8000</code> in <code>stackd.env</code> and <code>STACKD_DOCKER_NETWORK=stackd_agents</code>
+  in <code>worker.env</code> — valid only while every worker runs on that host.</li>
+<li><strong>No platform secret.</strong> <code>worker.env</code> must never hold <code>DATABASE_URL</code>, <code>S3_*</code>,
+  <code>STACKD_ENCRYPTION_KEY</code>, <code>STACKD_JWT_SECRET</code> or <code>GOOGLE_CLIENT_SECRET</code> — the worker reaches
+  states and plans through the API, and tofu and platform hooks inherit its environment.</li>
+</ul>
+<p>A production API refuses a worker on any other runner (<code>STACKD_RUNNER=local</code>): the agent logs
+<code>registration refused by the API</code> and retries slowly.</p>
+<h2 id="monitoring">Monitoring<a class="headerlink" href="#monitoring" title="Permanent link">&para;</a></h2>
+<p><code>/metrics</code> is unauthenticated and blocked at the proxy. Scrape <code>http://api:8000/metrics</code> from a
+Prometheus attached to the compose network (<code>docker network connect stackd_agents prometheus</code>, or
+a compose override adding your Prometheus to <code>agents</code>). Set <code>STACKD_OTLP_ENDPOINT</code> to export
+traces. Logs are JSON on stdout (<code>docker compose logs</code>). See <a href="../observability/">Observability</a>.</p>
+<h2 id="upgrading">Upgrading<a class="headerlink" href="#upgrading" title="Permanent link">&para;</a></h2>
+<p>Stackd upgrades are <strong>migrate, then restart</strong>; the migration runs before the new API starts:</p>
+<ol>
+<li>Read the release notes (configuration changes, required steps).</li>
+<li>Stop the workers (<code>docker compose stop worker</code>, and on worker hosts
+   <code>docker compose -f worker.compose.yml stop</code>). A stopped worker <strong>drains</strong>: it takes no new
+   job, lets its running ones finish and report, then exits — so <code>stop</code> can take as long as the
+   longest running job, up to <code>STACKD_DRAIN_TIMEOUT_SECONDS</code> (20 min by default); past it, the
+   remaining jobs are stopped and their runs fail with <code>worker_shutdown</code>. The compose files give
+   the worker a <code>stop_grace_period</code> (<code>STACKD_WORKER_STOP_GRACE</code> in <code>.env</code>, default <code>23m</code> — raise it with the apply budget) so Docker does not kill it first; with plain Docker use
+   <code>docker stop -t 1380 &lt;container&gt;</code> (the default 10 s would kill a running apply). Stop the
+   workers <strong>before</strong> the API: a draining worker reports to it. A second <code>Ctrl-C</code>/signal stops
+   the running jobs at once. See <a href="../workers-and-scaling/#stopping-a-worker">Workers &amp; scaling</a>.</li>
+<li><a href="../backup-restore/">Back up</a> the database (and keep <code>stackd.env</code>).</li>
+<li>
+<p>Point <code>.env</code> at the new image tags (or rebuild them), then:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-10-1" name="__codelineno-10-1" href="#__codelineno-10-1"></a>docker<span class="w"> </span>compose<span class="w"> </span>pull<span class="w">          </span><span class="c1"># registry images</span>
+<a id="__codelineno-10-2" name="__codelineno-10-2" href="#__codelineno-10-2"></a>docker<span class="w"> </span>compose<span class="w"> </span>up<span class="w"> </span>-d<span class="w">         </span><span class="c1"># migrate (one-shot) → api → front → proxy</span>
+<a id="__codelineno-10-3" name="__codelineno-10-3" href="#__codelineno-10-3"></a>docker<span class="w"> </span>compose<span class="w"> </span>logs<span class="w"> </span>migrate<span class="w">  </span><span class="c1"># &quot;Running upgrade …&quot;, then &quot;seed: spaces + tiers ensured&quot;</span>
+</code></pre></div>
+<p>Compose re-runs <code>migrate</code> with the new image and only replaces the <code>api</code> once it succeeded;
+on a failed migration (each runs in a transaction) the <code>api</code> is not replaced and the error is
+in <code>docker compose logs migrate</code>. To run the migration alone: <code>docker compose run --rm migrate</code>.</p>
+</li>
+<li>
+<p>Upgrade the workers to the same release (new <code>STACKD_WORKER_IMAGE</code>), then start them again.</p>
+</li>
+</ol>
+<p>Never edit an applied migration and never downgrade the database schema in place; restoring the
+pre-upgrade backup is the way back.</p>
+<h2 id="tls-options">TLS options<a class="headerlink" href="#tls-options" title="Permanent link">&para;</a></h2>
+<ul>
+<li><strong>Automatic HTTPS (default)</strong>: Caddy obtains the certificate for <code>STACKD_DOMAIN</code>. Set
+  <code>CADDY_GLOBAL_OPTIONS=email you@example.com</code> for expiry notices. Keep the <code>caddy_data</code> volume:
+  it holds the certificates and the ACME account.</li>
+<li><strong>Your own certificate</strong>: mount it into the <code>proxy</code> service with a compose override and add
+  <code>tls /certs/fullchain.pem /certs/privkey.pem</code> to the site block of <code>deploy/production/Caddyfile</code>.</li>
+<li><strong>Behind a TLS-terminating load balancer</strong>: point the load balancer at the proxy, add
+  <code>trusted_proxies static &lt;LB ranges&gt;</code> to a <code>servers</code> global option so client addresses are kept,
+  and keep the public URL <code>https://</code>. WebSockets, the <code>LOCK</code>/<code>UNLOCK</code> methods and long requests
+  (a worker's claim waits 25 s) must pass the load balancer.</li>
+<li><strong>Tests / private networks</strong>: <code>CADDY_GLOBAL_OPTIONS=local_certs</code> uses Caddy's internal CA —
+  browsers, workers and AWS will not trust it.</li>
+</ul>
+<h2 id="security-checklist">Security checklist<a class="headerlink" href="#security-checklist" title="Permanent link">&para;</a></h2>
+<ul>
+<li>[ ] <code>stackd.env</code> mode <code>0600</code>, backed up outside the host; <code>STACKD_ENCRYPTION_KEY</code> never rotated
+      in place.</li>
+<li>[ ] <code>worker.env</code> holds no platform secret; workers on dedicated hosts.</li>
+<li>[ ] <code>STACKD_ALLOWED_DOMAINS</code> lists only your Workspace domain(s); you signed in first (admin).</li>
+<li>[ ] The OIDC signer is KMS, or <code>STACKD_ALLOW_LOCAL_SIGNER=true</code> is a deliberate choice.</li>
+<li>[ ] Only the proxy publishes ports (80/443); Postgres and the API are not reachable from
+      outside; <code>/metrics</code> answers 404 publicly.</li>
+<li>[ ] The S3 bucket is private, versioned and encrypted; its key is scoped to that bucket.</li>
+<li>[ ] The application database role cannot <code>UPDATE</code>/<code>DELETE</code> <code>audit_events</code>; the purge role is
+      configured (or the audit trail is kept forever on purpose).</li>
+<li>[ ] Runner images pinned by digest, built from <code>deploy/images/</code>, rebuilt for security updates.</li>
+<li>[ ] Job container limits set (<code>STACKD_DOCKER_MEMORY</code>, <code>STACKD_DOCKER_CPUS</code>) and an egress
+      policy on <code>STACKD_DOCKER_NETWORK</code> if your threat model needs one.</li>
+<li>[ ] Database backups scheduled and a restore tested — see <a href="../backup-restore/">Backup &amp; restore</a>.</li>
+</ul>
+<h2 id="kubernetes-future-work">Kubernetes (future work)<a class="headerlink" href="#kubernetes-future-work" title="Permanent link">&para;</a></h2>
+<p>There is no Helm chart yet (PLAN Phase 7). The same images map onto Kubernetes as follows; treat
+this as a design sketch, not a supported install:</p>
+<ul>
+<li><strong>api</strong>: a <code>Deployment</code> (several replicas are fine: the scheduler tasks take Postgres advisory
+  locks, WebSocket fan-out goes through Postgres <code>LISTEN/NOTIFY</code>; the rate limits are per
+  replica), a <code>Service</code>, the <code>stackd.env</code> settings as a <code>Secret</code>.</li>
+<li><strong>migrate</strong>: a <code>Job</code> (or a Helm pre-upgrade hook) running <code>alembic upgrade head</code> and the
+  bootstrap seed with the same image, before the API rolls out.</li>
+<li><strong>front</strong>: a <code>Deployment</code> + <code>Service</code> of the front image (<code>:8080</code>).</li>
+<li><strong>Ingress</strong>: one host; <code>/api</code>, <code>/worker</code>, <code>/state</code>, <code>/oidc</code>, <code>/.well-known/openid-configuration</code>
+  and <code>/healthz</code> to the API, the rest to the front; WebSockets and the <code>LOCK</code>/<code>UNLOCK</code> methods
+  allowed; <code>/metrics</code> not routed (a <code>ServiceMonitor</code> scrapes the Service).</li>
+<li><strong>Workers — the constraint</strong>: the <code>docker</code> runner needs a Docker Engine socket and host-path
+  workspaces at identical paths. Inside Kubernetes that means a dedicated node pool with a Docker
+  Engine on the nodes and a <code>hostPath</code> workspace (privileged, root-equivalent), or a Docker-in-Docker
+  sidecar sharing an <code>emptyDir</code> workspace mounted at the same path in both containers. A runner that
+  starts a Kubernetes <code>Pod</code> per command does not exist yet; until it does, the simplest option is
+  to keep the workers on VMs (as above) and run only the API and the front in the cluster. A
+  worker pod drains on SIGTERM: give it <code>terminationGracePeriodSeconds: 1380</code> (drain timeout +
+  cancel grace + 30 s) — the default 30 s would kill a running apply — and the registry
+  credential as a read-only <code>Secret</code> volume (<code>STACKD_REGISTRY_AUTH_FILE</code>).</li>
+</ul>
+<h2 id="troubleshooting">Troubleshooting<a class="headerlink" href="#troubleshooting" title="Permanent link">&para;</a></h2>
+<table>
+<thead>
+<tr>
+<th>Symptom</th>
+<th>Cause</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>migrate</code> exits with <code>STACKD_ENV=production: …</code></td>
+<td>a setting the production check refuses — the message lists them</td>
+</tr>
+<tr>
+<td><code>migrate</code> cannot connect</td>
+<td><code>DATABASE_URL</code> (driver <code>postgresql+asyncpg://</code>, URL-encoded password); with an external server, the host's firewall</td>
+</tr>
+<tr>
+<td>the proxy has no certificate</td>
+<td>DNS not pointing at the host yet, or port 80/443 closed; <code>docker compose logs proxy</code></td>
+</tr>
+<tr>
+<td>Google sign-in fails with <code>redirect_uri_mismatch</code></td>
+<td>the OAuth client lacks <code>https://&lt;domain&gt;/api/v1/auth/google/callback</code></td>
+</tr>
+<tr>
+<td>a worker logs <code>registration refused by the API</code></td>
+<td>a production API refuses any runner but <code>docker</code></td>
+</tr>
+<tr>
+<td>a worker logs <code>register failed, retrying</code> (401)</td>
+<td>a wrong pool token, or its pool was deleted</td>
+</tr>
+<tr>
+<td>a run fails reaching <code>/state/v1/…</code></td>
+<td>the job containers cannot reach <code>STACKD_INTERNAL_URL</code> — see <a href="#what-the-docker-runner-needs">What the docker runner needs</a></td>
+</tr>
+<tr>
+<td>a run fails <code>docker pull … failed: … unauthorized</code> / <code>pull access denied</code></td>
+<td>a private registry without a matching credential: set <code>STACKD_REGISTRY_AUTH_FILE</code> (an <code>auths</code> entry for the image's registry host), or pre-pull the runner images on the worker host</td>
+</tr>
+<tr>
+<td>a worker refuses to start: <code>STACKD_REGISTRY_AUTH_FILE …</code></td>
+<td>the file is not mounted at that path, or is not valid JSON / its <code>auth</code> is not base64 <code>user:password</code></td>
+</tr>
+<tr>
+<td>a run fails <code>worker_shutdown: …</code></td>
+<td>its worker was stopped and the job outlived the drain timeout (or a second stop signal)</td>
+</tr>
+</tbody>
+</table>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+  <script>var tabs=__md_get("__tabs");if(Array.isArray(tabs))e:for(var set of document.querySelectorAll(".tabbed-set")){var labels=set.querySelector(".tabbed-labels");for(var tab of tabs)for(var label of labels.getElementsByTagName("label"))if(label.innerText.trim()===tab){var input=document.getElementById(label.htmlFor);input.checked=!0;continue e}}</script>
+
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+          <button type="button" class="md-top md-icon" data-md-component="top" hidden>
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M13 20h-2V8l-5.5 5.5-1.42-1.42L12 4.16l7.92 7.92-1.42 1.42L13 8z"/></svg>
+  Back to top
+</button>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": "../..", "features": ["navigation.sections", "navigation.top", "navigation.instant", "navigation.tracking", "toc.follow", "search.suggest", "search.highlight", "content.code.copy", "content.tabs.link"], "search": "../../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
+    
+    
+      <script src="../../assets/javascripts/bundle.79ae519e.min.js"></script>
+      
+    
+  </body>
+</html>

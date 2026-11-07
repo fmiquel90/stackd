@@ -367,6 +367,34 @@
   
   
     <li class="md-nav__item">
+      <a href="../guide/installing/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Installing in production
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../guide/stacks-and-environments/" class="md-nav__link">
         
   
@@ -599,6 +627,34 @@
     
   
     Exit & data portability
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../guide/backup-restore/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Backup & restore
   
 
     
@@ -3251,7 +3307,7 @@ variables, hooks, notifications, secret sources; URL <code>?tab=settings&amp;sub
 <h3 id="510-variable-sets-settings-login-notifications-new-section-in-v2">5.10 Variable sets, settings, login, notifications (new section in v2)<a class="headerlink" href="#510-variable-sets-settings-login-notifications-new-section-in-v2" title="Permanent link">&para;</a></h3>
 <ul>
 <li><strong>Variable sets</strong> (<code>/s/:space/variable-sets</code>): one row per set with how it reaches envs (<code>auto-attach · whole space</code>, <code>rule: team=payments</code>, <code>3 attachments</code>); the set opens its page (<code>/s/:space/variable-sets/:set</code>) with tabs Variables / Attachments / Settings (<code>?tab=</code>). Delete per §5.7.</li>
-<li><strong>Settings</strong> (<code>/settings</code>): <strong>Preferences</strong> for everyone (theme: follow the system / dark / light; single-key shortcuts on/off — in memory, for the tab only, until A8) and <strong>Deployment</strong> for everyone (environment, version, database status). Admin only: <strong>Tiers</strong> (name, <code>requires_four_eyes</code> and <code>repo_hooks_at_apply</code> with §5.7 friction, display order, envs using it, delete per §5.7), <strong>Users</strong> (role, allowed tiers, <code>can_destroy</code>, disabled — staged edits, §5.7), <strong>Spaces</strong> (members, per-space role and tiers).</li>
+<li><strong>Settings</strong> (<code>/settings</code>): <strong>Preferences</strong> for everyone (theme: follow the system / dark / light; single-key shortcuts on/off — in memory, for the tab only, until A8) and <strong>Deployment</strong> for everyone (environment, version, database status). Admin only: <strong>Tiers</strong> (name, <code>requires_four_eyes</code> and <code>repo_hooks_at_apply</code> with §5.7 friction, display order, envs using it, delete per §5.7), <strong>Users</strong> (role, allowed tiers, <code>can_destroy</code>, disabled — staged edits, §5.7; a filter Everyone / People / Service accounts; a service account carries a <code>service account</code> badge, is offered only <code>reader</code> / <code>writer</code> as instance role and no tier or destroy right — it never applies, SPECS §23), <strong>Service accounts</strong> (SPECS §23: list with role, <code>disabled</code>, active token count; "New service account" dialog — name, reader/writer; per account a <strong>Tokens…</strong> dialog listing name, prefix, status badge <code>active</code> / <code>expired</code> / <code>revoked</code>, expiry, last use, with <strong>New token</strong> — name, 1–365 days — whose raw value is shown <strong>once</strong> in a read-only field with a copy action and "you won't see it again", held in the dialog's state only and dropped when it closes; <strong>Revoke…</strong> behind a confirmation popover; <strong>Disable…</strong> behind a popover, Enable in one click; the section says plainly that a service account plans but never confirms an apply), <strong>Spaces</strong> (members, per-space role and tiers; the add picker groups People and Service accounts). For a <strong>space admin</strong> (an instance admin, or anyone whose space membership list answers): <strong>Space configuration</strong> (SPECS §22) — pick a space, <strong>Export configuration</strong> (a JSON download through an object URL), <strong>Import configuration…</strong> (dialog: pick a <code>.json</code> file, read in memory; <strong>Run a dry run</strong> → report: counts, secrets to fill first in an amber banner, warnings, skipped with the reason in words, changes grouped by op then kind with the changed fields, unchanged collapsed; <strong>Apply import</strong> only after a dry run → the final report, a created worker pool's token shown once like an API token; a 422 lists the fields at fault, never their input).</li>
 <li><strong>Login</strong>: brand mark, "Sign in with Google"; in dev, the personas show email and role, and their allowed tiers once the dev endpoint returns them (needs API work A12).</li>
 <li><strong>First-login walkthrough</strong>: a short dialog tour (overview, stacks and environments, runs, permissions, dependencies…) shown until the user completes it; closing it in any way completes it, persisted server-side (no browser storage).</li>
 <li><strong>Notifications</strong> (bell popover, Radix): each item names what and where ("Run failed · demo-dns/dev · 6m"), links to the run (Logs at first error for failures) — a rollout notification (<code>rollout_paused</code>, <code>rollout_succeeded</code>, <code>rollout_failed</code>, <code>rollout_upstream_changed</code> "Upstream applied under a rollout", SPECS §21.7) to the rollout page. Opening the popover marks every item read (items that were unread keep a "new" mark while it stays open); "Clear read" removes the read ones. The bell badge counts unread, neutral (not violet, not amber).</li>
@@ -3355,7 +3411,7 @@ approval)" — never a plain "confirmed by alice": she approved the rollout, not
 <li><strong>Tokens</strong>: <code>styles/tokens.css</code> defines the variables of §3 for <code>[data-theme="dark"]</code> and <code>[data-theme="light"]</code>; <code>index.css</code> maps them into Tailwind under distinct utility names, since <code>@theme</code> re-emits its variables and a same-name alias would be a cycle (<code>bg-base</code>/<code>surface</code>/<code>raised</code>/<code>sunken</code>, <code>border-line</code>, <code>border-control</code>, <code>bg-scrim</code>, <code>text-primary</code>, <code>text-muted</code> = text-secondary, <code>ring</code>, <code>logo</code>, <code>text-onfill</code>, <code>text-st-&lt;state&gt;</code>, <code>text-mocked</code>, <code>bg-tint-&lt;state&gt;</code>, <code>text-df-&lt;action&gt;</code>…), plus the type scale (<code>text-eyebrow</code> … <code>text-display</code>) and radii (<code>rounded-base</code>, <code>rounded-badge</code>). <strong>Components use Tailwind utilities only</strong>: no <code>style={{…}}</code> except for computed geometry (virtualized heights, graph positions). Enforced by a lint rule (<code>no-restricted-syntax</code> on colour properties inside <code>style</code> attributes, plus <code>no-restricted-globals</code> / <code>no-restricted-properties</code> on <code>localStorage</code> / <code>sessionStorage</code>) and by <code>pnpm check:invariants</code> in CI (<code>front/scripts/check-invariants.mjs</code>: no browser storage, no hex / <code>rgb()</code> / <code>hsl()</code> literal outside <code>tokens.css</code>, no <code>text-base</code> — a colour here, not a size).</li>
 <li><strong>Theme</strong>: follows <code>prefers-color-scheme</code>; the user menu toggle, Settings → Preferences or ⌘K overrides it <strong>in memory</strong> (lost on reload) — persistence needs a profile field (AUDIT A8). <code>&lt;html data-theme&gt;</code> is set before first paint by an inline script that reads only <code>matchMedia</code>.</li>
 <li><strong>Folder structure</strong>:</li>
-<li><code>src/ui/</code> — re-skinned primitives: Button (<code>primary</code>, <code>secondary</code>, <code>ghost</code>, <code>decision</code>, <code>danger</code>; sizes <code>sm</code>, <code>md</code>, <code>touch</code>), Input, NativeSelect, Checkbox, Field, Tabs, Table (<code>Th</code>, <code>Td</code>), Badge, Banner (<code>info</code>, <code>decision</code>, <code>failed</code>, <code>mock</code>), Kbd, Skeleton, EmptyState, CopyButton, RelativeTime, Sha (<code>primitives.tsx</code>); Dialog, Sheet, Popover, Menu (DropdownMenu), Tooltip (<code>overlays.tsx</code>); ConfirmPopover, TypeNameDialog; <code>cn</code>, <code>useMediaQuery</code>. No IconButton or Switch primitive (icon-only tools are <code>Button</code>s with an <code>aria-label</code>); ⌘K uses <code>cmdk</code> directly in <code>app/CommandPalette.tsx</code>.</li>
+<li><code>src/ui/</code> — re-skinned primitives: Button (<code>primary</code>, <code>secondary</code>, <code>ghost</code>, <code>decision</code>, <code>danger</code>; sizes <code>sm</code>, <code>md</code>, <code>touch</code>), Input, NativeSelect, Checkbox, Field, Tabs, Table (<code>Th</code>, <code>Td</code>), Badge, Banner (<code>info</code>, <code>decision</code>, <code>failed</code>, <code>mock</code>), Kbd, Skeleton, EmptyState, CopyButton, RelativeTime, Sha (<code>primitives.tsx</code>); Dialog, Sheet, Popover, Menu (DropdownMenu), Tooltip (<code>overlays.tsx</code>); ConfirmPopover, TypeNameDialog; OneTimeSecret (a credential the API returns once: read-only field, copy, "you won't see it again"), ProblemBanner (an API refusal: detail, and a 422's fields at fault); <code>cn</code>, <code>useMediaQuery</code>. No IconButton or Switch primitive (icon-only tools are <code>Button</code>s with an <code>aria-label</code>); ⌘K uses <code>cmdk</code> directly in <code>app/CommandPalette.tsx</code>.</li>
 <li><code>src/identity/</code> — the identity components, each with a Ladle story (below), plus <code>TypeToConfirm</code> and the shared story fixtures.</li>
 <li><code>src/app/</code> — the shell: routes and nav (<code>AppShell</code>, <code>nav.ts</code>), space context, ⌘K, keyboard map, theme, live-region announcer, notification bell, login, walkthrough, brand.</li>
 <li><code>src/features/&lt;domain&gt;/</code> — <code>overview</code>, <code>runs</code>, <code>environments</code>, <code>stacks</code>, <code>graph</code>, <code>queue</code>, <code>workers</code>, <code>audit</code>, <code>variableSets</code>, <code>settings</code>, <code>rollouts</code> (rollouts and the clone dialog), <code>data</code> (<code>useSpaceEnvs</code>, the space-wide env summaries shared by the overview, the graph, the run page and the nav badge): page components, their queries and local components. A page file stays under ~250 lines; data hooks live next to it (<code>useRunPage</code>, <code>useSpaceEnvs</code>).</li>
