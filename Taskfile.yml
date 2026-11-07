@@ -122,6 +122,12 @@ tasks:
       - go vet ./...
       - go test -race ./...
 
+  cli-docs:
+    desc: Regenerate the CLI command reference (docs/guide/cli-reference.md) from the command tree
+    dir: cli
+    cmds:
+      - STACKD_UPDATE_DOCS=1 go test ./internal/docgen -run TestReferenceIsUpToDate -count=1
+
   asdf-plugin-test:
     desc: End-to-end test of the stackd asdf plugin (bin/) against a fake local release
     cmds: [bash scripts/test-asdf-plugin.sh]

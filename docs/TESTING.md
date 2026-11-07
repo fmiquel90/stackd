@@ -277,6 +277,9 @@ The tier gate (an approver without `prod`) and staleness stay manual checks (DEV
   chunk printed under its own phase header, JSON mode keeping stdout one document (logs on
   stderr), `--clear-labels`, a non-problem error body cut short. It does not run against a live
   API.
+- **Reference docs** (`internal/docgen/docgen_test.go`): `docs/guide/cli-reference.md` matches
+  the command tree byte for byte (regenerate with `task cli-docs`), covers every command, carries
+  no generation date.
 - **asdf plugin** (`task asdf-plugin-test` = `scripts/test-asdf-plugin.sh`, CI job `asdf-plugin`
   with shellcheck): builds the CLI, serves a fake `cli-v*` release over local HTTP and tags a
   throwaway repo, then runs the plugin's scripts as asdf would — version listing and sorting

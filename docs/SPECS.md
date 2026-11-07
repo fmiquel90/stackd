@@ -2831,6 +2831,10 @@ stackd version | completion
   cut to a short excerpt; a 401 without a token says so; a response over 64 MiB is an error, never
   silently truncated.
 
+**Reference documentation.** `docs/guide/cli-reference.md` is generated from the cobra command
+tree (`cli/internal/docgen`, `task cli-docs`), never written by hand; a test fails when it no
+longer matches the commands, so CI catches a flag added without its documentation.
+
 **Distribution.** `task cli-build` → `cli/dist/stackd`. A `cli-vX.Y.Z` tag runs
 `.github/workflows/cli-release.yml`: static binaries (`CGO_ENABLED=0`) for linux/darwin/windows ×
 amd64/arm64, archives + `SHA256SUMS`, as a GitHub release. The CLI is versioned on its own.

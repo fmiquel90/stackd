@@ -1,5 +1,9 @@
 # Command-line client
 
+!!! tip "Every command and flag"
+    This guide walks through the common tasks. The [CLI reference](cli-reference.md) lists every
+    command and flag, generated from the CLI itself.
+
 `stackd` is a single static binary that drives a Stackd instance over its
 [REST API](../api.md): spaces, stacks, environments, runs and configuration export/import. Use it
 in CI jobs and scripts instead of hand-written `curl` + `jq`. Specification: SPECS §24.

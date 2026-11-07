@@ -6,6 +6,7 @@ user guide: `docs/guide/cli.md`.
 ```bash
 task cli-build          # → cli/dist/stackd
 task cli-test           # gofmt + go vet + go test
+task cli-docs           # regenerate docs/guide/cli-reference.md after changing a command or flag
 ```
 
 A standalone Go module (`go.mod` here): it shares no code with `api/` and only speaks the public
