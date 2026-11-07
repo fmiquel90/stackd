@@ -3,6 +3,7 @@ package cmd
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -21,6 +22,7 @@ type app struct {
 	url          string
 	token        string
 	output       string // text | json
+	allowHTTP    bool
 	out, errOut  io.Writer
 	in           io.Reader
 	pollInterval time.Duration
@@ -40,7 +42,8 @@ func (a *app) client() (*client.Client, error) {
 	if a.token == "" {
 		a.token = os.Getenv("STACKD_TOKEN")
 	}
-	c, err := client.New(a.url, a.token, "stackd-cli/"+Version)
+	allowHTTP := a.allowHTTP || os.Getenv("STACKD_ALLOW_HTTP") == "1"
+	c, err := client.New(a.url, a.token, "stackd-cli/"+Version, allowHTTP)
 	if err != nil {
 		return nil, err
 	}
@@ -78,6 +81,7 @@ confirms an apply or a destroy: that stays a named human's decision (SPECS §23)
 	// --help, and the token must never be.
 	pf.StringVar(&a.url, "url", "", "Stackd instance URL (env STACKD_URL)")
 	pf.StringVar(&a.token, "token", "", "API token (env STACKD_TOKEN)")
+	pf.BoolVar(&a.allowHTTP, "allow-http", false, "allow a plain http URL to a non-loopback host (env STACKD_ALLOW_HTTP=1)")
 	pf.StringVarP(&a.output, "output", "o", envOr("STACKD_OUTPUT", "text"), "output format: text or json (env STACKD_OUTPUT)")
 
 	root.AddCommand(
@@ -98,12 +102,19 @@ confirms an apply or a destroy: that stays a named human's decision (SPECS §23)
 	return root
 }
 
-// Execute runs the CLI and returns the process exit code.
+// Execute runs the CLI on the process's arguments and streams and returns its exit code.
 func Execute(ctx context.Context) int {
-	root := NewRootCmd(os.Stdin, os.Stdout, os.Stderr)
+	return run(ctx, newRoot(&app{in: os.Stdin, out: os.Stdout, errOut: os.Stderr, pollInterval: 2 * time.Second}), os.Args[1:])
+}
+
+// run executes a command tree and maps the outcome to an exit code: 0, the code of an exitError
+// (2: a followed run failed), or 1.
+func run(ctx context.Context, root *cobra.Command, args []string) int {
+	root.SetArgs(args)
 	if err := root.ExecuteContext(ctx); err != nil {
-		fmt.Fprintln(os.Stderr, "Error:", err)
-		if e, ok := err.(*exitError); ok {
+		fmt.Fprintln(root.ErrOrStderr(), "Error:", err)
+		var e *exitError
+		if errors.As(err, &e) {
 			return e.code
 		}
 		return 1

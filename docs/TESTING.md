@@ -271,7 +271,18 @@ The tier gate (an approver without `prod`) and staleness stay manual checks (DEV
   request bodies carrying only the flags given, a repo secret read from stdin and never echoed,
   `--output json` passing the API's body through, `runs plan --wait` (log lines once, exit 0 at
   `unconfirmed`, exit 2 on `failed`), `config import --dry-run`, problem+json rendering (422
-  details, a 403 on `spaces create` explained). It does not run against a live API.
+  details, a 403 on `spaces create` explained), run ids validated before reaching a URL, plain
+  http refused off loopback, transient 5xx retried during `--wait` (a 4xx not), exit codes
+  through `run()` (0 / 2 / 1 on timeout), `logs -f` reading incrementally (`after_seq`) with a late
+  chunk printed under its own phase header, JSON mode keeping stdout one document (logs on
+  stderr), `--clear-labels`, a non-problem error body cut short. It does not run against a live
+  API.
+- **asdf plugin** (`task asdf-plugin-test` = `scripts/test-asdf-plugin.sh`, CI job `asdf-plugin`
+  with shellcheck): builds the CLI, serves a fake `cli-v*` release over local HTTP and tags a
+  throwaway repo, then runs the plugin's scripts as asdf would — version listing and sorting
+  (other tags ignored, pre-releases last), `latest-stable`, download + install of a working
+  binary, a checksum mismatch refused with nothing extracted, a missing release and a `ref`
+  install failing clearly. No asdf or GitHub needed.
 
 - **Playwright** (`pnpm e2e`, `e2e/happy-path.spec.ts`): one smoke test — dev login as admin
   reaches the overview of a space (`/s/<space>`) — against a running dev stack (`PW_BASE_URL`,

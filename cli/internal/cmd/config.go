@@ -100,6 +100,9 @@ func configImport(a *app) *cobra.Command {
 			var data []byte
 			var err error
 			if args[1] == "-" {
+				if isTerminal(a.in) {
+					return fmt.Errorf("'-' reads the document from a pipe: stackd config import <space> - < file.json")
+				}
 				data, err = io.ReadAll(a.in)
 			} else {
 				data, err = os.ReadFile(args[1])

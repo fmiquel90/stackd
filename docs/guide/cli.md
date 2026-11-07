@@ -6,7 +6,28 @@ in CI jobs and scripts instead of hand-written `curl` + `jq`. Specification: SPE
 
 ## Install
 
-Download the archive for your OS and architecture from the repository's releases (tags
+With [asdf](https://asdf-vm.com) (or [mise](https://mise.jdx.dev), which reads asdf plugins) —
+this repository is its own plugin:
+
+```bash
+asdf plugin add stackd https://github.com/fmiquel90/stackd.git
+asdf install stackd latest
+asdf set stackd latest            # asdf ≥ 0.16; older: asdf global stackd latest
+stackd version
+```
+
+Pin it per project in `.tool-versions` (`stackd 0.1.0`) so CI and laptops run the same CLI.
+The plugin checks every archive against the release's `SHA256SUMS` and refuses a mismatch.
+
+| Variable | When |
+|---|---|
+| `GITHUB_API_TOKEN` | the repository is private (or you hit GitHub's rate limit) |
+| `ASDF_STACKD_REPO` | you install from a fork (`https://github.com/<you>/stackd`) |
+| `ASDF_STACKD_DOWNLOAD_BASE` | you mirror the releases internally (`<base>/cli-v<version>/<asset>`) |
+
+Supported: Linux and macOS, amd64 and arm64. On Windows, take the zip from the release page.
+
+By hand: download the archive for your OS and architecture from the repository's releases (tags
 `cli-vX.Y.Z`), check it against `SHA256SUMS`, and put `stackd` on your `PATH`:
 
 ```bash
@@ -18,7 +39,7 @@ tar xzf stackd_${VERSION}_linux_amd64.tar.gz
 sudo install stackd_${VERSION}_linux_amd64/stackd /usr/local/bin/
 ```
 
-From a checkout: `task cli-build` (writes `./bin/stackd`; needs Go).
+From a checkout: `task cli-build` (writes `cli/dist/stackd`; needs Go).
 
 Shell completion: `stackd completion bash|zsh|fish|powershell --help`.
 
@@ -43,7 +64,10 @@ works in: `writer` to create stacks and trigger plans, `admin` for `config expor
     the environment's autodeploy). Creating a **space** requires an instance admin, which a
     service account can never be: `stackd spaces create` only works with an admin's session token.
 
-The token is never printed, including in `--help`. Pass secrets on stdin, never as a flag value.
+The token is never printed, including in `--help`. Pass secrets through a pipe, never as a flag
+value. A plain `http://` URL is refused unless the host is local (`localhost`, `127.0.0.1`): the
+token would travel in clear. On a trusted network (a CI-internal hostname), add `--allow-http` or
+`STACKD_ALLOW_HTTP=1`.
 
 ## Name things
 
@@ -77,7 +101,8 @@ stackd runs plan network/prod --wait --logs
 
 `--wait` returns once the plan **awaits confirmation** (`unconfirmed`) or the run ends. Exit
 status: `0` at `unconfirmed` or `finished`, `2` if the run failed, was canceled or discarded, `1`
-on any other error (API error, `--timeout`, default 30 min). Other plan options: `--destroy`,
+on any other error (API error, `--timeout`, default 30 min, `0` for none). A brief API outage
+(network error, 5xx) is retried until the timeout, so a restart doesn't fail your pipeline. Other plan options: `--destroy`,
 `--target <addr>` / `--replace <addr>` (repeatable), `--commit <sha>`, `--with-downstream`.
 
 Inspect runs:
@@ -104,7 +129,8 @@ deletes. Secrets are never in the document: the report lists the ones to fill in
 
 ## Output for scripts
 
-`--output json` (or `STACKD_OUTPUT=json`) prints the API's own response body, unmodified:
+`--output json` (or `STACKD_OUTPUT=json`) prints the API's own response body (re-indented). With
+`--wait --logs` or `logs -f`, the log lines go to stderr so stdout stays a single JSON document:
 
 ```bash
 ENV_ID=$(stackd envs get network/prod -o json | jq -r .id)

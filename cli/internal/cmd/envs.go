@@ -113,12 +113,14 @@ type envFlags struct {
 	autodeploy, protected, fourEyes, managedState, allowMock, allowFallback, driftCheck bool
 	labels                                                                              []string
 	position                                                                            int
+	clearLabels                                                                         bool
 }
 
 func (f *envFlags) register(cmd *cobra.Command, forUpdate bool) {
 	fl := cmd.Flags()
 	if forUpdate {
 		fl.StringVar(&f.name, "name", "", "rename the environment")
+		fl.BoolVar(&f.clearLabels, "clear-labels", false, "remove every label")
 	}
 	fl.StringVar(&f.tier, "tier", "", "tier (a name from the tier catalog)")
 	fl.StringVar(&f.branch, "branch", "", "git branch tracked by the environment")
@@ -132,6 +134,9 @@ func (f *envFlags) register(cmd *cobra.Command, forUpdate bool) {
 	fl.StringVar(&f.backendConfigFile, "backend-config-file", "", "backend config file (unmanaged state)")
 	fl.StringArrayVar(&f.labels, "label", nil, "label key=value (repeatable; replaces all labels)")
 	fl.IntVar(&f.position, "position", 0, "display order within the stack")
+	if forUpdate {
+		cmd.MarkFlagsMutuallyExclusive("label", "clear-labels")
+	}
 }
 
 // body sends only the flags the user set: PATCH semantics on update, API defaults on create.
@@ -166,6 +171,9 @@ func (f *envFlags) body(cmd *cobra.Command) (map[string]any, error) {
 	}
 	if ch("position") {
 		b["position"] = f.position
+	}
+	if f.clearLabels {
+		b["labels"] = nil
 	}
 	if ch("label") {
 		labels, err := parseLabels(f.labels)

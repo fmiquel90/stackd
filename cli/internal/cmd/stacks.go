@@ -109,13 +109,14 @@ func printStack(w io.Writer, s *client.Stack) error {
 type stackFlags struct {
 	name, description, repoURL, repoAuthKind, projectRoot, tool, toolVersion string
 	labels                                                                   []string
-	repoSecretStdin                                                          bool
+	repoSecretStdin, clearLabels                                             bool
 }
 
 func (f *stackFlags) register(cmd *cobra.Command, forUpdate bool) {
 	fl := cmd.Flags()
 	if forUpdate {
 		fl.StringVar(&f.name, "name", "", "rename the stack")
+		fl.BoolVar(&f.clearLabels, "clear-labels", false, "remove every label")
 	}
 	fl.StringVar(&f.description, "description", "", "description")
 	fl.StringVar(&f.repoURL, "repo-url", "", "git repository URL")
@@ -126,6 +127,9 @@ func (f *stackFlags) register(cmd *cobra.Command, forUpdate bool) {
 	fl.StringArrayVar(&f.labels, "label", nil, "label key=value (repeatable; replaces all labels)")
 	fl.BoolVar(&f.repoSecretStdin, "repo-secret-stdin", false,
 		"read the repository token / deploy key from stdin (never pass a secret as a flag)")
+	if forUpdate {
+		cmd.MarkFlagsMutuallyExclusive("label", "clear-labels")
+	}
 }
 
 // body builds the request from the flags the user actually set (PATCH semantics for update).
@@ -143,6 +147,9 @@ func (f *stackFlags) body(cmd *cobra.Command, in io.Reader) (map[string]any, err
 	set("project-root", "project_root", f.projectRoot)
 	set("tool", "tool", f.tool)
 	set("tool-version", "tool_version", f.toolVersion)
+	if f.clearLabels {
+		b["labels"] = nil
+	}
 	if cmd.Flags().Changed("label") {
 		labels, err := parseLabels(f.labels)
 		if err != nil {
@@ -163,6 +170,10 @@ func (f *stackFlags) body(cmd *cobra.Command, in io.Reader) (map[string]any, err
 // readSecret reads a secret from stdin: the whole input for a multi-line deploy key, trimmed of
 // the trailing newline.
 func readSecret(in io.Reader) (string, error) {
+	if isTerminal(in) {
+		// Typed at a terminal, the secret would be echoed on screen: require a pipe.
+		return "", fmt.Errorf(`--repo-secret-stdin reads a pipe, not a terminal: printf %%s "$REPO_TOKEN" | stackd …`)
+	}
 	data, err := io.ReadAll(bufio.NewReader(in))
 	if err != nil {
 		return "", fmt.Errorf("read secret from stdin: %w", err)

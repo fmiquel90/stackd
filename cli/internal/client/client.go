@@ -11,6 +11,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/url"
 	"strings"
@@ -25,9 +26,13 @@ type Client struct {
 	http      *http.Client
 }
 
+// maxBody bounds a response read into memory; a larger body is an error, never silently cut.
+const maxBody = 64 << 20
+
 // New validates the instance URL and returns a client. A trailing "/api/v1" in rawURL is
-// accepted and ignored, so both forms of the URL work.
-func New(rawURL, token, userAgent string) (*Client, error) {
+// accepted and ignored, so both forms of the URL work. Plain http is refused for anything but a
+// loopback host unless allowHTTP: the bearer token would cross the network in clear.
+func New(rawURL, token, userAgent string, allowHTTP bool) (*Client, error) {
 	if rawURL == "" {
 		return nil, errors.New("no Stackd URL: set STACKD_URL or pass --url")
 	}
@@ -37,6 +42,10 @@ func New(rawURL, token, userAgent string) (*Client, error) {
 	}
 	if u.Scheme != "http" && u.Scheme != "https" {
 		return nil, fmt.Errorf("invalid Stackd URL %q: scheme must be http or https", rawURL)
+	}
+	if u.Scheme == "http" && !allowHTTP && !isLoopback(u.Hostname()) {
+		return nil, fmt.Errorf("refusing plain http to %s: the token would travel unencrypted "+
+			"(use https, or --allow-http / STACKD_ALLOW_HTTP=1 on a trusted network)", u.Host)
 	}
 	u.Path = strings.TrimSuffix(u.Path, "/api/v1")
 	return &Client{
@@ -107,16 +116,24 @@ func (c *Client) Do(ctx context.Context, method, path string, query url.Values, 
 		return nil, fmt.Errorf("%s %s: %w", method, path, err)
 	}
 	defer resp.Body.Close()
-	data, err := io.ReadAll(io.LimitReader(resp.Body, 64<<20))
+	data, err := io.ReadAll(io.LimitReader(resp.Body, maxBody+1))
 	if err != nil {
 		return nil, fmt.Errorf("%s %s: read response: %w", method, path, err)
+	}
+	if len(data) > maxBody {
+		return nil, fmt.Errorf("%s %s: response larger than %d MiB", method, path, maxBody>>20)
 	}
 	if resp.StatusCode >= 200 && resp.StatusCode < 300 {
 		return data, nil
 	}
 	p := &Problem{}
 	if json.Unmarshal(data, p) != nil || p.Title == "" {
-		p = &Problem{Title: http.StatusText(resp.StatusCode), Detail: strings.TrimSpace(string(data))}
+		// Not problem+json (e.g. a proxy's HTML page): keep a short excerpt only.
+		detail := strings.TrimSpace(string(data))
+		if len(detail) > 300 {
+			detail = detail[:300] + "…"
+		}
+		p = &Problem{Title: http.StatusText(resp.StatusCode), Detail: detail}
 	}
 	p.Status = resp.StatusCode
 	if p.Status == http.StatusUnauthorized && c.token == "" {
@@ -138,4 +155,12 @@ func (c *Client) JSON(ctx context.Context, method, path string, query url.Values
 		}
 	}
 	return data, nil
+}
+
+func isLoopback(host string) bool {
+	if host == "localhost" {
+		return true
+	}
+	ip := net.ParseIP(host)
+	return ip != nil && ip.IsLoopback()
 }

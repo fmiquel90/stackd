@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"os"
 	"sort"
 	"strings"
 	"text/tabwriter"
@@ -114,4 +115,14 @@ func planSummary(s map[string]any) string {
 		}
 	}
 	return out
+}
+
+// isTerminal reports whether r is an interactive terminal (a character device), not a pipe/file.
+func isTerminal(r io.Reader) bool {
+	f, ok := r.(*os.File)
+	if !ok {
+		return false
+	}
+	st, err := f.Stat()
+	return err == nil && st.Mode()&os.ModeCharDevice != 0
 }

@@ -2,10 +2,13 @@ package cmd
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -129,7 +132,7 @@ exits 0 if it reached unconfirmed or finished, 2 if it failed, was canceled or d
 				return nil
 			}
 			fmt.Fprintf(a.errOut, "Run %s %s on %s\n", run.ID, run.State, e.Name)
-			ctx, cancel := context.WithTimeout(cmd.Context(), timeout)
+			ctx, cancel := withOptionalTimeout(cmd.Context(), timeout)
 			defer cancel()
 			return a.follow(ctx, c, run.ID, logs)
 		},
@@ -142,8 +145,8 @@ exits 0 if it reached unconfirmed or finished, 2 if it failed, was canceled or d
 	f.StringArrayVar(&targets, "target", nil, "resource address passed as -target (repeatable)")
 	f.StringArrayVar(&replace, "replace", nil, "resource address passed as -replace (repeatable, tracked runs only)")
 	f.BoolVar(&wait, "wait", false, "follow the run until it awaits confirmation or ends")
-	f.BoolVar(&logs, "logs", false, "with --wait, stream the run's logs to stdout")
-	f.DurationVar(&timeout, "timeout", 30*time.Minute, "with --wait, give up after this long")
+	f.BoolVar(&logs, "logs", false, "with --wait, stream the run's logs (to stderr with --output json)")
+	f.DurationVar(&timeout, "timeout", 30*time.Minute, "with --wait, give up after this long (0 = no limit)")
 	return c
 }
 
@@ -151,7 +154,7 @@ func runsGet(a *app) *cobra.Command {
 	return &cobra.Command{
 		Use:   "get <run-id>",
 		Short: "Show a run",
-		Args:  cobra.ExactArgs(1),
+		Args:  runIDArg,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			c, err := a.client()
 			if err != nil {
@@ -207,14 +210,18 @@ func runsLogs(a *app) *cobra.Command {
 	c := &cobra.Command{
 		Use:   "logs <run-id>",
 		Short: "Print a run's logs (ANSI kept)",
-		Args:  cobra.ExactArgs(1),
+		Long: `Print a run's logs. With --follow, keep printing new lines until the run ends or awaits
+confirmation; the exit status is then the run's, as for 'runs plan --wait' (0, or 2 if it failed,
+was canceled or discarded). With --output json and --follow, log lines go to stderr and stdout
+carries only the run's final JSON.`,
+		Args: runIDArg,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			c, err := a.client()
 			if err != nil {
 				return err
 			}
 			if follow {
-				ctx, cancel := context.WithTimeout(cmd.Context(), timeout)
+				ctx, cancel := withOptionalTimeout(cmd.Context(), timeout)
 				defer cancel()
 				return a.follow(ctx, c, args[0], true)
 			}
@@ -231,7 +238,7 @@ func runsLogs(a *app) *cobra.Command {
 		},
 	}
 	c.Flags().BoolVarP(&follow, "follow", "f", false, "keep printing new lines until the run ends or awaits confirmation")
-	c.Flags().DurationVar(&timeout, "timeout", 30*time.Minute, "with --follow, give up after this long")
+	c.Flags().DurationVar(&timeout, "timeout", 30*time.Minute, "with --follow, give up after this long (0 = no limit)")
 	return c
 }
 
@@ -239,7 +246,7 @@ func runAction(a *app, action, short string) *cobra.Command {
 	return &cobra.Command{
 		Use:   action + " <run-id>",
 		Short: short,
-		Args:  cobra.ExactArgs(1),
+		Args:  runIDArg,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			c, err := a.client()
 			if err != nil {
@@ -267,58 +274,120 @@ func runsDiscard(a *app) *cobra.Command {
 	return runAction(a, "discard", "Discard a plan awaiting confirmation")
 }
 
+// runIDArg requires exactly one argument that is a UUID: a run id goes into the URL path, so a
+// value like "../environments/<id>/runs" must never reach it.
+func runIDArg(cmd *cobra.Command, args []string) error {
+	if err := cobra.ExactArgs(1)(cmd, args); err != nil {
+		return err
+	}
+	if !isUUID(args[0]) {
+		return fmt.Errorf("invalid run id %q: expected a UUID", args[0])
+	}
+	return nil
+}
+
+// withOptionalTimeout is context.WithTimeout, except that 0 means no deadline.
+func withOptionalTimeout(ctx context.Context, d time.Duration) (context.Context, context.CancelFunc) {
+	if d <= 0 {
+		return context.WithCancel(ctx)
+	}
+	return context.WithTimeout(ctx, d)
+}
+
+// transient reports whether a failed call is worth retrying while following a run: a network
+// error, a 5xx (an API restarting behind its proxy) or a 429. A 4xx is an answer, not a blip.
+func transient(err error) bool {
+	var p *client.Problem
+	if errors.As(err, &p) {
+		return p.Status >= 500 || p.Status == http.StatusTooManyRequests
+	}
+	return true
+}
+
+// workerPhases are the log phases a worker writes while a run executes, in order (SPECS §4.1:
+// log phases are run states). Followed incrementally; a final full read catches any other.
+var workerPhases = []string{"preparing", "planning", "checking", "applying", "running"}
+
 // follow polls a run until it settles: terminal, or unconfirmed — the plan awaits a human, the end
 // of what automation can do (nothing more happens until someone confirms). It prints new log
-// lines when withLogs.
+// lines when withLogs: to stdout, or to stderr in JSON mode so stdout stays one JSON document.
+// Transient API errors are retried until the context's deadline.
 func (a *app) follow(ctx context.Context, c *client.Client, runID string, withLogs bool) error {
-	printer := newLogPrinter(a.out)
+	logOut := a.out
+	if a.json() {
+		logOut = a.errOut
+	}
+	printer := newLogPrinter(logOut)
 	lastState := ""
+	failures := 0
 	var run client.Run
+	gaveUp := func() error {
+		return fmt.Errorf("gave up waiting on run %s (last state %s): %w", runID, lastState, context.Cause(ctx))
+	}
 	for {
 		raw, err := c.JSON(ctx, http.MethodGet, "/runs/"+runID, nil, nil, &run)
 		if err != nil {
 			if ctx.Err() != nil {
-				return fmt.Errorf("gave up waiting on run %s (last state %s): %w", runID, lastState, ctx.Err())
+				return gaveUp()
 			}
-			return err
-		}
-		if withLogs {
-			var chunks []client.LogChunk
-			if _, err := c.JSON(ctx, http.MethodGet, "/runs/"+runID+"/logs", nil, nil, &chunks); err == nil {
-				printer.print(chunks)
+			if !transient(err) {
+				return err
 			}
-		}
-		if run.State != lastState {
-			if lastState != "" {
-				fmt.Fprintf(a.errOut, "Run %s: %s\n", runID, run.State)
+			failures++
+			if failures == 1 {
+				fmt.Fprintf(a.errOut, "Warning: %v (retrying)\n", err)
 			}
-			lastState = run.State
-		}
-		done := client.TerminalStates[run.State] || run.State == "unconfirmed"
-		if done {
-			if a.json() {
-				if err := printJSON(a.out, raw); err != nil {
-					return err
+		} else {
+			if failures > 0 {
+				fmt.Fprintln(a.errOut, "Reconnected.")
+				failures = 0
+			}
+			done := client.TerminalStates[run.State] || run.State == "unconfirmed"
+			if withLogs {
+				printer.poll(ctx, c, runID, run.State, done)
+			}
+			if run.State != lastState {
+				if lastState != "" {
+					fmt.Fprintf(a.errOut, "Run %s: %s\n", runID, run.State)
 				}
-			} else if !withLogs {
-				if err := printRun(a.out, &run); err != nil {
-					return err
-				}
-			} else {
-				fmt.Fprintf(a.errOut, "Run %s ended %s %s\n", runID, run.State, planSummary(run.PlanSummary))
+				lastState = run.State
 			}
-			if run.State == "unconfirmed" && run.UsedMocks {
-				// Not an error, but worth saying: such a plan is blocked at apply by default (§9.3).
-				fmt.Fprintln(a.errOut, "Note: this plan consumed mock values; it cannot be applied unless the environment allows mock apply.")
+			if done {
+				return a.settled(&run, raw, withLogs)
 			}
-			return runOutcome(&run)
+		}
+		// Back off on repeated failures (up to 30 s), otherwise poll at the normal interval.
+		delay := a.pollInterval
+		for i := 1; i < failures && delay < 30*time.Second; i++ {
+			delay *= 2
 		}
 		select {
 		case <-ctx.Done():
-			return fmt.Errorf("gave up waiting on run %s (last state %s): %w", runID, lastState, ctx.Err())
-		case <-time.After(a.pollInterval):
+			return gaveUp()
+		case <-time.After(delay):
 		}
 	}
+}
+
+// settled prints the outcome of a run that stopped moving and returns its exit status.
+func (a *app) settled(run *client.Run, raw []byte, withLogs bool) error {
+	switch {
+	case a.json():
+		if err := printJSON(a.out, raw); err != nil {
+			return err
+		}
+	case withLogs:
+		fmt.Fprintf(a.errOut, "Run %s ended %s %s\n", run.ID, run.State, planSummary(run.PlanSummary))
+	default:
+		if err := printRun(a.out, run); err != nil {
+			return err
+		}
+	}
+	if run.State == "unconfirmed" && run.UsedMocks {
+		// Not an error, but worth saying: such a plan is blocked at apply by default (§9.3).
+		fmt.Fprintln(a.errOut, "Note: this plan consumed mock values; it cannot be applied unless the environment allows mock apply.")
+	}
+	return runOutcome(run)
 }
 
 // runOutcome maps a settled run to the exit status: 0 when it finished or awaits confirmation,
@@ -342,13 +411,48 @@ var phaseOrder = map[string]int{
 	"applying": 6, "running": 7, "finished": 8, "failed": 9, "discarded": 10, "canceled": 11,
 }
 
-// logPrinter prints each log chunk once, phases in run order, chunks by seq.
+// logPrinter prints each log chunk once (key: phase + seq, the API's own key), phases in run
+// order, chunks by seq, with a phase header whenever the phase changes.
 type logPrinter struct {
-	w    io.Writer
-	seen map[string]bool
+	w         io.Writer
+	seen      map[string]bool
+	maxSeq    map[string]int // highest seq printed per phase, for incremental reads
+	lastPhase string
 }
 
-func newLogPrinter(w io.Writer) *logPrinter { return &logPrinter{w: w, seen: map[string]bool{}} }
+func newLogPrinter(w io.Writer) *logPrinter {
+	return &logPrinter{w: w, seen: map[string]bool{}, maxSeq: map[string]int{}}
+}
+
+// poll reads only what is new: for each worker phase the run has reached, the chunks after the
+// last seq printed. On the final poll (final=true) it reads everything once, so a phase outside
+// workerPhases is never lost. Read errors are skipped: the next poll catches up.
+func (p *logPrinter) poll(ctx context.Context, c *client.Client, runID, state string, final bool) {
+	if final {
+		var chunks []client.LogChunk
+		if _, err := c.JSON(ctx, http.MethodGet, "/runs/"+runID+"/logs", nil, nil, &chunks); err == nil {
+			p.print(chunks)
+		}
+		return
+	}
+	current, ok := phaseOrder[state]
+	if !ok {
+		current = len(phaseOrder)
+	}
+	for _, phase := range workerPhases {
+		if phaseOrder[phase] > current {
+			break
+		}
+		q := url.Values{"phase": {phase}}
+		if seq, ok := p.maxSeq[phase]; ok {
+			q.Set("after_seq", strconv.Itoa(seq))
+		}
+		var chunks []client.LogChunk
+		if _, err := c.JSON(ctx, http.MethodGet, "/runs/"+runID+"/logs", q, nil, &chunks); err == nil {
+			p.print(chunks)
+		}
+	}
+}
 
 func (p *logPrinter) print(chunks []client.LogChunk) {
 	sort.SliceStable(chunks, func(i, j int) bool {
@@ -368,18 +472,19 @@ func (p *logPrinter) print(chunks []client.LogChunk) {
 		}
 		return chunks[i].Seq < chunks[j].Seq
 	})
-	lastPhase := ""
 	for _, ch := range chunks {
 		key := fmt.Sprintf("%s/%d", ch.Phase, ch.Seq)
 		if p.seen[key] {
 			continue
 		}
 		p.seen[key] = true
-		if ch.Phase != lastPhase && !p.seen["phase:"+ch.Phase] {
-			fmt.Fprintf(p.w, "===== %s =====\n", ch.Phase)
-			p.seen["phase:"+ch.Phase] = true
+		if seq, ok := p.maxSeq[ch.Phase]; !ok || ch.Seq > seq {
+			p.maxSeq[ch.Phase] = ch.Seq
 		}
-		lastPhase = ch.Phase
+		if ch.Phase != p.lastPhase {
+			fmt.Fprintf(p.w, "===== %s =====\n", ch.Phase)
+			p.lastPhase = ch.Phase
+		}
 		prefix := ""
 		if ch.Section != nil && *ch.Section != "" {
 			prefix = "[" + *ch.Section + "] "
