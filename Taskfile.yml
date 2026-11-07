@@ -165,6 +165,16 @@ tasks:
       - docker build -f front/Dockerfile -t {{.PREFIX}}/front:{{.TAG}} {{.CLI_ARGS}} front
       - docker build -f worker/Dockerfile -t {{.PREFIX}}/worker:{{.TAG}} {{.CLI_ARGS}} worker
 
+  release:
+    desc: Cut a release — bump the version everywhere, commit, tag (VERSION=X.Y.Z; never pushes, see DEV.md §10)
+    requires:
+      vars: [VERSION]
+    cmds: ["bash scripts/release.sh {{.VERSION}}"]
+
+  version-check:
+    desc: Check that api, worker and front carry the same version (as CI does)
+    cmds: ["bash scripts/check-version.sh"]
+
   prod-config:
     desc: Validate the production compose file against your env files (deploy/production)
     dir: deploy/production
