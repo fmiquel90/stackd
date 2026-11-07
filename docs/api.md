@@ -31,6 +31,25 @@ curl -s localhost:8000/api/v1/stacks -H "Authorization: Bearer $TOKEN"
 In production, authentication is Google OIDC (PKCE) with a rotating refresh token; mutating calls
 on `/refresh` and `/logout` use a CSRF double-submit token.
 
+**Automation** (CI, scripts, scheduled exports) uses a **service account** and its API token
+([SPECS §23](SPECS.md)): an instance admin creates the account, grants it a space membership, and
+mints an expiring token, shown once — in the UI under **Settings → Service accounts** (the
+membership under **Settings → Spaces**), or over the API:
+
+```bash
+SA=$(curl -s -X POST $STACKD/api/v1/service-accounts -H "$AUTH" -H 'content-type: application/json' \
+  -d '{"name":"ci-github","role":"writer"}' | jq -r .id)
+curl -s -X PUT $STACKD/api/v1/spaces/$SPACE_ID/members -H "$AUTH" -H 'content-type: application/json' \
+  -d "{\"user_id\":\"$SA\",\"role\":\"writer\",\"allowed_tiers\":[],\"can_destroy\":false}"
+TOKEN=$(curl -s -X POST $STACKD/api/v1/service-accounts/$SA/tokens -H "$AUTH" \
+  -H 'content-type: application/json' -d '{"name":"github-actions","expires_in_days":90}' | jq -r .token)
+curl -s -X POST $STACKD/api/v1/environments/$ENV_ID/runs -H "Authorization: Bearer $TOKEN" \
+  -H 'content-type: application/json' -d '{}'
+```
+
+A service account reads and plans — it **never confirms** an apply, a destroy, a mutating command
+or a rollout: that stays a named human's decision.
+
 ## Interactive reference
 
 The API is FastAPI, so the full, always-current schema is served by the running instance:
@@ -46,11 +65,11 @@ exhaustive list):
 | Area | Examples |
 |---|---|
 | Auth | `GET /auth/google/start` + `/callback`, `POST /auth/refresh`, `POST /auth/logout`, `GET /auth/me`, `POST /auth/me/onboarded`; dev only: `GET /auth/dev/personas`, `POST /auth/dev/login` |
-| Spaces | `GET/POST /spaces`, `GET/PUT /spaces/{id}/members`, `DELETE /spaces/{id}/members/{user_id}`, secret sources under `/spaces/{id}/secret-sources`, `POST /spaces/{id}/environment-clones` |
+| Spaces | `GET/POST /spaces`, `GET/PUT /spaces/{id}/members`, `DELETE /spaces/{id}/members/{user_id}`, secret sources under `/spaces/{id}/secret-sources`, `POST /spaces/{id}/environment-clones`, configuration `GET /spaces/{id}/export` / `POST /spaces/{id}/import[?dry_run=true]` (space admin, [Backup & restore](guide/backup-restore.md)) |
 | Stacks | `GET/POST /stacks`, `GET/PATCH/DELETE /stacks/{id}` (409 while a run is active), `POST /stacks/{id}/check-repo` |
 | Environments | `POST /stacks/{id}/environments`, `GET /environments/{id}/resolved-variables`, `POST /environments/{id}/refresh-head`, `POST /environments/{id}/discover-inputs` |
 | Variables & sets | variables CRUD (stack/env/set), variable sets + attachments (tier/stack/env of the set's space) |
-| Runs | `POST /environments/{id}/runs`, `/commands`, `/promote`; `GET /environments/{id}/runs`; `GET /runs/{id}`, `POST /runs/{id}/confirm`/`discard`/`cancel`, `GET /runs/{id}/logs` (+ `/logs/download`)/`plan`/`checks`, `POST /runs/{id}/vcs/resync` |
+| Runs | `POST /environments/{id}/runs` (optional `targets`/`replace`: a targeted / replace plan), `/commands` (incl. `force-unlock` on an unmanaged backend, admin), `/promote`; `GET /environments/{id}/runs`; `GET /runs/{id}`, `POST /runs/{id}/confirm`/`discard`/`cancel`, `GET /runs/{id}/logs` (+ `/logs/download`)/`plan`/`checks`, `POST /runs/{id}/vcs/resync` |
 | Rollouts | `GET/POST /rollouts`, `GET /rollouts/{id}`, `POST /rollouts/{id}/approve`/`retry`/`cancel` |
 | Comments | `GET/POST /runs/{id}/comments`, `PATCH/DELETE /runs/{id}/comments/{cid}` |
 | Hooks | `GET/POST/PATCH/DELETE /stacks/{id}/hooks` and `/environments/{id}/hooks` |
@@ -58,6 +77,7 @@ exhaustive list):
 | State | `GET /environments/{id}/state/versions`, `POST …/state/import-session`, `DELETE …/state/lock` (force-unlock) |
 | Cloud | `GET/PUT/DELETE /environments/{id}/cloud-integration` + `POST …/cloud-integration/test` (AssumeRole test) |
 | Notifications | targets: `GET/POST/PATCH/DELETE /stacks/{id}/notifications` and `/environments/{id}/notifications`, plus `…/{tid}/test`; your in-app feed: `GET /notifications`, `POST /notifications/read`, `DELETE /notifications/{nid}`, `DELETE /notifications` |
+| Service accounts | `GET/POST /service-accounts`, `GET/POST /service-accounts/{id}/tokens`, `DELETE /service-accounts/{id}/tokens/{tid}` (instance admin) |
 | Users & tiers | `GET /users` (admin), `PATCH /users/{id}` (admin), `GET /users/mentionable`, `GET/POST /tiers`, `PATCH/DELETE /tiers/{id}` |
 | Audit | `GET /audit` (filters), `GET /audit/export` (CSV) — both admin-only |
 | Webhooks | `POST /webhooks/github` |

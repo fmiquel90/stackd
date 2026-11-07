@@ -13,6 +13,7 @@ from app.enums import ROLE_RANK, Role
 from app.errors import ProblemException
 from app.models.user import User
 from app.security import decode_access_token
+from app.service_accounts.tokens import authenticate, is_api_token
 
 
 async def get_current_user(
@@ -22,8 +23,12 @@ async def get_current_user(
     auth = request.headers.get("authorization", "")
     if not auth.startswith("Bearer "):
         raise ProblemException(401, "Not authenticated", "Missing bearer token.")
+    raw = auth.removeprefix("Bearer ")
+    if is_api_token(raw):
+        # A service account's API token (§23) — the only non-session credential of the human API.
+        return await authenticate(session, raw)
     try:
-        claims = decode_access_token(auth.removeprefix("Bearer "))
+        claims = decode_access_token(raw)
     except jwt.PyJWTError as exc:
         raise ProblemException(401, "Not authenticated", "Invalid or expired token.") from exc
 

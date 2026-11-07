@@ -387,6 +387,10 @@ register (pool token) → heartbeat (every ~20s) → claim (long-poll)
   environment variable *names* — never values, recent agent logs) and posts it back. It also carries
   `cancel_job`, which stops a job the worker is executing (§4): SIGINT to the tool, SIGKILL after
   `STACKD_CANCEL_GRACE_SECONDS` (120 s). Delivery latency is bounded by the heartbeat interval (~20 s).
+- **Drain.** A worker stopped with SIGTERM/SIGINT claims nothing more, keeps heartbeating, lets
+  its running jobs finish and report, then exits; past `STACKD_DRAIN_TIMEOUT_SECONDS` (20 min) or
+  on a second signal it stops them as `cancel_job` would, and their runs fail `worker_shutdown`
+  (SPECS §7.1). Give the container more stop time than that (`stop_grace_period`).
 
 **Run an agent:**
 
@@ -625,8 +629,8 @@ bypasses the apply gate.
   run: a read-only `proposed` run (`triggered_by=schedule`) planning that commit with `-refresh-only`,
   claimed after any user run. Unlike a PR plan it keeps the environment's secrets (it runs code that
   already ran with them). The outcome lands on the environment's `drift_status` — `drifted` (eligible
-  approvers get an inbox alert), `in_sync` or `error` — and a successful apply clears it. Drift is
-  never auto-remediated.
+  approvers get an inbox alert), `in_sync` or `error` — and a successful apply clears it (not a
+  targeted `-target` apply, which is partial). Drift is never auto-remediated.
 - **Environment clones & rollouts.** `POST /api/v1/spaces/{space_id}/environment-clones` creates, in
   several stacks of a space at once, an environment modelled on an existing one — settings,
   governance and dependency edges. A **rollout** then plans and applies a set of environments along
@@ -665,7 +669,8 @@ bypasses the apply gate.
 | **Provenance** | where a resolved variable came from (`set:…`, `stack`, `env`, `dependency:…`, `mock`, `secret:…`) |
 | **Run** | one change to one environment, from plan to apply, driven by the state machine |
 | **Job** | what a worker executes for a run: the plan job, the apply job, or a command job |
-| **Command run** | one allowlisted tofu subcommand (`import`, `state rm`…) instead of plan → apply |
+| **Command run** | one allowlisted tofu subcommand (`import`, `state rm`, `force-unlock`…) instead of plan → apply; options limited to a per-command allowlist |
+| **Plan options** | `targets` / `replace` addresses on a run (`-target=` / `-replace=` on the plan only); never auto-confirmed; a targeted apply is partial (keeps drift, not a promotion source) |
 | **`transition()`** | the only thing that changes a run's state |
 | **Tier** | configurable catalog; gates apply via the user's `allowed_tiers` set (not ordered) |
 | **Four-eyes** | the person who triggered a run can't confirm it, on a `requires_four_eyes` tier, a `protected` environment, or when the environment requires it |
@@ -688,3 +693,5 @@ bypasses the apply gate.
 | **Plan comment** | threaded, optionally anchored review comment on a run; advisory |
 | **Inbox** | per-user in-app notifications (approval requests, run outcomes, mentions, drift, rollouts) |
 | **Secret source** | external secrets manager a variable references; fetched at claim, never stored |
+| **Service account** | a non-human user for automation, with expiring API tokens; reads and plans, never confirms (SPECS §23) |
+| **Config export / import** | a space's configuration as a JSON document by names (no secret); imported back by merge, never deleting (SPECS §22) |

@@ -65,3 +65,6 @@ site/
 
 # Showcase video: hosted outside git (rendered from docs/showcase/video-src)
 docs/showcase/*.mp4
+
+# Production compose deployment: real env files (examples are committed)
+deploy/production/*.env

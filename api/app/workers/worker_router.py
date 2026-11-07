@@ -385,7 +385,8 @@ async def _decide_after_plan(session: AsyncSession, worker: Worker, run: Run, re
         return
 
     # A rollout member (§21.5): a creates-only plan is confirmed under the rollout's approval.
-    if run.rollout_id is not None:
+    # (A rollout member never carries plan options; the guard keeps a targeted plan human-only.)
+    if run.rollout_id is not None and not run.plan_options:
         from app.rollouts.service import confirm_under_approval
 
         if await confirm_under_approval(session, run, fields=fields):
@@ -397,10 +398,12 @@ async def _decide_after_plan(session: AsyncSession, worker: Worker, run: Run, re
     # env's own autodeploy never confirms it (a changing or destroying plan, a canceled rollout).
     # Never a destroy either: only an approver passing can_apply (+ can_destroy) confirms one, and
     # never a plan its apply gates would refuse (mocks §9.3, a secret fallback §15.5) — those stop
-    # at `unconfirmed`, where the block is shown, rather than fail at the apply claim.
+    # at `unconfirmed`, where the block is shown, rather than fail at the apply claim. Never a
+    # targeted / replace plan (plan options, §3.5): a partial or forced change is always a human's.
     autoconfirm = (
         run.rollout_id is None
         and run.type == RunType.tracked
+        and not run.plan_options
         and env.autodeploy
         and not env.protected
         and not run.used_mocks
@@ -503,10 +506,11 @@ async def post_event(
         if run.state == RunState.applying and body.phase == "after_apply":
             # The apply succeeded, an after_apply hook failed (§8.3): the run fails and nothing
             # cascades, but the infra has changed — its outputs are recorded (§9.1), and the state
-            # matches reality again, so any drift is cleared as a finished apply does (§19).
+            # matches reality again, so any drift is cleared as a finished apply does (§19) —
+            # unless the apply was targeted (§19.4: it reconciled only part of the env).
             await capture_outputs(session, run, result.get("outputs") or {})
             applied_env = await session.get(Environment, run.environment_id)
-            if applied_env is not None:
+            if applied_env is not None and not run.is_targeted:
                 await clear_drift(session, applied_env, datetime.now(UTC))
         checks = result.get("checks") or []
         failed_check = any(c.get("status") == "fail" for c in checks)
@@ -586,9 +590,10 @@ async def post_event(
                 audit_action="run.applied",
                 audit_context={"environment_id": str(run.environment_id), "commit": run.commit_sha},
             )
-            # A successful apply reconciles state with reality → clears any drift (§19).
+            # A successful apply reconciles state with reality → clears any drift (§19). Not a
+            # targeted apply: it reconciled only its targets, the rest may still drift (§19.4).
             env = await session.get(Environment, run.environment_id)
-            if env is not None:
+            if env is not None and not run.is_targeted:
                 await clear_drift(session, env, datetime.now(UTC))
             await cascade(session, run)
         else:

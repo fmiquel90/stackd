@@ -34,6 +34,9 @@ class Settings(BaseSettings):
     # Comma-separated Google `hd` allowlist (§2.1). Empty admits no Google login (fail closed) and
     # is refused at production startup; dev login does not read it.
     stackd_allowed_domains: str = ""
+    # Comma-separated emails made `admin` when they first sign in (§2.1). Set, it replaces the
+    # "first user is admin" bootstrap: no race for the admin seat on a fresh instance.
+    stackd_bootstrap_admin_emails: str = ""
     google_client_id: str = ""
     google_client_secret: str = ""
     stackd_public_url: str = "http://localhost:8000"  # browser/OAuth + OIDC issuer (must be public)
@@ -149,6 +152,12 @@ class Settings(BaseSettings):
     @property
     def internal_url(self) -> str:
         return self.stackd_internal_url or self.stackd_public_url
+
+    @property
+    def bootstrap_admin_emails(self) -> set[str]:
+        return {
+            e.strip().lower() for e in self.stackd_bootstrap_admin_emails.split(",") if e.strip()
+        }
 
     @property
     def allowed_domains(self) -> set[str]:

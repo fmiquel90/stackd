@@ -3,7 +3,7 @@ from __future__ import annotations
 import uuid
 from datetime import datetime, timedelta
 
-from sqlalchemy import select
+from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.audit import record_audit
@@ -26,7 +26,8 @@ _log = get_logger("stackd.drift")
 
 async def _last_applied_sha(session: AsyncSession, env_id: uuid.UUID) -> str | None:
     """The commit currently deployed: the most recent run that finished after applying. Drift =
-    state vs reality at that commit, so a refresh-only plan must run against it (not git HEAD)."""
+    state vs reality at that commit, so a refresh-only plan must run against it (not git HEAD).
+    A targeted apply (§3.5) deployed only part of its commit: it is never the deployed commit."""
     return (
         await session.execute(
             select(Run.commit_sha)
@@ -35,6 +36,7 @@ async def _last_applied_sha(session: AsyncSession, env_id: uuid.UUID) -> str | N
                 Run.state == RunState.finished,
                 Run.type.in_((RunType.tracked, RunType.destroy)),
                 Run.commit_sha.is_not(None),
+                or_(Run.plan_options.is_(None), ~Run.plan_options.has_key("targets")),
             )
             .order_by(Run.finished_at.desc())
             .limit(1)

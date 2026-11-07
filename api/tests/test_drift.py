@@ -8,7 +8,9 @@ import httpx
 from tests.conftest_phase2 import event, login, make_env, make_stack, register_worker
 
 
-async def _applied_commit(env_id: str, sha: str = "applied1") -> None:
+async def _applied_commit(
+    env_id: str, sha: str = "applied1", plan_options: dict | None = None
+) -> None:
     """Seed a finished tracked run so the env has an applied commit to refresh against."""
     from app.db import SessionLocal
     from app.enums import RunState, RunType, TriggeredBy
@@ -23,6 +25,7 @@ async def _applied_commit(env_id: str, sha: str = "applied1") -> None:
                 triggered_by=TriggeredBy.manual,
                 commit_sha=sha,
                 finished_at=datetime.now(UTC),
+                plan_options=plan_options,
             )
         )
         await s.commit()
@@ -228,6 +231,86 @@ async def test_clear_drift_on_apply(client: httpx.AsyncClient) -> None:
     assert env_obj.drift_run_id is None
 
 
+async def _set_drifted(env_id: str) -> None:
+    from app.db import SessionLocal
+    from app.enums import DriftStatus
+    from app.models.environment import Environment
+
+    async with SessionLocal() as s:
+        env_obj = await s.get(Environment, uuid.UUID(env_id))
+        env_obj.drift_status = DriftStatus.drifted.value
+        env_obj.drift_run_id = uuid.uuid4()
+        await s.commit()
+
+
+async def _drift_status(env_id: str) -> str:
+    from app.db import SessionLocal
+    from app.models.environment import Environment
+
+    async with SessionLocal() as s:
+        return (await s.get(Environment, uuid.UUID(env_id))).drift_status
+
+
+async def _apply(client, wh, admin, env_id: str, **opts) -> None:
+    changes = {"has_changes": True, "summary": {"add": 1, "change": 0, "destroy": 0}}
+    run = (
+        await client.post(f"/api/v1/environments/{env_id}/runs", headers=admin, json=opts)
+    ).json()
+    await client.post("/worker/v1/jobs/claim", headers=wh)
+    await event(client, wh, run["id"], "phase_started", phase="planning")
+    await event(client, wh, run["id"], "phase_finished", result=changes)
+    assert (await client.post(f"/api/v1/runs/{run['id']}/confirm", headers=admin)).status_code == (
+        200
+    )
+    await client.post("/worker/v1/jobs/claim", headers=wh)
+    await event(client, wh, run["id"], "phase_finished", result={"outputs": {}})
+    final = (await client.get(f"/api/v1/runs/{run['id']}", headers=admin)).json()
+    assert final["state"] == "finished", final
+
+
+async def test_targeted_apply_does_not_clear_drift(client: httpx.AsyncClient) -> None:
+    # §19.4: a `-target` apply reconciled only its targets — the rest may still drift. A replace
+    # plan applies the whole configuration: it clears drift like any apply.
+    admin = await login(client, "admin")
+    wh = await register_worker(client, admin, "drift-targeted-pool")
+    stack = await make_stack(client, admin, "drift-targeted")
+    env = await make_env(client, admin, stack, "dev", "dev")
+
+    await _set_drifted(env)
+    await _apply(client, wh, admin, env, targets=["aws_s3_bucket.a"])
+    assert await _drift_status(env) == "drifted"
+
+    await _apply(client, wh, admin, env, replace=["aws_instance.web"])
+    assert await _drift_status(env) == "in_sync"
+
+
+async def test_targeted_apply_after_apply_failure_keeps_drift(client: httpx.AsyncClient) -> None:
+    # The after_apply-hook failure path records outputs and clears drift for a full apply (§8.3);
+    # a targeted one keeps the drift marker there too.
+    admin = await login(client, "admin")
+    wh = await register_worker(client, admin, "drift-targeted-fail-pool")
+    stack = await make_stack(client, admin, "drift-targeted-fail")
+    env = await make_env(client, admin, stack, "dev", "dev")
+    await _set_drifted(env)
+
+    changes = {"has_changes": True, "summary": {"add": 1, "change": 0, "destroy": 0}}
+    run = (
+        await client.post(
+            f"/api/v1/environments/{env}/runs", headers=admin, json={"targets": ["a.b"]}
+        )
+    ).json()
+    await client.post("/worker/v1/jobs/claim", headers=wh)
+    await event(client, wh, run["id"], "phase_started", phase="planning")
+    await event(client, wh, run["id"], "phase_finished", result=changes)
+    await client.post(f"/api/v1/runs/{run['id']}/confirm", headers=admin)
+    await client.post("/worker/v1/jobs/claim", headers=wh)
+    failed = await event(
+        client, wh, run["id"], "job_failed", phase="after_apply", result={"outputs": {}}
+    )
+    assert failed.status_code == 200, failed.text
+    assert await _drift_status(env) == "drifted"
+
+
 async def test_claim_prefers_user_run_over_drift(client: httpx.AsyncClient) -> None:
     from app.db import SessionLocal
     from app.enums import RunState, RunType, TriggeredBy
@@ -261,3 +344,31 @@ async def test_claim_prefers_user_run_over_drift(client: httpx.AsyncClient) -> N
     claim = await client.post("/worker/v1/jobs/claim", headers=wh)
     assert claim.status_code == 200, claim.text
     assert claim.json()["job_id"] == user_id  # the user run wins despite the drift run being older
+
+
+async def test_targeted_apply_is_not_the_applied_commit(client: httpx.AsyncClient) -> None:
+    """§3.5: a targeted apply deployed only part of its commit — a drift plan refreshes the last
+    full apply's commit, and git staleness still compares the branch head against it."""
+    from sqlalchemy import update
+
+    from app.db import SessionLocal
+    from app.drift.service import detect_drift
+    from app.models.environment import Environment
+
+    admin = await login(client, "admin")
+    stack = await make_stack(client, admin, "drift-targeted-baseline")
+    env = await make_env(client, admin, stack, "dev", "dev")
+    await _applied_commit(env, "full1")
+    await _applied_commit(env, "targ2", plan_options={"targets": ["terraform_data.a"]})
+    async with SessionLocal() as s:
+        await s.execute(
+            update(Environment).where(Environment.id == uuid.UUID(env)).values(head_sha="targ2")
+        )
+        await s.commit()
+
+    r = await client.get(f"/api/v1/environments/{env}", headers=admin)
+    assert r.json()["stale"] is True  # head = the targeted commit, but the env is not fully there
+
+    async with SessionLocal() as s:
+        assert await detect_drift(s, datetime.now(UTC)) >= 1
+    assert (await _drift_run(env))["commit_sha"] == "full1"

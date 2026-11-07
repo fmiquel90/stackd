@@ -57,6 +57,12 @@ class Run(Base):
 
     # For RunType.command: {"name": "<subcommand>", "args": [...]} (SPECS §4.3).
     command: Mapped[dict | None] = mapped_column(JSONB, default=None)
+    # Plan options (§3.5): {"targets": [...], "replace": [...]} — only the non-empty keys — passed
+    # as `-target=`/`-replace=` to the plan job only (§7.4). SQL NULL for a full plan (none_as_null:
+    # never the JSON `null`, so `IS NULL` is the "no options" test).
+    plan_options: Mapped[dict[str, list[str]] | None] = mapped_column(
+        JSONB(none_as_null=True), default=None
+    )
 
     plan_summary: Mapped[dict | None] = mapped_column(JSONB, default=None)
     check_results: Mapped[dict | None] = mapped_column(JSONB, default=None)
@@ -83,6 +89,12 @@ class Run(Base):
     logs_archived_at: Mapped[datetime | None] = mapped_column(default=None)
     error: Mapped[str | None] = mapped_column(String, default=None)
     created_at: Mapped[datetime] = created_at_col()
+
+    @property
+    def is_targeted(self) -> bool:
+        """A `-target` plan (§3.5): its apply is partial — it neither clears drift (§19.4) nor
+        is a promotion source (§9.7). A replace-only plan is not partial."""
+        return bool((self.plan_options or {}).get("targets"))
 
 
 class RunEvent(Base):

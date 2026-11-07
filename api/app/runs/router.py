@@ -55,6 +55,7 @@ async def create_run(
         commit_sha=body.commit_sha,
         group_root=body.with_downstream,
         secret_overrides=body.secret_overrides,
+        plan_options=body.plan_options(),
     )
 
 
@@ -67,7 +68,8 @@ async def run_command(
     env_id: uuid.UUID, body: CommandTriggerIn, user: CurrentUser, session: DbSession
 ) -> Run:
     """Run a one-off allowlisted tofu/terraform subcommand (import, state rm, …) as a `command`
-    run. Read-only commands need writer; mutating ones additionally require can_apply (§4.3)."""
+    run. Read-only commands need writer; mutating ones additionally require can_apply, and
+    `force-unlock` the admin role (§4.3)."""
     env = await guard_env_id(session, user, env_id, min_role=Role.writer)
     return await trigger_command_run(
         session, env, user, command=body.command, args=body.args, commit_sha=body.commit_sha

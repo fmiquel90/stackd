@@ -82,7 +82,8 @@ def _scan_clone(
 async def _envs_out(session: AsyncSession, envs: Sequence[Environment]) -> list[EnvironmentOut]:
     """Serialize envs with their git staleness (§9.6). `last_applied_sha` is the commit of each
     env's last finished tracked run — a tracked run only finishes after an apply or an empty plan —
-    fetched for the whole batch in one query."""
+    fetched for the whole batch in one query. A targeted apply (§3.5) is skipped: it deployed only
+    part of its commit, so the env still lags behind it."""
     last_applied: dict[uuid.UUID, str | None] = {}
     if envs:
         rows = await session.execute(
@@ -91,6 +92,7 @@ async def _envs_out(session: AsyncSession, envs: Sequence[Environment]) -> list[
                 Run.environment_id.in_([e.id for e in envs]),
                 Run.type == RunType.tracked,
                 Run.state == RunState.finished,
+                or_(Run.plan_options.is_(None), ~Run.plan_options.has_key("targets")),
             )
             .order_by(Run.environment_id, Run.finished_at.desc(), Run.id.desc())
             .distinct(Run.environment_id)

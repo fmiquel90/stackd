@@ -526,3 +526,38 @@ def test_unsupported_bucket_settings_only_warn(monkeypatch: pytest.MonkeyPatch) 
     store._ensure_bucket(client, "garage-bucket")
     assert client.created == ["garage-bucket"]
     assert warned == ["versioning", "encryption"]
+
+
+def test_s3_client_credentials(monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    """Static keys when set; in production without keys, the AWS default credential chain (no key
+    passed to boto3) — instance profile, task role, IRSA; dev keeps its placeholder keys."""
+    from types import SimpleNamespace
+
+    from app.statebackend import store
+
+    seen: list[dict] = []
+    monkeypatch.setattr(store.boto3, "client", lambda *a, **kw: seen.append(kw))
+
+    def settings(**kw):  # type: ignore[no-untyped-def]
+        base = {
+            "s3_access_key": "",
+            "s3_secret_key": "",
+            "is_production": False,
+            "s3_endpoint_url": None,
+            "aws_region": "eu-west-1",
+        }
+        return SimpleNamespace(**{**base, **kw})
+
+    monkeypatch.setattr(store, "get_settings", lambda: settings(is_production=True))
+    store._client()
+    assert "aws_access_key_id" not in seen[-1]
+    monkeypatch.setattr(
+        store,
+        "get_settings",
+        lambda: settings(is_production=True, s3_access_key="AK", s3_secret_key="SK"),
+    )
+    store._client()
+    assert seen[-1]["aws_access_key_id"] == "AK"
+    monkeypatch.setattr(store, "get_settings", lambda: settings())
+    store._client()
+    assert seen[-1]["aws_access_key_id"] == "test"

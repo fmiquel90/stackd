@@ -29,6 +29,19 @@ def test_token_bucket_allows_burst_then_blocks() -> None:
     assert exc.value.status == 429
 
 
+def test_limit_is_shared_across_processes(monkeypatch: pytest.MonkeyPatch) -> None:
+    """§20.3: with N uvicorn processes each holds 1/N of the burst, so the replica allows about
+    the configured burst, not N times it."""
+    _reset()
+    monkeypatch.setenv("WEB_CONCURRENCY", "2")
+    dep = rate_limit("procs", per_minute=60, burst=4)
+    req = _FakeRequest("5.6.7.8")
+    dep(req)
+    dep(req)
+    with pytest.raises(ProblemException):
+        dep(req)
+
+
 def test_token_bucket_is_per_ip() -> None:
     _reset()
     dep = rate_limit("t2", per_minute=60, burst=1)

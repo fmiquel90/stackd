@@ -155,6 +155,21 @@ tasks:
       - docker build -f deploy/images/opentofu.Dockerfile -t stackd/opentofu:1.12.2 .
       - docker build -f deploy/images/terraform.Dockerfile -t stackd/terraform:1.14.9 .
 
+  build-images:
+    desc: Build the production api/front/worker images (TAG=…, PREFIX=…; extra docker args after --)
+    vars:
+      PREFIX: '{{.PREFIX | default "stackd"}}'
+      TAG: '{{.TAG | default "latest"}}'
+    cmds:
+      - docker build -f api/Dockerfile -t {{.PREFIX}}/api:{{.TAG}} {{.CLI_ARGS}} api
+      - docker build -f front/Dockerfile -t {{.PREFIX}}/front:{{.TAG}} {{.CLI_ARGS}} front
+      - docker build -f worker/Dockerfile -t {{.PREFIX}}/worker:{{.TAG}} {{.CLI_ARGS}} worker
+
+  prod-config:
+    desc: Validate the production compose file against your env files (deploy/production)
+    dir: deploy/production
+    cmds: ["docker compose config --quiet && echo 'deploy/production: compose config OK'"]
+
   lint:
     desc: ruff check + ruff format --check (api; mypy runs in CI only)
     cmds:

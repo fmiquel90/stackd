@@ -3,13 +3,13 @@ from __future__ import annotations
 import uuid
 from datetime import datetime
 
-from sqlalchemy import Boolean, Enum, ForeignKey, String, UniqueConstraint
+from sqlalchemy import Boolean, Enum, ForeignKey, Index, String, UniqueConstraint, text
 from sqlalchemy.dialects.postgresql import ARRAY
 from sqlalchemy.dialects.postgresql import UUID as PGUUID
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db import Base, created_at_col, pk_uuid
-from app.enums import Role
+from app.enums import Role, UserKind
 
 
 class User(Base):
@@ -17,9 +17,19 @@ class User(Base):
     gate per-env apply (§2.4) — a user may apply to any environment whose tier is in the set."""
 
     __tablename__ = "users"
+    # §23: a service account's name (its email) is unique — migration 0036.
+    __table_args__ = (
+        Index(
+            "uq_users_service_account_email",
+            "email",
+            unique=True,
+            postgresql_where=text("kind = 'service'"),
+        ),
+    )
 
     id: Mapped[uuid.UUID] = pk_uuid()
-    google_sub: Mapped[str] = mapped_column(String, unique=True)
+    # NULL for a service account (§23): it never signs in with Google.
+    google_sub: Mapped[str | None] = mapped_column(String, unique=True, default=None)
     email: Mapped[str] = mapped_column(String)
     display_name: Mapped[str | None] = mapped_column(String, default=None)
     avatar_url: Mapped[str | None] = mapped_column(String, default=None)
@@ -27,6 +37,9 @@ class User(Base):
     allowed_tiers: Mapped[list[str]] = mapped_column(ARRAY(String), default=list)
     can_destroy: Mapped[bool] = mapped_column(Boolean, default=False)
     disabled: Mapped[bool] = mapped_column(Boolean, default=False)
+    kind: Mapped[UserKind] = mapped_column(
+        Enum(UserKind, name="user_kind"), default=UserKind.human, server_default="human"
+    )
     last_login_at: Mapped[datetime | None] = mapped_column(default=None)
     onboarded_at: Mapped[datetime | None] = mapped_column(default=None)  # first-login tour seen
     created_at: Mapped[datetime] = created_at_col()
@@ -34,6 +47,10 @@ class User(Base):
     @property
     def onboarded(self) -> bool:
         return self.onboarded_at is not None
+
+    @property
+    def is_service_account(self) -> bool:
+        return self.kind == UserKind.service
 
 
 class RefreshToken(Base):

@@ -1,0 +1,38 @@
+# Stackd worker — for a dedicated worker host (docs/guide/installing.md). Copy this file,
+# worker.env.example (as worker.env) and the "worker host" part of .env.example (as .env) to the
+# host, then `docker compose -f worker.compose.yml up -d`. compose.yml reuses this service for a
+# worker on the main host (profile `worker`).
+#
+# The agent drives the host's Docker Engine (STACKD_RUNNER=docker, SPECS §7.4): each tofu command
+# and hook runs in a fresh container of a runner image (deploy/images/). The Docker socket is
+# root-equivalent on this host: keep the host dedicated to workers.
+
+name: stackd-worker
+
+services:
+  worker:
+    image: ${STACKD_WORKER_IMAGE:-stackd/worker:latest}
+    # Only worker.env: no database, S3, master key, JWT or Google secret ever reaches the worker
+    # (tofu and platform hooks inherit its environment, minus STACKD_*).
+    env_file: worker.env
+    environment:
+      STACKD_RUNNER: docker
+      # The job containers bind-mount each workspace by its *host* path: the directory must be
+      # mounted at the identical path here (see volumes).
+      STACKD_WORKSPACE_ROOT: ${STACKD_WORKSPACE_ROOT:-/var/lib/stackd/workspaces}
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ${STACKD_WORKSPACE_ROOT:-/var/lib/stackd/workspaces}:${STACKD_WORKSPACE_ROOT:-/var/lib/stackd/workspaces}
+      # Private registry for the runner images: a Docker config.json (`auths` entries, no
+      # credential helper), read-only, then STACKD_REGISTRY_AUTH_FILE=/run/secrets/registry-auth.json
+      # in worker.env. Only the agent reads it; job containers never see it.
+      # - /etc/stackd/registry-auth.json:/run/secrets/registry-auth.json:ro
+    init: true # forwards SIGTERM to the agent, which drains (SPECS §7.1)
+    # On stop, the agent drains: no new job, the running ones finish (up to
+    # STACKD_DRAIN_TIMEOUT_SECONDS, default 1200 — and never before a running apply's own budget,
+    # STACKD_APPLY_TIMEOUT_SECONDS on the API, + 300 s), then the rest are stopped (SIGINT, SIGKILL
+    # after STACKD_CANCEL_GRACE_SECONDS, 120) and report. Docker must not kill it before:
+    # max(drain timeout, apply budget + 300) + 120 + 30 s — 1350 s with the defaults. Set
+    # STACKD_WORKER_STOP_GRACE (.env, compose duration) when you raise any of those.
+    stop_grace_period: ${STACKD_WORKER_STOP_GRACE:-23m}
+    restart: unless-stopped

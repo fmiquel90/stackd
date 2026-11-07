@@ -23,6 +23,12 @@ Resolution precedence per reference mirrors the rule for dependency mocks — **
 
 The fetched value flows into the run exactly like a stored sensitive variable: it lands in the worker's `tfvars`/`sensitive_env` and the agent masks it in all logs.
 
+!!! note "`pass-cli` on the API"
+    The API resolves references by running `pass-cli`. The production image ships it only when
+    built with its release binary and checksum:
+    `docker build -f api/Dockerfile --build-arg PASS_CLI_URL=<binary URL> --build-arg PASS_CLI_SHA256=<sha256> api`
+    (`task build-images -- --build-arg …`). Without it, every Proton Pass reference fails closed.
+
 ## 1. Create a secret source
 
 A secret source is **scoped to a space** and holds the machine credential used to fetch secrets. The credential is AES-256-GCM encrypted at rest and **write-only** — it is never returned by the API. Creating one requires the **admin** role.

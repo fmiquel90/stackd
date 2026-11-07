@@ -117,3 +117,36 @@ def test_command_over_budget_fails_with_clear_message(monkeypatch, tmp_path: Pat
     kind, kw = client.events[-1]
     assert kind == "job_failed"
     assert kw["result"] == {"error": "state rm exceeded the 900s time budget and was terminated"}
+
+
+def _argv(monkeypatch, tmp_path: Path, name: str, args: list[str]) -> list[str]:
+    """The subcommand's argv (the call after init) for a command job."""
+    calls: list[list[str]] = []
+
+    def fake_run_command(cmd: list[str], *a: object, **kw: object) -> int:
+        calls.append(cmd)
+        return 0
+
+    monkeypatch.setattr(main, "Workspace", _FakeWorkspace)
+    monkeypatch.setattr(main, "run_command", fake_run_command)
+    job = _job(name, "apply")
+    job["command"] = {"name": name, "args": args}
+    main.handle_command_run(
+        _FakeClient(), job, SimpleNamespace(runner="local", workspace_root=str(tmp_path))
+    )
+    assert calls[0][1] == "init"
+    return calls[-1]
+
+
+def test_force_unlock_runs_non_interactively(monkeypatch, tmp_path: Path) -> None:
+    # The user passes only the lock ID (§4.3); the agent adds `-force` so tofu never prompts.
+    argv = _argv(monkeypatch, tmp_path, "force-unlock", ["3f2b8c1e-5a4d"])
+    assert argv == ["tofu", "force-unlock", "-force", "3f2b8c1e-5a4d"]
+
+
+def test_command_args_passed_in_api_order(monkeypatch, tmp_path: Path) -> None:
+    # The API stores options first (validated against its allowlist); the agent adds nothing.
+    argv = _argv(monkeypatch, tmp_path, "state rm", ["-dry-run", "aws_s3_bucket.a"])
+    assert argv == ["tofu", "state", "rm", "-dry-run", "aws_s3_bucket.a"]
+    argv = _argv(monkeypatch, tmp_path, "refresh", ["-target=a.b"])
+    assert argv == ["tofu", "refresh", "-target=a.b"]

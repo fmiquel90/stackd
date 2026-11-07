@@ -1,0 +1,49 @@
+# Stackd edge proxy (deploy/production/compose.yml). One origin for the SPA and the API: the
+# session cookies are SameSite=Strict + Secure, and the SPA calls /api/v1 and opens the
+# /api/v1/ws WebSocket on its own origin.
+#
+#   STACKD_DOMAIN          the public host name (DNS A/AAAA → this host); certificates are
+#                          obtained automatically from Let's Encrypt / ZeroSSL (ports 80 + 443).
+#   CADDY_GLOBAL_OPTIONS   extra global options, e.g. `email ops@example.com` (ACME account), or
+#                          `local_certs` (Caddy's internal CA — tests, private networks).
+{
+	{$CADDY_GLOBAL_OPTIONS}
+}
+
+{$STACKD_DOMAIN} {
+	encode zstd gzip
+
+	header {
+		Strict-Transport-Security "max-age=31536000"
+		X-Content-Type-Options nosniff
+		-Server
+	}
+
+	# Handle blocks are mutually exclusive and tried in this order.
+
+	# Prometheus metrics are unauthenticated: never public (SPECS §20.1). Scrape the API on the
+	# internal network instead (http://api:8000/metrics). The API routes below are an allowlist,
+	# so this block is defense in depth.
+	@metrics path /metrics /metrics/*
+	handle @metrics {
+		respond 404
+	}
+
+	# Everything the API serves:
+	#   /api/*      REST + the /api/v1/ws WebSocket (upgrades are proxied as is)
+	#   /worker/*   worker protocol (long-poll claim)
+	#   /state/*    Terraform/OpenTofu HTTP backend — GET/POST/LOCK/UNLOCK, every method passes
+	#   /oidc/*, /.well-known/openid-configuration
+	#               the workload OIDC issuer: cloud providers (AWS STS) fetch the discovery
+	#               document and the JWKS over public https
+	#   /healthz    liveness, for an external load balancer or uptime check
+	@api path /api/* /worker/* /state/* /oidc/* /.well-known/openid-configuration /healthz
+	handle @api {
+		reverse_proxy api:8000
+	}
+
+	# The SPA (static files, fallback to index.html in the front image).
+	handle {
+		reverse_proxy front:8080
+	}
+}

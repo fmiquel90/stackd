@@ -60,6 +60,7 @@ nav:
   - Home: index.md
   - Guide:
       - Getting started: guide/getting-started.md
+      - Installing in production: guide/installing.md
       - Stacks & environments: guide/stacks-and-environments.md
       - Variables & secrets: guide/variables.md
       - External secret sources: guide/external-secrets.md
@@ -69,6 +70,7 @@ nav:
       - Dependencies & mocks: guide/dependencies-and-mocks.md
       - Importing an existing stack: guide/importing-existing-state.md
       - Exit & data portability: guide/leaving.md
+      - Backup & restore: guide/backup-restore.md
       - Cloud credentials (OIDC): guide/cloud-credentials.md
       - Workers & scaling: guide/workers-and-scaling.md
       - Notifications: guide/notifications.md

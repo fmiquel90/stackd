@@ -10,10 +10,13 @@ import { Button } from "@/ui/Button";
 import { Badge, Banner, Checkbox, Field, Input, Skeleton } from "@/ui/primitives";
 import { TypeNameDialog } from "@/ui/TypeNameDialog";
 import { SpaceMembers, Users } from "./access";
+import { ServiceAccounts } from "./serviceAccounts";
+import { SpaceConfiguration } from "./spaceConfig";
 
-// Settings (DESIGN §5.7): personal preferences for everyone (kept in memory, no browser storage),
-// then — for admins — the tier catalogue and users. Weakening a tier's safety or deleting it asks
-// for the typed name; user edits are staged and saved with a summary.
+// Settings (DESIGN §5.7, §5.10): personal preferences for everyone (kept in memory, no browser
+// storage), then — for admins — the tier catalogue, users, service accounts and space members;
+// for space admins, the space's configuration export / import. Weakening a tier's safety or
+// deleting it asks for the typed name; user edits are staged and saved with a summary.
 
 function Section({
   id,
@@ -335,11 +338,13 @@ export function SettingsPage() {
         <>
           <Tiers catalog={catalog.data ?? []} loading={catalog.isLoading} />
           <Users tierNames={tierNames} />
+          <ServiceAccounts />
           <SpaceMembers tierNames={tierNames} />
         </>
       ) : (
-        <p className="text-muted">Tiers and users are managed by administrators.</p>
+        <p className="text-muted">Tiers, users and service accounts are managed by administrators.</p>
       )}
+      <SpaceConfiguration />
       <Deployment />
     </div>
   );

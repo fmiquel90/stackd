@@ -1,0 +1,14 @@
+# Ignore file for api/Dockerfile only (BuildKit reads <Dockerfile>.dockerignore), so the dev image
+# build (Dockerfile.dev) is unaffected. The production build copies pyproject.toml, uv.lock,
+# alembic.ini, migrations/ and app/ only.
+.venv/
+**/__pycache__/
+**/*.py[cod]
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage*
+tests/
+e2e/
+.env
+.env.*

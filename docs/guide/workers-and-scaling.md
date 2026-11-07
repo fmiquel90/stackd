@@ -49,6 +49,29 @@ Runs that are **not executing** are never reclaimed: an `unconfirmed` run waits 
 
 A job holding **apply credentials** — an `applying` run, or a **mutating command** run (`import`, `state rm`/`mv`, `taint`, `untaint`, `refresh`) — is the exception: it is reclaimed only after the **apply window**, the apply budget plus a grace period (`stackd_apply_timeout_seconds` + `stackd_apply_lost_grace_seconds`, default 15 min + 5 min). The worker hard-kills its own apply or mutating command at the budget, and that job's state token and apply OIDC token expire at the end of the window. So a healthy long apply is never failed mid-flight, and by the time the environment is handed to another run, the lost worker can no longer write its state. As a second safeguard, the state backend refuses a write or a lock from any token whose run has already ended.
 
+### Stopping a worker
+
+A worker **drains** on its first SIGTERM or SIGINT (`docker stop`, a pod's termination, `Ctrl-C`):
+
+1. it claims no new job — a claim already waiting on the API is let through, and a job it returns is run, never dropped;
+2. it keeps heartbeating, so it stays online and a user's stop still reaches its jobs;
+3. its running jobs finish and report as usual; then it exits `0`.
+
+Past `STACKD_DRAIN_TIMEOUT_SECONDS` (default **1200 s**), or at once on a **second** signal, it stops the jobs still running the way a user's stop does — SIGINT to the tool, SIGKILL after `STACKD_CANCEL_GRACE_SECONDS` — waits for them to report, and exits `1`. Those runs fail with `worker_shutdown: …` (an interrupted apply may have changed part of the infrastructure, as with any stopped apply). The default is the API's apply window — the 15 min apply budget plus the 5 min grace: an apply that started just before the signal can still use its whole budget, and a run held longer than that would be reclaimed by the API (`worker_lost`) anyway. If you raise the API's `STACKD_APPLY_TIMEOUT_SECONDS`, raise it too.
+
+A running **apply** (or mutating command) is never stopped before its own apply budget — as the API sent it in the claim — plus 300 s, even past the drain timeout; a second signal still stops it at once.
+
+**The process manager must wait longer than the drain**, or it kills the worker mid-job — the very thing draining avoids. Allow max(drain timeout, apply budget + 300 s) + cancel grace + 30 s to report, **1380 s** with the defaults (raise it with `STACKD_APPLY_TIMEOUT_SECONDS`):
+
+| Where | Setting |
+|---|---|
+| Docker Compose | `stop_grace_period` in `deploy/production/worker.compose.yml`: `STACKD_WORKER_STOP_GRACE` in `.env` (default `23m`) |
+| plain Docker | `docker stop -t 1380 <container>` (default 10 s); the agent needs an init forwarding the signal (`--init`) |
+| Kubernetes | `terminationGracePeriodSeconds: 1380` on the worker pod (default 30 s) |
+| systemd | `TimeoutStopSec=1380` (default 90 s), `KillMode=mixed` |
+
+Stop workers **before** the API: a draining worker reports its jobs to it. The dev stack's hot reload (watchfiles) still cuts a running job off after 5 s.
+
 ### Time budgets
 
 Each job's subprocesses run in their own process group: whatever a hook or a tofu command leaves running there is killed once it exits, and a watchdog kills the whole group past its budget. A plan, an apply or a command killed this way fails the run with an "exceeded the …s time budget" error:
@@ -95,6 +118,7 @@ STACKD_POOL_TOKEN=$POOL_TOKEN \
 | `STACKD_WORKER_LABELS` | — | the worker's labels, comma-separated `key=value` (`tier=prod,region=eu-west-3`); added to its pool's, see [labels](#dedicate-a-pool-with-labels). A malformed value refuses to start |
 | `STACKD_MAX_CONCURRENT_JOBS` | `1` | jobs run at once, always on different environments |
 | `STACKD_CANCEL_GRACE_SECONDS` | `120` | after a stop request interrupts the tool (SIGINT), how long it gets to stop by itself before it is killed |
+| `STACKD_DRAIN_TIMEOUT_SECONDS` | `1200` | when the worker is stopped, how long its running jobs get to finish before they are stopped, see [Stopping a worker](#stopping-a-worker) |
 | `STACKD_HOOK_TIMEOUT_SECONDS` | `600` | each hook's time budget |
 | `STACKD_LEAK_TRIPWIRE` | `warn` | `fail` fails a plan whose non-sensitive output shows a secret |
 | `STACKD_WORKSPACE_ROOT` | `/tmp/stackd-ws` | where each job's workspace is created, then removed |
@@ -123,6 +147,7 @@ Every job runs in its own workspace, removed when the job ends. `STACKD_RUNNER` 
 | `STACKD_DOCKER_PIDS_LIMIT` | `1024` | per-container process limit |
 | `STACKD_DOCKER_TMP_SIZE` | `1g` | size of the writable `/tmp` tmpfs (the container's `HOME`) |
 | `STACKD_DOCKER_RUNTIME` | unset | an alternative OCI runtime, e.g. `runsc` (gVisor) |
+| `STACKD_REGISTRY_AUTH_FILE` | unset | a Docker `config.json` whose `auths` entry for the image's registry authenticates the pull of a runner image from a private registry (credential helpers not supported), see [Installing](installing.md#6-runner-images) |
 
 !!! warning "The worker's host is privileged"
     Access to the Docker socket is root-equivalent on that host: give the worker a dedicated VM, ideally with rootless Docker. If the agent itself runs in a container, mount `STACKD_WORKSPACE_ROOT` at the **same path** on the host and in the agent's container: the job containers mount it by host path.
@@ -164,6 +189,7 @@ Drift detection adds background load: every environment with `drift_check_enable
 
 ## See also
 
+- [Installing in production](installing.md#7-workers) — the production worker image and its compose file
 - [Cloud credentials](cloud-credentials.md)
 - [Observability](observability.md)
 - [SPECS — worker protocol (§7)](../SPECS.md)

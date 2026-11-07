@@ -33,13 +33,13 @@ A platform that orchestrates Terraform/OpenTofu runs (`plan` → human confirmat
 api/        FastAPI (Python 3.13+) — REST + WS, auth, worker API, state backend, OIDC issuer, audit
 worker/     agent (Python today; a Go rewrite is a post-MVP track) — poll, clone, hooks, terraform, OIDC→STS
 front/      React + Vite + TypeScript (SPA)
-deploy/     docker-compose.dev.yml (+ dev.aws overlay), garage.toml, images/ (OpenTofu/Terraform runner images); deployment Helm/Terraform (later)
+deploy/     docker-compose.dev.yml (+ dev.aws overlay), garage.toml, images/ (OpenTofu/Terraform runner images), production/ (reference single-host compose, docs/guide/installing.md); Helm/Terraform module (later)
 docs/       PLAN.md, SPECS.md, DESIGN.md, DEV.md (authoritative) + CONCEPTS.md, ARCHITECTURE.md, TESTING.md, api.md, guide/ (MkDocs site)
 scripts/    bootstrap-env.sh, bootstrap-s3.sh, seed-fixtures.sh (called by the Taskfile)
 Taskfile.yml  orchestration (see DEV.md)
 ```
 
-API modules (`api/app/`, cf. PLAN §2.1): `auth/ users/ spaces/ tiers/ stacks/ environments/ variables/ variable_sets/ secret_sources/ runs/ comments/ workers/ scheduler/ audit/ oidc/ statebackend/ dependencies/ drift/ rollouts/ hooks/ webhooks/ vcs/ notifications/ inbox/ observability/ ws/`, plus `models/` (the SQLAlchemy models, one file per aggregate) and a few cross-cutting top-level files (`config.py`, `db.py`, `errors.py`, `permissions.py`, `crypto.py`, `ratelimit.py`, `seed.py`…). One module = one domain, with its routes, Pydantic schemas, and logic. No catch-all `utils/` that grows endlessly.
+API modules (`api/app/`, cf. PLAN §2.1): `auth/ users/ spaces/ tiers/ stacks/ environments/ variables/ variable_sets/ secret_sources/ runs/ comments/ workers/ scheduler/ audit/ oidc/ statebackend/ dependencies/ drift/ rollouts/ portability/ hooks/ webhooks/ vcs/ notifications/ inbox/ observability/ ws/`, plus `models/` (the SQLAlchemy models, one file per aggregate) and a few cross-cutting top-level files (`config.py`, `db.py`, `errors.py`, `permissions.py`, `crypto.py`, `ratelimit.py`, `seed.py`…). One module = one domain, with its routes, Pydantic schemas, and logic. No catch-all `utils/` that grows endlessly.
 
 ---
 

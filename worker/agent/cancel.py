@@ -5,6 +5,12 @@ The API asks through the heartbeat (`cancel_job`); the heartbeat thread flips th
 graceful: SIGINT to the tool (tofu finishes the operation in flight, releases its state lock and
 exits), and only after a grace period SIGKILL. Whatever ends the job then raises `JobCanceled`, which
 `_run_job` reports as `job_canceled`.
+
+The agent's own shutdown (§7.1 "Drain") reuses the same path: past the drain timeout, or on a
+second stop signal, every running job's token is requested with `source="shutdown"`. A job stopped
+*only* by its worker's shutdown is reported `job_failed` (`worker_shutdown: …`), not
+`job_canceled` — nobody asked the API to cancel that run, and the API refuses a `job_canceled` it
+did not request.
 """
 
 from __future__ import annotations
@@ -31,6 +37,7 @@ class CancelToken:
         self._grace = grace
         self._lock = threading.Lock()
         self._requested = False
+        self._sources: set[str] = set()
         self._disarmed = False
         self._interrupted = False
         self._interrupt: Callable[[], None] | None = None
@@ -40,6 +47,12 @@ class CancelToken:
     @property
     def requested(self) -> bool:
         return self._requested
+
+    @property
+    def by_shutdown_only(self) -> bool:
+        """Stopped by the worker's own shutdown, with no stop request from the API."""
+        with self._lock:
+            return self._sources == {"shutdown"}
 
     @property
     def should_stop(self) -> bool:
@@ -52,8 +65,11 @@ class CancelToken:
         """The signal reached a live process: its result is a stop, not an outcome."""
         return self._interrupted
 
-    def request(self) -> None:
+    def request(self, source: str = "api") -> None:
+        """Ask the job to stop. `source`: "api" (a `cancel_job` command) or "shutdown" (the
+        worker's drain gave up, §7.1)."""
         with self._lock:
+            self._sources.add(source)
             if self._requested:
                 return
             self._requested = True
@@ -123,15 +139,29 @@ class JobRegistry:
         self._lock = threading.Lock()
         self._jobs: dict[str, CancelToken] = {}
         self._early: dict[str, float] = {}
+        self._shutting_down = False
 
     def register(self, job_id: str) -> CancelToken:
         token = CancelToken(self._grace)
         with self._lock:
             self._jobs[job_id] = token
             early = self._early.pop(job_id, None) is not None
+            shutting_down = self._shutting_down
         if early:
             token.request()
+        if shutting_down:  # claimed after the worker gave up draining: stopped before it starts
+            token.request("shutdown")
         return token
+
+    def shutdown(self) -> int:
+        """Stop every running job — and any registered later — through the cancel path (the
+        drain's fallback, §7.1). Returns how many were running."""
+        with self._lock:
+            self._shutting_down = True
+            tokens = list(self._jobs.values())
+        for token in tokens:
+            token.request("shutdown")
+        return len(tokens)
 
     def unregister(self, job_id: str) -> None:
         with self._lock:

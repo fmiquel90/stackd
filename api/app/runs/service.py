@@ -71,11 +71,19 @@ async def trigger_run(
     group_root: bool = False,
     secret_overrides: dict[str, str] | None = None,
     is_drift: bool = False,
+    plan_options: dict[str, list[str]] | None = None,
 ) -> Run:
     """Create a run in `queued` (SPECS §4). A plan changes nothing, so any writer+ may trigger;
     a `destroy` additionally requires can_destroy (§2.4). `group_root` starts a cascade group.
     `secret_overrides` is a break-glass map of variable→value used if the secret source is down
-    (§15.4) — an apply-affecting bypass, so it requires can_apply and is sealed AES-GCM."""
+    (§15.4) — an apply-affecting bypass, so it requires can_apply and is sealed AES-GCM.
+    `plan_options` (`targets`/`replace`, validated by TriggerRunIn) make a targeted / replace plan
+    (§3.5): only a human's tracked or destroy trigger carries them — never a proposed, drift,
+    cascade or rollout run — and such a run never auto-confirms (§4.2)."""
+    if plan_options and run_type not in (RunType.tracked, RunType.destroy):
+        raise ProblemException(422, "Plan options not allowed", "Only on a tracked or destroy run.")
+    if plan_options and plan_options.get("replace") and run_type != RunType.tracked:
+        raise ProblemException(422, "Plan options not allowed", "replace is tracked runs only.")
     # The membership only feeds the destroy / secret-override gates — don't query it for the
     # common plain trigger.
     membership = None
@@ -105,6 +113,7 @@ async def trigger_run(
         commit_sha=commit_sha,
         secret_overrides_encrypted=overrides_encrypted,
         is_drift=is_drift,
+        plan_options=plan_options or None,
     )
     session.add(run)
     await session.flush()
@@ -120,7 +129,12 @@ async def trigger_run(
         actor_email=user.email if user else None,
         target_kind="run",
         target_id=run.id,
-        context={"environment_id": str(env.id), "type": run_type.value, "tier": env.tier},
+        context={
+            "environment_id": str(env.id),
+            "type": run_type.value,
+            "tier": env.tier,
+            **({"plan_options": plan_options} if plan_options else {}),
+        },
     )
     await session.commit()
     await session.refresh(run)
@@ -133,7 +147,7 @@ async def promote_run(
     """Promote the commit currently applied on `source_env` to `target_env` of the SAME stack: a
     tracked run on the target pinned to the commit of the source's last applied run (§9.7).
     Triggering a plan needs writer; the apply is still gated by can_apply + 4-eyes at confirm."""
-    from sqlalchemy import select
+    from sqlalchemy import or_, select
 
     if source_env.stack_id != target_env.stack_id:
         raise ProblemException(
@@ -144,7 +158,8 @@ async def promote_run(
 
     # The last apply that went through: a confirmed tracked/destroy run that finished. Not a PR or
     # drift plan (proposed: never applied — a PR's commit may not even be merged), a command run,
-    # or an empty plan (finished without a confirmation).
+    # an empty plan (finished without a confirmation), or a targeted apply (§9.7: it applied only
+    # part of its commit, so that commit is not what the environment runs).
     src = (
         await session.execute(
             select(Run)
@@ -154,6 +169,7 @@ async def promote_run(
                 Run.type.in_((RunType.tracked, RunType.destroy)),
                 Run.confirmed_at.is_not(None),
                 Run.commit_sha.is_not(None),
+                or_(Run.plan_options.is_(None), ~Run.plan_options.has_key("targets")),
             )
             .order_by(Run.finished_at.desc())
             .limit(1)
@@ -206,19 +222,35 @@ async def trigger_command_run(
 ) -> Run:
     """Create a one-off `command` run (an allowlisted tofu/terraform subcommand, §4.3). Read-only
     commands need only writer (the route gate); mutating ones require `can_apply`."""
-    from app.runs.commands import ALLOWED_COMMANDS, is_mutating
+    from app.enums import Role
+    from app.runs.commands import (
+        ADMIN_ONLY_COMMANDS,
+        ALLOWED_COMMANDS,
+        CommandArgsError,
+        is_mutating,
+        normalize_args,
+    )
 
     if command not in ALLOWED_COMMANDS:
         raise ProblemException(
             400, "Command not allowed", f"'{command}' is not in the allowlist of runnable commands."
         )
-    # Args are passed verbatim to `<tool> <command> <args...>`. None of the allowlisted commands
-    # need option flags, and a leading-`-` arg (e.g. -chdir, -state, -backend) would widen what a
-    # command run can touch beyond its gate. Reject them.
-    bad_args = [a for a in args if a.startswith("-")]
-    if bad_args:
+    # Args are passed verbatim to `<tool> <command> <args...>`. A leading-`-` arg (e.g. -chdir,
+    # -state, -backend) would widen what a command run can touch beyond its gate: refused unless
+    # the command's option allowlist names it (§4.3) — options first in the stored order.
+    try:
+        args = normalize_args(command, args)
+    except CommandArgsError as exc:
+        raise ProblemException(400, "Argument not allowed", str(exc)) from exc
+    if command in ADMIN_ONLY_COMMANDS and user.role != Role.admin:
+        # Parity with DELETE /environments/{id}/state/lock (instance admin, §11.2).
+        raise ProblemException(403, "Forbidden", f"'{command}' requires the admin role.")
+    if command == "force-unlock" and env.managed_state:
         raise ProblemException(
-            400, "Argument not allowed", f"Command arguments must not start with '-': {bad_args}"
+            409,
+            "Managed state lock",
+            "This environment's state is managed by Stackd, which owns its lock: release it with "
+            f"DELETE /api/v1/environments/{env.id}/state/lock.",
         )
     if is_mutating(command):
         membership = await _env_membership(session, user, env)

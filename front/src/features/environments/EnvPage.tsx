@@ -4,11 +4,12 @@ import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom"
 import { ChevronDown, RefreshCw } from "lucide-react";
 import { ApiError } from "@/api/client";
 import { environments, rollouts, runs, stacks, tiers, users } from "@/api/resources";
-import type { TierDef } from "@/api/types";
+import type { PlanOptions, TierDef } from "@/api/types";
 import { useLiveSignals } from "@/api/stream";
 import { useSpaces } from "@/app/SpaceContext";
 import { useSession } from "@/auth/session";
 import { CommandPanel } from "@/components/CommandPanel";
+import { PlanOptionsFields, parseAddresses, toPlanOptions } from "@/components/PlanOptions";
 import { DependenciesPanel } from "@/components/DependenciesPanel";
 import { HooksPanel } from "@/components/HooksPanel";
 import { NotificationsPanel } from "@/components/NotificationsPanel";
@@ -51,7 +52,19 @@ export function EnvPage() {
   const qc = useQueryClient();
   const navigate = useNavigate();
   const [params, setParams] = useSearchParams();
-  const [dialog, setDialog] = useState<null | "promote" | "command" | "destroy" | "clone">(null);
+  const [dialog, setDialogState] = useState<null | "promote" | "command" | "destroy" | "clone" | "options">(
+    null,
+  );
+  // Plan options (SPECS §3.5) typed in the "Plan with options…" / destroy dialogs: one address per line.
+  const [targets, setTargets] = useState("");
+  const [replace, setReplace] = useState("");
+  // Every dialog opens (and closes) with empty plan options: addresses typed then cancelled in one
+  // dialog must never pre-fill the other — a destroy would silently become targeted.
+  const setDialog = (next: typeof dialog) => {
+    setTargets("");
+    setReplace("");
+    setDialogState(next);
+  };
 
   const stackList = useQuery({ queryKey: ["stacks"], queryFn: stacks.list });
   const stack = stackList.data?.find((s) => s.space_id === space?.id && s.name === stackName);
@@ -83,8 +96,11 @@ export function EnvPage() {
   });
 
   const plan = useMutation({
-    mutationFn: (opts: { type?: "tracked" | "destroy"; downstream?: boolean }) =>
-      runs.trigger(env!.id, opts.type ?? "tracked", !!opts.downstream),
+    mutationFn: (opts: {
+      type?: "tracked" | "destroy";
+      downstream?: boolean;
+      options?: PlanOptions | null;
+    }) => runs.trigger(env!.id, opts.type ?? "tracked", !!opts.downstream, opts.options),
     onSuccess: (r) => navigate(`/runs/${r.id}`),
   });
   const refresh = useMutation({
@@ -156,6 +172,7 @@ export function EnvPage() {
                     <MenuItem onSelect={() => plan.mutate({ downstream: true })}>
                       Plan with downstream
                     </MenuItem>
+                    <MenuItem onSelect={() => setDialog("options")}>Plan with options…</MenuItem>
                     <MenuItem onSelect={() => setDialog("promote")}>Promote from a sibling…</MenuItem>
                     <MenuItem onSelect={() => setDialog("command")}>Run a command…</MenuItem>
                     <MenuItem onSelect={() => setDialog("clone")}>New environment from…</MenuItem>
@@ -303,7 +320,7 @@ export function EnvPage() {
           title={`Run a command on ${env.name}`}
           description="One allowlisted subcommand. Mutating commands need the apply permission."
         >
-          <CommandPanel envId={env.id} />
+          <CommandPanel envId={env.id} managedState={env.managed_state} isAdmin={isAdmin} />
         </DialogContent>
       </Dialog>
       {dialog === "clone" && (
@@ -317,13 +334,50 @@ export function EnvPage() {
           onRollOut={(name) => rollOut.mutate(name)}
         />
       )}
+      <Dialog open={dialog === "options"} onOpenChange={(v) => setDialog(v ? "options" : null)}>
+        <DialogContent
+          wide
+          title={`Plan ${env.name} with options`}
+          description="A targeted or replace plan. The apply is confirmed by a human as usual."
+        >
+          <PlanOptionsFields
+            defaultOpen
+            targets={targets}
+            replace={replace}
+            onTargets={setTargets}
+            onReplace={setReplace}
+          />
+          <div className="mt-3 flex justify-end gap-2">
+            <Button variant="ghost" onClick={() => setDialog(null)}>
+              Cancel
+            </Button>
+            <Button
+              variant="primary"
+              disabled={!toPlanOptions(targets, replace)}
+              loading={plan.isPending && !!plan.variables?.options && plan.variables.type !== "destroy"}
+              onClick={() => plan.mutate({ options: toPlanOptions(targets, replace) })}
+            >
+              Plan
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
       <Dialog open={dialog === "destroy"} onOpenChange={(v) => setDialog(v ? "destroy" : null)}>
         <DialogContent title={`Plan a destroy of ${env.name}`}>
           <p className="mb-3">
-            This plans the destruction of every resource of the environment. Nothing is destroyed until
-            someone with the destroy permission confirms it — by typing{" "}
+            This plans the destruction of every resource of the environment (or only of the target addresses
+            below). Nothing is destroyed until someone with the destroy permission confirms it — by typing{" "}
             <span className="font-data">{env.name}</span>.
           </p>
+          <div className="mb-3">
+            <PlanOptionsFields
+              allowReplace={false}
+              targets={targets}
+              replace=""
+              onTargets={setTargets}
+              onReplace={() => {}}
+            />
+          </div>
           <div className="flex justify-end gap-2">
             <Button variant="ghost" onClick={() => setDialog(null)}>
               Cancel
@@ -331,9 +385,9 @@ export function EnvPage() {
             <Button
               variant="danger"
               loading={plan.isPending && plan.variables?.type === "destroy"}
-              onClick={() => plan.mutate({ type: "destroy" })}
+              onClick={() => plan.mutate({ type: "destroy", options: toPlanOptions(targets, "") })}
             >
-              Plan the destroy
+              {parseAddresses(targets).length ? "Plan the targeted destroy" : "Plan the destroy"}
             </Button>
           </div>
         </DialogContent>

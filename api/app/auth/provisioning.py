@@ -3,7 +3,8 @@ from __future__ import annotations
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.enums import Role
+from app.config import get_settings
+from app.enums import Role, UserKind
 from app.models.space import Space
 from app.models.user import User
 from app.spaces.service import membership_from_defaults
@@ -22,8 +23,9 @@ async def upsert_user(
 ) -> User:
     """Upsert on the stable `google_sub` (SPECS §2.1 step 6).
 
-    Bootstrap (§2.1): the very first user is `admin`, subsequent ones `reader`,
-    unless an explicit role is provided (dev personas, §2.4).
+    Bootstrap (§2.1): the very first user is `admin`, subsequent ones `reader`, unless an
+    explicit role is provided (dev personas, §2.4). With `STACKD_BOOTSTRAP_ADMIN_EMAILS` set, the
+    listed emails become `admin` instead and everyone else `reader` — no first-come admin seat.
     """
     user = (
         await session.execute(select(User).where(User.google_sub == google_sub))
@@ -31,8 +33,16 @@ async def upsert_user(
 
     if user is None:
         if role is None:
-            count = (await session.execute(select(func.count()).select_from(User))).scalar_one()
-            role = Role.admin if count == 0 else Role.reader
+            bootstrap = get_settings().bootstrap_admin_emails
+            if bootstrap:
+                role = Role.admin if email.lower() in bootstrap else Role.reader
+            else:
+                count = (
+                    await session.execute(
+                        select(func.count()).select_from(User).where(User.kind == UserKind.human)
+                    )
+                ).scalar_one()
+                role = Role.admin if count == 0 else Role.reader
         user = User(
             google_sub=google_sub,
             email=email,

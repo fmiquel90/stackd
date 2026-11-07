@@ -100,6 +100,27 @@ async def check_url_safe(url: str) -> tuple[httpx.URL, list[IPAddress]]:
     return parsed, addrs
 
 
+async def ensure_url_safe(url: str, loc: tuple[str, ...] = ("body", "url")) -> None:
+    """`check_url_safe` as an API answer: an unsafe URL is a 422 problem located at `loc`, exactly
+    like a failed body validator — the one shape every route (and the config import, §22) uses."""
+    from fastapi.exceptions import RequestValidationError
+
+    try:
+        await check_url_safe(url)
+    except ValueError as exc:
+        raise RequestValidationError(
+            [
+                {
+                    "type": "value_error",
+                    "loc": loc,
+                    "msg": f"Value error, {exc}",
+                    "input": url,
+                    "ctx": {"error": exc},
+                }
+            ]
+        ) from exc
+
+
 # Short human label per state for the message subject line.
 _LABEL = {
     "unconfirmed": "plan awaiting confirmation",

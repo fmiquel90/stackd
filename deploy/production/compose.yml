@@ -1,0 +1,164 @@
+# Stackd — reference single-host production deployment (docs/guide/installing.md).
+#
+#   ./init-env.sh          # copies the *.env.example files, generates the secrets (never overwrites)
+#   $EDITOR .env stackd.env
+#   docker compose up -d   # migrate (one-shot) → api → front → proxy
+#
+# One env file per recipient — so a secret cannot reach a container by accident:
+#   .env         compose itself (interpolation): domain, image references, ports, profiles
+#   stackd.env   api + migrate only: database, S3, master key, JWT, Google, OIDC signer
+#   worker.env   worker only: API URL, pool token, runner images — no platform secret
+#   migrate.env  (optional) migrate only: DATABASE_URL of the schema owner role
+#
+# Profiles (COMPOSE_PROFILES in .env):
+#   bundled-postgres   a PostgreSQL 18 container on this host (default: bring your own)
+#   worker             a worker on this host (after the first pool exists — see the guide)
+#
+# Networks: `edge` (proxy, front, api) — the only path in from outside; `backend` (api,
+# migrate, postgres) — the proxy, the SPA and the worker never reach the database; `agents`
+# (api, worker) — the worker reaches the API directly, not through the public proxy.
+
+name: stackd
+
+x-api-env: &api-env
+  # The public origin: OAuth redirect, session cookies, OIDC issuer (must be https). The settings
+  # are validated by the migrations too, so both services get it.
+  STACKD_PUBLIC_URL: ${STACKD_PUBLIC_URL:-https://${STACKD_DOMAIN}}
+
+x-api-common: &api-common
+  image: ${STACKD_API_IMAGE:-stackd/api:latest}
+  env_file: stackd.env
+  environment: *api-env
+  init: true
+  read_only: true
+  tmpfs:
+    - /tmp
+    # git/ssh write ~/.ssh/known_hosts (StrictHostKeyChecking=accept-new)
+    - /home/stackd:uid=10002,gid=10002,mode=0700
+  cap_drop: [ALL]
+  security_opt: ["no-new-privileges:true"]
+
+services:
+  postgres:
+    profiles: [bundled-postgres]
+    image: postgres:18@sha256:bd5dfa494a5a259704365813dbfa5fa6b3e69be7348d43b547f540c730478583
+    environment:
+      POSTGRES_USER: stackd
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-}
+      POSTGRES_DB: stackd
+    # PG18 keeps its data in a versioned subdirectory of this mount (docker-library/postgres#37).
+    volumes: ["pgdata:/var/lib/postgresql"]
+    networks: [backend]
+    shm_size: 256m
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U stackd -d stackd"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    restart: unless-stopped
+
+  # One-shot: schema migrations, then the idempotent bootstrap (the `default` space and the tier
+  # catalog, SPECS §3.0/§2.4). Never the dev demo data (`python -m app.seed`). Re-run on every
+  # upgrade, before the api starts (depends_on below).
+  migrate:
+    <<: *api-common
+    # migrate.env (optional) overrides DATABASE_URL with the schema owner's connection, when the
+    # api runs as a less privileged role (see the guide: database roles).
+    env_file:
+      - stackd.env
+      - path: migrate.env
+        required: false
+    command:
+      - sh
+      - -c
+      - >-
+        alembic upgrade head &&
+        python -c 'import asyncio; from app.seed import seed; asyncio.run(seed())'
+    networks: [backend]
+    depends_on:
+      postgres:
+        condition: service_healthy
+        required: false
+    restart: "no"
+
+  api:
+    <<: *api-common
+    environment:
+      <<: *api-env
+      # uvicorn trusts X-Forwarded-For/-Proto only from the proxy's network (client IPs in the
+      # audit trail and the per-IP rate limits).
+      FORWARDED_ALLOW_IPS: ${STACKD_EDGE_SUBNET:-172.31.250.0/24}
+      WEB_CONCURRENCY: ${STACKD_API_PROCESSES:-2}
+    networks: [edge, backend, agents]
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      postgres:
+        condition: service_healthy
+        required: false
+    restart: unless-stopped
+
+  front:
+    image: ${STACKD_FRONT_IMAGE:-stackd/front:latest}
+    read_only: true
+    # Caddy writes its instance id and storage locks under /data even when it serves static files:
+    # a tmpfs keeps the root read-only without the startup errors.
+    tmpfs:
+      - /data:uid=10003,gid=10003,mode=0700
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    networks: [edge]
+    restart: unless-stopped
+
+  proxy:
+    image: caddy:2.11.9-alpine@sha256:71d41fe4b1ae92a058abc87afe614178b996d8a6b96d0f4c71ae30606e5927e3
+    environment:
+      STACKD_DOMAIN: ${STACKD_DOMAIN:?set STACKD_DOMAIN in .env}
+      CADDY_GLOBAL_OPTIONS: ${CADDY_GLOBAL_OPTIONS:-}
+    ports:
+      - "${STACKD_HTTP_PORT:-80}:80"
+      - "${STACKD_HTTPS_PORT:-443}:443"
+      - "${STACKD_HTTPS_PORT:-443}:443/udp" # HTTP/3
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data # certificates + ACME account: keep it (rate limits)
+      - caddy_config:/config
+    cap_drop: [ALL]
+    cap_add: [NET_BIND_SERVICE]
+    security_opt: ["no-new-privileges:true"]
+    networks: [edge]
+    depends_on:
+      api:
+        condition: service_healthy
+      front:
+        condition: service_healthy
+    restart: unless-stopped
+
+  # The same service as on a dedicated worker host (worker.compose.yml), reaching the API over
+  # the `agents` network. See the guide for the docker runner's constraints.
+  worker:
+    profiles: [worker]
+    extends:
+      file: worker.compose.yml
+      service: worker
+    environment:
+      STACKD_API_URL: http://api:8000
+    networks: [agents]
+    depends_on:
+      api:
+        condition: service_healthy
+
+networks:
+  edge:
+    ipam:
+      config:
+        - subnet: ${STACKD_EDGE_SUBNET:-172.31.250.0/24}
+  backend:
+  agents:
+    # A fixed name, so it can be given to STACKD_DOCKER_NETWORK (single-host setups, see the guide).
+    name: stackd_agents
+
+volumes:
+  pgdata:
+  caddy_data:
+  caddy_config:
