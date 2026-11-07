@@ -108,6 +108,21 @@ jobs:
       - name: Build
         run: CGO_ENABLED=0 go build -o /dev/null .
 
+  # The asdf plugin of the CLI (bin/, SPECS §24): shellcheck, then a full list/download/install
+  # against a fake local release (no GitHub, no asdf needed).
+  asdf-plugin:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: cli/go.mod
+          cache-dependency-path: cli/go.sum
+      - name: Shellcheck
+        run: shellcheck -x bin/utils.bash bin/list-all bin/latest-stable bin/download bin/install bin/help.overview bin/help.links scripts/test-asdf-plugin.sh
+      - name: End-to-end
+        run: scripts/test-asdf-plugin.sh
+
   # The production images (docs/guide/installing.md) must keep building: no push, build only.
   # Also asserts the dev login module is absent from the API image (DEV §3).
   images:

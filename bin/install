@@ -1,0 +1,19 @@
+#!/usr/bin/env bash
+# asdf: install the downloaded binary into $ASDF_INSTALL_PATH/bin and check it runs.
+set -euo pipefail
+# shellcheck source=bin/utils.bash
+source "$(dirname "$0")/utils.bash"
+
+[ "${ASDF_INSTALL_TYPE:-version}" = version ] || fail "only released versions can be installed (got ${ASDF_INSTALL_TYPE})"
+src="${ASDF_DOWNLOAD_PATH:?}"
+dest="${ASDF_INSTALL_PATH:?}"
+
+(
+	mkdir -p "$dest/bin"
+	install -m 0755 "$src/$TOOL_NAME" "$dest/bin/$TOOL_NAME"
+	"$dest/bin/$TOOL_NAME" version >/dev/null
+	echo "* $TOOL_NAME ${ASDF_INSTALL_VERSION:-} installed"
+) || {
+	rm -rf "$dest"
+	fail "installing $TOOL_NAME ${ASDF_INSTALL_VERSION:-} failed"
+}

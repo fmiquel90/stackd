@@ -109,10 +109,10 @@ tasks:
       - "cd front && pnpm test"
 
   cli-build:
-    desc: Build the stackd CLI into ./bin/stackd (SPECS §24)
+    desc: Build the stackd CLI into cli/dist/stackd (SPECS §24)
     dir: cli
     cmds:
-      - CGO_ENABLED=0 go build -ldflags "-s -w -X github.com/fmiquel90/stackd/cli/internal/cmd.Version=$(git describe --tags --always --dirty)" -o ../bin/stackd .
+      - CGO_ENABLED=0 go build -ldflags "-s -w -X github.com/fmiquel90/stackd/cli/internal/cmd.Version=$(git describe --tags --always --dirty)" -o dist/stackd .
 
   cli-test:
     desc: gofmt check + go vet + go test for the stackd CLI
@@ -121,6 +121,10 @@ tasks:
       - test -z "$(gofmt -l .)" || { gofmt -l .; exit 1; }
       - go vet ./...
       - go test -race ./...
+
+  asdf-plugin-test:
+    desc: End-to-end test of the stackd asdf plugin (bin/) against a fake local release
+    cmds: [bash scripts/test-asdf-plugin.sh]
 
   push-change:
     desc: Simulate a merge in demo-network (staleness test)

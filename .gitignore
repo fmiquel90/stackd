@@ -70,5 +70,5 @@ docs/showcase/*.mp4
 deploy/production/*.env
 
 # ── Go (cli) ───────────────────────────────────────────────────────────────
-/bin/
+# build output (task cli-build); the root bin/ holds the asdf plugin's scripts, not binaries
 cli/dist/

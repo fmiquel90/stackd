@@ -1,0 +1,3 @@
+#!/usr/bin/env bash
+echo "stackd: command-line client for the Stackd API (static binary from the cli-v* GitHub releases)."
+echo "Set GITHUB_API_TOKEN for a private repository; ASDF_STACKD_DOWNLOAD_BASE for a mirror."

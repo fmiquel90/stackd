@@ -34,6 +34,7 @@ api/        FastAPI (Python 3.13+) — REST + WS, auth, worker API, state backen
 worker/     agent (Python today; a Go rewrite is a post-MVP track) — poll, clone, hooks, terraform, OIDC→STS
 front/      React + Vite + TypeScript (SPA)
 cli/        stackd CLI (Go, cobra) — a static binary over the public REST API only (SPECS §24)
+bin/        the CLI's asdf plugin (list-all, download, install…) — scripts, never build output
 deploy/     docker-compose.dev.yml (+ dev.aws overlay), garage.toml, images/ (OpenTofu/Terraform runner images), production/ (reference single-host compose, docs/guide/installing.md); Helm/Terraform module (later)
 docs/       PLAN.md, SPECS.md, DESIGN.md, DEV.md (authoritative) + CONCEPTS.md, ARCHITECTURE.md, TESTING.md, api.md, guide/ (MkDocs site)
 scripts/    bootstrap-env.sh, bootstrap-s3.sh, seed-fixtures.sh (called by the Taskfile)
