@@ -1,0 +1,3 @@
+#!/usr/bin/env bash
+echo "Guide:    https://github.com/fmiquel90/stackd/blob/main/docs/guide/cli.md"
+echo "Releases: https://github.com/fmiquel90/stackd/releases"

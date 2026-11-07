@@ -68,3 +68,7 @@ docs/showcase/*.mp4
 
 # Production compose deployment: real env files (examples are committed)
 deploy/production/*.env
+
+# ── Go (cli) ───────────────────────────────────────────────────────────────
+# build output (task cli-build); the root bin/ holds the asdf plugin's scripts, not binaries
+cli/dist/

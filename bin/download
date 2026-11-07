@@ -1,0 +1,29 @@
+#!/usr/bin/env bash
+# asdf: download and verify the release archive of $ASDF_INSTALL_VERSION into $ASDF_DOWNLOAD_PATH.
+set -euo pipefail
+# shellcheck source=bin/utils.bash
+source "$(dirname "$0")/utils.bash"
+
+[ "${ASDF_INSTALL_TYPE:-version}" = version ] || fail "only released versions can be installed (got ${ASDF_INSTALL_TYPE})"
+version="${ASDF_INSTALL_VERSION:?}"
+dest="${ASDF_DOWNLOAD_PATH:?}"
+os="$(detect_os)"
+arch="$(detect_arch)"
+asset="${TOOL_NAME}_${version}_${os}_${arch}.tar.gz"
+
+tmp="$(mktemp -d)"
+trap 'rm -rf "$tmp"' EXIT
+
+echo "* Downloading $TOOL_NAME $version ($os/$arch)..."
+download_asset "$version" "$asset" "$tmp/$asset" || fail "could not download $asset (does release ${TAG_PREFIX}$version exist?)"
+download_asset "$version" SHA256SUMS "$tmp/SHA256SUMS" || fail "could not download SHA256SUMS of ${TAG_PREFIX}$version"
+
+# Never install an archive whose checksum is missing or wrong.
+expected="$(awk -v f="$asset" '$2 == f || $2 == "*"f {print $1}' "$tmp/SHA256SUMS")"
+[ -n "$expected" ] || fail "$asset is not listed in SHA256SUMS"
+actual="$(sha256_of "$tmp/$asset")"
+[ "$expected" = "$actual" ] || fail "checksum mismatch for $asset (expected $expected, got $actual)"
+
+mkdir -p "$dest"
+tar -xzf "$tmp/$asset" -C "$dest" --strip-components=1
+[ -f "$dest/$TOOL_NAME" ] || fail "the archive holds no $TOOL_NAME binary"

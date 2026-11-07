@@ -33,6 +33,8 @@ A platform that orchestrates Terraform/OpenTofu runs (`plan` → human confirmat
 api/        FastAPI (Python 3.13+) — REST + WS, auth, worker API, state backend, OIDC issuer, audit
 worker/     agent (Python today; a Go rewrite is a post-MVP track) — poll, clone, hooks, terraform, OIDC→STS
 front/      React + Vite + TypeScript (SPA)
+cli/        stackd CLI (Go, cobra) — a static binary over the public REST API only (SPECS §24)
+bin/        the CLI's asdf plugin (list-all, download, install…) — scripts, never build output
 deploy/     docker-compose.dev.yml (+ dev.aws overlay), garage.toml, images/ (OpenTofu/Terraform runner images), production/ (reference single-host compose, docs/guide/installing.md); Helm/Terraform module (later)
 docs/       PLAN.md, SPECS.md, DESIGN.md, DEV.md (authoritative) + CONCEPTS.md, ARCHITECTURE.md, TESTING.md, api.md, guide/ (MkDocs site)
 scripts/    bootstrap-env.sh, bootstrap-s3.sh, seed-fixtures.sh (called by the Taskfile)
@@ -50,6 +52,7 @@ API modules (`api/app/`, cf. PLAN §2.1): `auth/ users/ spaces/ tiers/ stacks/ e
 - **API**: FastAPI, Pydantic v2, SQLAlchemy 2 **async**, Alembic (migrations), PostgreSQL 18 (cf. PLAN §6 — native `uuidv7()`, async I/O). **Python package and environment management: `uv`** (not pip, not Poetry) — `uv sync`, `uv run`, `uv add`; dependencies in `pyproject.toml` + committed `uv.lock`. No Redis/broker in the MVP — the queue is Postgres via `SELECT ... FOR UPDATE SKIP LOCKED` (SPECS §7.2).
 - **Front**: React 19, Vite 7, strict TypeScript, TanStack Query (server state), Tailwind v4 (`@tailwindcss/vite` plugin) + CSS tokens, re-skinned shadcn/ui (the shadcn way: Radix primitives wrapped by hand in `src/ui/`, no shadcn CLI — DESIGN §8), react-flow (`@xyflow/react`) + dagre (graphs), react-virtuoso + anser (ANSI logs). Package manager: **pnpm**. Details and unblocked directions: PLAN §6.
 - **Worker**: Python + watchfiles (hot reload), Docker runner in prod / local in dev.
+- **CLI**: Go (module in `cli/`, cobra), standalone: it never imports API code, it only calls `/api/v1`. Checks: `gofmt`, `go vet`, `go test` (`task cli-test`).
 - **Object**: S3 (Garage in dev) for tfstate, archived logs, artifacts.
 - **Target IaC**: **OpenTofu first**, Terraform as a user option (reason: BUSL license — see PLAN §5).
 
@@ -98,7 +101,7 @@ Everything goes through the **Taskfile** (see DEV.md, do not reintroduce a Makef
 
 ```
 task dev          # full local stack incl. the front on :5173 (compose + S3 bootstrap + migrations + fixtures + seed)
-task test         # API pytest + front vitest (the worker suite: cd worker && uv run pytest)
+task test         # API pytest + front vitest (the worker suite: cd worker && uv run pytest; the CLI: task cli-test)
 task e2e          # full non-regression scenario (the functional contract)
 task lint         # ruff check + ruff format --check (api)
 task seed         # idempotent demo data

@@ -115,11 +115,29 @@ task e2e    # the full plan → approve → apply → cascade scenario
 task reset  # start from scratch
 ```
 
-The worker agent has its own suite: `cd worker && uv run pytest`.
+The worker agent has its own suite: `cd worker && uv run pytest`; the CLI too: `task cli-test`.
 
 This is the dev stack — never expose it. To run Stackd for real, follow
 [Installing in production](https://fmiquel90.github.io/stackd/guide/installing/): production
 images and a reference Docker Compose deployment (`deploy/production/`).
+
+## Command-line client
+
+`stackd` is a single static binary to drive Stackd from scripts and CI: create stacks and
+environments, trigger a plan and wait for it, follow logs, export and import a space's
+configuration. It speaks the public API with a service-account token, so it can do exactly what
+that token can — and never confirms an apply: that stays a human's decision.
+
+```bash
+asdf plugin add stackd https://github.com/fmiquel90/stackd.git && asdf install stackd latest
+
+export STACKD_URL=https://stackd.example.com STACKD_TOKEN=stkd_…
+stackd stacks create network --space platform --repo-url https://github.com/acme/infra.git --tool-version 1.10
+stackd runs plan network/prod --wait --logs   # exits 0 once the plan awaits review, 2 if it failed
+```
+
+Read the [CLI guide](https://fmiquel90.github.io/stackd/guide/cli/) and the
+[command reference](https://fmiquel90.github.io/stackd/guide/cli-reference/).
 
 ## Learn more
 
@@ -127,6 +145,7 @@ images and a reference Docker Compose deployment (`deploy/production/`).
 |---|---|
 | 🚀 [Getting started](https://fmiquel90.github.io/stackd/guide/getting-started/) | Bring the stack up and drive your first run |
 | 📦 [Installing in production](https://fmiquel90.github.io/stackd/guide/installing/) | Production images, the reference Docker Compose deployment, upgrades |
+| ⌨️ [Command-line client](https://fmiquel90.github.io/stackd/guide/cli/) · [reference](https://fmiquel90.github.io/stackd/guide/cli-reference/) | Script Stackd and drive it from CI |
 | 🧠 [Concepts](docs/CONCEPTS.md) | Every concept, explained with examples |
 | 🏗️ [Architecture](docs/ARCHITECTURE.md) | How it works inside, with diagrams |
 | 📐 [Specification](docs/SPECS.md) | The technical source of truth |
@@ -140,6 +159,8 @@ images and a reference Docker Compose deployment (`deploy/production/`).
 api/      FastAPI (Python 3.13) — REST + worker API, auth, audit, OIDC issuer, state backend
 worker/   Pull-model agent (Python)
 front/    React 19 + Vite 7 + TypeScript
+cli/      The stackd command-line client (Go)
+bin/      asdf plugin for the CLI (asdf plugin add stackd <this repo>)
 deploy/   Dev stack (docker compose), production deployment (deploy/production), runner images (deploy/images)
 docs/     User guide and reference docs (published with MkDocs)
 scripts/  Bootstrap and fixture scripts run by the Taskfile

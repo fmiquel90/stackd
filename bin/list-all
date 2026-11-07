@@ -1,0 +1,10 @@
+#!/usr/bin/env bash
+# asdf: print every installable stackd version, space-separated, oldest first.
+set -euo pipefail
+# shellcheck source=bin/utils.bash
+source "$(dirname "$0")/utils.bash"
+
+versions="$(list_all_versions)"
+[ -n "$versions" ] || fail "no ${TAG_PREFIX}* release tag found in $STACKD_REPO"
+# shellcheck disable=SC2086 # word splitting joins the lines with spaces, as asdf expects
+echo $versions

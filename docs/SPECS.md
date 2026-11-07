@@ -2763,3 +2763,93 @@ the service account as actor.
 
 **Invariants preserved**: the apply gate (CLAUDE §4.4) — a service account never passes it; secrets
 (§4.3) — a token is stored hashed and shown once, never logged or audited; same-transaction audit.
+
+---
+
+## 24. `stackd` CLI (post-MVP)
+
+> **Status:** shipped (v1). Module `cli/` (Go, cobra), user guide `docs/guide/cli.md`. Adds no
+> endpoint and changes no permission: it is a client of §12 and §22, authenticated as in §23.
+
+**Need.** Scripting Stackd from a CI job or a terminal meant hand-written `curl` + `jq` (name →
+id lookups, polling a run, problem+json errors). A single static binary is easy to drop into a CI
+image or a laptop — hence Go rather than the Python of `api/` and `worker/`.
+
+**Boundaries.**
+
+- **Public API only.** The CLI imports no API code and calls nothing outside `/api/v1`: it works
+  against any instance, and an API change that breaks it is an API compatibility break.
+- **No new right.** It can do exactly what its token can. A service-account token (§23) creates no
+  space (instance admin), confirms no apply/destroy and runs no mutating command. So the CLI has
+  **no `confirm`** (nor `approve`, nor mutating `commands`): applying stays a named human's act,
+  in the UI where the plan is shown.
+- **Secrets.** The token is read from `STACKD_TOKEN` or `--token`, never printed (not even as a
+  flag default in `--help`), never written to disk by the CLI. A repo secret is read from stdin
+  (`--repo-secret-stdin`), never from a flag value (shell history, `ps`). The only secrets the CLI
+  prints are those the API returns once by design (worker-pool tokens of a `config import`).
+- **Transport.** Plain `http://` is refused for a non-loopback host (the token would cross the
+  network in clear) unless `--allow-http` / `STACKD_ALLOW_HTTP=1`. A run id is validated as a UUID
+  before it goes into a URL path.
+- **Stdin.** `--repo-secret-stdin` and `config import <space> -` read a pipe and refuse a
+  terminal (a typed secret would be echoed). After a first Ctrl-C the default signal handling is
+  restored, so a second one always stops the process.
+- **No local state.** No config file, no cache: `STACKD_URL`, `STACKD_TOKEN`, `STACKD_OUTPUT`
+  (`text` | `json`) or the matching flags.
+
+**Commands (v1).**
+
+```
+stackd spaces  list | create <name>
+stackd stacks  list [--space] | get | create <name> --space … --repo-url … --tool-version … | update | delete --yes
+stackd envs    list <stack> | get | create <stack> <name> --tier … --branch … | update | delete --yes
+stackd runs    list <env> | plan <env> [--destroy] [--target]… [--replace]… [--commit] [--with-downstream]
+               [--wait [--logs] [--timeout]] | get <run> | logs <run> [-f] | cancel <run> | discard <run>
+stackd config  export <space> [-f file] | import <space> <file|-> [--dry-run]
+stackd version | completion
+```
+
+- **References.** A space by id or name; a stack by id or name (`--space` when the name exists in
+  several spaces — names are unique per space only); an environment by id or `<stack>/<env>`. Names
+  are resolved through the list endpoints, so resolution sees only what the token can read.
+- **Writes** send only the flags given: `update` is a PATCH of those fields (`--clear-labels`
+  sends `labels: null`); `create` leaves the rest to the API's defaults (§3).
+- **Output.** `text` (tables, key/value) or `json` — the API's own response body, re-indented but
+  otherwise unchanged (a `--space` filter keeps the API's objects), so a script never depends on
+  the CLI's rendering. In JSON mode stdout always holds one JSON document: streamed log lines go to
+  stderr.
+- **`runs plan --wait`** and **`runs logs -f`** poll `GET /runs/{id}` (every 2 s) until the run is
+  `unconfirmed` (what automation can reach: the plan awaits a human) or terminal (§4.1); `--timeout`
+  (default 30 min, `0` = none) bounds the wait. A network error, a 5xx or a 429 is retried with
+  backoff (up to 30 s between tries) until that deadline; a 4xx ends it. Logs (`--logs`, `-f`) are
+  read incrementally — `?phase=&after_seq=` for each worker phase the run reached — then once in
+  full when the run settles; each `(phase, seq)` prints once, with a phase header whenever the
+  phase changes. Exit status, for both: **0** at `unconfirmed` or `finished`, **2** at `failed`,
+  `canceled` or `discarded`, **1** for any other error (API problem, timeout). A plan that consumed
+  mocks is flagged (it can't be applied by default, §9.3).
+- **Errors.** problem+json is rendered as `<status> <title>: <detail>` plus the validation details
+  of a 422 (`loc` and `msg` only, never the submitted value); a non-problem body (a proxy's page) is
+  cut to a short excerpt; a 401 without a token says so; a response over 64 MiB is an error, never
+  silently truncated.
+
+**Reference documentation.** `docs/guide/cli-reference.md` is generated from the cobra command
+tree (`cli/internal/docgen`, `task cli-docs`), never written by hand; a test fails when it no
+longer matches the commands, so CI catches a flag added without its documentation.
+
+**Distribution.** `task cli-build` → `cli/dist/stackd`. A `cli-vX.Y.Z` tag runs
+`.github/workflows/cli-release.yml`: static binaries (`CGO_ENABLED=0`) for linux/darwin/windows ×
+amd64/arm64, archives + `SHA256SUMS`, as a GitHub release. The CLI is versioned on its own.
+
+**asdf plugin.** The repository is its own asdf plugin (also usable by mise): the root `bin/`
+holds `list-all`, `latest-stable`, `download`, `install` and `help.*`, so
+`asdf plugin add stackd https://github.com/fmiquel90/stackd.git` works with no separate plugin
+repo. Versions are the `cli-v*` tags without the prefix (`cli-v0.2.0` → `0.2.0`; other tags are
+ignored). `download` fetches `stackd_<version>_<os>_<arch>.tar.gz` and `SHA256SUMS` and **refuses
+an archive whose checksum is missing or wrong**; linux and darwin, amd64 and arm64 (asdf has no
+Windows). Settings: `GITHUB_API_TOKEN` (private repository — assets then go through the GitHub
+API — or rate limits; never on the command line), `ASDF_STACKD_REPO` (a fork),
+`ASDF_STACKD_DOWNLOAD_BASE` (a mirror: `<base>/cli-v<version>/<asset>`). Tested end to end by
+`scripts/test-asdf-plugin.sh` against a fake local release (CI job `asdf-plugin`).
+
+**Not in v1.** An interactive login for humans (would need a public OAuth client and a loopback
+redirect on the API side — §2.1); variables and variable sets, hooks, dependencies, notifications,
+rollouts (reachable through `config import`, or the API directly); a Terraform provider.
