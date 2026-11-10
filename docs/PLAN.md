@@ -262,6 +262,7 @@ The platform becomes an **OIDC issuer** (the same mechanism as GitHub Actions OI
   - [x] (2) `environment-clones` (SPECS §21.2) + "New environment from…" dialog
   - [x] (3) rollouts: model, approval, gate, `advance_rollout()`, rollout page (SPECS §21.3–§21.8, DESIGN §5.11)
 - [ ] **Environment matrix** (track, not specified): declare `{eu-west-1, us-east-1} × {dev, prod}` on a stack and generate/synchronize the corresponding environments — multi-region is done by naming convention + variable sets in the MVP; standing one up across stacks is the job of environment rollouts above (one-shot, no synchronization)
+- [ ] **Declared interface** (SPECS §24): a stack's root-module variables and outputs read statically from the code (HCL parse, no terraform), cached by commit and following the env's head — Interface tab on the stack page, declared coverage on the env Inputs/Outputs tabs; input discovery reuses it — *status: specified*
 - [ ] HTTP run tasks (blocking external webhooks), advanced policies (OPA) if there is a real need
 - [ ] OIDC to GCP/Azure (the `CloudIntegration` interface is already generic)
 - [x] Scheduled drift detection — *status: shipped (SPECS §19)*

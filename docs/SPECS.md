@@ -1506,7 +1506,10 @@ POST /api/v1/stacks/{id}/check-repo                                    #   a run
 GET|POST /api/v1/stacks/{id}/environments ; GET|PATCH|DELETE /api/v1/environments/{id}
 POST /api/v1/environments/{id}/refresh-head        # Git staleness, §9.6
 POST /api/v1/environments/{id}/discover-inputs     # shallow clone + HCL parse → placeholder
-                                                   #   env variables for required inputs (§20.3)
+                                                   #   env variables for required inputs (§20.3, §24.4)
+GET  /api/v1/stacks/{id}/interface[?ref=]          # declared interface: root-module variables +
+GET  /api/v1/environments/{id}/interface           #   outputs, static parse cached by commit;
+                                                   #   the env variant adds coverage (§24) — specified, not built yet
 GET|POST /api/v1/stacks/{id}/variables ; PATCH|DELETE /api/v1/stacks/{id}/variables/{vid}
 GET|POST /api/v1/environments/{id}/variables ; PATCH|DELETE /api/v1/environments/{id}/variables/{vid}
 
@@ -2149,10 +2152,11 @@ span is emitted.
   holds 1/`WEB_CONCURRENCY` of the rate and burst, so a replica allows about the configured limit,
   not N times it (a client pinned to one process gets its share — stricter, never looser). The buckets live in an LRU hard-capped at 10 000 keys under a
   lock (the least recently used bucket is evicted at the cap), so memory stays bounded. Applied to `auth/google/callback` + `auth/refresh` (one shared
-  bucket, 30/min, burst 15), `webhooks/github` (120/min, burst 40), and `discover-inputs` (10/min, burst 5). 429
+  bucket, 30/min, burst 15), `webhooks/github` (120/min, burst 40), and `discover-inputs` (10/min, burst 5) — a bucket the
+  declared-interface endpoints also consume, on a cache miss only (§24.3). 429
   problem+json when empty. `/me` is intentionally unthrottled (the UI polls it). Dev login is not
   throttled (dev-only, dropped in prod).
-- **Discovery clone caps**: the input-discovery clone is already `--depth 1 --single-branch` +
+- **Discovery clone caps** (input discovery and the declared interface, §24): the discovery clone is already `--depth 1 --single-branch` +
   30 s-bounded; Phase H adds a post-clone **size budget** (`STACKD_DISCOVERY_MAX_REPO_MB`, default
   200 → 413) and a **`.tf` file cap** (`STACKD_DISCOVERY_MAX_TF_FILES`, default 500 → 413).
 
@@ -2763,3 +2767,128 @@ the service account as actor.
 
 **Invariants preserved**: the apply gate (CLAUDE §4.4) — a service account never passes it; secrets
 (§4.3) — a token is stored hashed and shown once, never logged or audited; same-transaction audit.
+
+---
+
+## 24. Declared interface — static discovery of inputs and outputs (post-MVP)
+
+> Goal: show a stack's **contract** — the variables its root module declares and the outputs it
+> publishes — **without running terraform**, before any plan or apply, and keep it current as the
+> code moves. It is read from the code at a commit, never from a state: it says what the code
+> *declares*, not what an environment *holds* (that stays `env_outputs`, §9.1). The UI calls it the
+> **declared interface**, never "state" or "outputs" alone.
+
+### 24.1 What is parsed
+
+The **root module** only: the `*.tf` files directly in `project_root` (non-recursive — child modules
+are implementation, not contract), with the file selection and symlink rules of input discovery
+(`tf_files`: a symlink is kept only when it resolves to a regular file inside the clone), the clone
+caps of §20.3 and HCL parsing only (`python-hcl2`) — no `tofu`/`terraform` process, no provider, no
+module download, no network beyond the clone.
+
+- **Override files** (`override.tf`, `*_override.tf`) are applied after the others, Terraform's way:
+  an override block's attributes replace those of the block of the same name. A non-override name
+  declared twice is a tofu error: last one wins and a warning is reported.
+- **`*.tf.json`** files are not parsed in this version: each is reported as a warning (the interface
+  may then be incomplete).
+- An **unparseable file** is skipped and reported as a warning (no longer silent) — one bad file
+  never sinks the rest.
+
+Per **variable**:
+
+| Field | Source |
+|---|---|
+| `name` | block label |
+| `type` | declared type expression as text (`string`, `list(string)`, `object({…})`); `null` when absent (= `any`) |
+| `required` | `true` when the block has no `default` attribute — `default = null` counts as a default (Terraform semantics: the variable is optional) |
+| `default` | the default as JSON, **omitted when `sensitive`** (it is in the repo, but Stackd never echoes a value flagged sensitive) and omitted with `default_truncated: true` above 4 KB |
+| `description`, `sensitive`, `nullable` (default `true`), `ephemeral` | the attributes; booleans false when absent |
+| `validations` | number of `validation` blocks (their conditions are not shown) |
+| `hcl` | complex type (list/set/tuple/map/object) → injected as HCL (§3.4) — as today |
+
+Per **output**: `name`, `description`, `sensitive`. The `value` expression is **never** returned (code
+detail, may name secrets), nor anything evaluated.
+
+### 24.2 API
+
+```
+GET /api/v1/stacks/{id}/interface[?ref=<branch>]     # reader. ref absent → the remote's default
+                                                     #   branch (HEAD); the commit is resolved by
+                                                     #   `git ls-remote`, then parsed (§24.3)
+GET /api/v1/environments/{id}/interface              # reader. At env.head_sha (§9.6) when known,
+                                                     #   else ls-remote of env.branch; + coverage
+```
+
+Both answer:
+
+```json
+{
+  "commit_sha": "125304e…", "ref": "main", "project_root": "infra/app",
+  "variables": [{"name": "region", "type": "string", "required": false, "default": "eu-west-1",
+                 "description": "…", "sensitive": false, "nullable": true, "ephemeral": false,
+                 "validations": 0, "hcl": false}],
+  "outputs":   [{"name": "vpc_id", "description": "…", "sensitive": false}],
+  "warnings":  [{"file": "legacy.tf.json", "message": "JSON configuration files are not parsed"}]
+}
+```
+
+The **environment** variant adds the comparison with what is configured — the only part that
+depends on the environment, computed on every request (never cached):
+
+- per variable, `status`:
+  - `set` — a terraform variable of that name resolves (§3.4, with its `provenance`), or an
+    `output_reference` of an incoming dependency feeds it (`provenance: "dependency:<stack>/<env>"`);
+  - `default` — nothing sets it and it is optional: the declared default applies;
+  - `missing` — nothing sets it and it is required: a plan would fail with *No value for required
+    variable*.
+- `undeclared`: terraform variables that resolve for the env but that the interface does not
+  declare (tofu only warns about them), each with its provenance. Those set at the env or stack
+  level are flagged; those coming from a variable set are informational — a set legitimately serves
+  many stacks.
+- per output, `captured: bool` (an `env_outputs` row exists), and `captured_undeclared`: names in
+  `env_outputs` the interface no longer declares (left by an earlier apply, §9.1).
+
+Values are never returned in this comparison — only names, statuses and provenances; a sensitive
+default is never returned either (§24.1). Read-only: **no audit event**, no write.
+
+Errors: clone/ls-remote failure → 502 (`Repository clone failed`, credentials redacted as today);
+`project_root` missing at that commit → 404 `Project root not found`; caps → 413 (§20.3); empty
+bucket → 429.
+
+### 24.3 Cache and refresh
+
+The interface of a commit never changes, so it is **cached by commit and never invalidated**:
+
+- key `(stack_id, repo_url, project_root, commit_sha)` — `stack_id` so a stack never reads another
+  stack's entry through a shared `repo_url` (their credentials and spaces may differ);
+  `repo_url`/`project_root` so a stack `PATCH` simply misses;
+- an in-process LRU (512 entries per process, no DB table, no migration); a miss on another replica
+  or process re-parses — cheap, and correct since entries are immutable;
+- on a miss the API clones `ref` (`clone_shallow`, §20.3) and caches the result under the commit the
+  clone **actually** checked out (the branch may have moved since the ls-remote); the response
+  carries that `commit_sha`.
+
+**Refreshing is moving the commit.** The environment variant follows `env.head_sha`, which the push
+webhook, the fallback poll and the env's *Refresh* button already keep current (§9.6): after a push
+the next view misses the cache and shows the new interface, with no new mechanism. The stack variant
+resolves its ref on each request (one `ls-remote`, 30 s bound).
+
+**Throttling**: a cache miss consumes the `discover` bucket of §20.3 (per IP, 10/min, burst 5); a hit
+consumes nothing.
+
+### 24.4 Input discovery reuses it
+
+`POST /environments/{id}/discover-inputs` keeps its contract (create the missing required inputs as
+env variables with empty placeholders, audited `environment.inputs_discovered`) but reads the
+variables from the environment's §24 interface (same commit resolution, same cache) instead of its own parse, and creates
+only the variables whose §24.2 `status` is `missing` — so an input fed by a dependency
+(`output_reference`) no longer gets a placeholder.
+
+### 24.5 Invariants preserved
+
+- No terraform process, no state read, no credential beyond the repo's (CLAUDE §1: the API stays
+  the source of truth for what is *deployed*; this is only what is *declared*).
+- Secrets: a sensitive variable's default and every output expression are never returned; the
+  environment comparison returns no value.
+- Read-only: no write, so no audit event; discovery's writes stay audited (§24.4).
+- No new dependency (python-hcl2 already used), no table, no migration.
