@@ -54,7 +54,7 @@ job, a fresh clone of the reviewed commit, runs `before_apply` and `after_apply`
 - **A failing `after_apply` hook** fails the run although the apply has already changed the
   infrastructure. Stackd still records the new outputs and clears the environment's drift flag,
   but nothing cascades from a failed run.
-- **Timeout.** Each hook gets 10 minutes (`STACKD_HOOK_TIMEOUT_SECONDS` on the worker). Past it the
+- **Timeout.** Each hook gets 10 minutes (`STACKD_HOOK_TIMEOUT_SECONDS` on the worker), less when the job's credentials expire sooner ([Time budgets](workers-and-scaling.md#time-budgets)). Past it the
   hook and every process it started are killed, and it fails by its own `on_failure` (detail
   `timed out after <n>s`).
 - **No background process.** When a hook's command exits, every process it left running in its
