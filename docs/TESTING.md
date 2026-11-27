@@ -42,7 +42,7 @@ Under the hood:
 
 | Task | Command | Needs |
 |---|---|---|
-| `task test` | `docker compose exec -T api uv run pytest` then `cd front && pnpm test` (`vitest run`) | compose `api` up, Docker for testcontainers |
+| `task test` | `cd api && uv run pytest` on the host, in a clean env (testcontainers needs the Docker socket, which the `api` container lacks; the Taskfile's `.env` dotenv carries the dev stack's settings), then `pnpm test` (`vitest run`) in a throwaway `front` container (`docker compose run --rm --no-deps`: `front/node_modules` holds the container's Linux binaries) | Docker, `uv` on the host; no running stack |
 | `task e2e` | `docker compose exec -T api uv run pytest e2e -v` (deps: `dev`) | full stack **+ a live worker** + the provisioned dev S3 |
 
 `task test` does **not** run the worker suite. Run it directly — it needs no DB and no stack (the
