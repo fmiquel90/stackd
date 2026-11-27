@@ -1812,6 +1812,10 @@ all. Counts in parentheses include parametrized cases and drift as tests are add
 <td>Issuer metadata + JWKS; the plan token's <code>sub</code>; apply uses the apply role; AssumeRole against moto STS; with a cloud integration a static AWS credential never reaches the job, without one it is passed as before.</td>
 </tr>
 <tr>
+<td><code>test_oidc_profiles.py</code> (17)</td>
+<td>Named AWS profiles (SPECS §10.6): stored, returned sorted and audited by name, replaced whole by a <code>PUT</code>; a bad name (charset, length, <code>default</code>, section injection), a non-role or malformed ARN, a bad region, an unknown field or more than 50 profiles → 422, nothing written; the claim gives each profile the role of the credential phase (plan roles for a plan, apply roles for an apply).</td>
+</tr>
+<tr>
 <td><code>test_oidc_kms.py</code> (16)</td>
 <td>The issuer's signing key in KMS (moto): signs through <code>kms:Sign</code>, a key that can't sign is refused; rotation keeps the old key published until its tokens expired, a known key can be reactivated; a token that can't be signed fails the job closed; concurrent claims and JWKS fetches provision the key once, a losing race uses the winner's key; transient signing failures leave the run to retry, permanent ones store a generic code only and discard what the payload staged.</td>
 </tr>
@@ -1968,7 +1972,7 @@ The tier gate (an approver without <code>prod</code>) and staleness stay manual 
 </tr>
 <tr>
 <td><code>test_hook_secrets.py</code> (11)</td>
-<td>What a repo hook can read: no saved plan, raw plan JSON, tfvars, OIDC token file or repo token in the workspace; the repo credential reaches the clone and <code>init</code> only, never a repo or platform hook — a deploy key (over a stand-in <code>ssh</code>) as a <code>0600</code> file while git and <code>init</code> run, a token as host-scoped git config with which a module download authenticates and writes no token, masked when <code>init</code> echoes it; a masked <code>plan.json</code> at <code>after_plan</code> (platform hooks get the raw one); symlinks a repo plants never receive a secret; the clone leaves no token under <code>.git/</code>; repo hooks get only the allowlisted worker env, platform hooks none of the agent's <code>STACKD_*</code> settings; command runs still read the tfvars; the real OpenTofu end to end.</td>
+<td>What a repo hook can read: no saved plan, raw plan JSON, tfvars, OIDC token file, AWS config file or repo token in the workspace; the repo credential reaches the clone and <code>init</code> only, never a repo or platform hook — a deploy key (over a stand-in <code>ssh</code>) as a <code>0600</code> file while git and <code>init</code> run, a token as host-scoped git config with which a module download authenticates and writes no token, masked when <code>init</code> echoes it; a masked <code>plan.json</code> at <code>after_plan</code> (platform hooks get the raw one); symlinks a repo plants never receive a secret; the clone leaves no token under <code>.git/</code>; repo hooks get only the allowlisted worker env, platform hooks none of the agent's <code>STACKD_*</code> settings; command runs still read the tfvars; the real OpenTofu end to end.</td>
 </tr>
 <tr>
 <td><code>test_exit_codes.py</code> (17)</td>
@@ -2049,6 +2053,10 @@ The tier gate (an approver without <code>prod</code>) and staleness stay manual 
 <tr>
 <td><code>test_oidc_precedence.py</code> (2)</td>
 <td>With OIDC credentials, the host's own AWS credentials never reach tofu or a platform hook; without them, the static fallback is untouched (SPECS §10.5).</td>
+</tr>
+<tr>
+<td><code>test_aws_profiles.py</code> (12)</td>
+<td>The generated AWS config file (SPECS §10.6): <code>[default]</code> mirroring the default role and one <code>[profile &lt;name&gt;]</code> per named profile with the job's token file and session name, parsed as INI; written 0600 only while a command runs, never through a planted symlink, absent without OIDC credentials; a name or value that could break out of its line or section fails the job; the platform's <code>AWS_CONFIG_FILE</code> wins over the host's and the run's, <code>AWS_PROFILE</code> is never set, the host credentials file is masked.</td>
 </tr>
 <tr>
 <td><code>test_repo_hook_policy.py</code> (2)</td>
@@ -2132,6 +2140,10 @@ The tier gate (an approver without <code>prod</code>) and staleness stay manual 
 <tr>
 <td><code>src/components/StackGeneralPanel.test.tsx</code> (5)</td>
 <td>The webhook secret field follows the API's writer gate: shown to a writer, hidden from a reader; a deploy key goes in a multi-line field and is sent whole, a stored one is never filled back and is omitted when left blank; a token stays a password input.</td>
+</tr>
+<tr>
+<td><code>src/components/CloudPanel.test.tsx</code> (4)</td>
+<td>Named AWS profiles (SPECS §10.6): the API map round-trips through sorted rows (empty region → null); a nameless, duplicated or <code>default</code> profile blocks Save; editable by an admin, listed read-only for others.</td>
 </tr>
 </tbody>
 </table>

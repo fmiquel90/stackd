@@ -1456,7 +1456,7 @@ next to the repo included: the deploy key as a <code>0600</code> file outside th
 config in <code>init</code>'s environment, scoped to the repo's host and written nowhere. No hook, platform or
 repo, gets either (SPECS §8.3).</p>
 <p><strong>Hooks and checks.</strong> Platform hooks run first, then the repo's <code>.stackd.yml</code> hooks; a repo hook gets
-no secret (an allowlisted env, a masked <code>plan.json</code>, no tfvars or token file on disk). Every check
+no secret (an allowlisted env, a masked <code>plan.json</code>, no tfvars, token file or AWS config file on disk). Every check
 result, with the stage it ran at, is kept on the run (<code>check_results</code>). A failing <code>fail</code> check stops
 the job at its stage; a failing <code>after_apply</code> check fails the run after the infrastructure changed:
 its outputs are recorded, nothing cascades. At the apply stages, repo hooks run only on a tier with

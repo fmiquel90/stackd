@@ -778,6 +778,23 @@
     </span>
   </a>
   
+    <nav class="md-nav" aria-label="2. Attach a cloud integration to the environment">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#named-aws-profiles" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Named AWS profiles
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
 </li>
       
         <li class="md-nav__item">
@@ -1272,6 +1289,23 @@
     </span>
   </a>
   
+    <nav class="md-nav" aria-label="2. Attach a cloud integration to the environment">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#named-aws-profiles" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Named AWS profiles
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
 </li>
       
         <li class="md-nav__item">
@@ -1462,23 +1496,75 @@ different role or even a different AWS account). The resource is CRUD over:</p>
 <p>Writing or deleting it is admin-only and audited (<code>cloud_integration.created</code>, <code>.updated</code>,
 <code>.deleted</code>); <code>session_duration</code> defaults to 3600 s and is capped per phase as above. AWS is the MVP
 target; GCP and Azure come later.</p>
+<h3 id="named-aws-profiles">Named AWS profiles<a class="headerlink" href="#named-aws-profiles" title="Permanent link">&para;</a></h3>
+<p>Terraform written for people who sign in with AWS SSO usually <strong>names its profiles</strong>: a provider
+with <code>profile = "prod-admin"</code>, a backend <code>.config</code> file with <code>profile = "tfstates"</code>, a
+<code>terraform_remote_state</code> whose <code>config</code> carries a <code>profile</code> — often in other AWS accounts. Under a
+single OIDC role such code fails (<code>failed to get shared config profile</code>). Rather than rewrite it,
+map each profile name to a pair of roles on the integration:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a>curl<span class="w"> </span>-s<span class="w"> </span>-X<span class="w"> </span>PUT<span class="w"> </span>localhost:8000/api/v1/environments/<span class="nv">$PROD</span>/cloud-integration<span class="w"> </span>-H<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$AUTH</span><span class="s2">&quot;</span><span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a><span class="w">  </span>-H<span class="w"> </span><span class="s1">&#39;content-type: application/json&#39;</span><span class="w"> </span>-d<span class="w"> </span><span class="s1">&#39;{</span>
+<a id="__codelineno-6-3" name="__codelineno-6-3" href="#__codelineno-6-3"></a><span class="s1">  &quot;plan_role_arn&quot;:  &quot;arn:aws:iam::111111111111:role/stackd-prod-plan&quot;,</span>
+<a id="__codelineno-6-4" name="__codelineno-6-4" href="#__codelineno-6-4"></a><span class="s1">  &quot;apply_role_arn&quot;: &quot;arn:aws:iam::111111111111:role/stackd-prod-apply&quot;,</span>
+<a id="__codelineno-6-5" name="__codelineno-6-5" href="#__codelineno-6-5"></a><span class="s1">  &quot;region&quot;: &quot;eu-west-1&quot;,</span>
+<a id="__codelineno-6-6" name="__codelineno-6-6" href="#__codelineno-6-6"></a><span class="s1">  &quot;profiles&quot;: {</span>
+<a id="__codelineno-6-7" name="__codelineno-6-7" href="#__codelineno-6-7"></a><span class="s1">    &quot;prod-admin&quot;: {</span>
+<a id="__codelineno-6-8" name="__codelineno-6-8" href="#__codelineno-6-8"></a><span class="s1">      &quot;plan_role_arn&quot;:  &quot;arn:aws:iam::111111111111:role/stackd-prod-plan&quot;,</span>
+<a id="__codelineno-6-9" name="__codelineno-6-9" href="#__codelineno-6-9"></a><span class="s1">      &quot;apply_role_arn&quot;: &quot;arn:aws:iam::111111111111:role/stackd-prod-apply&quot;</span>
+<a id="__codelineno-6-10" name="__codelineno-6-10" href="#__codelineno-6-10"></a><span class="s1">    },</span>
+<a id="__codelineno-6-11" name="__codelineno-6-11" href="#__codelineno-6-11"></a><span class="s1">    &quot;tfstates&quot;: {</span>
+<a id="__codelineno-6-12" name="__codelineno-6-12" href="#__codelineno-6-12"></a><span class="s1">      &quot;plan_role_arn&quot;:  &quot;arn:aws:iam::222222222222:role/stackd-tfstates-plan&quot;,</span>
+<a id="__codelineno-6-13" name="__codelineno-6-13" href="#__codelineno-6-13"></a><span class="s1">      &quot;apply_role_arn&quot;: &quot;arn:aws:iam::222222222222:role/stackd-tfstates-apply&quot;,</span>
+<a id="__codelineno-6-14" name="__codelineno-6-14" href="#__codelineno-6-14"></a><span class="s1">      &quot;region&quot;: &quot;eu-west-1&quot;</span>
+<a id="__codelineno-6-15" name="__codelineno-6-15" href="#__codelineno-6-15"></a><span class="s1">    }</span>
+<a id="__codelineno-6-16" name="__codelineno-6-16" href="#__codelineno-6-16"></a><span class="s1">  }</span>
+<a id="__codelineno-6-17" name="__codelineno-6-17" href="#__codelineno-6-17"></a><span class="s1">}&#39;</span>
+</code></pre></div>
+<p>The same code keeps running by hand: people keep their own <code>~/.aws/config</code> with the same profile
+names, and Stackd's runs resolve them to the roles above. Each job gets the role of its phase for
+every profile — the plan roles for a plan, the apply roles for an apply — all assumed with the
+job's one token.</p>
+<p>Rules (a <code>422</code> otherwise): at most 50 profiles; a name of letters, digits, <code>.</code>, <code>_</code> and <code>-</code>
+(64 characters at most, starting with a letter or digit); <code>default</code> is reserved (it is the
+integration's own roles); both role ARNs are IAM role ARNs; <code>region</code> is optional. A <code>PUT</code> replaces
+the whole set. In the UI, the environment's <strong>Settings → Cloud integration</strong> panel edits them as
+rows.</p>
+<p><strong>IAM side.</strong> A profile's role is a role like the others: in <strong>its</strong> account, create the IAM OIDC
+identity provider for Stackd's issuer, and give the role a trust policy with the <strong>same</strong> <code>aud</code> and
+<code>sub</code> conditions as the default roles — <code>tier</code> and <code>phase</code> pinned, so a profile's apply role trusts
+<code>run:prod:*:apply</code> and nothing else.</p>
+<div class="admonition note">
+<p class="admonition-title">A plan role on an S3 backend with <code>use_lockfile</code></p>
+<p>With unmanaged state on an S3 backend using <code>use_lockfile = true</code>, a plan takes the state lock:
+the plan role of the backend's profile needs <code>s3:PutObject</code> and <code>s3:DeleteObject</code> on the
+<code>&lt;key&gt;.tflock</code> objects (and only read access to the state object itself).</p>
+</div>
 <h2 id="3-test-it">3. Test it<a class="headerlink" href="#3-test-it" title="Permanent link">&para;</a></h2>
 <p>A built-in <strong>AssumeRole test</strong> verifies the trust chain without launching a run:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a>curl<span class="w"> </span>-s<span class="w"> </span>-X<span class="w"> </span>POST<span class="w"> </span>localhost:8000/api/v1/environments/<span class="nv">$PROD</span>/cloud-integration/test<span class="w"> </span>-H<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$AUTH</span><span class="s2">&quot;</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a>curl<span class="w"> </span>-s<span class="w"> </span>-X<span class="w"> </span>POST<span class="w"> </span>localhost:8000/api/v1/environments/<span class="nv">$PROD</span>/cloud-integration/test<span class="w"> </span>-H<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$AUTH</span><span class="s2">&quot;</span>
 </code></pre></div>
 <p>It (admin-only) signs a probe <code>plan</code> token and attempts the <code>AssumeRoleWithWebIdentity</code> on the
 <strong>plan role</strong> end to end — a fast way to catch a missing identity provider, a too-narrow <code>sub</code>
 condition, or an unreachable issuer. It returns the assumed role's ARN, or a <code>422</code> with the STS
-error. The apply role is not exercised: its trust policy is only tested by a real apply.</p>
+error. The apply role is not exercised: its trust policy is only tested by a real apply. Nor are
+the named profiles' roles: a plan job is their first test.</p>
 <h2 id="what-the-agent-injects">What the agent injects<a class="headerlink" href="#what-the-agent-injects" title="Permanent link">&para;</a></h2>
 <p>When a <code>cloud_integration</code> is set, the worker exports, <strong>to tofu and to platform hooks only</strong>:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a>AWS_WEB_IDENTITY_TOKEN_FILE = &lt;path to the token file, outside the checkout&gt;
-<a id="__codelineno-7-2" name="__codelineno-7-2" href="#__codelineno-7-2"></a>AWS_ROLE_ARN                = &lt;plan_role_arn | apply_role_arn for this phase&gt;
-<a id="__codelineno-7-3" name="__codelineno-7-3" href="#__codelineno-7-3"></a>AWS_ROLE_SESSION_NAME       = stackd-&lt;run_id&gt;
-<a id="__codelineno-7-4" name="__codelineno-7-4" href="#__codelineno-7-4"></a>AWS_REGION                  = &lt;region, when the integration sets one&gt;
+<div class="highlight"><pre><span></span><code><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a>AWS_WEB_IDENTITY_TOKEN_FILE = &lt;path to the token file, outside the checkout&gt;
+<a id="__codelineno-8-2" name="__codelineno-8-2" href="#__codelineno-8-2"></a>AWS_ROLE_ARN                = &lt;plan_role_arn | apply_role_arn for this phase&gt;
+<a id="__codelineno-8-3" name="__codelineno-8-3" href="#__codelineno-8-3"></a>AWS_ROLE_SESSION_NAME       = stackd-&lt;run_id&gt;
+<a id="__codelineno-8-4" name="__codelineno-8-4" href="#__codelineno-8-4"></a>AWS_REGION                  = &lt;region, when the integration sets one&gt;
+<a id="__codelineno-8-5" name="__codelineno-8-5" href="#__codelineno-8-5"></a>AWS_CONFIG_FILE             = &lt;path to a generated AWS config file, beside the token file&gt;
+<a id="__codelineno-8-6" name="__codelineno-8-6" href="#__codelineno-8-6"></a>AWS_SHARED_CREDENTIALS_FILE = /dev/null
 </code></pre></div>
-<p>The token file is written right before each tofu command or platform hook and deleted right
-after: it is never on disk while a repo hook runs.</p>
+<p>The generated config file has a <code>[default]</code> section with the phase's default role, and one
+<code>[profile &lt;name&gt;]</code> section per named profile, each with <code>role_arn</code>, <code>web_identity_token_file</code>
+(the job's token), <code>role_session_name = stackd-&lt;run_id&gt;</code> and its <code>region</code> when set. <code>AWS_PROFILE</code>
+is never set: code that names no profile runs as the default role, code that names one gets that
+profile's role. Region precedence is the AWS SDK's: a <code>region</code> in the code, then <code>AWS_REGION</code>
+(the integration's, else a run variable), then the profile's own <code>region</code>.</p>
+<p>The token file and the config file are written right before each tofu command or platform hook
+and deleted right after: neither is ever on disk while a repo hook runs.</p>
 <p>The AWS SDK inside the providers performs the AssumeRoleWithWebIdentity natively. The
 session name ties every CloudTrail entry back to the run — and thus to the human who
 confirmed the apply.</p>
@@ -1490,8 +1576,9 @@ not be able to assume the apply role and exfiltrate). Platform hooks always get 
 <code>aws-credentials</code> variable set).</p>
 <p>With a <code>cloud_integration</code>, the OIDC role is the job's <strong>only</strong> AWS identity: Stackd drops every
 static AWS credential resolved for the environment (<code>AWS_ACCESS_KEY_ID</code>, <code>AWS_SECRET_ACCESS_KEY</code>,
-<code>AWS_SESSION_TOKEN</code>, <code>AWS_PROFILE</code>, the credential files…) before the job starts — the AWS SDK
-would otherwise use them before the OIDC token — and the worker drops its own. The environment's
+<code>AWS_SESSION_TOKEN</code>, <code>AWS_PROFILE</code>, <code>AWS_CONFIG_FILE</code>, the credential files…) before the job
+starts — the AWS SDK would otherwise use them before the OIDC token — and the worker drops its own;
+the only AWS config a job reads is the generated one. The environment's
 cloud panel warns about each one it drops (by name), and the run's inputs show it as
 <code>NOT PASSED (OIDC)</code>. Settings such as <code>AWS_REGION</code> are kept.</p>
 <h2 id="see-also">See also<a class="headerlink" href="#see-also" title="Permanent link">&para;</a></h2>

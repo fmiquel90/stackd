@@ -2295,11 +2295,18 @@ and platform hooks only — never to repo hooks — and the token file exists on
 runs. The
 <code>AWS_ROLE_SESSION_NAME = stackd-&lt;run_id&gt;</code> ties every CloudTrail action back to the run — and thus to
 the human who confirmed it.</p>
+<p><strong>Named profiles.</strong> Code written for humans often says <code>profile = "tfstates"</code> (provider, backend
+config, remote state). The integration maps such names to their own plan/apply roles; the worker
+writes them into a generated AWS config file (<code>[profile tfstates]</code> with <code>role_arn</code> and the job's
+token file), so that code runs unchanged — each profile's role is assumed with the same token, so
+its trust policy pins tier and phase like the default roles' (SPECS §10.6).</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-17-1" name="__codelineno-17-1" href="#__codelineno-17-1"></a>curl<span class="w"> </span>-s<span class="w"> </span>-X<span class="w"> </span>PUT<span class="w"> </span>localhost:8000/api/v1/environments/<span class="nv">$PROD</span>/cloud-integration<span class="w"> </span>-H<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$AUTH</span><span class="s2">&quot;</span><span class="w"> </span><span class="se">\</span>
 <a id="__codelineno-17-2" name="__codelineno-17-2" href="#__codelineno-17-2"></a><span class="w">  </span>-H<span class="w"> </span><span class="s1">&#39;content-type: application/json&#39;</span><span class="w"> </span>-d<span class="w"> </span><span class="s1">&#39;{</span>
 <a id="__codelineno-17-3" name="__codelineno-17-3" href="#__codelineno-17-3"></a><span class="s1">  &quot;plan_role_arn&quot;:&quot;arn:aws:iam::123:role/stackd-prod-plan&quot;,</span>
-<a id="__codelineno-17-4" name="__codelineno-17-4" href="#__codelineno-17-4"></a><span class="s1">  &quot;apply_role_arn&quot;:&quot;arn:aws:iam::123:role/stackd-prod-apply&quot;,&quot;region&quot;:&quot;eu-west-1&quot;}&#39;</span>
-<a id="__codelineno-17-5" name="__codelineno-17-5" href="#__codelineno-17-5"></a>curl<span class="w"> </span>-s<span class="w"> </span>-X<span class="w"> </span>POST<span class="w"> </span>localhost:8000/api/v1/environments/<span class="nv">$PROD</span>/cloud-integration/test<span class="w"> </span>-H<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$AUTH</span><span class="s2">&quot;</span><span class="w">  </span><span class="c1"># verify AssumeRole</span>
+<a id="__codelineno-17-4" name="__codelineno-17-4" href="#__codelineno-17-4"></a><span class="s1">  &quot;apply_role_arn&quot;:&quot;arn:aws:iam::123:role/stackd-prod-apply&quot;,&quot;region&quot;:&quot;eu-west-1&quot;,</span>
+<a id="__codelineno-17-5" name="__codelineno-17-5" href="#__codelineno-17-5"></a><span class="s1">  &quot;profiles&quot;:{&quot;tfstates&quot;:{&quot;plan_role_arn&quot;:&quot;arn:aws:iam::456789012345:role/tfstates-plan&quot;,</span>
+<a id="__codelineno-17-6" name="__codelineno-17-6" href="#__codelineno-17-6"></a><span class="s1">                          &quot;apply_role_arn&quot;:&quot;arn:aws:iam::456789012345:role/tfstates-apply&quot;}}}&#39;</span>
+<a id="__codelineno-17-7" name="__codelineno-17-7" href="#__codelineno-17-7"></a>curl<span class="w"> </span>-s<span class="w"> </span>-X<span class="w"> </span>POST<span class="w"> </span>localhost:8000/api/v1/environments/<span class="nv">$PROD</span>/cloud-integration/test<span class="w"> </span>-H<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$AUTH</span><span class="s2">&quot;</span><span class="w">  </span><span class="c1"># verify AssumeRole</span>
 </code></pre></div>
 <hr />
 <h2 id="11-webhooks-git-staleness">11. Webhooks &amp; Git staleness<a class="headerlink" href="#11-webhooks-git-staleness" title="Permanent link">&para;</a></h2>
