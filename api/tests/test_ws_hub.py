@@ -59,7 +59,7 @@ async def _await_signal(queue: SignalQueue, channel: str) -> None:
             await _notify(channel, '{"kind": "run_event"}')
             await asyncio.sleep(0.1)
             while not queue.empty():
-                if queue.get_nowait() == '{"kind": "run_event"}':
+                if queue.get_nowait() == (channel, '{"kind": "run_event"}'):
                     return
 
 
@@ -172,14 +172,14 @@ async def test_subscriber_queue_is_bounded_and_keeps_the_newest(hub: NotifyHub) 
         await _notify(channel, str(i))
     await _eventually(queue.full)
     await asyncio.sleep(0.2)  # the later signals keep evicting the oldest
-    assert [queue.get_nowait(), queue.get_nowait()] == ["3", "4"]
+    assert [queue.get_nowait(), queue.get_nowait()] == [(channel, "3"), (channel, "4")]
 
 
 def test_offer_drops_the_oldest_when_full() -> None:
     queue: SignalQueue = asyncio.Queue(maxsize=2)
     for item in ("a", "b", "c"):
-        offer(queue, item)
-    assert [queue.get_nowait(), queue.get_nowait()] == ["b", "c"]
+        offer(queue, ("ch", item))
+    assert [queue.get_nowait(), queue.get_nowait()] == [("ch", "b"), ("ch", "c")]
 
 
 class _Socket:
@@ -247,7 +247,8 @@ async def test_repeated_subscription_is_deduplicated(
     assert len(ws_hub._subs[channel]) == 1
 
     await _notify(channel, '{"kind": "notification"}')
-    assert (await sock.next_message())["text"] == '{"kind": "notification"}'
+    signal = json.loads((await sock.next_message())["text"])
+    assert signal == {"sub": f"user:{user_id}", "kind": "notification"}
     with pytest.raises(TimeoutError):
         await sock.next_message(within=0.3)  # one subscription → one copy
 
@@ -269,6 +270,38 @@ async def test_subscriptions_are_capped(
     sock.send({"sub": f"user:{user_id}"})  # a repeat does not count against the cap
     sock.send({"sub": f"environment:{env_id}"})
     assert await sock.close_code() == 1008
+    assert ws_hub._subs == {}
+
+
+async def test_unsubscribe_releases_the_channel_and_its_slot(
+    client: httpx.AsyncClient, ws_hub: NotifyHub, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(get_settings(), "stackd_ws_max_subscriptions", 1)
+    token, user_id = await _token(client)
+    admin = await login(client, "admin")
+    env_id = await make_env(
+        client, admin, await make_stack(client, admin, "ws-unsub"), "dev", "dev"
+    )
+
+    sock = _Socket()
+    sock.send({"type": "auth", "token": token})
+    sock.send({"sub": f"user:{user_id}"})
+    await _eventually(lambda: f"user_{user_id}" in ws_hub._subs)
+    sock.send({"unsub": f"run:{uuid.uuid4()}"})  # never subscribed: a no-op
+    sock.send({"unsub": f"user:{user_id}"})
+    await _eventually(lambda: f"user_{user_id}" not in ws_hub._subs)
+
+    # The freed slot takes another channel under a cap of 1, and the released one stays silent.
+    sock.send({"sub": f"environment:{env_id}"})
+    await _eventually(lambda: f"env_{env_id}" in ws_hub._subs)
+    await _notify(f"user_{user_id}", '{"kind": "notification"}')
+    await _notify(f"env_{env_id}", '{"kind": "run_event"}')
+    signal = json.loads((await sock.next_message())["text"])
+    assert signal == {"sub": f"environment:{env_id}", "kind": "run_event"}
+    with pytest.raises(TimeoutError):
+        await sock.next_message(within=0.3)
+
+    await sock.disconnect()
     assert ws_hub._subs == {}
 
 
