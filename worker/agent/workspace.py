@@ -19,8 +19,8 @@ _SAFE_REF = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._/-]{0,255}$")
 # A full commit SHA (SHA-1, or SHA-256 object format): what a pinned run must check out exactly.
 _FULL_SHA = re.compile(r"^(?:[0-9a-f]{40}|[0-9a-f]{64})$")
 # The run's variable files (§3.4), auto-loaded by tofu/terraform.
-_TFVARS_JSON = "stackd.auto.tfvars.json"
-_HCL_TFVARS = "zzz_stackd.auto.tfvars"
+TFVARS_JSON = "stackd.auto.tfvars.json"
+HCL_TFVARS = "zzz_stackd.auto.tfvars"
 
 
 def _authed_url(repo_url: str, token: str | None) -> str:
@@ -170,7 +170,7 @@ class Workspace:
 
     def write_tfvars(self, cwd: Path, tfvars: dict) -> None:
         # JSON tfvars are always valid HCL2 inputs; auto-loaded by terraform/tofu.
-        _write_new(cwd / _TFVARS_JSON, json.dumps(tfvars).encode())
+        _write_new(cwd / TFVARS_JSON, json.dumps(tfvars).encode())
 
     def write_hcl_tfvars(self, cwd: Path, hcl_tfvars: dict) -> None:
         # `hcl` vars are written verbatim (`name = <raw value>`) so real HCL syntax ({ a = "b" },
@@ -179,7 +179,7 @@ class Workspace:
         if not hcl_tfvars:
             return
         body = "".join(f"{name} = {value}\n" for name, value in hcl_tfvars.items())
-        _write_new(cwd / _HCL_TFVARS, body.encode())
+        _write_new(cwd / HCL_TFVARS, body.encode())
 
     @contextmanager
     def tfvars(
@@ -193,8 +193,21 @@ class Workspace:
             self.write_hcl_tfvars(cwd, hcl_tfvars)
             yield
         finally:
-            for name in (_TFVARS_JSON, _HCL_TFVARS):
+            for name in (TFVARS_JSON, HCL_TFVARS):
                 (cwd / name).unlink(missing_ok=True)
+
+    def var_file_problem(self, cwd: Path, files: list[str]) -> str | None:
+        """Why the env's repo var files (§3.4) can't be passed to tofu, or None: each must resolve,
+        symlinks followed, to a regular file inside the checkout — the API's check is lexical, and
+        a file the repo symlinked out of it (the workspace's token file, the host's) is refused."""
+        repo_root = (self.path / "repo").resolve()
+        for name in files:
+            path = (cwd / name).resolve()
+            if not path.is_relative_to(repo_root):
+                return f"var file escapes the repository: {name!r}"
+            if not path.is_file():
+                return f"var file not found: {name!r}"
+        return None
 
     def write_backend_override(self, cwd: Path) -> None:
         # Only for managed_state envs (§11.3): the repo declares no backend; we inject http. Written
