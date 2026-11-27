@@ -59,8 +59,13 @@ def test_ssh_command_uses_the_deploy_key_only(tmp_path: Path) -> None:
         "BatchMode=yes",
         "-o",
         "StrictHostKeyChecking=accept-new",
+        *("-o", "ConnectTimeout=30", "-o", "ServerAliveInterval=15"),
+        *("-o", "ServerAliveCountMax=4"),
     ]
-    assert ssh_command() == "ssh -o BatchMode=yes -o StrictHostKeyChecking=accept-new"
+    assert ssh_command() == (
+        "ssh -o BatchMode=yes -o StrictHostKeyChecking=accept-new"
+        " -o ConnectTimeout=30 -o ServerAliveInterval=15 -o ServerAliveCountMax=4"
+    )
 
 
 def test_deploy_key_is_on_disk_only_inside_repo_credentials(tmp_path: Path) -> None:
@@ -129,8 +134,9 @@ def test_clone_over_ssh_with_the_deploy_key(tmp_path: Path, fake_ssh: Path) -> N
     assert ws.head_sha() == sha
     key = ws.secret_path("repo_ssh_key")
     calls = fake_ssh.read_text().splitlines()
-    # The clone and the pinned-commit fetch: each over ssh, with the key, 0600, while git ran.
-    assert calls == [f"host=git@git.example.com key={key} mode=600 first={KEY.splitlines()[0]}"] * 2
+    # One connection — the pinned commit's fetch, no clone of the default branch before it — over
+    # ssh, with the key, 0600, while git ran.
+    assert calls == [f"host=git@git.example.com key={key} mode=600 first={KEY.splitlines()[0]}"]
     assert not key.exists()  # gone once the clone is done
     assert _git(cwd, "config", "remote.origin.url") == url
 

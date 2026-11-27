@@ -188,6 +188,12 @@ its outputs are recorded, nothing cascades. At the apply stages, repo hooks run 
 compatible worker takes it. Nothing is carried over in the workspace: the apply always starts from a
 fresh clone of the pinned commit and the saved plan from the API.
 
+**Clone and provider downloads.** A pinned commit is fetched alone (`git init` + one shallow fetch
+of that SHA, no clone of the default branch first); each git command has a time budget and is
+interrupted by a stop request. Providers are downloaded by every `init`, unless the worker has a
+plugin cache (`STACKD_PLUGIN_CACHE_DIR`): then `init` — alone, one at a time on the host — fills
+it, and the other commands read it (SPECS §7.4).
+
 ## 🧬 Dependencies, mocks & cascade
 
 At claim the API resolves each referenced input as **real upstream output › mock › explicit
