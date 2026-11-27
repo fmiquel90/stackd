@@ -118,7 +118,7 @@ refresh_tokens (
 )
 ```
 
-On each `/auth/refresh`: the presented token must exist, not be revoked, not be expired, `used_at IS NULL`. We mark it `used_at`, issue a new token (same `family_id`, `parent_id = id`). If a token already `used_at` is presented again → **reuse**: revocation of the whole family + `audit auth.refresh_reuse_detected`. Purge of expired families as a periodic task (§7.5).
+On each `/auth/refresh`: the presented token must exist, not be revoked, not be expired, `used_at IS NULL`. The row is read `FOR UPDATE`, so two refreshes presenting the same token serialize. We mark it `used_at`, issue a new token (same `family_id`, `parent_id = id`). If a token already `used_at` is presented again → **reuse**: revocation of the whole family + `audit auth.refresh_reuse_detected` — **except within the grace window** `STACKD_REFRESH_REUSE_GRACE_SECONDS` (default 30) after its rotation: the browser's tabs share one refresh cookie, so a second tab whose refresh left before the first one's rotated cookie landed presents the parent. That presentation gets a fresh access token for the same user and **no cookie** (the browser already holds the child): the family is neither revoked nor forked, and a stolen token presented in the window gains no refresh token — its holder's next presentation, past the window, is caught as reuse. Purge of expired families as a periodic task (§7.5).
 
 ---
 

@@ -34,6 +34,9 @@ class Settings(BaseSettings):
 
     access_token_ttl_seconds: int = 15 * 60
     refresh_token_ttl_seconds: int = 14 * 24 * 3600
+    # Tabs share one refresh cookie: a reuse of a token rotated less than this long ago is a
+    # concurrent refresh, not a theft, and gets an access token instead of revoking (SPECS §2.5).
+    stackd_refresh_reuse_grace_seconds: int = 30
     # Worker JWTs expire so a leaked token can't claim jobs forever; the agent re-registers on 401
     # to refresh (and re-create its row if a pool reset wiped it).
     worker_token_ttl_seconds: int = 24 * 3600

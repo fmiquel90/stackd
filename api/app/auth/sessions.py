@@ -108,22 +108,41 @@ async def rotate_session(
     except jwt.PyJWTError as exc:
         raise invalid from exc
 
+    # Locked so two refreshes presenting the same token serialize: the second sees it used and
+    # takes the grace path instead of minting a second child (a forked family).
     row = (
         await session.execute(
-            select(RefreshToken).where(RefreshToken.token_hash == hash_token(presented))
+            select(RefreshToken)
+            .where(RefreshToken.token_hash == hash_token(presented))
+            .with_for_update()
         )
     ).scalar_one_or_none()
     if row is None or row.revoked_at is not None:
         raise invalid
-    if row.expires_at <= datetime.now(UTC):
+    now = datetime.now(UTC)
+    if row.expires_at <= now:
         raise invalid
+
+    grace = timedelta(seconds=settings.stackd_refresh_reuse_grace_seconds)
+    if row.used_at is not None and now - row.used_at < grace:
+        # Another tab rotated this token a moment ago and the browser already holds its child:
+        # hand out an access token only. No cookie is set, so a stolen token presented in the
+        # window gains no refresh token, and its next presentation is caught as reuse.
+        user = await session.get(User, row.user_id)
+        if user is None or user.disabled:
+            raise invalid
+        _log.info(
+            "refresh token reused within the grace window",
+            extra={"event": "auth.refresh_reuse_grace", "family_id": str(row.family_id)},
+        )
+        return create_access_token(user)
 
     if row.used_at is not None:
         # Reuse of an already-rotated token → revoke the whole family.
         await session.execute(
             RefreshToken.__table__.update()
             .where(RefreshToken.family_id == row.family_id)
-            .values(revoked_at=datetime.now(UTC))
+            .values(revoked_at=now)
         )
         await record_audit(
             session,
@@ -149,7 +168,7 @@ async def rotate_session(
     if user is None or user.disabled:
         raise invalid
 
-    row.used_at = datetime.now(UTC)
+    row.used_at = now
     new_jti = uuid7()
     new_refresh = issue_refresh_token(jti=new_jti, family_id=row.family_id, user_id=user.id)
     session.add(
