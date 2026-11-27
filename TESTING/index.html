@@ -1828,8 +1828,12 @@ all. Counts in parentheses include parametrized cases and drift as tests are add
 <td>Tool-version matching; a stack's <code>tool_version</code> is validated; the claim skips a run the worker can't run; the queue reports no compatible worker.</td>
 </tr>
 <tr>
-<td><code>test_log_retention.py</code> (9)</td>
-<td>Two-tier logs (moto S3): archived after the grace window then hot-purged and served from S3; an archived run with hot rows never reads S3; download from either tier, phases in run order even across midnight; a log phase that can't be an S3 key segment refused (422) at ingest; an archive failure leaves the run unarchived; refresh-token families purged once fully expired; the audit purge needs the distinct DB role.</td>
+<td><code>test_read_paths.py</code> (19)</td>
+<td>Bounded read paths: the env run list pages newest first on <code>(created_at, id)</code> through <code>X-Next-Cursor</code>/<code>before</code> (ties included), default cap 200, <code>limit</code> bounds, a foreign or unknown cursor → 400, <code>view=summary</code> drops <code>check_results</code>/<code>variable_provenance</code>; the audit CSV export streams every row across server-side cursor batches; the last applied commit skips targeted, failed and proposed runs; <code>/metrics</code> counts live states every scrape and caches terminal ones; webhook repo matching in SQL equals the Python normalization; migration 0046 goes down and up.</td>
+</tr>
+<tr>
+<td><code>test_log_retention.py</code> (10)</td>
+<td>Two-tier logs (moto S3): archived after the grace window then hot-purged and served from S3; an archived run with hot rows never reads S3; download from either tier, phases in run order even across midnight; <code>limit</code> on both tiers, the archive fetching only the phases the answer needs (a one-phase download too); a log phase that can't be an S3 key segment refused (422) at ingest; an archive failure leaves the run unarchived; refresh-token families purged once fully expired; the audit purge needs the distinct DB role.</td>
 </tr>
 <tr>
 <td><code>test_scheduler.py</code> (4)</td>

@@ -1327,7 +1327,7 @@ exhaustive list):</p>
 </tr>
 <tr>
 <td>Runs</td>
-<td><code>POST /environments/{id}/runs</code> (optional <code>targets</code>/<code>replace</code>: a targeted / replace plan), <code>/commands</code> (incl. <code>force-unlock</code> on an unmanaged backend, admin), <code>/promote</code>; <code>GET /environments/{id}/runs</code>; <code>GET /runs/{id}</code>, <code>POST /runs/{id}/confirm</code>/<code>discard</code>/<code>cancel</code>, <code>GET /runs/{id}/logs</code> (+ <code>/logs/download</code>)/<code>plan</code>/<code>checks</code>, <code>POST /runs/{id}/vcs/resync</code></td>
+<td><code>POST /environments/{id}/runs</code> (optional <code>targets</code>/<code>replace</code>: a targeted / replace plan), <code>/commands</code> (incl. <code>force-unlock</code> on an unmanaged backend, admin), <code>/promote</code>; <code>GET /environments/{id}/runs</code> (newest first, <code>limit</code> ≤ 500 — default 200, next page via the <code>X-Next-Cursor</code> header passed back as <code>before</code>; <code>view=summary</code> drops <code>check_results</code>/<code>variable_provenance</code>); <code>GET /runs/{id}</code>, <code>POST /runs/{id}/confirm</code>/<code>discard</code>/<code>cancel</code>, <code>GET /runs/{id}/logs</code> (<code>phase</code>, <code>after_seq</code>, <code>limit</code>; + <code>/logs/download</code>)/<code>plan</code>/<code>checks</code>, <code>POST /runs/{id}/vcs/resync</code></td>
 </tr>
 <tr>
 <td>Rollouts</td>
@@ -1367,7 +1367,7 @@ exhaustive list):</p>
 </tr>
 <tr>
 <td>Audit</td>
-<td><code>GET /audit</code> (filters), <code>GET /audit/export</code> (CSV) — both admin-only</td>
+<td><code>GET /audit</code> (filters), <code>GET /audit/export</code> (CSV, streamed) — both admin-only</td>
 </tr>
 <tr>
 <td>Webhooks</td>

@@ -1407,7 +1407,7 @@ the network layer.</p>
 <tr>
 <td><code>stackd_runs_total{state}</code></td>
 <td>gauge</td>
-<td>runs per state, read from the database at scrape</td>
+<td>runs per state, read from the database at scrape — the terminal states (<code>finished</code>, <code>failed</code>, <code>discarded</code>, <code>canceled</code>) at most every 5 minutes per API process</td>
 </tr>
 <tr>
 <td><code>stackd_queue_depth</code></td>
