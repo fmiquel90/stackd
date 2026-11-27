@@ -18,6 +18,7 @@ from app.auth.deps import CurrentUser
 from app.config import get_settings
 from app.crypto import decrypt
 from app.db import get_session
+from app.drift.out_of_band import BACKEND_FIELDS, acknowledge, reset_baseline
 from app.enums import (
     ACTIVE_STATES,
     AttachmentTarget,
@@ -37,8 +38,9 @@ from app.models.stack import Stack
 from app.models.tier import Tier
 from app.models.user import User
 from app.models.variable_set import VariableSetAttachment
+from app.permissions import can_apply
 from app.ratelimit import rate_limit
-from app.spaces import guard_env_id, guard_stack_id
+from app.spaces import get_membership, guard_env_id, guard_stack_id
 from app.stacks.git import clone_shallow, enforce_clone_budget, ls_remote_sha
 from app.variables.crud import create_variable, get_variable, update_variable, variables_for
 from app.variables.discovery import DiscoveredInput, parse_inputs, placeholder, tf_files
@@ -354,6 +356,9 @@ async def update_environment(
         env.head_updated_at = None
         env.commits_ahead = None
         env.affects_project_root = None
+    if any(changes[f] != getattr(env, f) for f in BACKEND_FIELDS & changes.keys()):
+        # Another state now (§19.7): the baseline and any out-of-band flag were the old state's.
+        reset_baseline(env)
     for field, value in changes.items():
         setattr(env, field, value)
     if env.protected:
@@ -439,6 +444,32 @@ async def refresh_head(env_id: uuid.UUID, user: CurrentUser, session: DbSession)
     await session.commit()
     await session.refresh(env)
     return await _env_out(session, env)
+
+
+@router.post("/environments/{env_id}/out-of-band-change/acknowledge", response_model=EnvironmentOut)
+async def acknowledge_out_of_band_change(
+    env_id: uuid.UUID, user: CurrentUser, session: DbSession
+) -> EnvironmentOut:
+    """Accept a state change made outside Stackd (§19.7): the people who could clear it by
+    applying — can_apply on the env — may clear it by hand."""
+    env = await guard_env_id(session, user, env_id, min_role=Role.writer)
+    stack = await session.get(Stack, env.stack_id)
+    assert stack is not None
+    decision = can_apply(user, env, await get_membership(session, user.id, stack.space_id))
+    if not decision.allowed:
+        raise ProblemException(403, "Forbidden", decision.reason)
+    locked = (
+        await session.execute(
+            select(Environment)
+            .where(Environment.id == env.id)
+            .with_for_update()
+            .execution_options(populate_existing=True)
+        )
+    ).scalar_one()
+    await acknowledge(session, locked, user)
+    await session.commit()
+    await session.refresh(locked)
+    return await _env_out(session, locked)
 
 
 # --- environment variables (override slot: stack_id + environment_id both set) ---

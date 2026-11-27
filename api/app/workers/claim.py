@@ -9,6 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import get_settings
 from app.crypto import decrypt
+from app.drift.out_of_band import observes_state
 from app.enums import (
     ACTIVE_STATES,
     AuditActorKind,
@@ -378,6 +379,9 @@ async def build_job_payload(session: AsyncSession, run: Run) -> dict:
         # `-backend-config` settings passed at init.
         "backend_config_file": None if env.managed_state else env.backend_config_file,
         "backend_config": None if env.managed_state else env.backend_config,
+        # §19.7: read the state's serial/lineage and report them (state_observed) — unmanaged
+        # state, reviewed code only.
+        "observe_state": observes_state(run, env),
         "cloud_credentials": cloud_credentials,
         "resolved_inputs": {f"TF_VAR_{k}": v for k, v in dep.resolved_inputs.items()},
         "mock_inputs": {f"TF_VAR_{k}": v for k, v in dep.mock_inputs.items()},
