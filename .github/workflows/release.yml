@@ -1,0 +1,249 @@
+name: release
+
+# Publishes a Stackd release when a `vX.Y.Z` tag is pushed (scripts/release.sh cuts it — see
+# docs/DEV.md §10):
+#
+#   verify     the tag is semver, on main, and every manifest carries that version
+#   ci, e2e    the full CI and the live e2e scenario, against the tagged commit
+#   images     api, front, worker and the OpenTofu runner image: linux/amd64 + linux/arm64, pushed
+#              to ghcr.io/<owner>/stackd/<name>, with SBOM + provenance attestations, signed with
+#              cosign (keyless, this workflow's GitHub OIDC identity)
+#   publish    the GitHub release: notes, image references pinned by digest, the deployment bundle
+#
+# Nothing is pushed unless verify, ci and e2e all pass. The Terraform runner image is not
+# published: Terraform is BUSL-licensed (PLAN §5) — operators who opt in build it themselves.
+on:
+  push:
+    tags: ["v*.*.*"]
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      prerelease: ${{ steps.version.outputs.prerelease }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+      - id: version
+        name: Tag, manifests and branch agree
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          version="${TAG#v}"
+          if [[ ! "$version" =~ ^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-[0-9A-Za-z.-]+)?$ ]]; then
+            echo "::error::tag $TAG is not vX.Y.Z[-pre]"; exit 1
+          fi
+          bash scripts/check-version.sh "$version"
+          if ! git merge-base --is-ancestor "$GITHUB_SHA" origin/main; then
+            echo "::error::$TAG does not point at a commit of main"; exit 1
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          if [[ "$version" == *-* ]]; then prerelease=true; else prerelease=false; fi
+          echo "prerelease=$prerelease" >> "$GITHUB_OUTPUT"
+
+  ci:
+    needs: verify
+    uses: ./.github/workflows/ci.yml
+    permissions:
+      contents: read
+
+  e2e:
+    needs: verify
+    uses: ./.github/workflows/e2e.yml
+    permissions:
+      contents: read
+
+  images:
+    needs: [verify, ci, e2e]
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    permissions:
+      contents: read
+      packages: write # push to ghcr.io
+      id-token: write # cosign keyless signing
+    strategy:
+      fail-fast: true
+      matrix:
+        include:
+          - { name: api, context: api, file: api/Dockerfile }
+          - { name: front, context: front, file: front/Dockerfile }
+          - { name: worker, context: worker, file: worker/Dockerfile }
+          - { name: opentofu, context: ., file: deploy/images/opentofu.Dockerfile, runner: true }
+    steps:
+      - uses: actions/checkout@v6
+
+      - id: meta
+        name: Image name and tags
+        env:
+          VERSION: ${{ needs.verify.outputs.version }}
+          PRERELEASE: ${{ needs.verify.outputs.prerelease }}
+          NAME: ${{ matrix.name }}
+          FILE: ${{ matrix.file }}
+          RUNNER: ${{ matrix.runner || false }}
+          OWNER: ${{ github.repository_owner }}
+        run: |
+          image="ghcr.io/${OWNER,,}/stackd/$NAME"
+          if [[ "$RUNNER" == "true" ]]; then
+            # A runner image is tagged by its tool version (the key of STACKD_RUNNER_IMAGES), plus
+            # that tool version for this release; workers pin it by digest anyway.
+            tool="$(sed -n 's/^ARG OPENTOFU_VERSION=//p' "$FILE")"
+            [[ -n "$tool" ]] || { echo "::error::no OPENTOFU_VERSION default in $FILE"; exit 1; }
+            tags="$image:$tool,$image:$tool-stackd$VERSION"
+            image_version="$tool"
+          else
+            tags="$image:$VERSION"
+            if [[ "$PRERELEASE" == "false" ]]; then
+              tags="$tags,$image:${VERSION%.*},$image:latest"
+            fi
+            image_version="$VERSION"
+          fi
+          {
+            echo "image=$image"
+            echo "tags=$tags"
+            echo "version=$image_version"
+            echo "created=$(git log -1 --format=%cI)"
+          } >> "$GITHUB_OUTPUT"
+
+      - uses: docker/setup-qemu-action@v4
+      - uses: docker/setup-buildx-action@v4
+      - uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - id: build
+        uses: docker/build-push-action@v7
+        with:
+          context: ${{ matrix.context }}
+          file: ${{ matrix.file }}
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: |
+            org.opencontainers.image.title=stackd-${{ matrix.name }}
+            org.opencontainers.image.version=${{ steps.meta.outputs.version }}
+            org.opencontainers.image.revision=${{ github.sha }}
+            org.opencontainers.image.created=${{ steps.meta.outputs.created }}
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+          provenance: mode=max
+          sbom: true
+          cache-from: type=gha,scope=release-${{ matrix.name }}
+          cache-to: type=gha,mode=max,scope=release-${{ matrix.name }}
+
+      - uses: sigstore/cosign-installer@v3
+      - name: Sign the image (keyless)
+        env:
+          REF: ${{ steps.meta.outputs.image }}@${{ steps.build.outputs.digest }}
+        run: cosign sign --yes "$REF"
+
+      - name: Record the digest
+        env:
+          REF: ${{ steps.meta.outputs.image }}@${{ steps.build.outputs.digest }}
+          TAG: ${{ steps.meta.outputs.version }}
+        run: |
+          mkdir -p digests
+          printf '%s\t%s\n' "$REF" "$TAG" > "digests/${{ matrix.name }}"
+      - uses: actions/upload-artifact@v7
+        with:
+          name: digest-${{ matrix.name }}
+          path: digests/${{ matrix.name }}
+          retention-days: 7
+
+  publish:
+    needs: [verify, images]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write # create the GitHub release
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: digest-*
+          path: digests
+          merge-multiple: true
+
+      - name: Deployment bundle and release notes
+        env:
+          VERSION: ${{ needs.verify.outputs.version }}
+          REPO: ${{ github.repository }}
+          SERVER: ${{ github.server_url }}
+        run: |
+          ref() { cut -f1 "digests/$1"; }
+          tool="$(cut -f2 digests/opentofu)"
+          mkdir -p dist
+          bundle="stackd-deploy-$VERSION"
+
+          # deploy/production as released, with .env.example pointing at this release's images
+          # (pinned by digest) — `./init-env.sh` copies it to .env as usual.
+          cp -r deploy/production "dist/$bundle"
+          sed -i \
+            -e "s|^STACKD_API_IMAGE=.*|STACKD_API_IMAGE=$(ref api)|" \
+            -e "s|^STACKD_FRONT_IMAGE=.*|STACKD_FRONT_IMAGE=$(ref front)|" \
+            -e "s|^STACKD_WORKER_IMAGE=.*|STACKD_WORKER_IMAGE=$(ref worker)|" \
+            "dist/$bundle/.env.example"
+          grep -q "^STACKD_API_IMAGE=$(ref api)\$" "dist/$bundle/.env.example"
+          sed -i "s|^STACKD_RUNNER_IMAGES=.*|STACKD_RUNNER_IMAGES={\"opentofu:$tool\": \"$(ref opentofu)\"}|" \
+            "dist/$bundle/worker.env.example"
+          grep -q "^STACKD_RUNNER_IMAGES=.*$(ref opentofu)" "dist/$bundle/worker.env.example"
+          tar -C dist -czf "dist/$bundle.tar.gz" "$bundle"
+          (cd dist && sha256sum "$bundle.tar.gz" > SHA256SUMS)
+
+          cat > notes.md <<EOF
+          ## Images
+
+          Multi-arch (\`linux/amd64\`, \`linux/arm64\`), signed with cosign (keyless), with SBOM and
+          provenance attestations. Pin them by digest:
+
+          | Image | Reference |
+          |---|---|
+          | api | \`$(ref api)\` |
+          | front | \`$(ref front)\` |
+          | worker | \`$(ref worker)\` |
+          | OpenTofu $tool runner | \`$(ref opentofu)\` |
+
+          Worker setting (\`worker.env\`):
+
+          \`\`\`
+          STACKD_RUNNER_IMAGES={"opentofu:$tool": "$(ref opentofu)"}
+          \`\`\`
+
+          Verify a signature:
+
+          \`\`\`bash
+          cosign verify $(ref api) \\
+            --certificate-identity-regexp '^$SERVER/$REPO/\.github/workflows/release\.yml@refs/tags/v' \\
+            --certificate-oidc-issuer https://token.actions.githubusercontent.com
+          \`\`\`
+
+          ## Install or upgrade
+
+          \`$bundle.tar.gz\` is \`deploy/production\` of this release, its \`.env.example\` and
+          \`worker.env.example\` already pointing at the images above. Follow
+          [Installing in production]($SERVER/$REPO/blob/v$VERSION/docs/guide/installing.md) — on an
+          upgrade, set the three \`STACKD_*_IMAGE\` of your \`.env\` to these references, then
+          \`docker compose up -d\` (the \`migrate\` service runs before the api).
+
+          EOF
+
+      - name: Create the GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+          VERSION: ${{ needs.verify.outputs.version }}
+          PRERELEASE: ${{ needs.verify.outputs.prerelease }}
+        run: |
+          flags=()
+          [[ "$PRERELEASE" == "true" ]] && flags+=(--prerelease)
+          gh release create "$TAG" --verify-tag --title "Stackd $TAG" \
+            --notes-file notes.md --generate-notes "${flags[@]}" \
+            "dist/stackd-deploy-$VERSION.tar.gz" dist/SHA256SUMS

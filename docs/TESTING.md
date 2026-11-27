@@ -63,7 +63,8 @@ CI (`.github/workflows/ci.yml`) runs pre-commit; ruff (check + format), pytest a
 to fail for now) for the API; ruff (check + format) and pytest for the worker, after pulling
 `alpine:3.20` and building the tofu test image for the docker-runner tests; eslint, prettier, the
 invariants check (no browser storage, no hard-coded colour), typecheck, vitest and build for the
-front. `e2e.yml` runs the live scenario.
+front. `e2e.yml` runs the live scenario on every pull request and on `main`. `release.yml` runs both
+again on a release tag before publishing anything (DEV.md §10).
 
 ### pytest configuration (`api/pyproject.toml`)
 

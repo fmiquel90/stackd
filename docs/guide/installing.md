@@ -86,8 +86,16 @@ API refuses to start in production on dev-grade settings (see [Configure](#3-con
 
 ## 1. Get the images
 
-Build the three production images from a checkout of the release you deploy, tag them with that
-version and push them to your registry:
+Each [release](https://github.com/fmiquel90/stackd/releases) publishes the images to GitHub's
+container registry, for `linux/amd64` and `linux/arm64`, signed with cosign:
+`ghcr.io/fmiquel90/stackd/api`, `…/front`, `…/worker` and the OpenTofu runner image
+`…/opentofu`. The release notes give each reference pinned by digest — use those, not a tag — and
+the `cosign verify` command. The release also attaches `stackd-deploy-X.Y.Z.tar.gz`: this
+directory (`deploy/production/`) as released, its `.env.example` and `worker.env.example` already
+pointing at the release's images. Start from it rather than from a checkout of `main`.
+
+To build them yourself instead (a fork, a patched build, an air-gapped registry), check out the
+release tag, then build, tag and push the three images:
 
 ```bash
 task build-images TAG=1.4.0 PREFIX=registry.example.com/stackd
@@ -217,8 +225,10 @@ never confirms an apply.
 
 Workers run every tofu/terraform command and every hook in a fresh container of a **runner
 image** (`deploy/images/`: one IaC tool + git + jq, non-root, signature-verified downloads).
-Build them for your workers' architectures, push them, and note their **digest** — workers refuse
-tags:
+Workers pin each one by **digest** — they refuse tags. Each release publishes the OpenTofu image
+of its pinned version (`ghcr.io/fmiquel90/stackd/opentofu`); its release notes give the
+`STACKD_RUNNER_IMAGES` line below, ready to use. For another OpenTofu version, or for Terraform
+(never published: BUSL), build the image for your workers' architectures and push it:
 
 ```bash
 docker buildx build -f deploy/images/opentofu.Dockerfile \
@@ -329,7 +339,8 @@ Stackd upgrades are **migrate, then restart**; the migration runs before the new
    workers **before** the API: a draining worker reports to it. A second `Ctrl-C`/signal stops
    the running jobs at once. See [Workers & scaling](workers-and-scaling.md#stopping-a-worker).
 3. [Back up](backup-restore.md) the database (and keep `stackd.env`).
-4. Point `.env` at the new image tags (or rebuild them), then:
+4. Point `.env` at the new release's image references (its release notes list them by digest, or
+   rebuild them), then:
 
     ```bash
     docker compose pull          # registry images

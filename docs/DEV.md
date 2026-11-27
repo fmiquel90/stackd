@@ -251,3 +251,33 @@ Every tracked plan goes through S3 (saved encrypted after the plan, downloaded b
 | Real GitHub/GitLab webhooks | Gitea (git profile) covers 95%; the rest in staging |
 | Load (N workers × M runs) | not covered yet (no load scenario) |
 | Light theme / mobile responsive | Ladle stories + manual review |
+
+---
+
+## 10. CI and releases
+
+**Pull requests** run two workflows, both to be marked *required* in the branch protection of `main`:
+
+- `ci.yml` — lint, tests, typecheck and the production image builds of api/worker/front (TESTING.md), plus `scripts/check-version.sh` (every manifest carries the same version);
+- `e2e.yml` — the live scenario of §7 (the functional contract), ~10 min. A new push to the PR cancels the running one.
+
+**Versioning**: semver, one version for the whole product (api, worker, front, images). It lives in `api/pyproject.toml`, `api/uv.lock`, `api/app/__init__.py` (the OpenAPI `version`), `worker/pyproject.toml`, `worker/uv.lock` and `front/package.json` — never edit them by hand, `task release` bumps them together and `task version-check` checks them. A pre-release is `X.Y.Z-rc.N`.
+
+**Cutting a release**:
+
+```bash
+git switch main && git pull
+task release VERSION=1.4.0          # bump + commit "chore(release): v1.4.0" + annotated tag v1.4.0
+git push --atomic origin main v1.4.0
+```
+
+If `main` only accepts pull requests, run `task release` on a branch instead: it commits the bump only and prints the tag command to run on the merge commit once the PR is merged. The release workflow refuses a tag that is not on `main`.
+
+Pushing the tag starts `release.yml`:
+
+1. **verify** — the tag is `vX.Y.Z[-pre]`, on `main`, and matches every manifest;
+2. **ci** and **e2e** — both workflows again, on the tagged commit; nothing is published if either fails;
+3. **images** — `api`, `front`, `worker` and the OpenTofu runner image, `linux/amd64` + `linux/arm64`, pushed to `ghcr.io/<owner>/stackd/<name>` with SBOM and provenance attestations, then signed with cosign (keyless: the workflow's GitHub OIDC identity). Tags: `X.Y.Z`, plus `X.Y` and `latest` for a final release; the runner image is tagged by its tool version (`1.12.2`, and `1.12.2-stackdX.Y.Z`). The Terraform runner image is **not** published (BUSL, PLAN §5);
+4. **publish** — the GitHub release: generated notes, the image references pinned by digest, the `STACKD_RUNNER_IMAGES` line, the `cosign verify` command, and `stackd-deploy-X.Y.Z.tar.gz` (`deploy/production` with its env examples pointing at those digests) + `SHA256SUMS`.
+
+A failed release is re-run from the Actions tab once the cause is fixed outside the code (a flaky step, a registry outage). A fix in the code is a new version: never move a published tag. The first publish creates the ghcr.io packages as private — make them public in the package settings if the images are meant to be pulled anonymously.
