@@ -178,6 +178,7 @@ export interface EnvironmentPatch {
   drift_check_enabled?: boolean;
   backend_config_file?: string | null;
   backend_config?: Record<string, string> | null;
+  var_files?: string[];
   labels?: Record<string, string> | null;
 }
 

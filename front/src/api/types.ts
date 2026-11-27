@@ -98,6 +98,8 @@ export interface Environment {
   allow_fallback_apply: boolean;
   backend_config_file: string | null;
   backend_config: Record<string, unknown> | null;
+  /** The repo's tfvars files (SPECS §3.4), relative to the project root, in `-var-file` order. */
+  var_files: string[];
   head_sha: string | null;
   commits_ahead: number | null;
   affects_project_root: boolean | null;

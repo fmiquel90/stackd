@@ -27,6 +27,7 @@ from app.enums import (
     TriggerPolicy,
     VariableKind,
 )
+from app.environments.var_files import check_var_files
 from app.notifications.dispatcher import check_url_syntax
 from app.notifications.schemas import ALLOWED_STATES
 from app.stacks.paths import normalize_trigger_paths
@@ -124,12 +125,18 @@ class EnvironmentDoc(_Doc):
     drift_check_enabled: bool = True
     backend_config_file: str | None = None
     backend_config: dict[str, Any] | None = None
+    var_files: list[str] = []  # §3.4, relative to the stack's project_root
     labels: dict[str, Any] | None = None
     position: int = 0
     variables: list[VariableDoc] = []
     hooks: list[HookDoc] = []
     notification_targets: list[NotificationTargetDoc] = []
     cloud_integration: CloudIntegrationDoc | None = None
+
+    @field_validator("var_files")
+    @classmethod
+    def _var_files(cls, v: list[str]) -> list[str]:
+        return check_var_files(v)
 
 
 class StackDoc(_Doc):

@@ -229,6 +229,7 @@ async def export_space(session: AsyncSession, space: Space) -> ConfigDocument:
                     drift_check_enabled=env.drift_check_enabled,
                     backend_config_file=env.backend_config_file,
                     backend_config=env.backend_config,
+                    var_files=list(env.var_files or []),
                     labels=env.labels,
                     position=env.position,
                     variables=[_variable(v, source_names) for v in env_vars],

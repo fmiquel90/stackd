@@ -46,6 +46,47 @@ The worker still clones the whole repository; trigger paths only decide which ch
 !!! note "Redelivering a GitHub webhook"
     Each delivery is acted on once: the API remembers its `X-GitHub-Delivery` id for **5 minutes**. A delivery GitHub sends again within that window — including **Redeliver** in the repo's webhook settings, which reuses the id — gets a `200` with `"duplicate": true` and does nothing. Past 5 minutes a Redeliver is processed again; a delivery that failed (5xx) can be redelivered at once. A request without the `X-GitHub-Delivery` header is refused (`400`). See [SPECS §13](../SPECS.md).
 
+### Private repositories and private modules
+
+`repo_auth_kind` picks how Stackd reaches a private repository; the credential goes in `repo_secret`. It is **write-only**: encrypted at rest, never returned (the stack only shows `has_repo_secret`), never in a [configuration export](backup-restore.md). Set it at creation or with `PATCH /api/v1/stacks/{id}`, or in the stack's **Settings → General**; to rotate it, write the new value.
+
+| `repo_auth_kind` | `repo_url` | `repo_secret` |
+|---|---|---|
+| `none` | any | — |
+| `token` | `https://…` | an access token, read-only |
+| `deploy_key` | `git@host:org/repo.git` or `ssh://git@host/org/repo.git` | an SSH **private** key without a passphrase |
+
+The same credential serves the **private modules** of that repository: `init` downloads modules with it, so a module source such as `git@github.com:acme/infra.git//modules/vpc?ref=v1.4.0` or `git::https://github.com/acme/infra.git//modules/vpc?ref=v1.4.0` resolves on the worker as it does on your machine — no SSH key or git credentials to bake into the runner image. Only `init` gets the credential: no hook (platform or repo) and no other tofu command does.
+
+- **Token** — sent with every module URL on the repository's own host (`https://host/…`, and `git@host:…` / `ssh://git@host/…` rewritten to HTTPS), never to another host. A module on another host goes anonymously. The worker writes the token nowhere on disk, and masks it in the logs.
+- **Deploy key** — git uses that key only, for the clone and for `init`. It reaches whatever the key is granted: on GitHub and GitLab a deploy key belongs to **one** repository, so modules from another private repository need that repository to accept the key too (GitLab can enable one deploy key on several projects; on GitHub, use a machine user's key or a token instead).
+
+Add a deploy key:
+
+```bash
+ssh-keygen -t ed25519 -N '' -C stackd-core-network -f stackd_deploy_key   # no passphrase
+```
+
+1. Register the **public** half (`stackd_deploy_key.pub`) on the repository, **read-only**:
+    - GitHub: *Settings → Deploy keys → Add deploy key*, leave *Allow write access* unchecked.
+    - GitLab: *Settings → Repository → Deploy keys → Add new key*, leave *Grant write permissions to this key* unchecked.
+2. Give Stackd the **private** half (`stackd_deploy_key`):
+
+    ```bash
+    curl -s -X PATCH localhost:8000/api/v1/stacks/$STACK \
+      -H "Authorization: Bearer $TOKEN" -H 'content-type: application/json' \
+      -d "$(jq -n --rawfile key stackd_deploy_key \
+            '{repo_url:"git@github.com:acme/infra.git", repo_auth_kind:"deploy_key", repo_secret:$key}')"
+    ```
+
+    or paste it in **Settings → General** (the *Deploy key* field keeps its line breaks).
+3. Delete the private key file from your machine, then [validate the repo](#validating-the-repo).
+
+Stackd refuses (`422`) a key with a passphrase, a public key, a key on an `https://` URL, and switching between `token` and `deploy_key` without the new credential. The worker trusts an SSH host key on first contact (`StrictHostKeyChecking=accept-new`).
+
+!!! warning "Pull requests and the credential"
+    A [proposed run](runs-and-approvals.md) keeps the repo credential, to clone the pull request and download its modules. The pull request picks the module sources, so it can read whatever the credential can: keep it **read-only** and scoped to the repositories the stack needs.
+
 ### Validating the repo
 
 Before creating environments, check that Stackd can reach the repo with the configured auth:
@@ -83,6 +124,7 @@ curl -s -X POST localhost:8000/api/v1/stacks/$STACK/environments \
 - **`allow_mock_apply`** — allow applying a run that consumed mock outputs (default `false`). See [Dependencies & mocks](dependencies-and-mocks.md).
 - **`allow_fallback_apply`** — allow applying a run whose external secret came from a fallback (default `false`). See [External secret sources](external-secrets.md#fallback-blocks-apply-by-default).
 - **`drift_check_enabled`** — include the environment in the periodic drift check (default `true`).
+- **`var_files`** — the repo's own tfvars files for this environment, relative to the project root, passed in order as `-var-file=`; Stackd's variables still win over them. See [Variables](variables.md#the-repos-own-tfvars-files).
 - **`labels`** — JSON tags: a run is only claimed by a worker whose labels contain all of them (see [Workers & scaling](workers-and-scaling.md#dedicate-a-pool-with-labels): its pool's labels plus its own `STACKD_WORKER_LABELS`); with the stack's labels they also select variable sets (see [Variables](variables.md)).
 
 !!! warning "Why not Terraform workspaces"

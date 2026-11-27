@@ -15,6 +15,7 @@ from collections.abc import Callable, Iterator
 from contextlib import AbstractContextManager, ExitStack, contextmanager, nullcontext
 from pathlib import Path
 from typing import Any
+from urllib.parse import quote
 
 from agent import cancel
 from agent.client import ApiClient
@@ -35,7 +36,7 @@ from agent.runner import (
     run_hooks,
     stream_json_command,
 )
-from agent.workspace import Workspace
+from agent.workspace import HCL_TFVARS, TFVARS_JSON, Workspace
 
 log = get_logger()
 
@@ -164,6 +165,31 @@ def _secret_leak_in_outputs(doc: str, masker: Masker) -> str | None:
 def _repo_token(job: dict) -> str | None:
     """The HTTPS clone token (repo_auth_kind=token); None for `none`/`deploy_key`."""
     return (job.get("repo_credentials") or {}).get("token")
+
+
+def _repo_ssh_key(job: dict) -> str | None:
+    """The deploy key (repo_auth_kind=deploy_key); None for `none`/`token`."""
+    return (job.get("repo_credentials") or {}).get("ssh_private_key")
+
+
+def _masker(job: dict) -> Masker:
+    """The job's log masker (§5.1): the API's `mask_values`, plus the repo token percent-encoded —
+    the form it takes inside a URL, which git can echo in a clone or module-download error."""
+    token = _repo_token(job)
+    extra = [quote(token, safe="")] if token else []
+    return Masker([*job.get("mask_values", []), *extra])
+
+
+def _clone(ws: Workspace, job: dict, commit_sha: str | None) -> Path:
+    env_info = job["environment"]
+    return ws.git_clone(
+        env_info["repo_url"],
+        commit_sha,
+        env_info["project_root"],
+        token=_repo_token(job),
+        branch=env_info.get("branch"),
+        ssh_key=_repo_ssh_key(job),
+    )
 
 
 def _merge_hooks(platform: dict, repo: dict) -> dict[str, list[dict]]:
@@ -420,6 +446,55 @@ def _init_cmd(
     return cmd
 
 
+def _var_file_flags(ws: Workspace, cwd: Path, job: dict[str, Any]) -> list[str]:
+    """`-var-file=` flags for a command that reads variables (§3.4): the env's repo var files in
+    their order, then — only when there are some — Stackd's own two files again, explicitly: a
+    `-var-file` beats any auto-loaded file, so without them a repo file would override the run's
+    resolved variables (dependency inputs and mocks included). Each repo file must be in the
+    checkout: a missing one fails the job here, naming it, rather than in tofu's own words."""
+    files = [f for f in job.get("var_files") or [] if isinstance(f, str)]
+    if not files:
+        return []
+    problem = ws.var_file_problem(cwd, files)
+    if problem:
+        env_info = job["environment"]
+        raise RuntimeError(
+            f"{problem} (environment {env_info.get('name')!r}, relative to the project root "
+            f"{env_info.get('project_root')!r})"
+        )
+    own = [TFVARS_JSON, *([HCL_TFVARS] if job.get("hcl_tfvars") else [])]
+    return [f"-var-file={f}" for f in (*files, *own)]
+
+
+def _init(
+    ws: Workspace,
+    cwd: Path,
+    job: dict[str, Any],
+    tool: str,
+    tf_env: dict[str, str],
+    *,
+    phase: str,
+    streamer: LogStreamer,
+    runner: Runner,
+) -> int:
+    """`init`, the one tofu command that holds the stack's repo credential (§8.3): it downloads the
+    modules, private ones hosted next to the repo included. On disk / in the env for it only."""
+    backend = job.get("backend")
+    creds = ws.repo_credentials(
+        job["environment"]["repo_url"], token=_repo_token(job), ssh_key=_repo_ssh_key(job)
+    )
+    with _tofu_files(ws, cwd, job), creds as git_env:
+        return run_command(
+            _init_cmd(tool, backend, job.get("backend_config_file"), job.get("backend_config")),
+            cwd,
+            {**tf_env, **git_env},
+            phase=phase,
+            section=None,
+            streamer=streamer,
+            runner=runner,
+        )
+
+
 def _job_failed(
     client: ApiClient,
     job_id: str,
@@ -452,20 +527,16 @@ def handle_plan(
     checks = [] if checks is None else checks
     job_id = job["job_id"]
     env_info = job["environment"]
-    masker = Masker(job.get("mask_values", []))
+    masker = _masker(job)
     streamer = LogStreamer(client, job_id, masker)
     ws = Workspace(settings.workspace_root, job_id)
     tool = _tool_bin(env_info["tool"])
 
     try:
         runner = _make_runner(settings, job, ws)
-        cwd = ws.git_clone(
-            env_info["repo_url"],
-            env_info.get("commit_sha"),
-            env_info["project_root"],
-            token=_repo_token(job),
-            branch=env_info.get("branch"),
-        )
+        cwd = _clone(ws, job, env_info.get("commit_sha"))
+        # The env's repo var files are the commit's: checked now, before any hook or tofu step.
+        _var_file_flags(ws, cwd, job)
         backend = job.get("backend")
         if backend:
             ws.write_backend_override(cwd)
@@ -503,16 +574,9 @@ def handle_plan(
 
         if stage("before_init"):
             return _job_failed(client, job_id, "before_init", checks)
-        with _tofu_files(ws, cwd, job):
-            init_rc = run_command(
-                _init_cmd(tool, backend, job.get("backend_config_file"), job.get("backend_config")),
-                cwd,
-                tf_env,
-                phase="planning",
-                section=None,
-                streamer=streamer,
-                runner=runner,
-            )
+        init_rc = _init(
+            ws, cwd, job, tool, tf_env, phase="planning", streamer=streamer, runner=runner
+        )
         if init_rc != 0:
             return _job_failed(client, job_id, "init", checks, error="init failed")
         for name in ("after_init", "before_plan"):
@@ -538,8 +602,12 @@ def handle_plan(
         if job.get("destroy"):
             plan_cmd.insert(2, "-destroy")
         # A targeted / replace plan (§3.5): the API validated the addresses; they reach the plan
-        # only — the saved plan carries them to the apply, which never re-plans.
-        plan_cmd[2:2] = _plan_option_flags(job.get("plan_options"))
+        # only — the saved plan carries them to the apply, which never re-plans. Same for the
+        # env's var files (§3.4), re-checked now that the hooks have run.
+        plan_cmd[2:2] = [
+            *_var_file_flags(ws, cwd, job),
+            *_plan_option_flags(job.get("plan_options")),
+        ]
         with _tofu_files(ws, cwd, job):
             code, events = stream_json_command(
                 plan_cmd,
@@ -655,7 +723,7 @@ def handle_apply(
     checks = [] if checks is None else checks
     job_id = job["job_id"]
     env_info = job["environment"]
-    masker = Masker(job.get("mask_values", []))
+    masker = _masker(job)
     streamer = LogStreamer(client, job_id, masker)
     ws = Workspace(settings.workspace_root, job_id)
     tool = _tool_bin(env_info["tool"])
@@ -668,13 +736,7 @@ def handle_apply(
         if not commit_sha:
             error = "apply refused: the run has no pinned commit; trigger a new plan"
             return _job_failed(client, job_id, "apply", checks, error=error)
-        cwd = ws.git_clone(
-            env_info["repo_url"],
-            commit_sha,
-            env_info["project_root"],
-            token=_repo_token(job),
-            branch=env_info.get("branch"),
-        )
+        cwd = _clone(ws, job, commit_sha)
         backend = job.get("backend")
         if backend:
             ws.write_backend_override(cwd)
@@ -701,16 +763,9 @@ def handle_apply(
             checks.extend({**r, "stage": name} for r in results)
             return aborted
 
-        with _tofu_files(ws, cwd, job):
-            init_rc = run_command(
-                _init_cmd(tool, backend, job.get("backend_config_file"), job.get("backend_config")),
-                cwd,
-                tf_env,
-                phase="applying",
-                section=None,
-                streamer=streamer,
-                runner=runner,
-            )
+        init_rc = _init(
+            ws, cwd, job, tool, tf_env, phase="applying", streamer=streamer, runner=runner
+        )
         if init_rc != 0:
             return _job_failed(client, job_id, "init", checks, error="init failed")
         # The saved plan the human reviewed (§7.4). Missing or unreadable → the apply fails closed:
@@ -807,9 +862,20 @@ def _command_timeout(job: dict) -> int:
 _NON_INTERACTIVE: dict[str, list[str]] = {"force-unlock": ["-force"]}
 
 
-def _command_argv(tool: str, cmd: dict) -> list[str]:
+# The allowlisted subcommands (§4.3) that read the configuration's variables and take
+# `-var-file`: they get the env's repo var files (§3.4), as the plan does.
+_READS_VARIABLES = frozenset({"import", "refresh"})
+
+
+def _command_argv(tool: str, cmd: dict, var_flags: list[str] | None = None) -> list[str]:
     name = str(cmd.get("name", ""))
-    return [tool, *name.split(), *_NON_INTERACTIVE.get(name, []), *(cmd.get("args") or [])]
+    return [
+        tool,
+        *name.split(),
+        *_NON_INTERACTIVE.get(name, []),
+        *(var_flags or []),
+        *(cmd.get("args") or []),
+    ]
 
 
 def handle_command_run(client: ApiClient, job: dict, settings: Settings) -> None:
@@ -818,40 +884,28 @@ def handle_command_run(client: ApiClient, job: dict, settings: Settings) -> None
     job_id = job["job_id"]
     env_info = job["environment"]
     cmd = job.get("command") or {}
-    masker = Masker(job.get("mask_values", []))
+    masker = _masker(job)
     streamer = LogStreamer(client, job_id, masker)
     ws = Workspace(settings.workspace_root, job_id)
     tool = _tool_bin(env_info["tool"])
 
     try:
         runner = _make_runner(settings, job, ws)
-        cwd = ws.git_clone(
-            env_info["repo_url"],
-            env_info.get("commit_sha"),
-            env_info["project_root"],
-            token=_repo_token(job),
-            branch=env_info.get("branch"),
-        )
+        cwd = _clone(ws, job, env_info.get("commit_sha"))
+        var_flags = _var_file_flags(ws, cwd, job) if cmd.get("name") in _READS_VARIABLES else []
         backend = job.get("backend")
         if backend:
             ws.write_backend_override(cwd)
         tf_env = _tofu_env(_run_env(ws, job, runner.name), backend)  # + state backend, tofu only
 
         client.event(job_id, "phase_started", phase="running")
-        with _tofu_files(ws, cwd, job):
-            init_rc = run_command(
-                _init_cmd(tool, backend, job.get("backend_config_file"), job.get("backend_config")),
-                cwd,
-                tf_env,
-                phase="running",
-                section=None,
-                streamer=streamer,
-                runner=runner,
-            )
+        init_rc = _init(
+            ws, cwd, job, tool, tf_env, phase="running", streamer=streamer, runner=runner
+        )
         if init_rc != 0:
             return client.event(job_id, "job_failed", phase="init", result={"error": "init failed"})
 
-        argv = _command_argv(tool, cmd)
+        argv = _command_argv(tool, cmd, var_flags)
         timeout = _command_timeout(job)
         with _tofu_files(ws, cwd, job):
             code = run_command(
@@ -1012,7 +1066,7 @@ def _run_job(client: ApiClient, job: dict, settings: Settings) -> None:
         jid, jphase = job.get("job_id"), job.get("phase")
         # The exception message can carry secrets (e.g. a clone URL with the repo token, a tofu
         # error echoing a sensitive value). Mask before logging or reporting it to the API (§5.1).
-        detail = Masker(job.get("mask_values", [])).mask(str(exc))
+        detail = _masker(job).mask(str(exc))
         log.error("job failed", extra={"event": "agent.failed", "run_id": jid, "error": detail})
         if jid:
             try:

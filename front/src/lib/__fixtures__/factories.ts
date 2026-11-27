@@ -48,6 +48,7 @@ export function makeEnv(over: Partial<Environment> = {}): Environment {
     allow_fallback_apply: false,
     backend_config_file: null,
     backend_config: null,
+    var_files: [],
     head_sha: "2af0351c9e",
     commits_ahead: null,
     affects_project_root: null,

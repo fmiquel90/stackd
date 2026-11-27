@@ -186,6 +186,11 @@ or "overridden here". The provenance is also frozen onto the run (`variable_prov
   `TF_VAR_<name>`).
 - `environment` → injected as a process environment variable for the run.
 
+A repo that already keeps one tfvars file per environment keeps it: the environment lists it in
+`var_files` (e.g. `["envs/prod.tfvars"]`, relative to the project root, in order) and the worker
+passes it as `-var-file=`. Stackd's own variables still win over it — the worker passes its
+generated files after the repo's (SPECS §3.4).
+
 ### Sensitive variables are write-only
 
 Mark a variable `sensitive: true` and it is **AES-256-GCM encrypted at rest** and **never returned
@@ -346,8 +351,9 @@ hooks:
 **Repo hooks get nothing secret**: of the worker's environment only an allowlist (`PATH`, `HOME`,
 locale, proxies…), the run's non-sensitive environment variables, no cloud credentials, and a
 `plan.json` with every sensitive value masked. While a repo hook runs, neither the saved plan, the
-run's tfvars, the cloud token file nor the repo token is on disk. Platform hooks are trusted: they
-get the run's secrets, the cloud credentials and the raw `plan.json`. Neither tofu nor any hook sees
+run's tfvars, the cloud token file nor the repo credential is on disk. Platform hooks are trusted: they
+get the run's secrets, the cloud credentials and the raw `plan.json` — but not the repo credential
+(token or deploy key), which only the clone and `init` (module downloads) get. Neither tofu nor any hook sees
 the agent's own `STACKD_*` settings. See [Hooks](guide/hooks.md#what-hooks-can-see).
 
 ---
