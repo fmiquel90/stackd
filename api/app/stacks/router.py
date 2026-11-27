@@ -18,6 +18,7 @@ from app.errors import ProblemException
 from app.models.environment import Environment
 from app.models.stack import Stack
 from app.spaces import accessible_space_ids, guard_stack_id, resolve_target_space
+from app.stacks.credentials import check_repo_auth, prepare_repo_secret
 from app.stacks.git import check_repo
 from app.stacks.schemas import CheckRepoResult, StackCreate, StackOut, StackUpdate
 from app.variables.crud import (
@@ -56,6 +57,7 @@ async def create_stack(
     # Target space: explicit space_id, else the default space (bootstrap fallback). Access is
     # membership-gated either way (§6, Phase F) — writer+ required to create.
     space_id = await resolve_target_space(session, user, body.space_id, min_role=Role.writer)
+    check_repo_auth(body.repo_auth_kind, body.repo_url)
     stack = Stack(
         space_id=space_id,
         name=body.name,
@@ -68,7 +70,9 @@ async def create_stack(
         labels=body.labels,
     )
     if body.repo_auth_kind != RepoAuthKind.none and body.repo_secret:
-        stack.repo_secret_encrypted = encrypt(body.repo_secret)
+        stack.repo_secret_encrypted = encrypt(
+            prepare_repo_secret(body.repo_auth_kind, body.repo_secret)
+        )
     session.add(stack)
     try:
         await session.flush()
@@ -104,10 +108,23 @@ async def update_stack(
     changes = body.model_dump(exclude_unset=True)
     secret = changes.pop("repo_secret", None)
     webhook_secret = changes.pop("webhook_secret", None)
+    kind = changes.get("repo_auth_kind") or stack.repo_auth_kind
+    check_repo_auth(kind, changes.get("repo_url") or stack.repo_url)
+    # A token is no deploy key, nor the reverse: switching between them needs the new credential.
+    if (
+        secret is None
+        and stack.repo_secret_encrypted is not None
+        and {kind, stack.repo_auth_kind} == {RepoAuthKind.token, RepoAuthKind.deploy_key}
+    ):
+        raise ProblemException(
+            422,
+            "Invalid repository credential",
+            f"Switching the repository auth to {kind.value} needs its credential (repo_secret).",
+        )
     for field, value in changes.items():
         setattr(stack, field, value)
     if secret is not None:
-        stack.repo_secret_encrypted = encrypt(secret) if secret else None
+        stack.repo_secret_encrypted = encrypt(prepare_repo_secret(kind, secret)) if secret else None
     if webhook_secret is not None:
         stack.webhook_secret_encrypted = encrypt(webhook_secret) if webhook_secret else None
     await record_audit(
