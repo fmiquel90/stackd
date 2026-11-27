@@ -1967,6 +1967,10 @@ or "overridden here". The provenance is also frozen onto the run (<code>variable
   <code>TF_VAR_&lt;name&gt;</code>).</li>
 <li><code>environment</code> → injected as a process environment variable for the run.</li>
 </ul>
+<p>A repo that already keeps one tfvars file per environment keeps it: the environment lists it in
+<code>var_files</code> (e.g. <code>["envs/prod.tfvars"]</code>, relative to the project root, in order) and the worker
+passes it as <code>-var-file=</code>. Stackd's own variables still win over it — the worker passes its
+generated files after the repo's (SPECS §3.4).</p>
 <h3 id="sensitive-variables-are-write-only">Sensitive variables are write-only<a class="headerlink" href="#sensitive-variables-are-write-only" title="Permanent link">&para;</a></h3>
 <p>Mark a variable <code>sensitive: true</code> and it is <strong>AES-256-GCM encrypted at rest</strong> and <strong>never returned
 in clear</strong> — the API masks it as <code>•••</code>, decrypting only to build the worker payload, and the agent

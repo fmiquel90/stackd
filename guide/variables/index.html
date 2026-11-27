@@ -568,6 +568,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#the-repos-own-tfvars-files" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The repo's own tfvars files
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#values-by-reference-external-secret-sources" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -1331,6 +1342,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#the-repos-own-tfvars-files" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The repo's own tfvars files
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#values-by-reference-external-secret-sources" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -1502,6 +1524,50 @@ expression instead (a list, a map, a number…).</p>
 <p class="admonition-title">Warning</p>
 <p>A sensitive value is <strong>never returned in clear</strong>. A later <code>GET</code> shows <code>"value": "•••"</code>; the plaintext is not readable again through the API.</p>
 </div>
+<h2 id="the-repos-own-tfvars-files">The repo's own tfvars files<a class="headerlink" href="#the-repos-own-tfvars-files" title="Permanent link">&para;</a></h2>
+<p>A repo that keeps one tfvars file per environment (<code>envs/prod.tfvars</code>, or <code>prod.tfvars</code> next to a
+<code>prod.config</code> backend file) can keep it: list it in the environment's <strong><code>var_files</code></strong> (the
+environment's settings, or the API). Paths are relative to the stack's project root, may go up
+(<code>../shared/prod.tfvars</code>) but never out of the repository, and are used <strong>in order</strong> — a later file
+wins over an earlier one.</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a>curl<span class="w"> </span>-s<span class="w"> </span>-X<span class="w"> </span>PATCH<span class="w"> </span>localhost:8000/api/v1/environments/<span class="nv">$ENV</span><span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a><span class="w">  </span>-H<span class="w"> </span><span class="s2">&quot;Authorization: Bearer </span><span class="nv">$TOKEN</span><span class="s2">&quot;</span><span class="w"> </span>-H<span class="w"> </span><span class="s1">&#39;content-type: application/json&#39;</span><span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a><span class="w">  </span>-d<span class="w"> </span><span class="s1">&#39;{&quot;var_files&quot;:[&quot;envs/prod.tfvars&quot;,&quot;../shared/prod.tfvars&quot;]}&#39;</span>
+</code></pre></div>
+<p>The worker passes each one as <code>-var-file=</code> to the plan (tracked, pull request, destroy, drift) and
+to the <code>import</code> / <code>refresh</code> commands. <strong>Stackd's variables always win</strong>: every layer above, the
+dependency outputs and the mocks override a repo file — the worker passes its own generated files
+after yours. The order, weakest first:</p>
+<table>
+<thead>
+<tr>
+<th>#</th>
+<th>Source</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>1</td>
+<td><code>TF_VAR_&lt;name&gt;</code> in the environment</td>
+</tr>
+<tr>
+<td>2</td>
+<td>the repo's <code>terraform.tfvars</code> and <code>*.auto.tfvars</code> (auto-loaded)</td>
+</tr>
+<tr>
+<td>3</td>
+<td><code>var_files</code>, in their order</td>
+</tr>
+<tr>
+<td>4</td>
+<td>Stackd's resolved variables (the 6 layers, dependency outputs, mocks)</td>
+</tr>
+</tbody>
+</table>
+<p>A file missing at the run's commit fails the run before anything executes, naming the file and the
+environment. It works the same with managed and unmanaged state. Don't define the same variable in
+both an auto-loaded repo file (layer 2) and a var file: the apply of the saved plan only sees the
+auto-loaded value, and the tool may refuse the plan as an input mismatch. Details: SPECS §3.4.</p>
 <h2 id="values-by-reference-external-secret-sources">Values by reference (external secret sources)<a class="headerlink" href="#values-by-reference-external-secret-sources" title="Permanent link">&para;</a></h2>
 <p>Instead of storing a secret in Stackd, a variable can point at an entry in an external secrets manager (Proton Pass today). The value is fetched <strong>live at run time</strong> and never persisted — see <a href="../external-secrets/">External secret sources</a>.</p>
 <h2 id="see-also">See also<a class="headerlink" href="#see-also" title="Permanent link">&para;</a></h2>

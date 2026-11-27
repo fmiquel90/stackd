@@ -1538,6 +1538,7 @@
 <li><strong><code>allow_mock_apply</code></strong> — allow applying a run that consumed mock outputs (default <code>false</code>). See <a href="../dependencies-and-mocks/">Dependencies &amp; mocks</a>.</li>
 <li><strong><code>allow_fallback_apply</code></strong> — allow applying a run whose external secret came from a fallback (default <code>false</code>). See <a href="../external-secrets/#fallback-blocks-apply-by-default">External secret sources</a>.</li>
 <li><strong><code>drift_check_enabled</code></strong> — include the environment in the periodic drift check (default <code>true</code>).</li>
+<li><strong><code>var_files</code></strong> — the repo's own tfvars files for this environment, relative to the project root, passed in order as <code>-var-file=</code>; Stackd's variables still win over them. See <a href="../variables/#the-repos-own-tfvars-files">Variables</a>.</li>
 <li><strong><code>labels</code></strong> — JSON tags: a run is only claimed by a worker whose labels contain all of them (see <a href="../workers-and-scaling/#dedicate-a-pool-with-labels">Workers &amp; scaling</a>: its pool's labels plus its own <code>STACKD_WORKER_LABELS</code>); with the stack's labels they also select variable sets (see <a href="../variables/">Variables</a>).</li>
 </ul>
 <div class="admonition warning">

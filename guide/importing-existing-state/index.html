@@ -1265,7 +1265,9 @@ exactly as before. Stackd still orchestrates the run (plan → approve → apply
 </code></pre></div>
 <p>If your backend block is partial, give the missing settings per environment: <code>backend_config_file</code>
 (a repo-relative <code>.config</code>/<code>.tfbackend</code> file) and/or <code>backend_config</code> (a <code>{key: value}</code> map, e.g. a
-<code>key</code> of its own per environment); the worker passes each as <code>-backend-config</code> at <code>init</code>.</p>
+<code>key</code> of its own per environment); the worker passes each as <code>-backend-config</code> at <code>init</code>. If the
+repo also keeps a tfvars file per environment (<code>prod.config</code> + <code>prod.tfvars</code>), list the latter in
+the environment's <code>var_files</code> — see <a href="../variables/#the-repos-own-tfvars-files">Variables</a>.</p>
 <p>The first <code>plan</code> reads your real state — a <strong>no-op diff confirms</strong> the import is correct before you
 apply anything. Once the environment has a finished run, drift detection (<code>drift_check_enabled</code>, on
 by default) re-plans it read-only (<code>-refresh-only</code>) every 6 h (<code>STACKD_DRIFT_INTERVAL_SECONDS</code>).</p>

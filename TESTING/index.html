@@ -1776,6 +1776,10 @@ all. Counts in parentheses include parametrized cases and drift as tests are add
 <td><code>hcl</code> variables routed to the generated <code>.auto.tfvars</code>, everything else to JSON.</td>
 </tr>
 <tr>
+<td><code>test_var_files.py</code> (17)</td>
+<td>An environment's repo var files (SPECS §3.4): order kept on create/PATCH, <code>null</code> clears, the change audited with the new list; 422 on an absolute path, a duplicate, an empty or over-long entry, a control character, more than 16, or a path leaving the repository from the stack's <code>project_root</code>; the claim carries them, managed state or not; export/import round trip (a change is an audited update, the boundary checked on import); a clone copies them.</td>
+</tr>
+<tr>
 <td><code>test_secret_sources.py</code> (12)</td>
 <td>External secret references: live value masked, static fallback + apply gate (autodeploy stops such a plan at <code>unconfirmed</code>, even with <code>allow_fallback_apply</code>), <code>error</code> mode fails closed, break-glass override (needs apply right, only for a <code>break_glass</code> reference — else 422 —, wiped at the terminal state), source CRUD hides the bootstrap secret, in-use source can't be deleted, a fallback appearing at the apply claim is gated; a variable can't reference another space's source, and one written before that check fails the run closed.</td>
 </tr>
@@ -1981,6 +1985,10 @@ The tier gate (an approver without <code>prod</code>) and staleness stay manual 
 <tr>
 <td><code>test_init_cmd.py</code> (6)</td>
 <td>The <code>init</code> command for managed state and for unmanaged partial backends (file, inline map, both).</td>
+</tr>
+<tr>
+<td><code>test_var_files.py</code> (19)</td>
+<td>An environment's repo var files (SPECS §3.4): <code>-var-file=</code> on the plan (tracked, drift, destroy) in order, then Stackd's JSON and HCL files; none on init, show, the saved plan's apply, nor without var files; <code>import</code>/<code>refresh</code> get them before their args, the other commands neither get nor need them; a missing file, a directory, or a path or symlink leaving the checkout fails the job before any tofu step, naming the file and the env; the precedence end to end on the real tool (skipped without one).</td>
 </tr>
 <tr>
 <td><code>test_security.py</code> (6)</td>
