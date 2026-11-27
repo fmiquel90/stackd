@@ -1848,6 +1848,10 @@ all. Counts in parentheses include parametrized cases and drift as tests are add
 <td>Outbox retry schedule: <code>Retry-After</code> (seconds, HTTP date), GitHub's rate-limit reset, exponential backoff with jitter up to the cap, the default budget spans over an hour, a later <code>Retry-After</code> wins (capped).</td>
 </tr>
 <tr>
+<td><code>test_run_reaping.py</code> (8)</td>
+<td>Runs whose job no worker executes (SPECS §3.7, §7.1, §7.5): a run its live worker leaves out of 2 heartbeats is failed <code>job_not_running</code> (never on a fresh claim, nor after one beat), a listed run or an agent sending no job ids is spared, a job holding apply credentials waits the apply window; a stop answered <code>running_here: false</code> ends the run (not on a fresh claim); one run that cannot be failed doesn't hold back the others; an API/DB outage is not counted as worker silence (only the last outage is discounted); a command without result is delivered again, 3 times at most, then failed.</td>
+</tr>
+<tr>
 <td><code>test_queue.py</code> (3)</td>
 <td><code>/queue</code> blocking reasons: a <code>confirmed</code> run is held for its plan worker only within the affinity window (never blocked by itself), a run behind it waits on <code>active_run</code>, a locked env reports <code>env_locked</code>; an apply's claim latency counts from its confirmation.</td>
 </tr>
@@ -2093,6 +2097,10 @@ The tier gate (an approver without <code>prod</code>) and staleness stay manual 
 <tr>
 <td><code>test_diagnostics.py</code> (1)</td>
 <td>The diagnostics bundle lists env var names, never values.</td>
+</tr>
+<tr>
+<td><code>test_heartbeat.py</code> (3)</td>
+<td>The heartbeat lists the jobs running here with a 10 s timeout (none without a registry); one failing command doesn't drop the others; diagnostics are collected off the heartbeat thread, once even if delivered again meanwhile.</td>
 </tr>
 </tbody>
 </table>

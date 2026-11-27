@@ -1409,7 +1409,12 @@ changed: <code>applying</code> is never <code>canceled</code>. Stopping such a j
 duplicate <code>job_failed</code>) is refused with 409.</p>
 <p><strong>Worker loss</strong> fails only runs whose job is <em>executing</em> on the lost worker (<code>preparing</code>,
 <code>planning</code>, <code>checking</code>, <code>running</code>, <code>applying</code>) — after 120 s, or, for a job holding apply
-credentials (<code>applying</code>, a mutating command), after the apply budget + grace. <code>unconfirmed</code> and
+credentials (<code>applying</code>, a mutating command), after the apply budget + grace. A live worker's
+heartbeat lists the jobs it runs: an executing run of it left out of 2 heartbeats in a row (a lost
+claim response, terminal reports that never got through) is failed <code>job_not_running</code> under the
+same delays, and so is one whose stop request it answers <code>running_here: false</code>. Worker silence is
+only counted while the API could hear it (an API restart or a DB outage is discounted), and each
+lost run is failed in its own transaction. <code>unconfirmed</code> and
 <code>confirmed</code> runs are never reclaimed: they wait on a human or on the apply claim. Every terminal
 transition drops the run's saved plan.</p>
 <h2 id="worker-pull-protocol">🤝 Worker pull protocol<a class="headerlink" href="#worker-pull-protocol" title="Permanent link">&para;</a></h2>
@@ -1423,7 +1428,7 @@ pinned to the commit that plan checked out, and the apply job applies exactly th
     participant H as Human
     W-&gt;&gt;A: POST /worker/v1/register (pool token)
     loop every 20s
-        W-&gt;&gt;A: heartbeat → pending commands (diagnostics, cancel_job)
+        W-&gt;&gt;A: heartbeat (in-flight, job ids) → commands (diagnostics, cancel_job), redelivered until answered
     end
     W-&gt;&gt;A: POST /jobs/claim?wait=25 (long-poll)
     A--&gt;&gt;W: plan job: vars + secrets, hooks, state token (plan scope), plan OIDC token

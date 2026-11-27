@@ -2193,13 +2193,17 @@ out to them.</p>
   A job holding apply credentials (an <code>applying</code> run, a mutating command) is only reclaimed after
   the apply budget + grace (15 + 5 min by default), so a long apply isn't failed mid-flight and its
   tokens have expired before another worker takes the environment. <code>unconfirmed</code> and <code>confirmed</code> runs are
-  never reclaimed: they wait on a human or on the apply claim, not on the plan worker.</li>
+  never reclaimed: they wait on a human or on the apply claim, not on the plan worker. A <strong>live</strong>
+  worker that lost a job (a claim response that never arrived) is caught too: its heartbeat lists
+  the jobs it runs, and a run it leaves out of 2 heartbeats is failed <code>job_not_running</code> (same
+  delays). An API or database outage doesn't count as worker silence.</li>
 <li><strong>Command channel.</strong> The heartbeat response is also the <em>downward</em> channel (still no inbound to
   the worker). It carries <strong>diagnostics</strong>: an admin clicks a button, a <code>pending</code> command is
   queued, the worker picks it up on its next heartbeat, runs a <strong>read-only</strong> bundle (versions, disk,
   environment variable <em>names</em> — never values, recent agent logs) and posts it back. It also carries
   <code>cancel_job</code>, which stops a job the worker is executing (§4): SIGINT to the tool, SIGKILL after
-  <code>STACKD_CANCEL_GRACE_SECONDS</code> (120 s). Delivery latency is bounded by the heartbeat interval (~20 s).</li>
+  <code>STACKD_CANCEL_GRACE_SECONDS</code> (120 s). Delivery latency is bounded by the heartbeat interval (~20 s). Delivery is at least once: a command
+  without a result after 90 s is delivered again (3 times at most).</li>
 <li><strong>Drain.</strong> A worker stopped with SIGTERM/SIGINT claims nothing more, keeps heartbeating, lets
   its running jobs finish and report, then exits; past <code>STACKD_DRAIN_TIMEOUT_SECONDS</code> (20 min) or
   on a second signal it stops them as <code>cancel_job</code> would, and their runs fail <code>worker_shutdown</code>
