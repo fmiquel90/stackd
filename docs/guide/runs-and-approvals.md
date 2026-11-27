@@ -225,7 +225,9 @@ A pull request's code runs inside tofu (`data "external"`, provisioners), and no
 it yet: a proposed run gets **none of the environment's secrets**. No sensitive variable, of
 either kind, and no [external secret](external-secrets.md) (not even fetched) reaches its job.
 What a plan needs stays: the cloud credentials of the **plan role**, read-only by design (see
-[Cloud credentials](cloud-credentials.md)), the read-only state token and the repo token to clone.
+[Cloud credentials](cloud-credentials.md)), the read-only state token and the repo credential, to clone and to download the modules (the pull
+request picks the module sources: keep that credential read-only, see
+[Private repositories and private modules](stacks-and-environments.md#private-repositories-and-private-modules)).
 
 !!! warning "What a proposed run still reaches"
     A plan that needs a secret gets no value for it: tofu uses the variable's default, or fails

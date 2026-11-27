@@ -346,8 +346,9 @@ hooks:
 **Repo hooks get nothing secret**: of the worker's environment only an allowlist (`PATH`, `HOME`,
 locale, proxies…), the run's non-sensitive environment variables, no cloud credentials, and a
 `plan.json` with every sensitive value masked. While a repo hook runs, neither the saved plan, the
-run's tfvars, the cloud token file nor the repo token is on disk. Platform hooks are trusted: they
-get the run's secrets, the cloud credentials and the raw `plan.json`. Neither tofu nor any hook sees
+run's tfvars, the cloud token file nor the repo credential is on disk. Platform hooks are trusted: they
+get the run's secrets, the cloud credentials and the raw `plan.json` — but not the repo credential
+(token or deploy key), which only the clone and `init` (module downloads) get. Neither tofu nor any hook sees
 the agent's own `STACKD_*` settings. See [Hooks](guide/hooks.md#what-hooks-can-see).
 
 ---
