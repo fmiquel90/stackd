@@ -40,6 +40,17 @@ def parse_labels(value: str) -> dict[str, str]:
     return labels
 
 
+def pool_token_from_env() -> str:
+    """STACKD_POOL_TOKEN, else the content of STACKD_POOL_TOKEN_FILE (re-read on each call: the
+    file is how a rotated token reaches a running agent)."""
+    token = os.environ.get("STACKD_POOL_TOKEN", "")
+    token_file = os.environ.get("STACKD_POOL_TOKEN_FILE")
+    if not token and token_file and os.path.exists(token_file):
+        with open(token_file) as f:
+            token = f.read().strip()
+    return token
+
+
 def _docker_limits() -> DockerLimits:
     env = os.environ.get
     cpus = env("STACKD_DOCKER_CPUS")
@@ -93,13 +104,9 @@ class Settings:
 
     @classmethod
     def from_env(cls) -> "Settings":
-        token = os.environ.get("STACKD_POOL_TOKEN", "")
-        token_file = os.environ.get("STACKD_POOL_TOKEN_FILE")
-        if not token and token_file and os.path.exists(token_file):
-            token = open(token_file).read().strip()
         return cls(
             api_url=os.environ.get("STACKD_API_URL", "http://api:8000").rstrip("/"),
-            pool_token=token,
+            pool_token=pool_token_from_env(),
             worker_name=os.environ.get("STACKD_WORKER_NAME", os.uname().nodename),
             runner=os.environ.get("STACKD_RUNNER", "local"),
             heartbeat_interval=int(os.environ.get("STACKD_HEARTBEAT_INTERVAL", "20")),

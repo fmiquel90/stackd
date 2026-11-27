@@ -19,7 +19,7 @@ from typing import Any
 from urllib.parse import quote
 
 from agent import cancel
-from agent.client import ApiClient
+from agent.client import ApiClient, transient
 from agent.config import Settings
 from agent.drain import APPLY_HOLD_MARGIN_SECONDS, EXIT_CODES, Drain, supervise
 from agent.logging import get_logger, setup as setup_logging
@@ -635,6 +635,42 @@ def _job_failed(
     client.event(job_id, "job_failed", phase=phase, result={**result, "checks": checks})
 
 
+def _apply_window_end(job: dict) -> float:
+    """When the API's apply window for this job closes (claim + apply budget + grace, §3.7): its
+    credentials expire then, and the API may reclaim the run (`worker_lost`)."""
+    budget = job.get("apply_timeout_seconds") or _DEFAULT_TIMEOUT_SECONDS
+    return time.monotonic() + budget + APPLY_HOLD_MARGIN_SECONDS
+
+
+# A report the API did not take is sent again after this pause, on top of the client's own retries.
+_REPORT_RETRY_PAUSE_SECONDS = 10.0
+
+
+def _report_changed(report: Callable[[], None], job_id: str, *, until: float) -> None:
+    """Send the end of a job that changed the infrastructure (an apply that went through, a
+    command that ran). Its report carries what the API must record — the outputs, the cascade
+    (§9.1/§9.2) — so a transient failure is retried until `until` (the apply window). It never
+    raises: a report that did not get through must not turn into a `job_failed` — the change
+    happened. Not delivered, the run is left to the API (`worker_lost`, §3.7)."""
+    while True:
+        try:
+            report()
+            return
+        except Exception as exc:  # noqa: BLE001
+            left = until - time.monotonic()
+            if not transient(exc) or left <= 0:
+                log.error(
+                    "job report not delivered",
+                    extra={"event": "agent.report_lost", "run_id": job_id, "error": str(exc)},
+                )
+                return
+            log.warning(
+                "job report failed, retrying",
+                extra={"event": "agent.report_retry", "run_id": job_id, "error": str(exc)},
+            )
+        time.sleep(min(_REPORT_RETRY_PAUSE_SECONDS, left))
+
+
 def _plan_option_flags(opts: dict | None) -> list[str]:
     """`-target=`/`-replace=` flags for a plan job's `plan_options` (§7.2), addresses as the API
     validated them. Each is one argv element (no shell), never a bare option."""
@@ -858,12 +894,14 @@ def handle_plan(
         )
     finally:
         ws.cleanup()
+        streamer.close()  # what is left of the job's output, bounded
 
 
 def handle_apply(
     client: ApiClient, job: dict, settings: Settings, checks: list[dict[str, Any]] | None = None
 ) -> None:
     """The apply job (§7.3/§7.4). `checks` as in `handle_plan`."""
+    window_end = _apply_window_end(job)
     checks = [] if checks is None else checks
     job_id = job["job_id"]
     env_info = job["environment"]
@@ -984,7 +1022,17 @@ def handle_apply(
             out = runner.capture([tool, "output", "-json"], cwd, tf_env)
         ok_output = out.returncode == 0
         if ok_output:
-            client.upload_artifact(job_id, "outputs.json", masker.mask(out.stdout).encode())
+            try:
+                client.upload_artifact(job_id, "outputs.json", masker.mask(out.stdout).encode())
+            except Exception as exc:  # noqa: BLE001 — a copy: the report below carries the outputs
+                log.warning(
+                    "outputs.json not uploaded",
+                    extra={
+                        "event": "agent.artifact_error",
+                        "run_id": job_id,
+                        "error": masker.mask(str(exc)),
+                    },
+                )
             # Tripwire on apply is warn-only: infra already changed, so failing the job here would
             # misrepresent a successful apply (§5.1). Surface it as a masked log line.
             leak = _secret_leak_in_outputs(out.stdout, masker)
@@ -995,10 +1043,22 @@ def handle_apply(
         # cascades from it. But the infra has changed: its outputs, read before the hooks ran,
         # are reported so the API records them (§9.1).
         if stage("after_apply"):
-            return _job_failed(client, job_id, "after_apply", checks, outputs=outputs)
-        client.event(job_id, "phase_finished", result={"outputs": outputs, "checks": checks})
+            return _report_changed(
+                lambda: _job_failed(client, job_id, "after_apply", checks, outputs=outputs),
+                job_id,
+                until=window_end,
+            )
+        streamer.flush()
+        _report_changed(
+            lambda: client.event(
+                job_id, "phase_finished", result={"outputs": outputs, "checks": checks}
+            ),
+            job_id,
+            until=window_end,
+        )
     finally:
         ws.cleanup()
+        streamer.close()  # what is left of the job's output, bounded
 
 
 def _holds_apply_credentials(job: dict) -> bool:
@@ -1045,6 +1105,7 @@ def _command_argv(tool: str, cmd: dict, var_flags: list[str] | None = None) -> l
 def handle_command_run(client: ApiClient, job: dict, settings: Settings) -> None:
     """Run one allowlisted tofu/terraform subcommand (RunType.command): clone, init, run it.
     No hooks, no plan/apply phases — a one-off operation (import, state rm, …)."""
+    window_end = _apply_window_end(job)
     job_id = job["job_id"]
     env_info = job["environment"]
     cmd = job.get("command") or {}
@@ -1111,9 +1172,14 @@ def handle_command_run(client: ApiClient, job: dict, settings: Settings) -> None
             return client.event(
                 job_id, "job_failed", phase="command", result={"error": masker.mask(error)}
             )
-        client.event(job_id, "phase_finished", result={"command": cmd.get("name")})
+        _report_changed(
+            lambda: client.event(job_id, "phase_finished", result={"command": cmd.get("name")}),
+            job_id,
+            until=window_end if _holds_apply_credentials(job) else 0.0,
+        )
     finally:
         ws.cleanup()
+        streamer.close()  # what is left of the job's output, bounded
 
 
 def _handle_command(
