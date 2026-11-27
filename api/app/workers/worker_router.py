@@ -894,7 +894,7 @@ async def _put_errored_state(session: AsyncSession, run: Run, request: Request) 
             409, "Not a state write", "Only an executing job holding apply credentials sends one."
         )
     await session.commit()  # hold no DB connection while the body streams in
-    data = await _read_capped(request, MAX_ERRORED_STATE_BYTES)
+    data = await read_capped(request, MAX_ERRORED_STATE_BYTES, "Artifact too large")
     if not data:
         raise ProblemException(400, "Empty artifact", "The errored state is empty.")
     key = await save_errored_state(run.id, data)

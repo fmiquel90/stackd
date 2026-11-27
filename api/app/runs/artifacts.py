@@ -75,9 +75,11 @@ def record_saved_plan(session: AsyncSession, run: Run, key: str) -> None:
 async def drop_unrecorded_plan(key: str) -> None:
     """A plan stored by an upload refused afterwards: no run points to it."""
     await _purge([key])
+
+
 async def save_errored_state(run_id: uuid.UUID, data: bytes) -> str:
     """Encrypt and store the state a job could not persist; returns its S3 key."""
-    key = artifact_key(run_id, ERRORED_STATE_FILE)
+    key = f"artifacts/{run_id}/{ERRORED_STATE_FILE}"
     await put_object(key, encrypt_bytes(data, aad=_aad(key)))
     return key
 
