@@ -18,6 +18,15 @@ class Settings(BaseSettings):
 
     # Database
     database_url: str = "postgresql+asyncpg://stackd:stackd@localhost:5432/stackd"
+    # Connection pool of each API process (docs/guide/workers-and-scaling.md#database-connections).
+    stackd_db_pool_size: int = 10
+    stackd_db_max_overflow: int = 10
+    stackd_db_pool_timeout_seconds: int = 30
+    # Server-side timeouts set on the API's own connections — not on Alembic's, nor the audit
+    # purge's. 0 leaves the server's (role/database) setting in place.
+    stackd_db_idle_in_transaction_timeout_seconds: int = 300
+    stackd_db_lock_timeout_seconds: int = 30
+    stackd_db_statement_timeout_seconds: int = 0
 
     # Crypto / sessions
     stackd_encryption_key: str = ""  # base64-encoded 32 bytes (AES-256-GCM master key, §1)
@@ -88,6 +97,8 @@ class Settings(BaseSettings):
     stackd_apply_lost_grace_seconds: int = 5 * 60
     stackd_head_poll_interval: int = 900
     stackd_apply_affinity_seconds: int = 60
+    # Server-side cap on a claim long-poll's `?wait=` (§7.2).
+    stackd_claim_max_wait_seconds: int = 30
     # Drift detection (§19): minimum spacing between read-only drift plans per environment.
     stackd_drift_interval_seconds: int = 21600  # 6h
 

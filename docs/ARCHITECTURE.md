@@ -252,8 +252,15 @@ claim time.
 ## 📈 Scaling
 
 Workers are stateless pull agents, so **scaling out = running more of them** (e.g. bumping an ECS
-service `desiredCount`). Postgres serializes claims with two guards (`FOR UPDATE … SKIP LOCKED` +
+service `desiredCount`). Postgres serializes claims with two guards (`FOR NO KEY UPDATE … SKIP LOCKED` +
 the `one_active_run_per_env` unique index). What's worth knowing:
+
+- 🔌 **Idle workers cost no database connection** — the claim long-poll ends its transaction before
+  each 2 s wait, so the API's pool is sized for requests in flight, not for workers
+  ([sizing](guide/workers-and-scaling.md#database-connections)).
+- 🧯 **One bad run never blocks the queue** — a job that cannot be built for a transient reason
+  (KMS, the database) is set aside for a backoff (`claimable_after`); any other build failure fails
+  the run closed.
 
 - 🧩 **The unit of parallelism is the environment, not the worker** — one active run per env, but
   different envs run concurrently. Throughput ≈ `min(workers, envs with queued work)`.

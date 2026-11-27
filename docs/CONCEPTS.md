@@ -368,9 +368,10 @@ register (pool token) → heartbeat (every ~20s) → claim (long-poll)
    → clone → hooks → init → plan/apply → stream logs → report → repeat
 ```
 
-- **Claim** is concurrency-safe: `SELECT … FOR UPDATE OF environment SKIP LOCKED` serialises per
-  environment, and the `one_active_run_per_env` unique index is the hard guarantee (a losing racer gets a
-  `23505` and simply re-polls).
+- **Claim** is concurrency-safe: `SELECT … FOR NO KEY UPDATE OF environment SKIP LOCKED` serialises
+  per environment, and the `one_active_run_per_env` unique index is the hard guarantee (a losing racer
+  gets a `23505` and simply re-polls). A run whose job cannot be built never blocks the queue: a
+  transient failure sets it aside for a backoff, any other fails it.
 - **Labels** target work to pools (e.g. a dedicated `prod` pool): a worker claims only runs whose
   environment labels are a subset of its own, and whose stack's tool version it can run.
 - **Apply affinity**: the worker that produced a plan is preferred for the apply for ~60s; past
