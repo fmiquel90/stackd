@@ -103,7 +103,12 @@ duplicate `job_failed`) is refused with 409.
 
 **Worker loss** fails only runs whose job is *executing* on the lost worker (`preparing`,
 `planning`, `checking`, `running`, `applying`) — after 120 s, or, for a job holding apply
-credentials (`applying`, a mutating command), after the apply budget + grace. `unconfirmed` and
+credentials (`applying`, a mutating command), after the apply budget + grace. A live worker's
+heartbeat lists the jobs it runs: an executing run of it left out of 2 heartbeats in a row (a lost
+claim response, terminal reports that never got through) is failed `job_not_running` under the
+same delays, and so is one whose stop request it answers `running_here: false`. Worker silence is
+only counted while the API could hear it (an API restart or a DB outage is discounted), and each
+lost run is failed in its own transaction. `unconfirmed` and
 `confirmed` runs are never reclaimed: they wait on a human or on the apply claim. Every terminal
 transition drops the run's saved plan.
 
@@ -121,7 +126,7 @@ sequenceDiagram
     participant H as Human
     W->>A: POST /worker/v1/register (pool token)
     loop every 20s
-        W->>A: heartbeat → pending commands (diagnostics, cancel_job)
+        W->>A: heartbeat (in-flight, job ids) → commands (diagnostics, cancel_job), redelivered until answered
     end
     W->>A: POST /jobs/claim?wait=25 (long-poll)
     A-->>W: plan job: vars + secrets, hooks, state token (plan scope), plan OIDC token

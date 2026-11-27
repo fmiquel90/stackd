@@ -7,7 +7,7 @@ from datetime import UTC, datetime, timedelta
 from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, Request, Response
-from sqlalchemy import select, text
+from sqlalchemy import and_, or_, select, text, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -52,6 +52,7 @@ from app.runs.transition import ALLOWED, transition
 from app.secret_sources.providers import SecretUnavailable
 from app.workers.auth import CurrentWorker, mint_worker_token, pool_from_token
 from app.workers.claim import build_job_payload, claim_one, holds_apply_credentials
+from app.workers.reaping import fail_lost_job, reclaimable
 from app.workers.schemas import (
     CommandResultIn,
     EventIn,
@@ -167,11 +168,43 @@ async def register(body: RegisterIn, request: Request, session: DbSession) -> Re
     return RegisterOut(worker_id=worker.id, worker_token=mint_worker_token(worker.id, pool.id))
 
 
+# A command delivered without a result (lost response, worker restarted, failed result post) is
+# delivered again after this long, up to `_COMMAND_MAX_DELIVERIES` times, then failed. The worker
+# handles every command idempotently (§7.1).
+_COMMAND_REDELIVERY = timedelta(seconds=90)
+_COMMAND_MAX_DELIVERIES = 3
+
+
+async def _count_unlisted_jobs(
+    session: AsyncSession, worker: Worker, job_ids: list[uuid.UUID], now: datetime
+) -> None:
+    """The heartbeat lists the jobs the worker is running (§7.1). Each executing run of this
+    worker it leaves out counts one more unlisted heartbeat — only once its claim is past
+    `stackd_worker_lost_seconds`, so a claim response still in flight or a beat sent before the
+    claim never counts; a listed run starts over. The scheduler fails the run once it has been left
+    out `UNLISTED_HEARTBEATS_TO_REAP` times in a row (§3.7)."""
+    mine = (Run.worker_id == worker.id) & Run.state.in_(WORKER_EXECUTING_STATES)
+    claim_grace = now - timedelta(seconds=get_settings().stackd_worker_lost_seconds)
+    await session.execute(
+        update(Run)
+        .where(mine, Run.id.in_(job_ids), Run.unlisted_heartbeats > 0)
+        .values(unlisted_heartbeats=0)
+        .execution_options(synchronize_session=False)
+    )
+    await session.execute(
+        update(Run)
+        .where(mine, Run.id.not_in(job_ids), Run.claimed_at < claim_grace)
+        .values(unlisted_heartbeats=Run.unlisted_heartbeats + 1)
+        .execution_options(synchronize_session=False)
+    )
+
+
 @router.post("/heartbeat", response_model=HeartbeatOut)
 async def heartbeat(
     worker: CurrentWorker, session: DbSession, body: HeartbeatIn | None = None
 ) -> HeartbeatOut:
-    worker.last_heartbeat_at = datetime.now(UTC)
+    now = datetime.now(UTC)
+    worker.last_heartbeat_at = now
     # The worker is authoritative for busy/idle via its reported in-flight count (§7, Phase E): a
     # multi-job worker stays busy while ≥1 job runs and flips to idle when all finish. A heartbeat
     # without a body (or count) just means online.
@@ -179,22 +212,44 @@ async def heartbeat(
         worker.status = WorkerStatus.busy if body.in_flight > 0 else WorkerStatus.idle
     elif worker.status == WorkerStatus.offline:
         worker.status = WorkerStatus.idle
+    # An agent that predates the job listing sends none: its runs are reaped once it is offline.
+    if body is not None and body.job_ids is not None:
+        await _count_unlisted_jobs(session, worker, body.job_ids, now)
 
-    # Deliver pending downward commands (diagnostics, cancel_job) and mark them sent.
-    pending = (
+    # Deliver pending downward commands (diagnostics, cancel_job), and again those delivered a
+    # while ago that never got a result.
+    due = (
         (
             await session.execute(
-                select(WorkerCommand).where(
-                    WorkerCommand.worker_id == worker.id, WorkerCommand.status == "pending"
+                select(WorkerCommand)
+                .where(
+                    WorkerCommand.worker_id == worker.id,
+                    or_(
+                        WorkerCommand.status == "pending",
+                        and_(
+                            WorkerCommand.status == "sent",
+                            WorkerCommand.sent_at < now - _COMMAND_REDELIVERY,
+                        ),
+                    ),
                 )
+                .order_by(WorkerCommand.created_at)
+                .with_for_update(skip_locked=True)
             )
         )
         .scalars()
         .all()
     )
-    commands = [{"id": str(c.id), "type": c.type, "payload": c.payload} for c in pending]
-    for c in pending:
+    commands = []
+    for c in due:
+        if c.attempts >= _COMMAND_MAX_DELIVERIES:
+            c.status = "failed"
+            c.result = {"error": f"no result from the worker after {c.attempts} deliveries"}
+            c.completed_at = now
+            continue
         c.status = "sent"
+        c.sent_at = now
+        c.attempts += 1
+        commands.append({"id": str(c.id), "type": c.type, "payload": c.payload})
     await session.commit()
     return HeartbeatOut(commands=commands)
 
@@ -214,7 +269,36 @@ async def command_result(
         "command result",
         extra={"event": "worker.command_result", "worker_id": str(worker.id), "type": cmd.type},
     )
+    if (
+        cmd.type == "cancel_job"
+        and body.status == "done"
+        and (body.result or {}).get("running_here") is False
+    ):
+        await _end_job_not_running(session, worker, (cmd.payload or {}).get("job_id"))
     return {"ok": True}
+
+
+async def _end_job_not_running(session: AsyncSession, worker: Worker, job_id: object) -> None:
+    """The worker the run is assigned to answered a stop request with `running_here: false`: the
+    job runs nowhere and the run would otherwise never end (§4.1). It is failed `job_not_running`
+    under the reaper's guards (`reclaimable`): the claim must be old enough that its response can
+    no longer be in flight, and a job holding apply credentials waits for the apply window."""
+    try:
+        run = await session.get(Run, uuid.UUID(str(job_id)))
+    except ValueError:
+        return
+    if (
+        run is None
+        or run.worker_id != worker.id
+        or run.state not in WORKER_EXECUTING_STATES
+        or not reclaimable(run, datetime.now(UTC))
+    ):
+        return
+    try:
+        await fail_lost_job(session, run, "job_not_running")
+        await session.commit()
+    except ProblemException:  # the run moved on underneath (its job reported after all)
+        await session.rollback()
 
 
 @router.post("/jobs/claim", response_model=None)

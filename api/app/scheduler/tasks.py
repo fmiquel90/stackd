@@ -4,14 +4,14 @@ import asyncio
 import uuid
 from datetime import UTC, datetime, timedelta
 
-from sqlalchemy import delete, func, or_, select, text, update
+from sqlalchemy import delete, func, or_, select, text, tuple_, update
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 
 from app.config import get_settings
 from app.crypto import decrypt
 from app.db import SessionLocal, get_engine
 from app.drift.service import detect_drift
-from app.enums import ACTIVE_STATES, RepoAuthKind, RunEventActor, RunState, WorkerStatus
+from app.enums import ACTIVE_STATES, RepoAuthKind, RunState, WorkerStatus
 from app.logging import get_logger
 from app.models.environment import Environment
 from app.models.run import Run
@@ -22,11 +22,10 @@ from app.notifications.dispatcher import dispatch_pending
 from app.oidc.issuer import retire_keys
 from app.rollouts.service import expire_approvals
 from app.runs.logs_archive import archive_run_logs, purge_hot_logs
-from app.runs.transition import transition
 from app.stacks.git import ls_remote_sha
 from app.vcs.dispatcher import dispatch_vcs
 from app.webhooks.replay import purge_webhook_deliveries
-from app.workers.claim import holds_apply_credentials
+from app.workers.reaping import UNLISTED_HEARTBEATS_TO_REAP, fail_lost_job, reclaimable
 
 # Distinct advisory-lock keys so each periodic task runs once across replicas (§7.5).
 _LOCK_WORKER_LOST = 74001
@@ -53,71 +52,124 @@ _AWAITING_STATES = frozenset({RunState.unconfirmed, RunState.confirmed})
 _WORKER_EXECUTING_STATES = ACTIVE_STATES - _AWAITING_STATES
 
 
+class _ApiClock:
+    """When this process's reaper last reached the database, and the last stretch it could not
+    (§7.5). Heartbeats cannot reach a stopped or cut-off API either, so the silence of a worker
+    during such a stretch says nothing about the worker: it is not counted. Before the first run
+    in a process, nothing is known — the whole past is such a stretch, which gives every worker one
+    offline period after an API (re)start to heartbeat again before it is marked offline."""
+
+    def __init__(self) -> None:
+        self.last_seen: datetime | None = None
+        self.gap: tuple[datetime | None, datetime] | None = None
+
+    def observe(self, now: datetime) -> None:
+        if self.last_seen is None:
+            self.gap = (None, now)
+        elif now - self.last_seen > _OUTAGE_GAP:
+            self.gap = (self.last_seen, now)
+        self.last_seen = now
+
+    def silence(self, last_heartbeat_at: datetime, now: datetime) -> timedelta:
+        """How long the worker has been silent while the API could hear it."""
+        silent = now - last_heartbeat_at
+        if self.gap is None:
+            return silent
+        start, end = self.gap
+        hidden = end - (last_heartbeat_at if start is None else max(last_heartbeat_at, start))
+        return silent - max(hidden, timedelta(0))
+
+
+# A reaper run this much later than the previous one means the ticks were failing (DB or API
+# outage). Only that last stretch is discounted, so slow ticks never postpone reaping for good.
+_OUTAGE_GAP = timedelta(seconds=2 * _TICK_SECONDS)
+_api_clock = _ApiClock()
+
+
 async def detect_worker_lost(session: AsyncSession, now: datetime) -> int:
-    """Mark stale workers offline; fail runs whose job was executing on a dead worker (§3.7,
-    §7.5). Runs awaiting a human or the apply claim don't depend on their plan worker."""
+    """Mark stale workers offline; fail runs whose job no worker executes any more (§3.7, §7.5):
+    on an offline worker (`worker_lost`), or left unlisted by its live worker's heartbeats
+    (`job_not_running`). Runs awaiting a human or the apply claim don't depend on their plan
+    worker. Each run is failed in a transaction of its own: one that cannot be (changed
+    underneath) is logged and skipped, never holding back the others."""
     settings = get_settings()
-    offline_cutoff = now - timedelta(seconds=settings.stackd_worker_offline_seconds)
-    await session.execute(
-        update(Worker)
-        .where(Worker.last_heartbeat_at < offline_cutoff, Worker.status != WorkerStatus.offline)
-        .values(status=WorkerStatus.offline)
-    )
-    await session.flush()
+    offline_after = timedelta(seconds=settings.stackd_worker_offline_seconds)
+    _api_clock.observe(now)
+    beats = (
+        await session.execute(
+            select(Worker.id, Worker.last_heartbeat_at).where(
+                Worker.status != WorkerStatus.offline, Worker.last_heartbeat_at.is_not(None)
+            )
+        )
+    ).all()
+    stale = [(wid, beat) for wid, beat in beats if _api_clock.silence(beat, now) > offline_after]
+    if stale:
+        # Guarded on the heartbeat read: a worker that beat since is left alone.
+        await session.execute(
+            update(Worker)
+            .where(
+                tuple_(Worker.id, Worker.last_heartbeat_at).in_(stale),
+                Worker.status != WorkerStatus.offline,
+            )
+            .values(status=WorkerStatus.offline)
+        )
+    await session.commit()
 
-    offline_ids = (
-        (await session.execute(select(Worker.id).where(Worker.status == WorkerStatus.offline)))
-        .scalars()
-        .all()
-    )
-    if not offline_ids:
-        await session.commit()
-        return 0
-
-    lost_cutoff = now - timedelta(seconds=settings.stackd_worker_lost_seconds)
     # A job holding apply credentials — an applying run, or a mutating command run (§4.3) — is
     # not reclaimed before the apply budget + grace (§4.2): failing a healthy long apply mid-flight
     # would let a second run claim the env and write state concurrently (split-brain). Its state and
     # OIDC tokens are minted for exactly this window (same `holds_apply_credentials` definition as
     # the claim), so by the time this cutoff passes they have expired and a reclaimed job can no
-    # longer write state.
-    apply_cutoff = now - timedelta(seconds=settings.apply_reclaim_window_seconds)
+    # longer write state (`reclaimable`).
+    lost_cutoff = now - timedelta(seconds=settings.stackd_worker_lost_seconds)
     candidates = (
-        (
-            await session.execute(
-                select(Run).where(
-                    Run.worker_id.in_(offline_ids),
-                    Run.state.in_(_WORKER_EXECUTING_STATES),
-                    Run.claimed_at < max(lost_cutoff, apply_cutoff),
-                )
+        await session.execute(
+            select(Run.id, Worker.status)
+            .join(Worker, Worker.id == Run.worker_id)
+            .where(
+                Run.state.in_(_WORKER_EXECUTING_STATES),
+                Run.claimed_at < lost_cutoff,
+                or_(
+                    Worker.status == WorkerStatus.offline,
+                    Run.unlisted_heartbeats >= UNLISTED_HEARTBEATS_TO_REAP,
+                ),
             )
         )
-        .scalars()
-        .all()
-    )
-    runs = [
-        run
-        for run in candidates
-        if run.claimed_at is not None
-        and run.claimed_at < (apply_cutoff if holds_apply_credentials(run) else lost_cutoff)
-    ]
-    for run in runs:
-        await transition(
-            session,
-            run,
-            RunState.failed,
-            actor=RunEventActor.system,
-            fields={"error": "worker_lost"},
-            audit_action="run.apply_failed",
-            audit_context={"reason": "worker_lost"},
-        )
+    ).all()
     await session.commit()
-    if runs:
+
+    failed: dict[str, int] = {}
+    for run_id, worker_status in candidates:
+        reason = "worker_lost" if worker_status == WorkerStatus.offline else "job_not_running"
+        try:
+            run = await session.get(Run, run_id, populate_existing=True)
+            if (
+                run is None
+                or run.state not in _WORKER_EXECUTING_STATES
+                or not reclaimable(run, now)
+            ):
+                continue
+            await fail_lost_job(session, run, reason)
+            await session.commit()
+        except Exception as exc:  # one run must not hold back the others, tick after tick
+            await session.rollback()
+            _log.warning(
+                "worker_lost run not failed",
+                extra={
+                    "event": "scheduler.worker_lost_skipped",
+                    "run_id": str(run_id),
+                    "reason": reason,
+                    "error": str(exc) or type(exc).__name__,
+                },
+            )
+            continue
+        failed[reason] = failed.get(reason, 0) + 1
+    if failed:
         _log.warning(
             "worker_lost runs failed",
-            extra={"event": "scheduler.worker_lost", "count": len(runs)},
+            extra={"event": "scheduler.worker_lost", "count": sum(failed.values()), **failed},
         )
-    return len(runs)
+    return sum(failed.values())
 
 
 async def poll_branch_heads(session: AsyncSession, now: datetime) -> int:

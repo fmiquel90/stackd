@@ -3,7 +3,16 @@ from __future__ import annotations
 import uuid
 from datetime import datetime
 
-from sqlalchemy import BigInteger, Boolean, Enum, ForeignKey, Integer, LargeBinary, String
+from sqlalchemy import (
+    BigInteger,
+    Boolean,
+    Enum,
+    ForeignKey,
+    Integer,
+    LargeBinary,
+    SmallInteger,
+    String,
+)
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.dialects.postgresql import UUID as PGUUID
 from sqlalchemy.orm import Mapped, mapped_column
@@ -85,6 +94,9 @@ class Run(Base):
     # A user asked to stop the run while a worker executes it (§4.1): the worker is signalled via
     # its heartbeat and reports `job_canceled`; the state itself only changes through transition().
     cancel_requested_at: Mapped[datetime | None] = mapped_column(default=None)
+    # Consecutive heartbeats of its worker that did not list the run's job (§3.7, §7.1); reset when
+    # one lists it. The scheduler fails an executing run its live worker no longer runs.
+    unlisted_heartbeats: Mapped[int] = mapped_column(SmallInteger, default=0, server_default="0")
     # Set once the run's logs are archived to S3 (app.runs.logs_archive, §5.2).
     logs_archived_at: Mapped[datetime | None] = mapped_column(default=None)
     error: Mapped[str | None] = mapped_column(String, default=None)

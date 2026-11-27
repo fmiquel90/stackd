@@ -2,6 +2,10 @@ from __future__ import annotations
 
 import httpx
 
+# The heartbeat thread's calls (the beat, a command's result): far below the API's offline
+# threshold (60 s), so a stuck API costs a beat or two, never the worker's liveness.
+HEARTBEAT_TIMEOUT_SECONDS = 10.0
+
 
 class ApiClient:
     """Thin client for the worker protocol (SPECS §7). All calls are pull/outbound."""
@@ -55,9 +59,14 @@ class ApiClient:
             resp = self._http.request(method, url, headers=self._auth(), **kwargs)  # type: ignore[arg-type]
         return resp
 
-    def heartbeat(self, in_flight: int = 0, capacity: int = 1) -> list[dict]:
+    def heartbeat(
+        self, in_flight: int = 0, capacity: int = 1, job_ids: list[str] | None = None
+    ) -> list[dict]:
+        body: dict[str, object] = {"in_flight": in_flight, "capacity": capacity}
+        if job_ids is not None:
+            body["job_ids"] = job_ids
         resp = self._send(
-            "POST", "/worker/v1/heartbeat", json={"in_flight": in_flight, "capacity": capacity}
+            "POST", "/worker/v1/heartbeat", json=body, timeout=HEARTBEAT_TIMEOUT_SECONDS
         )
         resp.raise_for_status()
         return resp.json().get("commands", [])
@@ -67,6 +76,7 @@ class ApiClient:
             "POST",
             f"/worker/v1/commands/{command_id}/result",
             json={"status": status, "result": result},
+            timeout=HEARTBEAT_TIMEOUT_SECONDS,
         ).raise_for_status()
 
     def claim(self, wait: int) -> dict | None:

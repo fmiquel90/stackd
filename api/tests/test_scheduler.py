@@ -9,6 +9,16 @@ import pytest
 from tests.conftest_phase2 import event, login, make_env, make_stack, register_worker
 
 
+@pytest.fixture(autouse=True)
+def _steady_api(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The scheduler has been running all along: no API outage to discount (§7.5)."""
+    from app.scheduler import tasks
+
+    clock = tasks._ApiClock()
+    monkeypatch.setattr(clock, "observe", lambda now: None)
+    monkeypatch.setattr(tasks, "_api_clock", clock)
+
+
 async def test_scheduler_lock_survives_task_commit(client: httpx.AsyncClient) -> None:
     """§7.5: the tasks commit mid-way, which hands the session's connection back to the pool. The
     advisory lock must still be released on the connection that took it — otherwise the unlock
