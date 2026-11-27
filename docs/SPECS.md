@@ -415,8 +415,15 @@ id uuid PK, environment_id FK unique,
 provider enum('aws'),                -- gcp/azure in Phase 7
 plan_role_arn text, apply_role_arn text,
 region text nullable, session_duration int default 3600,
+profiles jsonb default '{}',         -- named AWS profiles (§10.6):
+                                     --   {name: {plan_role_arn, apply_role_arn, region|null}}
 created_at, updated_at
 ```
+
+`profiles` is a JSONB value of the integration rather than a child table: the set is small and
+bounded (≤ 50), always read and replaced whole with the integration (`PUT`, export/import, clone,
+claim), never queried, joined or referenced one entry at a time; its validation (§10.6) lives in
+the one Pydantic model both the route and the configuration document (§22) use.
 
 ### 3.11 `oidc_signing_keys` (issuer workload, §10)
 
@@ -687,6 +694,7 @@ service_account.created / api_token.created / api_token.revoked   # §23 — nev
 space.config_exported / space.config_imported   # §22 — every item an import writes is also
                                   #   audited under its own action, context via = import
 cloud_integration.created / cloud_integration.updated / cloud_integration.deleted
+                                  # created/updated: context profiles (their names, §10.6)
 oidc_key.rotated / oidc_key.retired            # issuer signing key (§3.11)
 worker_pool.created / worker_pool.deleted
 worker.rejected                                # a non-docker runner refused in production (§7.4)
@@ -832,7 +840,11 @@ POST /worker/v1/jobs/claim?wait=25
       "provider": "aws",
       "oidc_token": "<signed workload JWT>",
       "role_arn": "arn:aws:iam::123:role/stackd-prod-plan",   # role of the cred_phase
-      "region": "eu-west-1"
+      "region": "eu-west-1",
+      "profiles": {                        # named profiles (§10.6), the cred_phase's role each;
+        "tfstates": { "role_arn": "arn:aws:iam::456:role/stackd-tfstates-plan",   # {} if none
+                      "region": null }
+      }
     },
     "resolved_inputs": { "TF_VAR_vpc_id": "vpc-0abc..." },          # informational: already
     "mock_inputs": { "TF_VAR_nlb_dns": "mock.example.internal" }    # in tfvars_json (§9.3)
@@ -940,9 +952,9 @@ tofu_env = {**platform_env, **tf_http(job.backend)}           # runner contract
 repo_env = {**allowlisted(worker_env), **job.env}        # repo hooks (§8.3)
 
 # What a tofu command reads from disk that no repo hook may find (§8.3) exists only while it runs:
-# the OIDC token file, and — for a command that reads variables — the run's tfvars (`tfvars_json`,
+# the OIDC token and AWS config files (§10.4, §10.6), and — for a command that reads variables — the run's tfvars (`tfvars_json`,
 # dependency inputs/mocks merged in, §9.3, and `hcl_tfvars`, §3.4). Written fresh (never through a
-# symlink), deleted right after. The token file is written around each platform hook the same way.
+# symlink), deleted right after. The token and config files are written around each platform hook the same way.
 with_files = lambda tfvars=True: tofu_files(ws, job, tfvars)
 
 hooks = merge_hooks(job.hooks, ws.load_stackd_yml())   # platform first, §8
@@ -1030,7 +1042,7 @@ explicit budget are capped at 2 h by the agent's watchdog.
 
 **`docker` runner.** Each command of a job — every tofu subcommand (`init`, `plan`, `show`, `apply`, `output`, a command run's) **and every hook** — runs in its **own fresh container** of the image `STACKD_RUNNER_IMAGES` names for the job's tool version (pulled by digest when the daemon lacks it), created, started and removed through the Docker Engine API on the local unix socket (`STACKD_DOCKER_HOST`, default `/var/run/docker.sock`; no docker CLI, no SDK). One container *per command* rather than per job: when the command exits, the container is force-removed with everything still running in it, so nothing a command starts — a `setsid` daemon included — reaches a later step (the tfvars and token file tofu reads, the raw plan JSON a platform hook reads). The git clone stays in the agent: the repo token never enters a container (§8.3).
 
-- **Mounts.** tofu and platform hooks: the job's workspace (checkout, OIDC token file while it exists, the plan job's saved plan), at the same absolute path as on the agent's side, so every path the agent hands a command is valid as is. **Repo hooks: the checkout only** — the token file and the saved plan are not even in their filesystem. A containerised agent must therefore see `STACKD_WORKSPACE_ROOT` at the same path as the Docker host does (bind-mount it at an identical path).
+- **Mounts.** tofu and platform hooks: the job's workspace (checkout, OIDC token and AWS config files while they exist, the plan job's saved plan), at the same absolute path as on the agent's side, so every path the agent hands a command is valid as is. **Repo hooks: the checkout only** — the token file and the saved plan are not even in their filesystem. A containerised agent must therefore see `STACKD_WORKSPACE_ROOT` at the same path as the Docker host does (bind-mount it at an identical path).
 - **Hardening, every container.** `CapDrop: ALL`, `no-new-privileges`, not privileged, read-only root filesystem with a `/tmp` tmpfs (`HOME=/tmp`, size `STACKD_DOCKER_TMP_SIZE`, default `1g`), an init process, `PidsLimit` (`STACKD_DOCKER_PIDS_LIMIT`, 1024), optional `Memory` (`STACKD_DOCKER_MEMORY`, no swap beyond it) and `NanoCpus` (`STACKD_DOCKER_CPUS`), optional runtime (`STACKD_DOCKER_RUNTIME`, e.g. `runsc`), network `STACKD_DOCKER_NETWORK` (default `bridge`; the place for an egress allowlist, and it must reach the API's internal URL for the state backend). Never the Docker socket. User: the agent's own uid:gid; a **root** agent hands the workspace to the images' unprivileged `uid 10001` (`chown` that never follows a symlink) and runs the container as it.
 - **Environment.** Only what the agent builds for the command: the run's env (and, for tofu and platform hooks, its sensitive env, the OIDC env and, for tofu, `TF_HTTP_*`), plus — of the worker's own environment — the proxy settings and the locale, nothing else (no `PATH`, no host `HOME`, no host credential). It travels in the API request body, never on a command line.
 - **Image pull.** An image the daemon lacks is pulled by digest (`POST /images/create`). For a private registry, `STACKD_REGISTRY_AUTH_FILE` names a Docker client config file (`config.json` format, re-read at each pull): the `auths` entry of the image reference's registry host (the first path component when it has a `.` or a `:` or is `localhost`, else Docker Hub — key `https://index.docker.io/v1/`, `docker.io` or `index.docker.io`) is sent as the `X-Registry-Auth` header, base64url of `{username, password, serveraddress}` (from `auth` = base64 `user:password`, or `username`/`password`) or `{identitytoken, serveraddress}`; no matching entry → anonymous pull. Credential helpers (`credsStore`, `credHelpers`) are not supported. An unreadable or malformed file refuses to start the agent (its message never quotes the file). The credential is sent to the local daemon on the pull request only: never logged (the agent logs the registry host and whether the pull is authenticated), masked out of any pull error, and never in a job container's environment (the path is an agent `STACKD_*` setting).
@@ -1097,7 +1109,7 @@ hooks:
 ### 8.3 Execution semantics
 
 - Each hook: one shell command (`sh -c`) in the checkout (cwd = project_root), with the run's environment-kind variables (`env`, plus `sensitive_env` for **platform** hooks only). Terraform-kind variables reach tofu only, through the tfvars files (below): no hook gets them. The plan job runs the `before_init` … `after_plan` stages, the apply job (a fresh clone, §7.3) `before_apply` and `after_apply`; a command job (§4.3) runs no hook. **Decided: no opt-in.** A per-environment opt-in giving repo hooks `sensitive_env` was specified and is rejected: a repo hook is code any pusher controls, and a check that needs a secret belongs on the platform side (§8.1). A repo hook never gets it.
-- **Cloud credentials (§10) not exported to repo hooks.** The `AWS_WEB_IDENTITY_TOKEN_FILE` / `AWS_ROLE_ARN` variables are injected only into the environment of **tofu** invocations and **platform** hooks (non-bypassable), never into that of **repo** hooks (same reasons as `sensitive_env`: a `.stackd.yml` pushed via PR must not be able to assume the prod apply role and exfiltrate). **Decided: no opt-in** (same reasons): a hook that needs the cloud is a platform hook. A repo hook never gets it. The token file `AWS_WEB_IDENTITY_TOKEN_FILE` names (`<workspace>/oidc_token`, outside the checkout) is on disk only while a tofu command or a platform hook runs — written fresh for each, never through a planted symlink, and removed right after — so a repo hook can't read it either (as `../oidc_token`).
+- **Cloud credentials (§10) not exported to repo hooks.** The `AWS_WEB_IDENTITY_TOKEN_FILE` / `AWS_ROLE_ARN` / `AWS_CONFIG_FILE` variables are injected only into the environment of **tofu** invocations and **platform** hooks (non-bypassable), never into that of **repo** hooks (same reasons as `sensitive_env`: a `.stackd.yml` pushed via PR must not be able to assume the prod apply role and exfiltrate). **Decided: no opt-in** (same reasons): a hook that needs the cloud is a platform hook. A repo hook never gets it. The token file `AWS_WEB_IDENTITY_TOKEN_FILE` names (`<workspace>/oidc_token`, outside the checkout) is on disk only while a tofu command or a platform hook runs — written fresh for each, never through a planted symlink, and removed right after — so a repo hook can't read it either (as `../oidc_token`). The same holds for the AWS config file `AWS_CONFIG_FILE` names (`<workspace>/aws_config`, §10.6).
 - **Repo-hook env is built from an allowlist.** Of the worker process environment, the agent's `repo_env` keeps only what any shell command needs — `PATH`, `HOME`, `USER`, `LOGNAME`, `SHELL`, `TMPDIR`, `TERM`, `LANG`, `LANGUAGE`, `LC_*`, `TZ`, the proxy settings (`HTTP_PROXY`, `HTTPS_PROXY`, `NO_PROXY`, `ALL_PROXY`, either case) and the CA bundle location (`SSL_CERT_FILE`, `SSL_CERT_DIR`) — then layers the run's non-sensitive `env`. Nothing else of the worker's own environment reaches a repo hook: a worker host can carry any secret there (the pool token, a database URL, a cloud-credential family such as `AWS_*` — exported, on the **trusted-dev** `local` runner, by a mounted `~/.aws`; the `docker` runner (prod) bakes no long-lived creds into the image), and the state backend's `TF_HTTP_*` (§11.2) go to tofu only. Anything a repo hook needs is set as a run variable. Platform hooks get the worker's environment minus the agent's own settings (the `STACKD_*` namespace, like tofu, §7.4), then the run's `env`, `sensitive_env` and cloud env. A regression test asserts a repo hook sees neither cloud nor sensitive env, nor any other worker variable.
 - **Repo hooks at the `*_apply` stages: a tier flag, off by default.** A repo hook at `before_apply`/`after_apply` runs in the job holding the apply credentials, so it runs only on a tier with `repo_hooks_at_apply = true` (§2.4) — a flag, not a tier name, since tiers are a configurable, non-ordered catalog (CLAUDE.md §4, §7). **Fail closed**: the column defaults to `false` for every tier, the default catalog and existing tiers included, and a missing tier row counts as `false`; an admin turns it on per tier (`PATCH /api/v1/tiers/{id}`, audited `tier.updated` with the new values; the UI asks to type the tier's name). The claim carries the env tier's value as `repo_hooks_at_apply`; on the worker, a job without it (an older API) counts as `false`. Where it is off, only **platform** hooks execute at `before_apply`/`after_apply`; each repo hook of those stages is skipped with a visible warning — a `warn` check result with its stage (detail `skipped: …`, so `run.check_warned` audits it) and a log line in its section. The `*_init`/`*_plan` repo stages remain allowed on every tier (plan role = ReadOnly).
 - `plan.json` available for reading at the `after_plan` stage — the plan job's last; the apply job is a fresh clone (§7.3) and has none. `tofu show -json` lists the run's variable values in clear, sensitive ones included: **platform** hooks read it as is; before the first **repo** hook runs it is replaced by a **masked copy** — every value tofu marks sensitive (input variables declared `sensitive`, resource attributes, outputs) and every value the agent masks in logs (§5.1) replaced by `***`, the rest kept as valid JSON. The uploaded `plan.json` artifact is that masked copy. Without that document — `show -json` failed, or printed no JSON object — the plan job fails (`plan JSON unavailable, not checked: …`) before any upload or hook: the checks never run against a stand-in empty plan. The plan job writes its plan file (`plan.tfplan`) outside the checkout and deletes it, once shown and uploaded (§7.3), before any `after_plan` hook runs: no repo hook finds the saved plan, nor raw plan JSON, in the workspace. Files the agent writes into the checkout replace whatever is there — a repo-planted symlink is never written through.
@@ -1376,11 +1388,26 @@ condition {
 
 Recommended pattern: `plan_role_arn` = ReadOnly role (+ S3 module access), `apply_role_arn` = scoped write role. A PR plan **physically** cannot modify the infra.
 
+**Named profiles (§10.6)** are roles like the default ones: each profile's plan and apply role, in
+whatever account it lives, needs the IAM OIDC identity provider for Stackd's issuer in **that**
+account and a trust policy with the **same** `aud`/`sub` conditions as the default roles (tier and
+phase pinned: a profile's apply role trusts `run:prod:*:apply` only). A profile is no way around
+the double lock: its apply role is only reachable with an apply-phase token. One exception to
+"plan = read-only": a plan role that reads a state held on an S3 backend with `use_lockfile = true`
+(unmanaged state, §11.3) also needs `s3:PutObject` and `s3:DeleteObject` on the `<key>.tflock`
+objects — a plan takes the state lock — and nothing writable on the state object itself.
+
 **The wildcard only covers the `stack` segment** (`run:prod:*:apply` = "any stack, but prod tier AND apply phase"). `tier` and `phase` are always fixed in the condition: they are what materializes the double lock (§2.4). A role whose trust policy left the tier or the phase as a wildcard (`run:*:*:*`) would cancel the guard — to be banned (see §13).
 
 ### 10.4 Worker side
 
 The worker exchanges nothing itself in the simple case: it writes the token to a file and exports `AWS_WEB_IDENTITY_TOKEN_FILE` + `AWS_ROLE_ARN` + `AWS_ROLE_SESSION_NAME=stackd-{run_id}` (+ `AWS_REGION` when the integration sets one) to tofu and platform hooks only — never repo hooks — and the file exists only while one of them runs (§8.3) — the AWS SDK in the providers does the AssumeRoleWithWebIdentity natively. The session name = run_id → **CloudTrail traces every AWS action back to the run** (and therefore back to the human who confirmed: complete audit loop).
+
+Alongside the token, the worker writes a platform-generated AWS config file (`aws_config`, same
+place, same lifecycle) and exports `AWS_CONFIG_FILE` to it, plus `AWS_SHARED_CREDENTIALS_FILE=/dev/null`
+(no credentials file of the worker host — the trusted-dev `local` runner's `~/.aws` — may define a
+profile's credentials ahead of its role); the file holds a `[default]` section mirroring the
+default role and one section per named profile (§10.6).
 
 Fallback: no `cloud_integration` → classic static variables (variable set `aws-credentials`), current behavior.
 
@@ -1389,10 +1416,68 @@ Fallback: no `cloud_integration` → classic static variables (variable set `aws
 If a `cloud_integration` exists AND static AWS credentials are resolved → the OIDC credentials win, config warning displayed (a classic source of confusion). "Win" has to be literal: the AWS SDK's credential chain reads static keys **before** the web identity token, so layering the OIDC variables on top is not enough. Hence:
 
 - **At claim (API)**: every environment-kind variable the SDK reads as a credential — `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `AWS_SESSION_TOKEN`, `AWS_SECURITY_TOKEN`, `AWS_PROFILE`, `AWS_DEFAULT_PROFILE`, `AWS_SHARED_CREDENTIALS_FILE`, `AWS_CONFIG_FILE`, `AWS_CONTAINER_CREDENTIALS_{FULL,RELATIVE}_URI`, `AWS_CONTAINER_AUTHORIZATION_TOKEN` — is dropped before the payload is built: not in `env`/`sensitive_env`, not fetched when it is an external reference (§15), not in `mask_values`. The run's `variable_provenance` records it as `shadowed:<layer>` (e.g. `shadowed:set:aws-credentials`). Settings that are not credentials (`AWS_REGION`, …) stay.
-- **On the worker**: the same names are dropped from the worker host's own environment (the trusted-dev `local` runner's mounted `~/.aws`) for tofu and platform hooks of a job carrying OIDC credentials.
+- **On the worker**: the same names are dropped from the worker host's own environment (the trusted-dev `local` runner's mounted `~/.aws`) — and, defence in depth, from the job's `env`/`sensitive_env` — for tofu and platform hooks of a job carrying OIDC credentials; then the platform's own `AWS_CONFIG_FILE` and `AWS_SHARED_CREDENTIALS_FILE` (§10.4, §10.6) are set, last.
 - **Warning**: `GET`/`PUT /environments/{id}/cloud-integration` return `warnings: [{code: "static_aws_credentials_shadowed", variables: [names], detail}]` — names only, never values — shown on the env's cloud panel.
 
 Without a `cloud_integration`, static credentials are the env's fallback (§10.4) and pass unchanged.
+
+### 10.6 Named AWS profiles
+
+Terraform written for humans on SSO names its identities: `provider "aws" { profile = "prod-admin" }`,
+a backend config file with `profile = "tfstates"`, a `terraform_remote_state` with a `profile` —
+sometimes in other AWS accounts. Under the single OIDC identity of §10.4 such code fails (`failed
+to get shared config profile`). A cloud integration can therefore map **profile names to roles**,
+so that code runs unchanged — and the same code keeps working by hand, on the operator's own
+`~/.aws/config` with the same profile names.
+
+- **Model** (`cloud_integrations.profiles`, §3.10): `{name: {plan_role_arn, apply_role_arn,
+  region|null}}`, next to the default plan/apply roles, which stay mandatory (the job's identity
+  when the code names no profile).
+- **Validation** (`PUT …/cloud-integration`, the configuration document §22 — one Pydantic model,
+  422 otherwise): at most **50** profiles; a name matches `^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$`
+  (it becomes an INI section header: no space, bracket or newline) and is not `default` (reserved,
+  below); each role is an IAM role ARN, `^arn:aws[a-z-]*:iam::\d{12}:role/[A-Za-z0-9+=,.@_/-]+$`;
+  a region matches `^[a-z]{2}(-[a-z]+)+-\d+$`.
+- **Claim** (§7.2): `cloud_credentials.profiles` gives each profile the role of the job's credential
+  phase — the plan role for a plan-phase job, the apply role for an apply-phase one: the same
+  rule, from the same `cred_phase`, as the default role (§10.2). There is one workload token per
+  job; every profile assumes its role with it, so the `sub` (tier, phase) gates each profile's
+  role exactly as it gates the default one.
+- **Worker** — the config file of §10.4, generated from the payload only:
+
+  ```ini
+  [default]
+  role_arn = <role_arn of the job>
+  web_identity_token_file = <the job's OIDC token file>
+  role_session_name = stackd-<run_id>
+  region = <integration region, when set>
+
+  [profile tfstates]
+  role_arn = <the profile's role for the job's credential phase>
+  web_identity_token_file = <the job's OIDC token file>
+  role_session_name = stackd-<run_id>
+  region = <the profile's region, when set>
+  ```
+
+  `AWS_CONFIG_FILE` points at it for tofu and platform hooks only — never repo hooks (§8.3) —
+  and, like the token file, it is on disk only while one of them runs. It is written whenever the
+  job holds OIDC credentials, with or without named profiles. A value the worker would write
+  that could break out of its line or section (a newline, a bracket in a name) fails the job.
+- **`[default]`** mirrors the default role so that code naming `profile = "default"` works too,
+  and tools that read the config file rather than the environment get the same identity. Hence
+  `default` is not a valid profile name: the default identity is the integration's default role,
+  set in one place.
+- **`AWS_PROFILE` is never set** by the platform, and a user-supplied `AWS_PROFILE`,
+  `AWS_DEFAULT_PROFILE` or `AWS_CONFIG_FILE` is still dropped (§10.5) — at claim, and by the worker
+  from both its host environment and the job's. A job uses a named profile only where its code
+  names one; elsewhere it runs as the default role (the SDKs read `AWS_ROLE_ARN` +
+  `AWS_WEB_IDENTITY_TOKEN_FILE` before the `[default]` section, and both name the same role).
+- **Region precedence** is the SDKs': an explicit `region` in the code first, then `AWS_REGION`
+  (the integration's region, else a run variable), then the profile's `region`. A profile's region
+  only matters where neither of the first two is set.
+- **Out of scope**: `source_profile` chains, `credential_process`, SSO sections — the generated file
+  holds web identity sections only. A role chained from a profile is the provider's own
+  `assume_role` block, with the profile's role allowed to assume it.
 
 ---
 
@@ -1624,7 +1709,7 @@ Specified but **not served yet**: `GET /api/v1/run-groups/{id}` (§9.4).
 | Cloud credentials | **OIDC workload by default**: tokens signed per run/phase, trust policies on claims, session name = run_id (CloudTrail ↔ Stackd audit). Static = fallback |
 | OIDC signing key | KMS (`kms:Sign`, required in production unless explicitly acknowledged) or AES-GCM in the DB (`oidc_signing_keys` §3.11), rotation with overlap and automatic retirement, short token TTL. `sub` wildcard allowed **only** on the stack segment; never on `tier` nor `phase` (§10.3) |
 | Static secrets | AES-256-GCM, write-only, decrypted at claim, masked in the logs |
-| Hooks | platform hooks not bypassable by PR; repo hooks without `sensitive_env` **nor cloud credentials**, with an allowlisted env, a masked `plan.json`, and no saved plan, tfvars, OIDC token file or repo token on disk while they run; the agent's `STACKD_*` settings reach no hook nor tofu; masking of sensitive values in their stdout; the process group killed when the hook exits, or past its 10 min timeout; a failing `fail` check stops the job at any stage (§8.3); on the `docker` runner each hook in its own container, a repo hook seeing the checkout only (§7.4). repo hooks at the `*_apply` stages only on a tier that allows them (`repo_hooks_at_apply`, off by default) |
+| Hooks | platform hooks not bypassable by PR; repo hooks without `sensitive_env` **nor cloud credentials**, with an allowlisted env, a masked `plan.json`, and no saved plan, tfvars, OIDC token file, AWS config file or repo token on disk while they run; the agent's `STACKD_*` settings reach no hook nor tofu; masking of sensitive values in their stdout; the process group killed when the hook exits, or past its 10 min timeout; a failing `fail` check stops the job at any stage (§8.3); on the `docker` runner each hook in its own container, a repo hook seeing the checkout only (§7.4). repo hooks at the `*_apply` stages only on a tier that allows them (`repo_hooks_at_apply`, off by default) |
 | Mocks | apply forbidden by default (`allow_mock_apply=false`), badge, audit `mock_consumed` |
 | External secrets | provider bootstrap credential AES-256-GCM write-only (`secret_sources.bootstrap_secret_encrypted` §15.1); live values fetched at claim, never persisted, masked; **fallback value (static or break-glass override) forbids apply by default** (`allow_fallback_apply=false`), badge, audit `secret.fallback_used` (§15); a break-glass override only for a `break_glass` reference (else 422), sealed on its run and wiped at the run's terminal state (§15.4) |
 | Workers | revocable tokens, no incoming port, labels (isolated prod pool); production accepts the `docker` runner only (§7.4); tool binaries verified by signature then checksum when the runner images are built, and those images run only by digest (§7.4, supply-chain). The `local` runner (dev) runs the binary on its PATH, at the stack's version |
@@ -1666,7 +1751,7 @@ the request's transaction:
 - **API unit tests**: transitions (`can_apply` per tier including apply-everywhere-except-prod, `can_destroy`, auto 4-eyes on a `requires_four_eyes` tier or a `protected` env **and its human-triggerer-only scope**, mock-apply blocking, warn → forced confirmation), 6-layer variable resolution + provenance (space-scoped attachments), a proposed run's claim payload carrying no secret (a tracked or drift run's still does), hook merging (platform→repo order; `*_apply` repo hooks skipped on a tier without `repo_hooks_at_apply`, §8.3), check results kept with their stage across the plan and apply jobs (a job failing on no check included, its warnings audited), an `after_apply` failure recording outputs and clearing drift without cascading, cycle detection, multi-parent cascade (§9.2), the rollout gate (§21.5: creates-only on a never-applied env, the pinned commit, four-eyes and member changes re-checked at auto-confirmation, a cancel racing the gate, the rollout-then-run lock order), mock resolution (real > mock > error), signature/claims of workload tokens (tier segment in the `sub`, wildcard limited to the stack segment), Google id_token validation, **refresh rotation + reuse detection → family revocation**.
 - **Integration**: Postgres testcontainers; **concurrent claim → only one wins, the loser catches `23505` and re-polls**; HTTP backend with real `tofu` + Garage; log idempotency; **masking of sensitive values (`tfvars` + env) in a hook's stdout**; `after_plan` hook that reads plan.json; **WS fan-out via `LISTEN/NOTIFY`**; **single execution of a periodic task under advisory lock with 2 replicas**; AssumeRoleWithWebIdentity against a mock STS (moto).
 - **E2E**: the live compose stack + fixture repos (built-in `terraform_data`, no provider) → on a throwaway copy of the demo graph, a 2-stack cascade **with mocks** (mocked plan → upstream apply → real cascade), the role/mock gates, and the `run.confirmed` audit actor (DEV §7).
-- **Agent**: exit codes (a plan only on 0/2) and the plan JSON failing closed, secret masking and the masked `plan.json`, hooks at every stage and from both sources (`fail` stops the job, `warn` goes on, the timeout kills the process group, a background process dies with its hook), what a repo hook can read (no saved plan, tfvars, OIDC token file or repo token; an allowlisted env), the `STACKD_*`-free env of tofu and platform hooks, saved-plan upload and fail-closed apply, commit pinning, the `TF_HTTP_*` backend env (tofu only), the command time budget from `cred_phase`, token encoding in clone URLs, writing the OIDC token and exporting the env vars.
+- **Agent**: exit codes (a plan only on 0/2) and the plan JSON failing closed, secret masking and the masked `plan.json`, hooks at every stage and from both sources (`fail` stops the job, `warn` goes on, the timeout kills the process group, a background process dies with its hook), what a repo hook can read (no saved plan, tfvars, OIDC token file, AWS config file or repo token; an allowlisted env), the `STACKD_*`-free env of tofu and platform hooks, saved-plan upload and fail-closed apply, commit pinning, the `TF_HTTP_*` backend env (tofu only), the command time budget from `cred_phase`, token encoding in clone URLs, writing the OIDC token and the AWS config file of named profiles (§10.6) and exporting the env vars.
 
 ---
 
@@ -2617,7 +2702,7 @@ JSON (the API's own format; it converts to YAML losslessly). Every object is ide
 | `worker_pools` | name | `labels` | the pool token (stored hashed anyway) |
 | `variable_sets` | name | `description`, `auto_attach`, `selector`, `variables`, `attachments` (to a stack, an env or a tier, by name) | — |
 | `stacks` | name | repo, `repo_auth_kind`, `project_root`, tool, `labels`, `variables`, platform `hooks`, `notification_targets`, `environments`; `has_repo_secret` / `has_webhook_secret` flags | the repo token / deploy key, the webhook secret |
-| `stacks[].environments` | name in the stack | the settings of §3.2 (`tier`, `branch`, `autodeploy`, `protected`, four-eyes, `managed_state`, `allow_*_apply`, unmanaged backend config, `drift_check_enabled`, `labels`, `position`), `variables`, `hooks`, `notification_targets`, `cloud_integration` | operational columns: `locked`, head/staleness (§9.6), drift status (§19) |
+| `stacks[].environments` | name in the stack | the settings of §3.2 (`tier`, `branch`, `autodeploy`, `protected`, four-eyes, `managed_state`, `allow_*_apply`, unmanaged backend config, `drift_check_enabled`, `labels`, `position`), `variables`, `hooks`, `notification_targets`, `cloud_integration` (named `profiles` included, §10.6) | operational columns: `locked`, head/staleness (§9.6), drift status (§19) |
 | `dependencies` | (upstream, downstream) | `trigger_policy`, `references` (output → input, `mock_value`) | — |
 
 - **Variables**: `{kind, name, hcl, sensitive, value, secret}`. A **sensitive value is never
