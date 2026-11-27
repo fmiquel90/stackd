@@ -228,11 +228,16 @@ class LocalRunner:
         return rc, killed["v"] and rc < 0
 
     def capture(
-        self, cmd: list[str], cwd: Path, env: dict[str, str]
+        self,
+        cmd: list[str],
+        cwd: Path,
+        env: dict[str, str],
+        *,
+        timeout: int = _DEFAULT_TIMEOUT_SECONDS,
     ) -> subprocess.CompletedProcess[str]:
         """Run a command to completion, capturing stdout and stderr apart (`tofu show -json`)."""
         return subprocess.run(
-            cmd, cwd=cwd, env=env, capture_output=True, text=True, timeout=_DEFAULT_TIMEOUT_SECONDS
+            cmd, cwd=cwd, env=env, capture_output=True, text=True, timeout=timeout
         )
 
 

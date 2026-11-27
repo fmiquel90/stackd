@@ -295,6 +295,87 @@ def _plan_json_unusable(show: subprocess.CompletedProcess[str]) -> str | None:
     return None if isinstance(doc, dict) else "printed no plan object"
 
 
+# `state pull` reads the whole state: a short budget of its own, so a hung backend can't hold a job.
+_STATE_PULL_TIMEOUT_SECONDS = 120
+
+
+class _NoStateIdentity(ValueError):
+    """`state pull` printed something that is not a state document. Never carries its content."""
+
+
+def _state_identity(raw: str) -> tuple[int | None, str | None]:
+    """The `serial` and `lineage` of a `state pull` document (§19.7) — nothing else of it is kept:
+    the state holds secrets. An empty output is an empty state (none yet): (None, None)."""
+    if not raw.strip():
+        return None, None
+    try:
+        doc = json.loads(raw)
+    except ValueError:
+        raise _NoStateIdentity("not JSON") from None
+    serial = doc.get("serial") if isinstance(doc, dict) else None
+    lineage = doc.get("lineage") if isinstance(doc, dict) else None
+    if isinstance(serial, bool) or not isinstance(serial, int) or serial < 0:
+        raise _NoStateIdentity("no serial")
+    if not isinstance(lineage, str) or not lineage:
+        raise _NoStateIdentity("no lineage")
+    return serial, lineage
+
+
+def _observe_state(
+    client: ApiClient,
+    job: dict[str, Any],
+    *,
+    ws: Workspace,
+    cwd: Path,
+    tool: str,
+    tf_env: dict[str, str],
+    runner: Runner,
+    streamer: LogStreamer,
+    phase: str,
+    baseline: bool,
+) -> None:
+    """Report the state's serial/lineage (`state_observed`, §19.7) when the API asked for it
+    (`observe_state`): a check (`baseline=False`, the state as the job finds it) or a baseline (the
+    state as its apply / command left it). `state pull`'s output stays in memory — never on disk,
+    never logged — and only those two fields leave this function. Best effort: any failure is a
+    warning, never the job's end."""
+    if not job.get("observe_state"):
+        return
+    job_id = job["job_id"]
+    try:
+        with _tofu_files(ws, cwd, job):
+            pulled = runner.capture(
+                [tool, "state", "pull"], cwd, tf_env, timeout=_STATE_PULL_TIMEOUT_SECONDS
+            )
+        if pulled.returncode != 0:
+            raise _NoStateIdentity(f"`{tool} state pull` exited {pulled.returncode}")
+        serial, lineage = _state_identity(pulled.stdout)
+        del pulled
+        client.event(
+            job_id,
+            "state_observed",
+            result={"serial": serial, "lineage": lineage, "baseline": baseline},
+        )
+    except Exception as exc:  # noqa: BLE001 — detection never fails the job
+        # Our own reason, a timeout, or the API's refusal: never the tool's output (it can hold the
+        # state), which none of these carries.
+        known = (_NoStateIdentity, subprocess.TimeoutExpired, httpx.HTTPError)
+        reason = Masker(job.get("mask_values", [])).mask(
+            str(exc) if isinstance(exc, known) else type(exc).__name__
+        )
+        log.warning(
+            "state observation failed",
+            extra={"event": "agent.state_observe_error", "run_id": job_id, "reason": reason},
+        )
+        try:
+            streamer.emit(
+                phase,
+                [f"[stackd] state serial not read ({reason}): out-of-band detection skipped"],
+            )
+        except Exception:  # noqa: BLE001
+            pass
+
+
 def _tool_bin(tool: str) -> str:
     return "tofu" if tool == "opentofu" else "terraform"
 
@@ -478,6 +559,20 @@ def handle_plan(
         }  # no secrets / cloud creds to repo hooks (§8.3)
         tf_env = _tofu_env(platform_env, backend)  # + state-backend creds, for tofu only
 
+        def observe(*, baseline: bool) -> None:
+            _observe_state(
+                client,
+                job,
+                ws=ws,
+                cwd=cwd,
+                tool=tool,
+                tf_env=tf_env,
+                runner=runner,
+                streamer=streamer,
+                phase="planning",
+                baseline=baseline,
+            )
+
         # Report the exact commit checked out: the API pins the run to it (or refuses a mismatch
         # with the commit it pinned), and the apply job clones exactly that SHA (§7.2/§7.3).
         client.event(
@@ -515,6 +610,9 @@ def handle_plan(
             )
         if init_rc != 0:
             return _job_failed(client, job_id, "init", checks, error="init failed")
+        # The state as this job finds it, before the plan (§19.7): a write made outside Stackd since
+        # its last observation shows here.
+        observe(baseline=False)
         for name in ("after_init", "before_plan"):
             if stage(name):
                 return _job_failed(client, job_id, name, checks)
@@ -684,6 +782,20 @@ def handle_apply(
         repo_env = {**_repo_environ(runner.name), **job.get("env", {})}
         tf_env = _tofu_env(platform_env, backend)  # + state-backend creds, for tofu only
 
+        def observe(*, baseline: bool) -> None:
+            _observe_state(
+                client,
+                job,
+                ws=ws,
+                cwd=cwd,
+                tool=tool,
+                tf_env=tf_env,
+                runner=runner,
+                streamer=streamer,
+                phase="applying",
+                baseline=baseline,
+            )
+
         def stage(name: str) -> bool:
             """As in the plan job (§8.3): True when an `on_failure: fail` hook failed. Every result is
             reported in the checks, with its stage; a `warn` one can't send the run, already
@@ -713,6 +825,9 @@ def handle_apply(
             )
         if init_rc != 0:
             return _job_failed(client, job_id, "init", checks, error="init failed")
+        # A write made outside Stackd since the plan job shows here (§19.7) — tofu would then
+        # refuse the saved plan as stale, and the baseline below must not absorb that write.
+        observe(baseline=False)
         # The saved plan the human reviewed (§7.4). Missing or unreadable → the apply fails closed:
         # it never re-plans, so it can only ever apply what was reviewed.
         try:
@@ -747,6 +862,9 @@ def handle_apply(
                 )
         finally:
             plan_file.unlink(missing_ok=True)
+            # The state as the apply left it — whatever its exit: a failed or stopped apply may
+            # have written part of it — is Stackd's own write: the new baseline (§19.7).
+            observe(baseline=True)
         if code != 0:
             # A stale saved plan (state changed since it was made) is refused by tofu itself.
             error = (
@@ -851,19 +969,39 @@ def handle_command_run(client: ApiClient, job: dict, settings: Settings) -> None
         if init_rc != 0:
             return client.event(job_id, "job_failed", phase="init", result={"error": "init failed"})
 
+        # A mutating command writes the state (`observe_state` is set for those only, §19.7): the
+        # state before it is a check, the state after it the new baseline.
+        def observe(*, baseline: bool) -> None:
+            _observe_state(
+                client,
+                job,
+                ws=ws,
+                cwd=cwd,
+                tool=tool,
+                tf_env=tf_env,
+                runner=runner,
+                streamer=streamer,
+                phase="running",
+                baseline=baseline,
+            )
+
+        observe(baseline=False)
         argv = _command_argv(tool, cmd)
         timeout = _command_timeout(job)
-        with _tofu_files(ws, cwd, job):
-            code = run_command(
-                argv,
-                cwd,
-                tf_env,
-                phase="running",
-                section=None,
-                streamer=streamer,
-                runner=runner,
-                timeout=timeout,
-            )
+        try:
+            with _tofu_files(ws, cwd, job):
+                code = run_command(
+                    argv,
+                    cwd,
+                    tf_env,
+                    phase="running",
+                    section=None,
+                    streamer=streamer,
+                    runner=runner,
+                    timeout=timeout,
+                )
+        finally:
+            observe(baseline=True)
         if code != 0:
             error = (
                 f"{cmd.get('name')} exceeded the {timeout}s time budget and was terminated"

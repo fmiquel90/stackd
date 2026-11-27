@@ -185,11 +185,11 @@ class DockerRunner:
         return self._run(cmd, cwd, env, timeout, lambda _kind, line: on_line(line))
 
     def capture(
-        self, cmd: list[str], cwd: Path, env: dict[str, str]
+        self, cmd: list[str], cwd: Path, env: dict[str, str], *, timeout: int = 2 * 60 * 60
     ) -> subprocess.CompletedProcess[str]:
         out: dict[int, list[str]] = {1: [], 2: []}
         rc, _ = self._run(
-            cmd, cwd, env, 2 * 60 * 60, lambda kind, line: out.setdefault(kind, []).append(line)
+            cmd, cwd, env, timeout, lambda kind, line: out.setdefault(kind, []).append(line)
         )
         return subprocess.CompletedProcess(
             cmd, rc, "\n".join(out[1]) + ("\n" if out[1] else ""), "\n".join(out[2])
