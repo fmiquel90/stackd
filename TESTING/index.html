@@ -1594,7 +1594,8 @@ docker-runner tests also want a Docker daemon and their images, §3, and skip wi
 to fail for now) for the API; ruff (check + format) and pytest for the worker, after pulling
 <code>alpine:3.20</code> and building the tofu test image for the docker-runner tests; eslint, prettier, the
 invariants check (no browser storage, no hard-coded colour), typecheck, vitest and build for the
-front. <code>e2e.yml</code> runs the live scenario.</p>
+front. <code>e2e.yml</code> runs the live scenario on every pull request and on <code>main</code>. <code>release.yml</code> runs both
+again on a release tag before publishing anything (DEV.md §10).</p>
 <h3 id="pytest-configuration-apipyprojecttoml">pytest configuration (<code>api/pyproject.toml</code>)<a class="headerlink" href="#pytest-configuration-apipyprojecttoml" title="Permanent link">&para;</a></h3>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="k">[tool.pytest.ini_options]</span>
 <a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a><span class="n">asyncio_mode</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">&quot;auto&quot;</span><span class="w">                          </span><span class="c1"># plain `async def test_*`, no decorator</span>

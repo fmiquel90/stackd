@@ -1739,8 +1739,15 @@ API refuses to start in production on dev-grade settings (see <a href="#3-config
   registry</strong> for the runner images.</li>
 </ul>
 <h2 id="1-get-the-images">1. Get the images<a class="headerlink" href="#1-get-the-images" title="Permanent link">&para;</a></h2>
-<p>Build the three production images from a checkout of the release you deploy, tag them with that
-version and push them to your registry:</p>
+<p>Each <a href="https://github.com/fmiquel90/stackd/releases">release</a> publishes the images to GitHub's
+container registry, for <code>linux/amd64</code> and <code>linux/arm64</code>, signed with cosign:
+<code>ghcr.io/fmiquel90/stackd/api</code>, <code>…/front</code>, <code>…/worker</code> and the OpenTofu runner image
+<code>…/opentofu</code>. The release notes give each reference pinned by digest — use those, not a tag — and
+the <code>cosign verify</code> command. The release also attaches <code>stackd-deploy-X.Y.Z.tar.gz</code>: this
+directory (<code>deploy/production/</code>) as released, its <code>.env.example</code> and <code>worker.env.example</code> already
+pointing at the release's images. Start from it rather than from a checkout of <code>main</code>.</p>
+<p>To build them yourself instead (a fork, a patched build, an air-gapped registry), check out the
+release tag, then build, tag and push the three images:</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>task<span class="w"> </span>build-images<span class="w"> </span><span class="nv">TAG</span><span class="o">=</span><span class="m">1</span>.4.0<span class="w"> </span><span class="nv">PREFIX</span><span class="o">=</span>registry.example.com/stackd
 <a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>docker<span class="w"> </span>push<span class="w"> </span>registry.example.com/stackd/api:1.4.0
 <a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>docker<span class="w"> </span>push<span class="w"> </span>registry.example.com/stackd/front:1.4.0
@@ -1867,8 +1874,10 @@ never confirms an apply.</p>
 <h2 id="6-runner-images">6. Runner images<a class="headerlink" href="#6-runner-images" title="Permanent link">&para;</a></h2>
 <p>Workers run every tofu/terraform command and every hook in a fresh container of a <strong>runner
 image</strong> (<code>deploy/images/</code>: one IaC tool + git + jq, non-root, signature-verified downloads).
-Build them for your workers' architectures, push them, and note their <strong>digest</strong> — workers refuse
-tags:</p>
+Workers pin each one by <strong>digest</strong> — they refuse tags. Each release publishes the OpenTofu image
+of its pinned version (<code>ghcr.io/fmiquel90/stackd/opentofu</code>); its release notes give the
+<code>STACKD_RUNNER_IMAGES</code> line below, ready to use. For another OpenTofu version, or for Terraform
+(never published: BUSL), build the image for your workers' architectures and push it:</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a>docker<span class="w"> </span>buildx<span class="w"> </span>build<span class="w"> </span>-f<span class="w"> </span>deploy/images/opentofu.Dockerfile<span class="w"> </span><span class="se">\</span>
 <a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a><span class="w">  </span>--build-arg<span class="w"> </span><span class="nv">OPENTOFU_VERSION</span><span class="o">=</span><span class="m">1</span>.12.2<span class="w"> </span>--platform<span class="w"> </span>linux/amd64,linux/arm64<span class="w"> </span><span class="se">\</span>
 <a id="__codelineno-6-3" name="__codelineno-6-3" href="#__codelineno-6-3"></a><span class="w">  </span>-t<span class="w"> </span>registry.example.com/stackd/opentofu:1.12.2<span class="w"> </span>--push<span class="w"> </span>.
@@ -1958,7 +1967,8 @@ traces. Logs are JSON on stdout (<code>docker compose logs</code>). See <a href=
    the running jobs at once. See <a href="../workers-and-scaling/#stopping-a-worker">Workers &amp; scaling</a>.</li>
 <li><a href="../backup-restore/">Back up</a> the database (and keep <code>stackd.env</code>).</li>
 <li>
-<p>Point <code>.env</code> at the new image tags (or rebuild them), then:</p>
+<p>Point <code>.env</code> at the new release's image references (its release notes list them by digest, or
+   rebuild them), then:</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-10-1" name="__codelineno-10-1" href="#__codelineno-10-1"></a>docker<span class="w"> </span>compose<span class="w"> </span>pull<span class="w">          </span><span class="c1"># registry images</span>
 <a id="__codelineno-10-2" name="__codelineno-10-2" href="#__codelineno-10-2"></a>docker<span class="w"> </span>compose<span class="w"> </span>up<span class="w"> </span>-d<span class="w">         </span><span class="c1"># migrate (one-shot) → api → front → proxy</span>
 <a id="__codelineno-10-3" name="__codelineno-10-3" href="#__codelineno-10-3"></a>docker<span class="w"> </span>compose<span class="w"> </span>logs<span class="w"> </span>migrate<span class="w">  </span><span class="c1"># &quot;Running upgrade …&quot;, then &quot;seed: spaces + tiers ensured&quot;</span>

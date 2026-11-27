@@ -1171,6 +1171,17 @@
   
 </li>
       
+        <li class="md-nav__item">
+  <a href="#10-ci-and-releases" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        10. CI and releases
+      
+    </span>
+  </a>
+  
+</li>
+      
     </ul>
   
 </nav>
@@ -1334,6 +1345,17 @@
     <span class="md-ellipsis">
       
         9. What dev mode does not cover (assumed)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#10-ci-and-releases" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        10. CI and releases
       
     </span>
   </a>
@@ -1606,6 +1628,28 @@
 </tr>
 </tbody>
 </table>
+<hr />
+<h2 id="10-ci-and-releases">10. CI and releases<a class="headerlink" href="#10-ci-and-releases" title="Permanent link">&para;</a></h2>
+<p><strong>Pull requests</strong> run two workflows, both to be marked <em>required</em> in the branch protection of <code>main</code>:</p>
+<ul>
+<li><code>ci.yml</code> — lint, tests, typecheck and the production image builds of api/worker/front (TESTING.md), plus <code>scripts/check-version.sh</code> (every manifest carries the same version);</li>
+<li><code>e2e.yml</code> — the live scenario of §7 (the functional contract), ~10 min. A new push to the PR cancels the running one.</li>
+</ul>
+<p><strong>Versioning</strong>: semver, one version for the whole product (api, worker, front, images). It lives in <code>api/pyproject.toml</code>, <code>api/uv.lock</code>, <code>api/app/__init__.py</code> (the OpenAPI <code>version</code>), <code>worker/pyproject.toml</code>, <code>worker/uv.lock</code> and <code>front/package.json</code> — never edit them by hand, <code>task release</code> bumps them together and <code>task version-check</code> checks them. A pre-release is <code>X.Y.Z-rc.N</code>.</p>
+<p><strong>Cutting a release</strong>:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a>git<span class="w"> </span>switch<span class="w"> </span>main<span class="w"> </span><span class="o">&amp;&amp;</span><span class="w"> </span>git<span class="w"> </span>pull
+<a id="__codelineno-8-2" name="__codelineno-8-2" href="#__codelineno-8-2"></a>task<span class="w"> </span>release<span class="w"> </span><span class="nv">VERSION</span><span class="o">=</span><span class="m">1</span>.4.0<span class="w">          </span><span class="c1"># bump + commit &quot;chore(release): v1.4.0&quot; + annotated tag v1.4.0</span>
+<a id="__codelineno-8-3" name="__codelineno-8-3" href="#__codelineno-8-3"></a>git<span class="w"> </span>push<span class="w"> </span>--atomic<span class="w"> </span>origin<span class="w"> </span>main<span class="w"> </span>v1.4.0
+</code></pre></div>
+<p>If <code>main</code> only accepts pull requests, run <code>task release</code> on a branch instead: it commits the bump only and prints the tag command to run on the merge commit once the PR is merged. The release workflow refuses a tag that is not on <code>main</code>.</p>
+<p>Pushing the tag starts <code>release.yml</code>:</p>
+<ol>
+<li><strong>verify</strong> — the tag is <code>vX.Y.Z[-pre]</code>, on <code>main</code>, and matches every manifest;</li>
+<li><strong>ci</strong> and <strong>e2e</strong> — both workflows again, on the tagged commit; nothing is published if either fails;</li>
+<li><strong>images</strong> — <code>api</code>, <code>front</code>, <code>worker</code> and the OpenTofu runner image, <code>linux/amd64</code> + <code>linux/arm64</code>, pushed to <code>ghcr.io/&lt;owner&gt;/stackd/&lt;name&gt;</code> with SBOM and provenance attestations, then signed with cosign (keyless: the workflow's GitHub OIDC identity). Tags: <code>X.Y.Z</code>, plus <code>X.Y</code> and <code>latest</code> for a final release; the runner image is tagged by its tool version (<code>1.12.2</code>, and <code>1.12.2-stackdX.Y.Z</code>). The Terraform runner image is <strong>not</strong> published (BUSL, PLAN §5);</li>
+<li><strong>publish</strong> — the GitHub release: generated notes, the image references pinned by digest, the <code>STACKD_RUNNER_IMAGES</code> line, the <code>cosign verify</code> command, and <code>stackd-deploy-X.Y.Z.tar.gz</code> (<code>deploy/production</code> with its env examples pointing at those digests) + <code>SHA256SUMS</code>.</li>
+</ol>
+<p>A failed release is re-run from the Actions tab once the cause is fixed outside the code (a flaky step, a registry outage). A fix in the code is a new version: never move a published tag. The first publish creates the ghcr.io packages as private — make them public in the package settings if the images are meant to be pulled anonymously.</p>
 
 
 
