@@ -1,4 +1,4 @@
-import type { Environment, Run } from "@/api/types";
+import type { Environment, Run, RunSummary } from "@/api/types";
 import { isActive, outcomeOf, type Outcome } from "./runOutcome";
 
 // The truth of an environment (DESIGN §2.3). Every place that summarises an env — the overview cell,
@@ -17,27 +17,27 @@ export interface EnvModifiers {
   pr: boolean;
 }
 
-export interface EnvSummary {
+export interface EnvSummary<R extends RunSummary = Run> {
   /** Active run if any, else the last real tracked/destroy outcome. Null: never ran. */
-  primary: Run | null;
+  primary: R | null;
   active: boolean;
   outcome: Outcome | null;
-  /** Commit of the last finished tracked run (applied or no changes). */
+  /** The env's `last_applied_sha`: the commit of its last finished, untargeted tracked run. */
   deployedSha: string | null;
   modifiers: EnvModifiers;
 }
 
 /** Runs that may stand for the env when it is idle (DESIGN §2.3 rule 2). */
-function isRealOutcome(run: Run): boolean {
+export function isRealOutcome(run: RunSummary): boolean {
   if (run.type !== "tracked" && run.type !== "destroy") return false;
   if (run.triggered_by === "schedule") return false; // drift checks are proposed, but be explicit
   const o = outcomeOf(run);
   return o !== null && o !== "discarded" && o !== "canceled";
 }
 
-const byNewest = (a: Run, b: Run) => b.created_at.localeCompare(a.created_at);
+const byNewest = (a: RunSummary, b: RunSummary) => b.created_at.localeCompare(a.created_at);
 
-export function summarizeEnv(env: Environment, runs: Run[]): EnvSummary {
+export function summarizeEnv<R extends RunSummary>(env: Environment, runs: R[]): EnvSummary<R> {
   const sorted = [...runs].sort(byNewest);
   // The run that holds the env (unique per env, SPECS §3.5 — the index excludes `queued`) wins over a
   // queued one: a queued run behind an unconfirmed plan must not hide the pending decision.
@@ -46,13 +46,13 @@ export function summarizeEnv(env: Environment, runs: Run[]): EnvSummary {
     sorted.find((r) => r.state === "queued") ??
     null;
   const primary = activeRun ?? sorted.find(isRealOutcome) ?? null;
-  const deployed = sorted.find((r) => r.type === "tracked" && r.state === "finished");
 
   return {
     primary,
     active: activeRun !== null,
     outcome: primary ? outcomeOf(primary) : null,
-    deployedSha: deployed?.commit_sha ?? null,
+    // From the env, not the run list: a page of recent runs may hold no deploy at all.
+    deployedSha: env.last_applied_sha,
     modifiers: {
       drift: env.drift_status === "drifted" || env.drift_status === "error" ? env.drift_status : null,
       outOfBand: env.out_of_band_change !== null,
@@ -68,7 +68,7 @@ export function summarizeEnv(env: Environment, runs: Run[]): EnvSummary {
 }
 
 /** Sort key for "worst first": needs a decision < failed < drift < running < fine < never ran. */
-export function severity(s: EnvSummary): number {
+export function severity(s: EnvSummary<RunSummary>): number {
   if (s.primary?.state === "unconfirmed") return 0;
   if (s.outcome === "failed" || s.outcome === "failed_during_apply") return 1;
   if (s.modifiers.drift || s.modifiers.outOfBand) return 2;

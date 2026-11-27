@@ -53,6 +53,7 @@ export function makeEnv(over: Partial<Environment> = {}): Environment {
     commits_ahead: null,
     affects_project_root: null,
     stale: false,
+    last_applied_sha: null,
     drift_status: "unknown",
     last_drift_checked_at: null,
     drift_run_id: null,

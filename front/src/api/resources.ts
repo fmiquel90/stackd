@@ -21,6 +21,7 @@ import type {
   Role,
   PlanOptions,
   Run,
+  RunSummary,
   Space,
   SpaceMember,
   Stack,
@@ -279,8 +280,27 @@ export const comments = {
   remove: (runId: string, cid: string) => api<void>(`/runs/${runId}/comments/${cid}`, { method: "DELETE" }),
 };
 
+/** One page of an env's runs, newest first; `next` is the cursor of the older page (null: none). */
+export interface RunPage<R> {
+  runs: R[];
+  next: string | null;
+}
+
+async function runPage<R>(envId: string, query: Record<string, string>): Promise<RunPage<R>> {
+  let next: string | null = null;
+  const list = await api<R[]>(`/environments/${envId}/runs?${new URLSearchParams(query)}`, {
+    onHeaders: (h) => (next = h.get("X-Next-Cursor")),
+  });
+  return { runs: list, next };
+}
+
 export const runs = {
-  list: (envId: string) => api<Run[]>(`/environments/${envId}/runs`),
+  /** Full runs (checks and variable provenance), `limit` per page; `before`: a page's `next`. */
+  page: (envId: string, limit: number, before?: string | null) =>
+    runPage<Run>(envId, { limit: String(limit), ...(before ? { before } : {}) }),
+  /** The same rows without their heavy JSONB (`view=summary`): what env summaries need. */
+  summaryPage: (envId: string, limit: number, before?: string | null) =>
+    runPage<RunSummary>(envId, { view: "summary", limit: String(limit), ...(before ? { before } : {}) }),
   get: (id: string) => api<Run>(`/runs/${id}`),
   /** `options`: a targeted / replace plan (SPECS §3.5) — `replace` on a tracked run only. */
   trigger: (
