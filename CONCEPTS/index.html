@@ -2174,9 +2174,10 @@ out to them.</p>
 <a id="__codelineno-10-2" name="__codelineno-10-2" href="#__codelineno-10-2"></a>   → clone → hooks → init → plan/apply → stream logs → report → repeat
 </code></pre></div>
 <ul>
-<li><strong>Claim</strong> is concurrency-safe: <code>SELECT … FOR UPDATE OF environment SKIP LOCKED</code> serialises per
-  environment, and the <code>one_active_run_per_env</code> unique index is the hard guarantee (a losing racer gets a
-  <code>23505</code> and simply re-polls).</li>
+<li><strong>Claim</strong> is concurrency-safe: <code>SELECT … FOR NO KEY UPDATE OF environment SKIP LOCKED</code> serialises
+  per environment, and the <code>one_active_run_per_env</code> unique index is the hard guarantee (a losing racer
+  gets a <code>23505</code> and simply re-polls). A run whose job cannot be built never blocks the queue: a
+  transient failure sets it aside for a backoff, any other fails it.</li>
 <li><strong>Labels</strong> target work to pools (e.g. a dedicated <code>prod</code> pool): a worker claims only runs whose
   environment labels are a subset of its own, and whose stack's tool version it can run.</li>
 <li><strong>Apply affinity</strong>: the worker that produced a plan is preferred for the apply for ~60s; past

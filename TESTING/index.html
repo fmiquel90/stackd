@@ -1817,7 +1817,7 @@ all. Counts in parentheses include parametrized cases and drift as tests are add
 </tr>
 <tr>
 <td><code>test_oidc_kms.py</code> (16)</td>
-<td>The issuer's signing key in KMS (moto): signs through <code>kms:Sign</code>, a key that can't sign is refused; rotation keeps the old key published until its tokens expired, a known key can be reactivated; a token that can't be signed fails the job closed; concurrent claims and JWKS fetches provision the key once, a losing race uses the winner's key; transient signing failures leave the run to retry, permanent ones store a generic code only and discard what the payload staged.</td>
+<td>The issuer's signing key in KMS (moto): signs through <code>kms:Sign</code>, a key that can't sign is refused; rotation keeps the old key published until its tokens expired, a known key can be reactivated; a token that can't be signed fails the job closed; concurrent claims and JWKS fetches provision the key once, a losing race uses the winner's key; transient signing failures leave the run to retry after its claim backoff, permanent ones store a generic code only and discard what the payload staged.</td>
 </tr>
 <tr>
 <td><code>test_production_runner.py</code> (4)</td>
@@ -1838,6 +1838,10 @@ all. Counts in parentheses include parametrized cases and drift as tests are add
 <tr>
 <td><code>test_scheduler.py</code> (4)</td>
 <td>The advisory lock survives a task's commit (dedicated connection); worker loss fails an executing run, waits the apply window for a mutating command, spares <code>unconfirmed</code>/<code>confirmed</code> runs.</td>
+</tr>
+<tr>
+<td><code>test_claim_resilience.py</code> (7)</td>
+<td>The claim long-poll waits outside any transaction (no idle-in-transaction connection) and its <code>wait</code> is capped server-side; the job build holds no lock on the worker's row nor a key-share-blocking one on the env; an unexpected build error (an undecryptable sealed secret) fails the run closed (<code>reason: internal</code>) and the queue moves on; a transient one (KMS, the database) answers 503 and sets the run aside for a doubling backoff while the run behind it is claimed; the candidate query uses <code>ix_runs_claimable</code>; the API's connections carry the server-side timeouts.</td>
 </tr>
 <tr>
 <td><code>test_queue.py</code> (3)</td>
@@ -1864,8 +1868,8 @@ all. Counts in parentheses include parametrized cases and drift as tests are add
 <td>Out-of-band state changes (SPECS §19.7): <code>observe_state</code> handed only to reviewed jobs of an unmanaged env (not a PR plan, a read-only command, a managed env); the first check adopts the baseline, an apply's baseline moves it, a differing check flags the env (audit + approvers notified once, debounced), a full apply clears it, a targeted one keeps it; a lineage change or an emptied state is detected; malformed or stale observations refused; acknowledge needs <code>can_apply</code>; a backend change resets the baseline.</td>
 </tr>
 <tr>
-<td><code>test_drift.py</code> (8)</td>
-<td>Drift runs enqueued only for envs with an applied commit; status flips and approvers (by space membership) are notified once; an apply clears drift — not a targeted one (also on the after_apply-failure path), a replace-only one does; user runs are claimed first.</td>
+<td><code>test_drift.py</code> (10)</td>
+<td>Drift runs enqueued only for envs with an applied commit, never next to a drift run still queued; status flips and approvers (by space membership) are notified once; an apply clears drift — not a targeted one (also on the after_apply-failure path), a replace-only one does; user runs are claimed first.</td>
 </tr>
 <tr>
 <td><code>test_repo_safety.py</code> (65)</td>

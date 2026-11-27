@@ -1526,11 +1526,21 @@ same outbox pattern.</p>
 claim time.</p>
 <h2 id="scaling">📈 Scaling<a class="headerlink" href="#scaling" title="Permanent link">&para;</a></h2>
 <p>Workers are stateless pull agents, so <strong>scaling out = running more of them</strong> (e.g. bumping an ECS
-service <code>desiredCount</code>). Postgres serializes claims with two guards (<code>FOR UPDATE … SKIP LOCKED</code> +
+service <code>desiredCount</code>). Postgres serializes claims with two guards (<code>FOR NO KEY UPDATE … SKIP LOCKED</code> +
 the <code>one_active_run_per_env</code> unique index). What's worth knowing:</p>
 <ul>
-<li>🧩 <strong>The unit of parallelism is the environment, not the worker</strong> — one active run per env, but
-  different envs run concurrently. Throughput ≈ <code>min(workers, envs with queued work)</code>.</li>
+<li>🔌 <strong>Idle workers cost no database connection</strong> — the claim long-poll ends its transaction before
+  each 2 s wait, so the API's pool is sized for requests in flight, not for workers
+  (<a href="../guide/workers-and-scaling/#database-connections">sizing</a>).</li>
+<li>
+<p>🧯 <strong>One bad run never blocks the queue</strong> — a job that cannot be built for a transient reason
+  (KMS, the database) is set aside for a backoff (<code>claimable_after</code>); any other build failure fails
+  the run closed.</p>
+</li>
+<li>
+<p>🧩 <strong>The unit of parallelism is the environment, not the worker</strong> — one active run per env, but
+  different envs run concurrently. Throughput ≈ <code>min(workers, envs with queued work)</code>.</p>
+</li>
 <li>🏷️ <strong>Labels segment pools</strong> — a worker only claims runs whose env labels are a subset of its own
   (and whose stack's tool version it can run), so you can dedicate (and scale) a prod pool
   independently.</li>

@@ -788,6 +788,17 @@
 </li>
         
           <li class="md-nav__item">
+  <a href="#a-job-that-cannot-be-built" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        A job that cannot be built
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#apply-affinity" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -905,6 +916,23 @@
       
     </span>
   </a>
+  
+    <nav class="md-nav" aria-label="Scale">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#database-connections" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Database connections
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
   
 </li>
       
@@ -1321,6 +1349,17 @@
 </li>
         
           <li class="md-nav__item">
+  <a href="#a-job-that-cannot-be-built" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        A job that cannot be built
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#apply-affinity" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -1439,6 +1478,23 @@
     </span>
   </a>
   
+    <nav class="md-nav" aria-label="Scale">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#database-connections" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Database connections
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
 </li>
       
         <li class="md-nav__item">
@@ -1498,8 +1554,10 @@
     Note over W: clone → hooks → init → plan/apply → report</code></pre>
 <p>The <strong>queue is Postgres</strong>, not a broker. A claim is an atomic <code>SELECT … FOR UPDATE … SKIP LOCKED</code> that picks the next eligible run. There is no Redis, no RabbitMQ, nothing to operate beyond the database.</p>
 <h3 id="one-active-run-per-environment">One active run per environment<a class="headerlink" href="#one-active-run-per-environment" title="Permanent link">&para;</a></h3>
-<p><code>SKIP LOCKED</code> alone does not serialise two workers claiming two <em>distinct</em> queued runs of the <strong>same</strong> environment. The hard guarantee is the partial unique index <code>one_active_run_per_env</code>: the second claim violates it (SQLSTATE <code>23505</code>), is caught, and is treated as "nothing to claim" — that worker simply re-polls. The claim also locks the environment row (<code>FOR UPDATE OF environment</code>) so losers skip it and pick other work instead of wasting effort.</p>
+<p><code>SKIP LOCKED</code> alone does not serialise two workers claiming two <em>distinct</em> queued runs of the <strong>same</strong> environment. The hard guarantee is the partial unique index <code>one_active_run_per_env</code>: the second claim violates it (SQLSTATE <code>23505</code>), is caught, and is treated as "nothing to claim" — that worker simply re-polls. The claim also locks the environment row (<code>FOR NO KEY UPDATE OF environment</code>) so losers skip it and pick other work instead of wasting effort.</p>
 <p>The practical consequence: <strong>the unit of parallelism is the environment.</strong> Two environments of the same stack run in parallel; two runs on the same environment never do.</p>
+<h3 id="a-job-that-cannot-be-built">A job that cannot be built<a class="headerlink" href="#a-job-that-cannot-be-built" title="Permanent link">&para;</a></h3>
+<p>When a run is claimed, the API builds its job: variables, <a href="../external-secrets/">external secrets</a>, dependency inputs, the <a href="../cloud-credentials/">workload token</a>. If that fails for a reason a retry can get past (KMS throttled or unreachable, a database hiccup), the claim is undone — the run stays <code>queued</code> (or <code>confirmed</code>, keeping its approval) — the worker gets a <code>503</code> and polls again, and the run is set aside for a backoff (10 s, doubling up to 5 min) so the runs queued behind it are claimed meanwhile. Any other failure — an unresolvable dependency or secret, a key that will never sign, a stored secret that no longer decrypts — fails the run at once (<code>run.apply_failed</code>). Either way, one bad run never blocks the queue.</p>
 <h3 id="apply-affinity">Apply affinity<a class="headerlink" href="#apply-affinity" title="Permanent link">&para;</a></h3>
 <p>After a plan is confirmed, the originating worker is <strong>preferred</strong> for the apply for ~60s (<code>STACKD_APPLY_AFFINITY_SECONDS</code>). Past that delay (a dead or saturated worker), any compatible worker takes it. No workspace is reused either way: the apply worker clones the run's <strong>pinned commit</strong>, downloads the <strong>saved plan</strong> from the API and runs <code>tofu apply plan.tfplan</code>. It never re-plans: without a usable saved plan the run fails, and you trigger a new plan. See <a href="../runs-and-approvals/#what-gets-applied-is-what-was-reviewed">Runs &amp; approvals</a>.</p>
 <h3 id="worker-loss">Worker loss<a class="headerlink" href="#worker-loss" title="Permanent link">&para;</a></h3>
@@ -1753,7 +1811,57 @@ can't read the pool token from its environment.</p>
 <li><code>GET /api/v1/queue</code> — waiting runs and <em>why</em> they wait (<code>active_run</code> | <code>env_locked</code> | <code>no_compatible_worker</code> | <code>apply_affinity_hold</code>).</li>
 </ul>
 <p>A <code>no_compatible_worker</code> backlog means no online worker carries the environment's labels or can run the stack's <code>tool_version</code> — not a capacity problem: adding generic workers will not help; you need workers with the right labels or tool versions. See <a href="../observability/">Observability</a> for the Workers &amp; health page.</p>
-<p>Drift detection adds background load: every environment with <code>drift_check_enabled</code> gets a read-only plan every 6 h (<code>STACKD_DRIFT_INTERVAL_SECONDS</code> on the API). A claim always takes user runs before these drift plans, then the oldest first.</p>
+<h3 id="database-connections">Database connections<a class="headerlink" href="#database-connections" title="Permanent link">&para;</a></h3>
+<p>A worker waiting on its claim long-poll holds <strong>no</strong> database connection: the API ends the claim's transaction before each 2 s wait (and caps <code>?wait=</code> at <code>STACKD_CLAIM_MAX_WAIT_SECONDS</code>, default 30). Idle workers therefore cost a few milliseconds of a connection every 2 s each, not a connection each. Size each API process's pool for the requests it serves <strong>at once</strong>:</p>
+<ul>
+<li>the jobs being built at the same moment — a claim holds its connection while it fetches external secrets and signs the workload token (plus a second, briefly, the first time a KMS key is provisioned);</li>
+<li>workers' events, logs and state-backend calls, and UI/API traffic;</li>
+<li>up to 4 for the scheduler (two tasks, each with its session and its advisory-lock connection).</li>
+</ul>
+<table>
+<thead>
+<tr>
+<th>API setting</th>
+<th>Default</th>
+<th>What it does</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>STACKD_DB_POOL_SIZE</code></td>
+<td><code>10</code></td>
+<td>connections kept open per API process</td>
+</tr>
+<tr>
+<td><code>STACKD_DB_MAX_OVERFLOW</code></td>
+<td><code>10</code></td>
+<td>extra connections opened under load, closed when returned</td>
+</tr>
+<tr>
+<td><code>STACKD_DB_POOL_TIMEOUT_SECONDS</code></td>
+<td><code>30</code></td>
+<td>how long a request waits for a free connection before failing</td>
+</tr>
+<tr>
+<td><code>STACKD_DB_IDLE_IN_TRANSACTION_TIMEOUT_SECONDS</code></td>
+<td><code>300</code></td>
+<td>the server ends a session left idle inside a transaction this long (a leak, a stuck request), releasing its locks</td>
+</tr>
+<tr>
+<td><code>STACKD_DB_LOCK_TIMEOUT_SECONDS</code></td>
+<td><code>30</code></td>
+<td>a statement waiting this long for a row or advisory lock fails instead of queueing forever</td>
+</tr>
+<tr>
+<td><code>STACKD_DB_STATEMENT_TIMEOUT_SECONDS</code></td>
+<td><code>0</code> (the server's)</td>
+<td>cap on any single statement; off by default, as a large retention purge can legitimately run long</td>
+</tr>
+</tbody>
+</table>
+<p>The three timeouts apply to the API's own connections only — <code>0</code> leaves the server's (role or database) setting. Migrations (<code>alembic upgrade</code>, the <code>migrate</code> service) and the audit purge open their own connections and never inherit them.</p>
+<p>Postgres must accept every replica's pool at full overflow, plus one <code>LISTEN</code> connection per replica (live updates), the migrations and the audit purge: <code>max_connections</code> ≥ replicas × (<code>STACKD_DB_POOL_SIZE</code> + <code>STACKD_DB_MAX_OVERFLOW</code> + 1) + a few. With the defaults that is 21 per replica — Postgres' default of 100 fits four replicas.</p>
+<p>Drift detection adds background load: every environment with <code>drift_check_enabled</code> gets a read-only plan every 6 h (<code>STACKD_DRIFT_INTERVAL_SECONDS</code> on the API) — never a second one while the previous drift plan is still queued. A claim always takes user runs before these drift plans, then the oldest first.</p>
 <h2 id="see-also">See also<a class="headerlink" href="#see-also" title="Permanent link">&para;</a></h2>
 <ul>
 <li><a href="../installing/#7-workers">Installing in production</a> — the production worker image and its compose file</li>
