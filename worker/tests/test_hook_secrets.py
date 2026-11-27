@@ -38,6 +38,8 @@ CLOUD = {
     "oidc_token": OIDC_TOKEN,
     "role_arn": "arn:aws:iam::123456789012:role/stackd-plan",
     "region": "eu-west-1",
+    # A named profile (§10.6): written in the AWS config file, beside the token file.
+    "profiles": {"tfstates": {"role_arn": "arn:aws:iam::210987654321:role/tfstates-plan"}},
 }
 # What `tofu show -json` prints for the plan: the variable values in clear, sensitive ones included.
 RAW_PLAN_JSON = {
@@ -65,6 +67,8 @@ _FAKE_TOFU = """#!/bin/sh
 tfvars=no; [ -f stackd.auto.tfvars.json ] && [ -f zzz_stackd.auto.tfvars ] && tfvars=yes
 token=no; [ -n "$AWS_WEB_IDENTITY_TOKEN_FILE" ] && [ -f "$AWS_WEB_IDENTITY_TOKEN_FILE" ] && token=yes
 echo "$1 tfvars=$tfvars token=$token" >> "$FAKE_TOFU/calls"
+cfg=no; [ -n "$AWS_CONFIG_FILE" ] && grep -qs '^\\[profile tfstates\\]$' "$AWS_CONFIG_FILE" && cfg=yes
+echo "$1 cfg=$cfg" >> "$FAKE_TOFU/configs"
 case "$1" in
 plan)
   for a; do case "$a" in -out=*) out="${a#-out=}";; esac; done
@@ -274,10 +278,14 @@ def test_repo_hooks_find_no_secret_in_the_workspace(
     tmp_path: Path, tofu: Path, git_http: str
 ) -> None:
     needles = ["RAW-PLAN", SECRET, HCL_SECRET, *TOKEN_FORMS, OIDC_TOKEN]
-    scan = _scan_hook(tmp_path, needles, ["plan.tfplan", *TFVARS_FILES, "oidc_token"])
+    names = ["plan.tfplan", *TFVARS_FILES, "oidc_token", "aws_config"]
+    scan = _scan_hook(tmp_path, needles, names)
     _, sha = _repo(tmp_path, {stage: [f"{scan} {stage}"] for stage in STAGES})
-    # A platform hook at every stage reads the OIDC token file, like tofu (§10.4).
-    has_token = '[ -f "$AWS_WEB_IDENTITY_TOKEN_FILE" ] && echo "PLATFORM {0} token=yes"'
+    # A platform hook at every stage reads the OIDC token and AWS config files, like tofu (§10.4).
+    has_token = (
+        '[ -f "$AWS_WEB_IDENTITY_TOKEN_FILE" ] && [ -f "$AWS_CONFIG_FILE" ]'
+        ' && echo "PLATFORM {0} token=yes"'
+    )
     platform = {
         stage: [{"name": f"p-{stage}", "command": has_token.format(stage), "source": "platform"}]
         for stage in STAGES
@@ -306,6 +314,9 @@ def test_repo_hooks_find_no_secret_in_the_workspace(
         "apply tfvars=yes token=yes",
         "output tfvars=no token=yes",
     ]
+    # Every tofu command reads the AWS config file of named profiles (§10.6).
+    configs = (tofu / "configs").read_text().splitlines()
+    assert len(configs) == 7 and all(c.endswith(" cfg=yes") for c in configs), configs
     # The saved plan still reaches the apply, exactly as tofu made it.
     assert client.uploads["plan.tfplan"].startswith(b"RAW-PLAN\n")
     assert (tofu / "applied").read_bytes() == client.uploads["plan.tfplan"]
@@ -348,6 +359,7 @@ def test_files_a_repo_plants_never_receive_a_secret(tmp_path: Path, tofu: Path) 
             ("b", "plan.json"),
             ("c", "../plan.tfplan"),
             ("d", "../oidc_token"),
+            ("e", "../aws_config"),
         )
     )
     url, sha = _repo(tmp_path, {"before_plan": [plant], "after_plan": ["true"]}, links)

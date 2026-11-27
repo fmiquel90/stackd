@@ -37,7 +37,7 @@ STACKD_YML = """
 hooks:
   after_plan:
     - name: repo-peek
-      command: "test ! -e ../oidc_token && test ! -e ../plan.tfplan && echo repo-hook-isolated"
+      command: "test ! -e ../oidc_token && test ! -e ../aws_config && test ! -e ../plan.tfplan && echo repo-hook-isolated"
       on_failure: fail
 """
 
@@ -123,7 +123,10 @@ def test_plan_and_apply_in_containers(tmp_path: Path, repo: tuple[str, str]) -> 
                 "after_plan": [
                     {
                         "name": "platform-check",
-                        "command": "test -s plan.json && echo platform-hook-ran",
+                        "command": (
+                            'test -s plan.json && test -s "$AWS_CONFIG_FILE"'
+                            " && echo platform-hook-ran"
+                        ),
                         "on_failure": "fail",
                         "source": "platform",
                     }
