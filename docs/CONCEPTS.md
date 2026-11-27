@@ -186,6 +186,11 @@ or "overridden here". The provenance is also frozen onto the run (`variable_prov
   `TF_VAR_<name>`).
 - `environment` → injected as a process environment variable for the run.
 
+A repo that already keeps one tfvars file per environment keeps it: the environment lists it in
+`var_files` (e.g. `["envs/prod.tfvars"]`, relative to the project root, in order) and the worker
+passes it as `-var-file=`. Stackd's own variables still win over it — the worker passes its
+generated files after the repo's (SPECS §3.4).
+
 ### Sensitive variables are write-only
 
 Mark a variable `sensitive: true` and it is **AES-256-GCM encrypted at rest** and **never returned

@@ -107,6 +107,7 @@ curl -s -X POST localhost:8000/api/v1/stacks/$STACK/environments \
 - **`allow_mock_apply`** — allow applying a run that consumed mock outputs (default `false`). See [Dependencies & mocks](dependencies-and-mocks.md).
 - **`allow_fallback_apply`** — allow applying a run whose external secret came from a fallback (default `false`). See [External secret sources](external-secrets.md#fallback-blocks-apply-by-default).
 - **`drift_check_enabled`** — include the environment in the periodic drift check (default `true`).
+- **`var_files`** — the repo's own tfvars files for this environment, relative to the project root, passed in order as `-var-file=`; Stackd's variables still win over them. See [Variables](variables.md#the-repos-own-tfvars-files).
 - **`labels`** — JSON tags: a run is only claimed by a worker whose labels contain all of them (see [Workers & scaling](workers-and-scaling.md#dedicate-a-pool-with-labels): its pool's labels plus its own `STACKD_WORKER_LABELS`); with the stack's labels they also select variable sets (see [Variables](variables.md)).
 
 !!! warning "Why not Terraform workspaces"

@@ -22,6 +22,7 @@ from app.audit import record_audit
 from app.dependencies.router import _create_edge
 from app.enums import AttachmentTarget, AuditActorKind, RepoAuthKind, Role, SecretFallback
 from app.environments.router import lock_attach_target
+from app.environments.var_files import require_inside_checkout
 from app.errors import ProblemException
 from app.models.dependency import EnvDependency, OutputReference
 from app.models.environment import Environment
@@ -67,6 +68,7 @@ _ENV_FIELDS = (
     "drift_check_enabled",
     "backend_config_file",
     "backend_config",
+    "var_files",
     "labels",
     "position",
 )
@@ -399,6 +401,10 @@ class Importer:
 
     async def _environment(self, stack: Stack, doc: EnvironmentDoc) -> None:
         path = f"stacks/{stack.name}/environments/{doc.name}"
+        try:
+            require_inside_checkout(stack.project_root, doc.var_files)
+        except ProblemException as exc:
+            raise ProblemException(exc.status, exc.title, f"{path}: {exc.detail}") from exc
         values = {f: getattr(doc, f) for f in _ENV_FIELDS}
         if values["protected"]:
             values["autodeploy"] = False  # protected forces manual confirmation (§3.2)

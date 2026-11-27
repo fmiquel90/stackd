@@ -109,6 +109,37 @@ The value is **AES-256-GCM encrypted at rest**, decrypted only to build the work
 !!! warning
     A sensitive value is **never returned in clear**. A later `GET` shows `"value": "•••"`; the plaintext is not readable again through the API.
 
+## The repo's own tfvars files
+
+A repo that keeps one tfvars file per environment (`envs/prod.tfvars`, or `prod.tfvars` next to a
+`prod.config` backend file) can keep it: list it in the environment's **`var_files`** (the
+environment's settings, or the API). Paths are relative to the stack's project root, may go up
+(`../shared/prod.tfvars`) but never out of the repository, and are used **in order** — a later file
+wins over an earlier one.
+
+```bash
+curl -s -X PATCH localhost:8000/api/v1/environments/$ENV \
+  -H "Authorization: Bearer $TOKEN" -H 'content-type: application/json' \
+  -d '{"var_files":["envs/prod.tfvars","../shared/prod.tfvars"]}'
+```
+
+The worker passes each one as `-var-file=` to the plan (tracked, pull request, destroy, drift) and
+to the `import` / `refresh` commands. **Stackd's variables always win**: every layer above, the
+dependency outputs and the mocks override a repo file — the worker passes its own generated files
+after yours. The order, weakest first:
+
+| # | Source |
+|---|---|
+| 1 | `TF_VAR_<name>` in the environment |
+| 2 | the repo's `terraform.tfvars` and `*.auto.tfvars` (auto-loaded) |
+| 3 | `var_files`, in their order |
+| 4 | Stackd's resolved variables (the 6 layers, dependency outputs, mocks) |
+
+A file missing at the run's commit fails the run before anything executes, naming the file and the
+environment. It works the same with managed and unmanaged state. Don't define the same variable in
+both an auto-loaded repo file (layer 2) and a var file: the apply of the saved plan only sees the
+auto-loaded value, and the tool may refuse the plan as an input mismatch. Details: SPECS §3.4.
+
 ## Values by reference (external secret sources)
 
 Instead of storing a secret in Stackd, a variable can point at an entry in an external secrets manager (Proton Pass today). The value is fetched **live at run time** and never persisted — see [External secret sources](external-secrets.md).
