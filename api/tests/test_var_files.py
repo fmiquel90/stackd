@@ -107,7 +107,8 @@ async def test_round_trip_and_patch(client: httpx.AsyncClient) -> None:
         (["a\nb.tfvars"], 422),  # control character
         (["x" * 257], 422),
         ([f"f{i}.tfvars" for i in range(17)], 422),  # bounded
-        (["../../outside.tfvars"], 422),  # escapes the checkout from stacks/app
+        (["../../../outside.tfvars"], 422),  # escapes the checkout from stacks/app
+        (["../../root.tfvars"], 201),  # the repository root: still inside
         (["../../stacks/../../x.tfvars"], 422),
         (["../../stacks/app/prod.tfvars"], 201),  # goes up, stays inside
         ([f"f{i}.tfvars" for i in range(16)], 201),
