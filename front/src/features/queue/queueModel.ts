@@ -1,6 +1,7 @@
 import { useQueries, useQuery } from "@tanstack/react-query";
 import { observability, queue, runs, stacks } from "@/api/resources";
 import type { Environment, HealthWorker, QueueEntry, Run, Stack } from "@/api/types";
+import { shortId } from "@/lib/ids";
 
 // The execution queue (DESIGN §5.5): `/queue` returns ids only, so names come from the stack and
 // environment lists, worker names from `/health`, and ages from one `runs.get` per row.
@@ -53,7 +54,7 @@ export function blockerOf(row: QueueRow, rows: QueueRow[], onlineWorkers: number
             ? "a plan on this environment awaits a human decision"
             : "another run is active on this environment",
         link: holder
-          ? { to: `/runs/${holder.entry.run_id}`, label: `run ${holder.entry.run_id.slice(0, 8)}` }
+          ? { to: `/runs/${holder.entry.run_id}`, label: `run ${shortId(holder.entry.run_id)}` }
           : undefined,
       };
     }

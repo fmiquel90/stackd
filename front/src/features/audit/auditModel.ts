@@ -1,4 +1,5 @@
 import type { AuditEvent, Environment, HealthWorker, Space, Stack, User } from "@/api/types";
+import { shortId } from "@/lib/ids";
 
 // The audit journal's pure logic (DESIGN §5.6): action catalogue, row emphasis, target resolution
 // and context summary. Context values are shown as recorded, except keys that could carry a secret.
@@ -116,7 +117,7 @@ export interface Target {
   gone?: boolean;
 }
 
-const short = (id: string) => id.slice(0, 8);
+const short = shortId;
 const str = (v: unknown): string | undefined => (typeof v === "string" && v ? v : undefined);
 
 export function envPath(env: Environment, l: Lookup): { label: string; to?: string } {

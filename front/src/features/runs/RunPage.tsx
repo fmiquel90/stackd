@@ -39,6 +39,7 @@ import {
 import { CheckList } from "./CheckList";
 import { CommentComposer, CommentThread, Discussion, commentLineKey, isRoot, lineKey } from "./comments";
 import { useRunPage } from "./useRunPage";
+import { shortId } from "@/lib/ids";
 
 // The run page (DESIGN §5.2): the decision first, then the evidence — plan, checks, logs, inputs,
 // discussion. Every piece of on-screen state that matters is in the URL (?tab, ?line, ?plan_q).
@@ -224,7 +225,7 @@ export function RunPage() {
           ) : (
             "…"
           )}
-          <span className="font-data text-[13px] font-normal text-muted">run {run.id.slice(0, 8)}</span>
+          <span className="font-data text-[13px] font-normal text-muted">run {shortId(run.id)}</span>
           {run.type !== "tracked" && (
             <Badge
               tone={run.type === "destroy" ? "failed" : "neutral"}
@@ -234,21 +235,24 @@ export function RunPage() {
             </Badge>
           )}
         </h1>
-        <p className="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[12px] text-muted">
+        {/* < 768 px: one condensed line (sha · age · trigger · message), DESIGN §5.2. */}
+        <p className="flex items-center gap-x-2 gap-y-0.5 overflow-hidden text-[12px] whitespace-nowrap text-muted md:flex-wrap md:whitespace-normal">
           <Sha value={run.commit_sha} copy />
-          {run.commit_message && <span className="text-primary">“{run.commit_message}”</span>}
-          {run.commit_author && <span>· {run.commit_author}</span>}
-          <span>
+          {run.commit_message && (
+            <span className="min-w-0 truncate text-primary max-md:order-last">“{run.commit_message}”</span>
+          )}
+          {run.commit_author && <span className="max-md:hidden">· {run.commit_author}</span>}
+          <span className="max-md:hidden">
             · branch <span className="font-data">{env.branch}</span>
           </span>
-          <span>
+          <span className="shrink-0">
             ·{" "}
             {run.triggered_by === "manual"
               ? `triggered by ${triggererEmail ?? "a user"}`
               : `via ${run.triggered_by === "schedule" ? "drift check" : run.triggered_by}`}
           </span>
           {rollout.data && (
-            <span>
+            <span className="max-md:hidden">
               · part of{" "}
               <Link className="link font-data" to={`/rollouts/${rollout.data.id}`}>
                 rollout {rollout.data.name}
@@ -256,12 +260,15 @@ export function RunPage() {
               {rolloutMember ? ` · level ${rolloutMember.level}` : ""}
             </span>
           )}
-          <span>
+          <span className="shrink-0">
             · <RelativeTime value={run.created_at} />
           </span>
-          <span className="font-data">· {durationOf(run.created_at, run.finished_at)}</span>
+          <span className="max-md:hidden">
+            · {run.finished_at ? "took" : "elapsed"}{" "}
+            <span className="font-data">{durationOf(run.created_at, run.finished_at)}</span>
+          </span>
           {run.command && (
-            <span className="font-data">
+            <span className="font-data max-md:hidden">
               · {run.command.name} {run.command.args.join(" ")}
             </span>
           )}
@@ -271,7 +278,7 @@ export function RunPage() {
 
       {/* ---------- decision ---------- */}
       <RunActionBar
-        className="sticky top-0 z-20"
+        className="z-20 md:sticky md:top-0"
         run={run}
         env={env}
         rights={rights}
@@ -361,6 +368,7 @@ export function RunPage() {
         )}
         {stale && (
           <Banner
+            inline
             title={
               <>
                 Plan computed on <span className="font-data">{run.commit_sha!.slice(0, 7)}</span>. The branch
@@ -385,7 +393,6 @@ export function RunPage() {
             }
           >
             Confirming still applies exactly <span className="font-data">{run.commit_sha!.slice(0, 7)}</span>.
-            Re-plan discards this plan and plans the head.
           </Banner>
         )}
         {run.used_mocks && (

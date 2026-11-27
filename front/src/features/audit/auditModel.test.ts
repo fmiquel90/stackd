@@ -34,7 +34,7 @@ describe("audit model", () => {
   it("resolves a run target with its environment, linked", () => {
     const t = targetOf(ev({ context: { environment_id: env.id } }), lookup);
     expect(t).toEqual({
-      label: "run 01a1276c · demo-network/prod",
+      label: "run 9ce3880b · demo-network/prod",
       to: "/runs/01a1276c-e6dd-7d3d-bd8f-7a969ce3880b",
     });
   });
