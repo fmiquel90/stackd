@@ -71,6 +71,12 @@ class Settings(BaseSettings):
     s3_access_key: str = ""
     s3_secret_key: str = ""
     aws_region: str = "garage"
+    # Every AWS client (S3, KMS, STS); the read timeout bounds each socket read, not a transfer.
+    stackd_aws_connect_timeout_seconds: float = 5
+    stackd_aws_read_timeout_seconds: float = 30
+    stackd_aws_max_attempts: int = 3
+    # Largest state document the HTTP backend accepts (413 past it, §11.2).
+    stackd_state_max_bytes: int = 64 * 1024 * 1024
 
     # Retention (§5.2, §6.1, §7.5): hot log rows are purged this long after the run's logs reach S3;
     # the audit trail is purged past `audit_retention_days` by a distinct DB role, only when its
@@ -98,6 +104,11 @@ class Settings(BaseSettings):
 
     # Environment rollouts (§21.6): how long an approval lets creates-only plans apply unattended.
     stackd_rollout_approval_ttl_seconds: int = 24 * 3600
+
+    # Live WebSocket (§5.3): the auth message must arrive within this delay (else 4401), and one
+    # socket holds at most this many distinct channels (else it is closed with 1008).
+    stackd_ws_auth_timeout_seconds: int = 10
+    stackd_ws_max_subscriptions: int = 1000
 
     # Background scheduler (§7.5) — disabled under tests so it can't fail runs mid-assertion.
     stackd_run_scheduler: bool = True

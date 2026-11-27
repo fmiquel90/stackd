@@ -32,7 +32,9 @@ class StateVersion(Base):
 
 
 class StateLock(Base):
-    """One advisory lock row per environment (SPECS §3.9). Visible in UI; force-unlock audited."""
+    """One advisory lock row per environment (SPECS §3.9). Visible in UI; force-unlock audited.
+    `run_id`: the run whose state token took it, released by `transition()` when that run ends
+    (§11.2); NULL for a run-less holder (import session): only its holder or an admin frees it."""
 
     __tablename__ = "state_locks"
 
@@ -40,5 +42,8 @@ class StateLock(Base):
         PGUUID(as_uuid=True), ForeignKey("environments.id", ondelete="CASCADE"), primary_key=True
     )
     lock_id: Mapped[str] = mapped_column(String)
+    run_id: Mapped[uuid.UUID | None] = mapped_column(
+        PGUUID(as_uuid=True), ForeignKey("runs.id", ondelete="SET NULL"), default=None
+    )
     info: Mapped[dict | None] = mapped_column(JSONB, default=None)
     locked_at: Mapped[datetime] = created_at_col()

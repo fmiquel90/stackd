@@ -16,6 +16,7 @@ import { attentionOf, envColumns, matchesState, STATE_FILTERS, type StateFilter 
 import { Matrix, type Selection } from "./Matrix";
 import { NewStackDialog } from "./NewStackDialog";
 import { NewEnvironmentDialog } from "@/features/rollouts/NewEnvironmentDialog";
+import { shortId } from "@/lib/ids";
 
 // The overview (DESIGN §5.1): attention zone, then the stack × environment matrix. Filters, the
 // selected cell and the cascade preview live in the URL (?q, ?state, ?tier, ?sel, ?cascade).
@@ -256,7 +257,7 @@ export function OverviewPage() {
                   downstream={[...downstream.values()]}
                   labelOf={(envId) => {
                     const e = data.entries.find((x) => x.env.id === envId);
-                    return e ? `${e.stack.name}/${e.env.name}` : envId.slice(0, 8);
+                    return e ? `${e.stack.name}/${e.env.name}` : shortId(envId);
                   }}
                   onPlanned={(id) => navigate(`/runs/${id}`)}
                 />

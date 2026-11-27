@@ -55,7 +55,7 @@ the network layer.
 
 | Metric | Type | What it counts |
 |---|---|---|
-| `stackd_runs_total{state}` | gauge | runs per state, read from the database at scrape |
+| `stackd_runs_total{state}` | gauge | runs per state, read from the database at scrape — the terminal states (`finished`, `failed`, `discarded`, `canceled`) at most every 5 minutes per API process |
 | `stackd_queue_depth` | gauge | runs waiting for a claim (`queued` + `confirmed`) |
 | `stackd_workers_online` | gauge | workers that heartbeated within the offline window (60 s) |
 | `stackd_claim_latency_seconds` | histogram | how long a run waited claimable: from its creation to a plan (or command) claim, from its confirmation to an apply claim |
@@ -149,7 +149,7 @@ event. Each step logs `scheduler.retention` (with a count) or
 
 Managed states, saved plans and archived logs live in S3 (Garage in dev), reached
 only by the API. `task s3-ls` lists the dev bucket with the API's own S3 settings:
-`states/<environment_id>/…` for state versions, `artifacts/<run_id>/plan.tfplan`
+`states/<environment_id>/…` for state versions, `artifacts/<run_id>/plan-<id>.tfplan`
 for the saved plan of a run that can still be applied (encrypted, deleted when
 the run ends), `logs/<run_id>/…` for archived run logs. If a plan with changes fails while uploading its plan file, the
 API cannot reach the bucket: run `task s3`, then `task dev`. See

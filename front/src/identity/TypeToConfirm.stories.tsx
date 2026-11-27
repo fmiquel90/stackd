@@ -48,7 +48,7 @@ export const Submitting = () => (
     <TypeToConfirm
       name="prod"
       verb="apply"
-      because={["protected environment"]}
+      because={["protected"]}
       counts={{ add: 1, change: 0, destroy: 0 }}
       destroyed={[]}
       replaced={[]}

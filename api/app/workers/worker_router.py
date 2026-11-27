@@ -12,6 +12,7 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.audit import record_audit
+from app.bodies import read_capped
 from app.config import get_settings
 from app.db import get_session
 from app.dependencies.service import DependencyError, capture_outputs, cascade
@@ -45,7 +46,9 @@ from app.runs.artifacts import (
     PLAN_FILE,
     SAVED_PLAN_TYPES,
     SavedPlanUnreadable,
+    drop_unrecorded_plan,
     load_plan,
+    record_saved_plan,
     save_plan,
 )
 from app.runs.transition import ALLOWED, transition
@@ -738,19 +741,6 @@ async def ingest_logs(
     return {"accepted": True}
 
 
-async def _read_capped(request: Request, limit: int) -> bytes:
-    """The request body, refused (413) past `limit` bytes without buffering more than that."""
-    declared = request.headers.get("content-length", "")
-    if declared.isdigit() and int(declared) > limit:
-        raise ProblemException(413, "Artifact too large", f"The limit is {limit} bytes.")
-    body = bytearray()
-    async for chunk in request.stream():
-        body += chunk
-        if len(body) > limit:
-            raise ProblemException(413, "Artifact too large", f"The limit is {limit} bytes.")
-    return bytes(body)
-
-
 def _check_plan_upload(run: Run, worker: Worker) -> None:
     if run.worker_id != worker.id:
         raise ProblemException(409, "Not your job", "This run is claimed by another worker.")
@@ -776,22 +766,29 @@ async def put_artifact(
     # the run's variable values in clear (app.runs.artifacts).
     _check_plan_upload(run, worker)
     await session.commit()  # hold no DB connection while the body streams in
-    data = await _read_capped(request, MAX_PLAN_BYTES)
+    data = await read_capped(request, MAX_PLAN_BYTES, "Artifact too large")
     if not data:
         raise ProblemException(400, "Empty artifact", "The plan file is empty.")
-    # Re-check under the run's row lock, held until commit: a concurrent terminal transition
-    # (worker_lost, cancel) either runs first — and this upload is refused — or after, and then
-    # finds the key to purge. Never a saved plan left behind on a terminal run.
-    locked = (
-        await session.execute(
-            select(Run)
-            .where(Run.id == job_id)
-            .with_for_update()
-            .execution_options(populate_existing=True)
-        )
-    ).scalar_one()
-    _check_plan_upload(locked, worker)
-    locked.plan_artifact_key = await save_plan(locked.id, data)
+    # Encrypt and upload before taking the row lock (a fresh key per upload: the reviewed plan's
+    # object is never overwritten), then re-check under that lock, held until commit: a concurrent
+    # terminal transition either runs first — this upload is refused and its object dropped — or
+    # after, and then finds the key to purge. Never a saved plan left behind on a terminal run.
+    key = await save_plan(job_id, data)
+    try:
+        locked = (
+            await session.execute(
+                select(Run)
+                .where(Run.id == job_id)
+                .with_for_update()
+                .execution_options(populate_existing=True)
+            )
+        ).scalar_one()
+        _check_plan_upload(locked, worker)
+    except ProblemException:
+        await session.rollback()
+        await drop_unrecorded_plan(key)
+        raise
+    record_saved_plan(session, locked, key)
     await session.commit()
     _log.info(
         "saved plan stored",

@@ -1,5 +1,7 @@
 import {
   forwardRef,
+  useEffect,
+  useRef,
   useState,
   type HTMLAttributes,
   type InputHTMLAttributes,
@@ -65,8 +67,24 @@ export const Tabs = TabsPrimitive.Root;
 export const TabsContent = TabsPrimitive.Content;
 
 export function TabsList({ children, className }: { children: ReactNode; className?: string }) {
+  // Tabs scroll horizontally on narrow screens (DESIGN §5.2): keep the active one in view — a deep
+  // link to `?tab=discussion` at 390 px would otherwise select a tab the user cannot see. Scrolls the
+  // list only (never the page, never the focus).
+  const ref = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const list = ref.current;
+    const active = list?.querySelector<HTMLElement>('[data-state="active"]');
+    if (!list || !active || list.scrollWidth <= list.clientWidth) return;
+    const a = active.getBoundingClientRect();
+    const l = list.getBoundingClientRect();
+    if (a.left < l.left) list.scrollLeft -= l.left - a.left + 16;
+    else if (a.right > l.right) list.scrollLeft += a.right - l.right + 16;
+  });
   return (
-    <TabsPrimitive.List className={cn("flex gap-1 overflow-x-auto border-b border-line", className)}>
+    <TabsPrimitive.List
+      ref={ref}
+      className={cn("flex gap-1 overflow-x-auto border-b border-line", className)}
+    >
       {children}
     </TabsPrimitive.List>
   );
@@ -197,6 +215,7 @@ export function Banner({
   action,
   icon,
   role,
+  inline,
 }: {
   tone?: BannerTone;
   title: ReactNode;
@@ -204,16 +223,28 @@ export function Banner({
   action?: ReactNode;
   icon?: ReactNode;
   role?: "status" | "alert";
+  /** Title and body run on as one paragraph — for a one-sentence banner that should take one line. */
+  inline?: boolean;
 }) {
   const b = BANNER[tone];
   return (
-    <div role={role} className={cn("flex items-start gap-3 rounded-base border px-3 py-2", b.cls)}>
+    <div
+      role={role}
+      className={cn("flex flex-wrap items-start gap-x-3 gap-y-2 rounded-base border px-3 py-2", b.cls)}
+    >
       <span className="mt-0.5 shrink-0">{icon ?? b.icon}</span>
-      <div className="min-w-0 flex-1">
-        <div className="font-semibold">{title}</div>
-        {children && <div className="mt-0.5 text-primary">{children}</div>}
-      </div>
-      {action && <div className="shrink-0">{action}</div>}
+      {inline ? (
+        <p className="min-w-0 flex-1 basis-56">
+          <span className="font-semibold">{title}</span>{" "}
+          {children && <span className="text-primary">{children}</span>}
+        </p>
+      ) : (
+        <div className="min-w-0 flex-1 basis-56">
+          <div className="font-semibold">{title}</div>
+          {children && <div className="mt-0.5 text-primary">{children}</div>}
+        </div>
+      )}
+      {action && <div className="shrink-0 max-sm:ml-7">{action}</div>}
     </div>
   );
 }

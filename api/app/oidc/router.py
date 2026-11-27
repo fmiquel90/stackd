@@ -12,6 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.audit import record_audit
 from app.auth.deps import CurrentUser, require_role
+from app.aws import client_config
 from app.config import get_settings
 from app.db import get_session
 from app.enums import AuditActorKind, CloudProvider, JobPhase, Role, TriggeredBy
@@ -181,7 +182,9 @@ async def test_assume_role(env_id: uuid.UUID, _: CurrentUser, session: DbSession
     token = await sign_workload_token(session, env, stack, probe, JobPhase.plan, ttl=900)
 
     def _assume() -> dict:
-        sts = boto3.client("sts", region_name=ci.region or "us-east-1")
+        sts = boto3.session.Session().client(
+            "sts", region_name=ci.region or "us-east-1", config=client_config()
+        )
         resp = sts.assume_role_with_web_identity(
             RoleArn=ci.plan_role_arn,
             RoleSessionName=f"stackd-test-{probe.id}",
