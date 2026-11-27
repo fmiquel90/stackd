@@ -6,6 +6,15 @@ import { run } from "./stories.fixtures";
 
 export default { title: "Identity / EnvCell" };
 
+const OOB = {
+  detected_at: "2026-11-20T10:00:00Z",
+  run_id: "run-1",
+  expected_serial: 41,
+  expected_lineage: "0b9c2f1e",
+  observed_serial: 43,
+  observed_lineage: "0b9c2f1e",
+};
+
 const cell = (
   name: string,
   runs: Run[],
@@ -38,6 +47,11 @@ export const Modifiers = () => (
   <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
     {cell("mocked", [run("mocked unconfirmed")])}
     {cell("drifted", [run("applied")], makeEnv({ drift_status: "drifted" }))}
+    {cell(
+      "changed outside Stackd",
+      [run("applied")],
+      makeEnv({ managed_state: false, out_of_band_change: OOB }),
+    )}
     {cell("stale ↑", [run("applied")], makeEnv({ stale: true }))}
     {cell(
       "stale, other folder",
@@ -48,7 +62,7 @@ export const Modifiers = () => (
     {cell(
       "everything",
       [run("mocked unconfirmed")],
-      makeEnv({ stale: true, drift_status: "drifted", locked: true }),
+      makeEnv({ stale: true, drift_status: "drifted", out_of_band_change: OOB, locked: true }),
     )}
   </div>
 );

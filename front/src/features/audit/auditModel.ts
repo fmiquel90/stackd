@@ -41,6 +41,8 @@ export const KNOWN_ACTIONS = [
   "environment.inputs_discovered",
   "environment.drift_detected",
   "environment.drift_cleared",
+  "environment.out_of_band_change_detected",
+  "environment.out_of_band_change_cleared",
   "state.force_unlocked",
   "state.import_session_created",
   "variable.created",

@@ -108,9 +108,24 @@ export interface Environment {
   last_drift_checked_at: string | null;
   drift_run_id: string | null;
   drift_check_enabled: boolean;
+  /** Unmanaged state (SPECS §19.7): the last state serial/lineage Stackd observed. */
+  state_serial: number | null;
+  state_lineage: string | null;
+  state_observed_at: string | null;
+  /** The state was written outside Stackd since its last observation; null when not flagged. */
+  out_of_band_change: OutOfBandChange | null;
   locked: boolean;
   labels: Record<string, unknown> | null;
   position: number;
+}
+
+export interface OutOfBandChange {
+  detected_at: string;
+  run_id: string | null;
+  expected_serial: number | null;
+  expected_lineage: string | null;
+  observed_serial: number | null;
+  observed_lineage: string | null;
 }
 
 export interface ResolvedVariable {
@@ -232,6 +247,8 @@ export type NotificationKindInbox =
   | "run_failed"
   | "comment_reply"
   | "mention"
+  | "drift_detected"
+  | "out_of_band_change"
   | "rollout_paused"
   | "rollout_succeeded"
   | "rollout_failed"

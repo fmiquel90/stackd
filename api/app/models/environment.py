@@ -58,6 +58,19 @@ class Environment(Base):
     drift_run_id: Mapped[uuid.UUID | None] = mapped_column(PGUUID(as_uuid=True), default=None)
     drift_check_enabled: Mapped[bool] = mapped_column(Boolean, default=True)
 
+    # Out-of-band state changes (§19.7), unmanaged state only: the baseline is the last state
+    # serial/lineage Stackd observed; a later observation that differs flags the env until a full
+    # apply finishes or a human acknowledges it. Only these two fields of the state reach the API.
+    state_serial: Mapped[int | None] = mapped_column(Integer, default=None)
+    state_lineage: Mapped[str | None] = mapped_column(String, default=None)
+    state_observed_at: Mapped[datetime | None] = mapped_column(default=None)
+    out_of_band_detected_at: Mapped[datetime | None] = mapped_column(default=None)
+    out_of_band_run_id: Mapped[uuid.UUID | None] = mapped_column(PGUUID(as_uuid=True), default=None)
+    out_of_band_expected_serial: Mapped[int | None] = mapped_column(Integer, default=None)
+    out_of_band_expected_lineage: Mapped[str | None] = mapped_column(String, default=None)
+    out_of_band_observed_serial: Mapped[int | None] = mapped_column(Integer, default=None)
+    out_of_band_observed_lineage: Mapped[str | None] = mapped_column(String, default=None)
+
     locked: Mapped[bool] = mapped_column(Boolean, default=False)
     labels: Mapped[dict | None] = mapped_column(JSONB(none_as_null=True), default=None)
     position: Mapped[int] = mapped_column(Integer, default=0)

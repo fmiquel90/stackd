@@ -190,6 +190,9 @@ export const environments = {
   remove: (id: string) => api<void>(`/environments/${id}`, { method: "DELETE" }),
   // Force-refresh the tracked branch HEAD from the remote (returns the updated environment).
   refreshHead: (id: string) => api<Environment>(`/environments/${id}/refresh-head`, { method: "POST" }),
+  // SPECS §19.7: accept a state change made outside Stackd (can_apply).
+  acknowledgeOutOfBand: (id: string) =>
+    api<Environment>(`/environments/${id}/out-of-band-change/acknowledge`, { method: "POST" }),
   outputs: (id: string) => api<EnvOutput[]>(`/environments/${id}/outputs`),
   // Introspect the repo and create the required root-module inputs as env vars with placeholders.
   discoverInputs: (id: string) =>

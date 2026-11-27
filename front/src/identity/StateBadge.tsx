@@ -189,6 +189,12 @@ export function ModifierChips({
         {modifiers.drift === "error" ? "DRIFT CHECK FAILED" : "DRIFT"}
       </Badge>,
     );
+  if (modifiers.outOfBand)
+    chips.push(
+      <Badge key="oob" glyph="⇄" title="The state was changed outside Stackd since its last observation">
+        {compact ? "OUTSIDE" : "CHANGED OUTSIDE"}
+      </Badge>,
+    );
   if (modifiers.locked)
     chips.push(
       <Badge key="lock" glyph="⚿" title="State is locked">

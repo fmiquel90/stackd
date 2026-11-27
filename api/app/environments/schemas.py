@@ -55,6 +55,18 @@ class EnvironmentUpdate(BaseModel):
         return check_var_files(v)
 
 
+class OutOfBandChangeOut(BaseModel):
+    """The env's state was written outside Stackd (§19.7): the baseline when it was first seen, and
+    the latest differing observation."""
+
+    detected_at: datetime
+    run_id: uuid.UUID | None
+    expected_serial: int | None
+    expected_lineage: str | None
+    observed_serial: int | None
+    observed_lineage: str | None
+
+
 class EnvironmentOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
@@ -80,6 +92,10 @@ class EnvironmentOut(BaseModel):
     last_drift_checked_at: datetime | None
     drift_run_id: uuid.UUID | None
     drift_check_enabled: bool
+    state_serial: int | None
+    state_lineage: str | None
+    state_observed_at: datetime | None
+    out_of_band_change: OutOfBandChangeOut | None
     locked: bool
     labels: dict | None
     position: int
@@ -113,6 +129,21 @@ class EnvironmentOut(BaseModel):
             last_drift_checked_at=e.last_drift_checked_at,
             drift_run_id=e.drift_run_id,
             drift_check_enabled=e.drift_check_enabled,
+            state_serial=e.state_serial,
+            state_lineage=e.state_lineage,
+            state_observed_at=e.state_observed_at,
+            out_of_band_change=(
+                OutOfBandChangeOut(
+                    detected_at=e.out_of_band_detected_at,
+                    run_id=e.out_of_band_run_id,
+                    expected_serial=e.out_of_band_expected_serial,
+                    expected_lineage=e.out_of_band_expected_lineage,
+                    observed_serial=e.out_of_band_observed_serial,
+                    observed_lineage=e.out_of_band_observed_lineage,
+                )
+                if e.out_of_band_detected_at is not None
+                else None
+            ),
             locked=e.locked,
             labels=e.labels,
             position=e.position,

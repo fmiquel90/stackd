@@ -9,6 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import get_settings
 from app.crypto import decrypt
+from app.drift.out_of_band import observes_state
 from app.enums import (
     ACTIVE_STATES,
     AuditActorKind,
@@ -383,6 +384,9 @@ async def build_job_payload(session: AsyncSession, run: Run) -> dict:
         # `-backend-config` settings passed at init.
         "backend_config_file": None if env.managed_state else env.backend_config_file,
         "backend_config": None if env.managed_state else env.backend_config,
+        # §19.7: read the state's serial/lineage and report them (state_observed) — unmanaged
+        # state, reviewed code only.
+        "observe_state": observes_state(run, env),
         # §3.4: the repo's tfvars files, managed state or not — the agent passes them as
         # `-var-file=` to the commands that read variables, Stackd's own files after them.
         "var_files": list(env.var_files or []),

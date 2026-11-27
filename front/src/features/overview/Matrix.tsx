@@ -216,6 +216,7 @@ export function cellLabel(entry: EnvEntry): string {
   if (m.fallback) parts.push("fallback secret");
   if (m.stale) parts.push("branch ahead");
   if (m.drift) parts.push(m.drift === "error" ? "drift check failed" : "drifted");
+  if (m.outOfBand) parts.push("state changed outside Stackd");
   if (m.locked) parts.push("locked");
   if (m.pr) parts.push("pull-request plan active");
   return parts.join(", ");

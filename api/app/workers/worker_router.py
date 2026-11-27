@@ -15,6 +15,12 @@ from app.audit import record_audit
 from app.config import get_settings
 from app.db import get_session
 from app.dependencies.service import DependencyError, capture_outputs, cascade
+from app.drift.out_of_band import (
+    clear_on_apply,
+    observes_state,
+    parse_observation,
+    record_observation,
+)
 from app.drift.service import clear_drift, record_drift_result
 from app.enums import (
     WORKER_EXECUTING_STATES,
@@ -512,6 +518,7 @@ async def post_event(
             applied_env = await session.get(Environment, run.environment_id)
             if applied_env is not None and not run.is_targeted:
                 await clear_drift(session, applied_env, datetime.now(UTC))
+                await clear_on_apply(session, applied_env, run)
         checks = result.get("checks") or []
         failed_check = any(c.get("status") == "fail" for c in checks)
         action = "run.check_failed" if failed_check else "run.apply_failed"
@@ -595,13 +602,61 @@ async def post_event(
             env = await session.get(Environment, run.environment_id)
             if env is not None and not run.is_targeted:
                 await clear_drift(session, env, datetime.now(UTC))
+                # Its plan saw the out-of-band change and was reviewed (§19.7).
+                await clear_on_apply(session, env, run)
             await cascade(session, run)
         else:
             await _decide_after_plan(session, worker, run, result)
         await session.commit()
         return {"ok": True}
 
+    if body.event == "state_observed":
+        await _observe_state(session, run, result)
+        await session.commit()
+        return {"ok": True}
+
     raise ProblemException(400, "Unknown event", body.event)
+
+
+async def _observe_state(session: AsyncSession, run: Run, result: dict[str, Any]) -> None:
+    """A job's reading of its state's serial/lineage (§19.7) — no run state changes. Only from a
+    job that was handed `observe_state`, while it executes; a baseline only from a job holding
+    apply credentials (it wrote the state)."""
+    serial, lineage = parse_observation(result)
+    # Env then run, the claim's lock order: a run reclaimed meanwhile (worker_lost) and its env
+    # handed to the next run can't have its late observation recorded.
+    env = (
+        await session.execute(
+            select(Environment)
+            .where(Environment.id == run.environment_id)
+            .with_for_update()
+            .execution_options(populate_existing=True)
+        )
+    ).scalar_one()
+    run = (
+        await session.execute(
+            select(Run)
+            .where(Run.id == run.id)
+            .with_for_update()
+            .execution_options(populate_existing=True)
+        )
+    ).scalar_one()
+    if run.state not in WORKER_EXECUTING_STATES:
+        raise ProblemException(
+            409, "Job not executing", f"A {run.state.value} run has no job to observe the state."
+        )
+    if not observes_state(run, env):
+        raise ProblemException(
+            409, "State not observed", "This job's state is not observed (§19.7)."
+        )
+    baseline = result.get("baseline") is True
+    if baseline and not holds_apply_credentials(run):
+        raise ProblemException(
+            409, "Not a state write", "Only a job holding apply credentials records a baseline."
+        )
+    await record_observation(
+        session, env, run, serial, lineage, baseline=baseline, now=datetime.now(UTC)
+    )
 
 
 @router.post("/jobs/{job_id}/logs", status_code=202)

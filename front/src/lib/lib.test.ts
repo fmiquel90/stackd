@@ -139,7 +139,21 @@ describe("envSummary (DESIGN §2.3)", () => {
     expect(s.primary?.id).toBe("a");
     expect(s.outcome).toBe("applied");
     expect(s.modifiers.drift).toBe("drifted");
+    expect(s.modifiers.outOfBand).toBe(false);
     expect(s.deployedSha).toBe("2af0351c9e");
+  });
+  it("marks a state changed outside Stackd (SPECS §19.7)", () => {
+    const change = {
+      detected_at: "2026-11-20T10:00:00Z",
+      run_id: null,
+      expected_serial: 1,
+      expected_lineage: "l",
+      observed_serial: 2,
+      observed_lineage: "l",
+    };
+    const s = summarizeEnv(makeEnv({ out_of_band_change: change }), []);
+    expect(s.modifiers.outOfBand).toBe(true);
+    expect(severity(s)).toBe(2);
   });
   it("marks an active PR run and stale envs", () => {
     const s = summarizeEnv(makeEnv({ stale: true }), [makeRun({ type: "proposed", state: "planning" })]);
