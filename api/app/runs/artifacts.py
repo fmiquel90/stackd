@@ -1,4 +1,5 @@
-"""Run artifacts in S3 (SPECS §11.3): the saved plan the apply job applies (§7.4).
+"""Run artifacts in S3 (SPECS §11.3): the saved plan the apply job applies (§7.4), and the
+errored state an apply (or a mutating command) could not persist (§7.3).
 
 A plan file carries the run's variable values in clear — sensitive ones included — so it never
 reaches S3 unencrypted: AES-256-GCM with the app key, the AAD binding the blob to its own key (a
@@ -35,6 +36,11 @@ MAX_PLAN_BYTES = 64 * 1024 * 1024
 # Run types whose plan can be applied, hence saved. A proposed run (PR plan, drift) never applies;
 # a command run has no plan.
 SAVED_PLAN_TYPES: frozenset[RunType] = frozenset({RunType.tracked, RunType.destroy})
+# The state tofu could not write back (`errored.tfstate`): the only record of what the job changed.
+# Encrypted like the plan (a state holds secrets) and, unlike it, kept once the run is terminal —
+# recovering it is the operator's job (§7.3).
+ERRORED_STATE_FILE = "errored.tfstate"
+MAX_ERRORED_STATE_BYTES = MAX_PLAN_BYTES
 
 
 class SavedPlanUnreadable(Exception):
@@ -69,6 +75,13 @@ def record_saved_plan(session: AsyncSession, run: Run, key: str) -> None:
 async def drop_unrecorded_plan(key: str) -> None:
     """A plan stored by an upload refused afterwards: no run points to it."""
     await _purge([key])
+
+
+async def save_errored_state(run_id: uuid.UUID, data: bytes) -> str:
+    """Encrypt and store the state a job could not persist; returns its S3 key."""
+    key = f"artifacts/{run_id}/{ERRORED_STATE_FILE}"
+    await put_object(key, encrypt_bytes(data, aad=_aad(key)))
+    return key
 
 
 async def load_plan(key: str) -> bytes | None:

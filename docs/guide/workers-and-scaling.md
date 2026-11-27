@@ -94,6 +94,14 @@ Each job's subprocesses run in their own process group: whatever a hook or a tof
 
 The worker never decides on its own whether a command is mutating: it reads `cred_phase` from the claim. A plan fails on any exit code but 0 (no changes) and 2 (changes) — a killed plan never passes for "no changes".
 
+Every budget above is also cut to the job's **credentials**: the state token and the OIDC token handed over at the claim expire (the apply window for an apply, 30 min for a plan's OIDC token), and each step must end 60 s before the first of them does — so tofu's last state write and its unlock still go out with a valid token. An apply (or a mutating command) is **not started** when less than 5 minutes (or its whole budget, if shorter) are left by then, because the clone, `init` and the `before_apply` hooks used the rest: the run fails with `apply not started: the job's credentials expire in …`, nothing applied — trigger a new plan. Otherwise a shortened apply budget is shown in the run's log. If your `before_apply` hooks are slow, raise the API's `STACKD_APPLY_LOST_GRACE_SECONDS`: it lengthens the apply window, hence the tokens.
+
+If tofu still cannot write the state back (the backend unreachable, say), it leaves an `errored.tfstate`: the worker uploads it to the API, which keeps it encrypted (`artifacts/<run_id>/errored.tfstate`, audited `run.errored_state_saved`), or keeps it on the worker under `STACKD_WORKSPACE_ROOT/.errored-state/` when the upload fails. The run's log says where. Push it back to the state backend before any other run of that environment.
+
+### Restarting after a crash
+
+A worker killed without draining (OOM, `kill -9`) can leave job containers still running tofu, and workspaces holding the checkout and the run's variables. At its next start it removes them — the containers whose workspace no running job holds, and those workspaces — and logs `agent.orphans_reaped`. Agents sharing a host and a `STACKD_WORKSPACE_ROOT` never touch each other's running jobs: a job holds a lock on its workspace while it runs.
+
 ## Create a pool
 
 Workers register to a **pool**, scoped to a space (`space_id` in the request, the `default` space otherwise). The pool token is shown once at creation and stored **hashed**. There is no rotate endpoint: if a token leaks, delete the pool and create a new one.
@@ -158,6 +166,7 @@ Every job runs in its own workspace, removed when the job ends. `STACKD_RUNNER` 
 | `STACKD_DOCKER_PIDS_LIMIT` | `1024` | per-container process limit |
 | `STACKD_DOCKER_TMP_SIZE` | `1g` | size of the writable `/tmp` tmpfs (the container's `HOME`) |
 | `STACKD_DOCKER_RUNTIME` | unset | an alternative OCI runtime, e.g. `runsc` (gVisor) |
+| `STACKD_DOCKER_PULL_TIMEOUT_SECONDS` | `600` | a runner image pull past it fails the job |
 | `STACKD_REGISTRY_AUTH_FILE` | unset | a Docker `config.json` whose `auths` entry for the image's registry authenticates the pull of a runner image from a private registry (credential helpers not supported), see [Installing](installing.md#6-runner-images) |
 
 !!! warning "The worker's host is privileged"

@@ -8,6 +8,7 @@ import httpx
 import os
 import re
 import signal
+import stat
 import subprocess
 import sys
 import threading
@@ -19,9 +20,11 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import quote
 
-from agent import cancel
+from agent import cancel, orphans
+from agent.backoff import Backoff
 from agent.client import ApiClient, transient
 from agent.config import Settings
+from agent.deadline import Deadline
 from agent.drain import APPLY_HOLD_MARGIN_SECONDS, EXIT_CODES, Drain, supervise
 from agent.logging import get_logger, setup as setup_logging
 from agent.masking import Masker, mask_plan
@@ -155,9 +158,12 @@ def _repo_environ(runner: str = "local") -> dict[str, str]:
     return {k: v for k, v in os.environ.items() if k in _REPO_ENV_ALLOWLIST or k.startswith("LC_")}
 
 
-def _make_runner(settings: Settings, job: dict[str, Any], ws: Workspace) -> Runner:
+def _make_runner(
+    settings: Settings, job: dict[str, Any], ws: Workspace, deadline: Deadline | None = None
+) -> Runner:
     """The job's runner (§7.4): `local`, or a `docker` runner on the image pinned for the stack's
-    tool version (pulled by digest when the daemon does not have it yet)."""
+    tool version (pulled by digest when the daemon does not have it yet, within
+    STACKD_DOCKER_PULL_TIMEOUT_SECONDS and the job's credential deadline)."""
     if settings.runner != "docker":
         return LOCAL
     env_info = job["environment"]
@@ -176,7 +182,10 @@ def _make_runner(settings: Settings, job: dict[str, Any], ws: Workspace) -> Runn
                 "authenticated": credential is not None,
             },
         )
-        engine.pull(image, credential)
+        pull_timeout = settings.docker_pull_timeout_seconds
+        engine.pull(
+            image, credential, timeout=deadline.timeout(pull_timeout) if deadline else pull_timeout
+        )
     if os.getuid() == 0:
         # A root agent's files must not reach a container as root: the workspace goes to the
         # images' unprivileged user, the checkout once cloned, each file the agent writes after.
@@ -415,6 +424,7 @@ def _observe_state(
     streamer: LogStreamer,
     phase: str,
     baseline: bool,
+    timeout: int = _STATE_PULL_TIMEOUT_SECONDS,
 ) -> None:
     """Report the state's serial/lineage (`state_observed`, §19.7) when the API asked for it
     (`observe_state`): a check (`baseline=False`, the state as the job finds it) or a baseline (the
@@ -426,9 +436,7 @@ def _observe_state(
     job_id = job["job_id"]
     try:
         with _tofu_files(ws, cwd, job):
-            pulled = runner.capture(
-                [tool, "state", "pull"], cwd, tf_env, timeout=_STATE_PULL_TIMEOUT_SECONDS
-            )
+            pulled = runner.capture([tool, "state", "pull"], cwd, tf_env, timeout=timeout)
         if pulled.returncode != 0:
             raise _NoStateIdentity(f"`{tool} state pull` exited {pulled.returncode}")
         serial, lineage = _state_identity(pulled.stdout)
@@ -658,6 +666,7 @@ def _init(
     phase: str,
     streamer: LogStreamer,
     runner: Runner,
+    timeout: int = _DEFAULT_TIMEOUT_SECONDS,
 ) -> int:
     """`init`, the one tofu command that holds the stack's repo credential (§8.3): it downloads the
     modules, private ones hosted next to the repo included. On disk / in the env for it only. It
@@ -683,6 +692,7 @@ def _init(
             section=None,
             streamer=streamer,
             runner=runner.for_init(),
+            timeout=timeout,
         )
 
 
@@ -746,12 +756,102 @@ def _plan_option_flags(opts: dict | None) -> list[str]:
     return flags
 
 
+# Where tofu writes the state it could not persist (a refused or failed state write: an expired
+# token, the backend unreachable), in its working directory: the only record of what it changed.
+_ERRORED_STATE = "errored.tfstate"
+# Where an errored state the API did not take is kept on the worker, under the workspace root.
+_KEPT_ERRORED_STATES = ".errored-state"
+
+
+def _errored_state_mark(cwd: Path) -> tuple[int, int, int] | None:
+    """Identifies the errored.tfstate in `cwd` before a command runs (one in the repo, say): only
+    a file the command wrote or changed is the command's."""
+    try:
+        st = os.lstat(cwd / _ERRORED_STATE)
+    except FileNotFoundError:
+        return None
+    return st.st_ino, st.st_size, st.st_mtime_ns
+
+
+def _keep_errored_state(root: str, job_id: str, data: bytes) -> Path:
+    keep = Path(root) / _KEPT_ERRORED_STATES
+    keep.mkdir(mode=0o700, parents=True, exist_ok=True)
+    path = keep / f"{job_id}-{int(time.time())}.tfstate"
+    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
+    with os.fdopen(fd, "wb") as f:
+        f.write(data)
+    return path
+
+
+def _preserve_errored_state(
+    client: ApiClient,
+    job: dict[str, Any],
+    cwd: Path,
+    before: tuple[int, int, int] | None,
+    *,
+    settings: Settings,
+    streamer: LogStreamer,
+    phase: str,
+) -> None:
+    """Save the errored.tfstate a state-writing command left, before the workspace is removed: as
+    the run's artifact (the API stores it encrypted, §7.3), else on the worker. Its content holds
+    secrets: it is never logged, only where it went. Never raises — the job's own outcome stands."""
+    job_id = job["job_id"]
+    try:
+        # Never through a symlink, and never blocked on a FIFO: a repo hook may have planted either.
+        fd = os.open(cwd / _ERRORED_STATE, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+    except OSError:
+        return
+    with os.fdopen(fd, "rb") as f:
+        st = os.fstat(f.fileno())
+        if not stat.S_ISREG(st.st_mode) or (st.st_ino, st.st_size, st.st_mtime_ns) == before:
+            return
+        data = f.read()
+    kept: Path | None = None
+    try:
+        client.upload_artifact(job_id, _ERRORED_STATE, data)
+        uploaded, where = True, "saved with the run (encrypted)"
+    except Exception as exc:  # noqa: BLE001 — the API down, the run already ended: keep it here
+        uploaded, reason = False, _masker(job).mask(str(exc))
+        try:
+            kept = _keep_errored_state(settings.workspace_root, job_id, data)
+            where = f"not uploaded ({reason}): kept on worker {settings.worker_name} at {kept}"
+        except OSError as keep_exc:
+            where = f"not uploaded ({reason}) nor kept on the worker ({keep_exc})"
+    log.error(
+        "errored state preserved",
+        extra={
+            "event": "agent.errored_state",
+            "run_id": job_id,
+            "size_bytes": len(data),
+            "uploaded": uploaded,
+            "path": str(kept) if kept else None,
+        },
+    )
+    try:
+        streamer.emit(
+            phase,
+            [
+                f"[stackd] the tool could not persist the state and wrote {_ERRORED_STATE}: "
+                f"{where}. Push it to the state backend before any other run of this environment."
+            ],
+        )
+    except Exception:  # noqa: BLE001
+        pass
+
+
 def handle_plan(
-    client: ApiClient, job: dict, settings: Settings, checks: list[dict[str, Any]] | None = None
+    client: ApiClient,
+    job: dict,
+    settings: Settings,
+    checks: list[dict[str, Any]] | None = None,
+    deadline: Deadline | None = None,
 ) -> None:
     """The plan job (§7.4). `checks` collects its check results, for the caller to report too
-    should the job end on an uncaught error."""
+    should the job end on an uncaught error. Every step's timeout is cut to `deadline`, when the
+    job's first short-lived credential expires (agent.deadline)."""
     checks = [] if checks is None else checks
+    deadline = deadline or Deadline.for_job(job, time.monotonic())
     job_id = job["job_id"]
     env_info = job["environment"]
     masker = _masker(job)
@@ -760,7 +860,7 @@ def handle_plan(
     tool = _tool_bin(env_info["tool"])
 
     try:
-        runner = _make_runner(settings, job, ws)
+        runner = _make_runner(settings, job, ws, deadline)
         cwd = _clone(ws, job, env_info.get("commit_sha"))
         # The env's repo var files are the commit's: checked now, before any hook or tofu step.
         _var_file_flags(ws, cwd, job)
@@ -788,6 +888,7 @@ def handle_plan(
                 streamer=streamer,
                 phase="planning",
                 baseline=baseline,
+                timeout=deadline.timeout(_STATE_PULL_TIMEOUT_SECONDS),
             )
 
         # Report the exact commit checked out: the API pins the run to it (or refuses a mismatch
@@ -809,6 +910,7 @@ def handle_plan(
                 streamer=streamer,
                 platform_files=lambda: _cloud_files(ws, job),
                 runner=runner,
+                bound=deadline.timeout,
             )
             checks.extend({**r, "stage": name} for r in results)
             return aborted
@@ -816,7 +918,15 @@ def handle_plan(
         if stage("before_init"):
             return _job_failed(client, job_id, "before_init", checks)
         init_rc = _init(
-            ws, cwd, job, tool, tf_env, phase="planning", streamer=streamer, runner=runner
+            ws,
+            cwd,
+            job,
+            tool,
+            tf_env,
+            phase="planning",
+            streamer=streamer,
+            runner=runner,
+            timeout=deadline.timeout(_DEFAULT_TIMEOUT_SECONDS),
         )
         if init_rc != 0:
             return _job_failed(client, job_id, "init", checks, error="init failed")
@@ -852,6 +962,7 @@ def handle_plan(
             *_var_file_flags(ws, cwd, job),
             *_plan_option_flags(job.get("plan_options")),
         ]
+        plan_timeout = deadline.timeout(_DEFAULT_TIMEOUT_SECONDS)
         with _tofu_files(ws, cwd, job):
             code, events = stream_json_command(
                 plan_cmd,
@@ -861,11 +972,12 @@ def handle_plan(
                 section=None,
                 streamer=streamer,
                 runner=runner,
+                timeout=plan_timeout,
             )
         if code not in (0, 2):
             # Only 0 and 2 are a plan: anything else — an error, the watchdog's kill (124), a
             # signal — fails the job closed, never passes for "no changes".
-            error = _exit_error("plan", code, _DEFAULT_TIMEOUT_SECONDS, events)
+            error = _exit_error("plan", code, plan_timeout, events)
             # Mask: a tofu diagnostic can echo a sensitive variable value verbatim (§5.1).
             return _job_failed(client, job_id, "plan", checks, error=masker.mask(error))
         has_changes = code == 2
@@ -884,8 +996,14 @@ def handle_plan(
                 section="plan",
                 streamer=streamer,
                 runner=runner,
+                timeout=deadline.timeout(_DEFAULT_TIMEOUT_SECONDS),
             )
-            show = runner.capture([tool, "show", "-json", "-no-color", str(plan_file)], cwd, tf_env)
+            show = runner.capture(
+                [tool, "show", "-json", "-no-color", str(plan_file)],
+                cwd,
+                tf_env,
+                timeout=deadline.timeout(_DEFAULT_TIMEOUT_SECONDS),
+            )
         # The after_plan checks and the reviewers read this document: without it, fail closed — a
         # stand-in `{}` would let every policy pass on an empty plan.
         plan, unusable = _plan_json(show)
@@ -944,6 +1062,7 @@ def handle_plan(
                 streamer=streamer,
                 platform_files=lambda: _cloud_files(ws, job),
                 runner=runner,
+                bound=deadline.timeout,
             )
             checks.extend({**r, "stage": "after_plan"} for r in results)
         if aborted:
@@ -964,11 +1083,17 @@ def handle_plan(
 
 
 def handle_apply(
-    client: ApiClient, job: dict, settings: Settings, checks: list[dict[str, Any]] | None = None
+    client: ApiClient,
+    job: dict,
+    settings: Settings,
+    checks: list[dict[str, Any]] | None = None,
+    deadline: Deadline | None = None,
 ) -> None:
-    """The apply job (§7.3/§7.4). `checks` as in `handle_plan`."""
+    """The apply job (§7.3/§7.4). `checks` and `deadline` as in `handle_plan`; the apply itself is
+    not started when too little is left before the deadline."""
     window_end = _apply_window_end(job)
     checks = [] if checks is None else checks
+    deadline = deadline or Deadline.for_job(job, time.monotonic())
     job_id = job["job_id"]
     env_info = job["environment"]
     masker = _masker(job)
@@ -977,7 +1102,7 @@ def handle_apply(
     tool = _tool_bin(env_info["tool"])
 
     try:
-        runner = _make_runner(settings, job, ws)
+        runner = _make_runner(settings, job, ws, deadline)
         # The apply runs on exactly the commit the plan was made on — pinned by the API from the
         # plan job's report (§7.2) — never on wherever the branch head has moved since.
         commit_sha = env_info.get("commit_sha")
@@ -1006,6 +1131,7 @@ def handle_apply(
                 streamer=streamer,
                 phase="applying",
                 baseline=baseline,
+                timeout=deadline.timeout(_STATE_PULL_TIMEOUT_SECONDS),
             )
 
         def stage(name: str) -> bool:
@@ -1021,12 +1147,21 @@ def handle_apply(
                 streamer=streamer,
                 platform_files=lambda: _cloud_files(ws, job),
                 runner=runner,
+                bound=deadline.timeout,
             )
             checks.extend({**r, "stage": name} for r in results)
             return aborted
 
         init_rc = _init(
-            ws, cwd, job, tool, tf_env, phase="applying", streamer=streamer, runner=runner
+            ws,
+            cwd,
+            job,
+            tool,
+            tf_env,
+            phase="applying",
+            streamer=streamer,
+            runner=runner,
+            timeout=deadline.timeout(_DEFAULT_TIMEOUT_SECONDS),
         )
         if init_rc != 0:
             return _job_failed(client, job_id, "init", checks, error="init failed")
@@ -1046,12 +1181,31 @@ def handle_apply(
         # A failing before_apply hook fails the job before tofu runs: nothing is applied.
         if stage("before_apply"):
             return _job_failed(client, job_id, "before_apply", checks)
+        # Hard apply budget (§4.2): the API caps an apply's wall-clock; the watchdog kills tofu past
+        # it (exit 124) so a hung apply can't pin the worker or outlive its short-lived credentials.
+        # The clone, init and hooks have used part of their lifetime: the budget is cut to what is
+        # left, and the apply is not started at all when that is too little — nothing is applied.
+        budget = job.get("apply_timeout_seconds") or _DEFAULT_TIMEOUT_SECONDS
+        left = deadline.too_short_for(budget)
+        if left is not None:
+            error = (
+                f"apply not started: the job's credentials expire in {left}s (after the safety "
+                "margin), too little for the apply. Nothing was applied; trigger a new plan"
+            )
+            return _job_failed(client, job_id, "apply", checks, error=error)
+        apply_timeout = deadline.timeout(budget)
+        if apply_timeout < budget:
+            streamer.emit(
+                "applying",
+                [
+                    f"[stackd] apply time budget cut from {budget}s to {apply_timeout}s: the job's "
+                    "short-lived credentials expire then"
+                ],
+            )
         # Written only now, after the before_apply hooks (a repo hook can't swap it), and removed
         # right after the apply (after_apply repo hooks never see its secrets).
         plan_file = ws.write_plan(cwd, saved_plan)
-        # Hard apply budget (§4.2): the API caps an apply's wall-clock; the watchdog kills tofu past
-        # it (exit 124) so a hung apply can't pin the worker or outlive its short-lived credentials.
-        apply_timeout = job.get("apply_timeout_seconds") or _DEFAULT_TIMEOUT_SECONDS
+        errored_before = _errored_state_mark(cwd)
         try:
             # With the run's variables too: tofu refuses a saved plan whose inputs changed (§7.3).
             with _tofu_files(ws, cwd, job):
@@ -1067,6 +1221,15 @@ def handle_apply(
                 )
         finally:
             plan_file.unlink(missing_ok=True)
+            _preserve_errored_state(
+                client,
+                job,
+                cwd,
+                errored_before,
+                settings=settings,
+                streamer=streamer,
+                phase="applying",
+            )
             # The state as the apply left it — whatever its exit: a failed or stopped apply may
             # have written part of it — is Stackd's own write: the new baseline (§19.7).
             observe(baseline=True)
@@ -1085,7 +1248,12 @@ def handle_apply(
         if _token is not None:
             _token.disarm()
         with _tofu_files(ws, cwd, job, tfvars=False):
-            out = runner.capture([tool, "output", "-json"], cwd, tf_env)
+            out = runner.capture(
+                [tool, "output", "-json"],
+                cwd,
+                tf_env,
+                timeout=deadline.timeout(_DEFAULT_TIMEOUT_SECONDS),
+            )
         ok_output = out.returncode == 0
         if ok_output:
             try:
@@ -1168,10 +1336,14 @@ def _command_argv(tool: str, cmd: dict, var_flags: list[str] | None = None) -> l
     ]
 
 
-def handle_command_run(client: ApiClient, job: dict, settings: Settings) -> None:
+def handle_command_run(
+    client: ApiClient, job: dict, settings: Settings, deadline: Deadline | None = None
+) -> None:
     """Run one allowlisted tofu/terraform subcommand (RunType.command): clone, init, run it.
-    No hooks, no plan/apply phases — a one-off operation (import, state rm, …)."""
+    No hooks, no plan/apply phases — a one-off operation (import, state rm, …). `deadline` as in
+    `handle_plan`; a mutating command, like an apply, is not started with too little left."""
     window_end = _apply_window_end(job)
+    deadline = deadline or Deadline.for_job(job, time.monotonic())
     job_id = job["job_id"]
     env_info = job["environment"]
     cmd = job.get("command") or {}
@@ -1181,7 +1353,7 @@ def handle_command_run(client: ApiClient, job: dict, settings: Settings) -> None
     tool = _tool_bin(env_info["tool"])
 
     try:
-        runner = _make_runner(settings, job, ws)
+        runner = _make_runner(settings, job, ws, deadline)
         cwd = _clone(ws, job, env_info.get("commit_sha"))
         var_flags = _var_file_flags(ws, cwd, job) if cmd.get("name") in _READS_VARIABLES else []
         backend = job.get("backend")
@@ -1191,7 +1363,15 @@ def handle_command_run(client: ApiClient, job: dict, settings: Settings) -> None
 
         client.event(job_id, "phase_started", phase="running")
         init_rc = _init(
-            ws, cwd, job, tool, tf_env, phase="running", streamer=streamer, runner=runner
+            ws,
+            cwd,
+            job,
+            tool,
+            tf_env,
+            phase="running",
+            streamer=streamer,
+            runner=runner,
+            timeout=deadline.timeout(_DEFAULT_TIMEOUT_SECONDS),
         )
         if init_rc != 0:
             return client.event(job_id, "job_failed", phase="init", result={"error": "init failed"})
@@ -1210,11 +1390,22 @@ def handle_command_run(client: ApiClient, job: dict, settings: Settings) -> None
                 streamer=streamer,
                 phase="running",
                 baseline=baseline,
+                timeout=deadline.timeout(_STATE_PULL_TIMEOUT_SECONDS),
             )
 
         observe(baseline=False)
         argv = _command_argv(tool, cmd, var_flags)
-        timeout = _command_timeout(job)
+        budget = _command_timeout(job)
+        mutating = job.get("cred_phase") != "plan"
+        left = deadline.too_short_for(budget) if mutating else None
+        if left is not None:
+            error = (
+                f"{cmd.get('name')} not started: the job's credentials expire in {left}s (after "
+                "the safety margin), too little to run it. Nothing was changed; run it again"
+            )
+            return client.event(job_id, "job_failed", phase="command", result={"error": error})
+        timeout = deadline.timeout(budget)
+        errored_before = _errored_state_mark(cwd)
         try:
             with _tofu_files(ws, cwd, job):
                 code = run_command(
@@ -1228,6 +1419,16 @@ def handle_command_run(client: ApiClient, job: dict, settings: Settings) -> None
                     timeout=timeout,
                 )
         finally:
+            if mutating:
+                _preserve_errored_state(
+                    client,
+                    job,
+                    cwd,
+                    errored_before,
+                    settings=settings,
+                    streamer=streamer,
+                    phase="running",
+                )
             observe(baseline=True)
         if code != 0:
             error = (
@@ -1376,8 +1577,13 @@ _SHUTDOWN_ERROR = (
 )
 
 
-def _run_job(client: ApiClient, job: dict, settings: Settings) -> None:
-    """Execute one claimed job to completion, reporting a job_failed on any uncaught error."""
+def _run_job(
+    client: ApiClient, job: dict, settings: Settings, deadline: Deadline | None = None
+) -> None:
+    """Execute one claimed job to completion, reporting a job_failed on any uncaught error. Its
+    workspace is locked while it runs: the startup reaper never takes it for an orphan
+    (agent.orphans). `deadline`: from the moment the claim was received (`Deadline.for_job`)."""
+    deadline = deadline or Deadline.for_job(job, time.monotonic())
     log.info(
         "claimed job",
         extra={"event": "agent.claimed", "run_id": job["job_id"], "phase": job["phase"]},
@@ -1388,12 +1594,13 @@ def _run_job(client: ApiClient, job: dict, settings: Settings) -> None:
         # (ToolUnavailable, reported below) instead of running another version.
         env_info = job["environment"]
         pick(settings.available_tools(), env_info["tool"], env_info["tool_version"])
-        if job["phase"] == "plan":
-            handle_plan(client, job, settings, checks)
-        elif job["phase"] == "apply":
-            handle_apply(client, job, settings, checks)
-        else:
-            handle_command_run(client, job, settings)
+        with orphans.hold_workspace(settings.workspace_root, job["job_id"]):
+            if job["phase"] == "plan":
+                handle_plan(client, job, settings, checks, deadline=deadline)
+            elif job["phase"] == "apply":
+                handle_apply(client, job, settings, checks, deadline=deadline)
+            else:
+                handle_command_run(client, job, settings, deadline=deadline)
         log.info("job done", extra={"event": "agent.done", "run_id": job["job_id"]})
     except cancel.JobCanceled:
         token = cancel.current()
@@ -1456,7 +1663,8 @@ def _claim_loop(
     """Claim jobs until a drain starts (§7.1). No claim starts once draining; a long-poll already in
     flight is let through and a job it returns is started — it is claimed, the run is this worker's
     now: dropping it would leave the run to the `worker_lost` reclaim. `start` takes over the slot
-    it is handed."""
+    it is handed. A failed claim is retried after a capped exponential backoff with jitter."""
+    backoff = Backoff(cap=max(settings.heartbeat_interval, 60))
     while not drain.draining:
         if not slots.acquire(timeout=0.5):  # every slot busy: look at the drain now and then
             continue
@@ -1468,12 +1676,39 @@ def _claim_loop(
         except Exception as exc:  # noqa: BLE001 — a transient claim error must not kill the worker
             log.warning("claim failed", extra={"event": "agent.claim_error", "error": str(exc)})
             slots.release()
-            drain.sleep(settings.heartbeat_interval)
+            drain.sleep(backoff.next())
             continue
+        backoff.reset()
         if job is None:
             slots.release()
             continue
         start(job)
+
+
+def _reap_orphans(settings: Settings) -> None:
+    """At start, before any claim: what a previous agent on this host left when it died without
+    cleaning up — its job containers (still running tofu, with live credentials) and workspaces
+    (agent.orphans). Best effort: a failure is logged, the agent starts anyway."""
+    containers = workspaces = 0
+    try:
+        if settings.runner == "docker":
+            containers = orphans.reap_containers(
+                DockerEngine(settings.docker_host), settings.workspace_root
+            )
+        workspaces = orphans.reap_workspaces(settings.workspace_root)
+    except Exception as exc:  # noqa: BLE001
+        log.error(
+            "orphan cleanup failed", extra={"event": "agent.orphans_error", "error": str(exc)}
+        )
+    if containers or workspaces:
+        log.warning(
+            "orphans of a previous agent removed",
+            extra={
+                "event": "agent.orphans_reaped",
+                "containers": containers,
+                "workspaces": workspaces,
+            },
+        )
 
 
 def run() -> int:
@@ -1495,7 +1730,9 @@ def run() -> int:
             return 0
         settings = Settings.from_env()
 
+    _reap_orphans(settings)
     client = ApiClient(settings.api_url)
+    backoff = Backoff(cap=max(settings.heartbeat_interval, 60))
     # Registration must survive the API not being ready yet (boot order: the worker can come up
     # before the API has migrated/seeded). Retry instead of crashing — otherwise the worker dies on
     # the first 5xx and never comes back without a restart.
@@ -1525,9 +1762,7 @@ def run() -> int:
                     "register failed, retrying",
                     extra={"event": "agent.register_error", "error": str(exc)},
                 )
-            drain.sleep(
-                max(settings.heartbeat_interval, 300) if refused else settings.heartbeat_interval
-            )
+            drain.sleep(max(settings.heartbeat_interval, 300) if refused else backoff.next())
             # Re-read the token: the seed rotates the pool token on a reset (DB wiped → fresh token
             # written to the shared file), so a token read at boot can be stale → 401.
             settings = Settings.from_env()
@@ -1564,10 +1799,10 @@ def run() -> int:
         with holds_lock:
             return max(holds.values(), default=None)
 
-    def _execute(job: dict, token: cancel.CancelToken) -> None:
+    def _execute(job: dict, token: cancel.CancelToken, deadline: Deadline) -> None:
         cancel.bind(token)  # this job's thread: the runners find its token here
         try:
-            _run_job(client, job, settings)  # reports the job's end before the slot is freed
+            _run_job(client, job, settings, deadline)  # reports its end before the slot is freed
         finally:
             with holds_lock:
                 holds.pop(job["job_id"], None)
@@ -1577,6 +1812,8 @@ def run() -> int:
             slots.release()
 
     def _start(job: dict) -> None:
+        # Its credentials' lifetimes run from now, not from when its thread gets going.
+        deadline = Deadline.for_job(job, time.monotonic())
         if _holds_apply_credentials(job):
             with holds_lock:
                 holds[job["job_id"]] = (
@@ -1586,7 +1823,7 @@ def run() -> int:
                 )
         inflight.inc()
         # Registered before the job starts, so a cancel that arrives first still finds it.
-        pool.submit(_execute, job, jobs.register(job["job_id"]))
+        pool.submit(_execute, job, jobs.register(job["job_id"]), deadline)
 
     outcome: list[str] = []
 

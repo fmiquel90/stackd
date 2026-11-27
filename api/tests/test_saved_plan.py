@@ -258,3 +258,67 @@ async def test_a_rolled_back_terminal_transition_keeps_the_plan(client: httpx.As
         await wait_for_purges()
         assert await _stored(run_id) is not None
         assert key is not None and await _plan_key(run_id) == key
+
+
+# --- errored state (§7.3): what an apply could not write back is kept, encrypted --------------
+
+ERRORED = b'{"version": 4, "serial": 7, "resources": [{"db_password": "SUPER-SECRET-VALUE"}]}'
+
+
+def _errored_url(run_id: str) -> str:
+    return f"/worker/v1/jobs/{run_id}/artifacts/errored.tfstate"
+
+
+async def test_errored_state_is_stored_encrypted_audited_and_kept(
+    client: httpx.AsyncClient,
+) -> None:
+    from sqlalchemy import select
+
+    from app.crypto import decrypt_bytes
+    from app.db import SessionLocal
+    from app.models.audit import AuditEvent
+    from app.runs.artifacts import wait_for_purges
+    from app.statebackend.store import get_object
+
+    admin, wh, env_id = await _setup(client, "sp-errored")
+    with mock_aws():
+        run_id, _ = await _plan(client, admin, wh, env_id)
+        # The plan job holds no write credential: it never sends one.
+        early = await client.put(_errored_url(run_id), headers=wh, content=ERRORED)
+        assert early.status_code == 409, early.text
+
+        await _confirm_and_claim_apply(client, admin, wh, run_id)
+        put = await client.put(_errored_url(run_id), headers=wh, content=ERRORED)
+        assert put.status_code == 204, put.text
+        await event(client, wh, run_id, "job_failed", phase="apply", result={"error": "401"})
+        await wait_for_purges()
+
+        key = f"artifacts/{run_id}/errored.tfstate"
+        blob = await get_object(key)
+        assert blob is not None, "kept once the run is terminal, unlike the saved plan"
+        assert b"SUPER-SECRET-VALUE" not in blob
+        assert decrypt_bytes(blob, aad=f"stackd:artifact:{key}".encode()) == ERRORED
+        async with SessionLocal() as s:
+            audits = (
+                await s.execute(
+                    select(AuditEvent).where(AuditEvent.action == "run.errored_state_saved")
+                )
+            ).scalars()
+            audit = next(a for a in audits if str(a.target_id) == run_id)
+        assert audit.context == {"environment_id": env_id, "key": key, "size_bytes": len(ERRORED)}
+
+        # Terminal now: a late upload is refused (the agent then keeps the file on the worker).
+        late = await client.put(_errored_url(run_id), headers=wh, content=ERRORED)
+        assert late.status_code == 409, late.text
+
+
+async def test_errored_state_only_from_the_runs_worker(client: httpx.AsyncClient) -> None:
+    admin, wh, env_id = await _setup(client, "sp-errored-owner")
+    other = await register_worker(client, admin, "pool-sp-errored-owner-2", "w2")
+    with mock_aws():
+        run_id, _ = await _plan(client, admin, wh, env_id)
+        await _confirm_and_claim_apply(client, admin, wh, run_id)
+        stolen = await client.put(_errored_url(run_id), headers=other, content=ERRORED)
+        assert stolen.status_code == 409, stolen.text
+        empty = await client.put(_errored_url(run_id), headers=wh, content=b"")
+        assert empty.status_code == 400, empty.text

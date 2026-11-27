@@ -162,6 +162,11 @@ apply budget + grace). A token whose run has ended can no longer write or lock. 
 to tofu only, as `TF_HTTP_*` environment variables — hooks never see it. A lock records the run whose
 token took it, and `transition()` releases it when that run ends (audited `state.lock_released`): a
 worker lost mid-plan or mid-apply never strands the environment's lock.
+to tofu only, as `TF_HTTP_*` environment variables — hooks never see it. The worker reads the
+lifetime of this token and of the OIDC token at the claim: every step of the job ends 60 s before
+the first expires, and an apply that would start with too little left is not started at all
+(SPECS §7.4). A state that tofu could not write back (`errored.tfstate`) is uploaded and kept
+encrypted (SPECS §7.3).
 
 **Repo credential.** The stack's token or SSH deploy key rides in the claim (`repo_credentials`).
 The worker uses it for the clone and for `init`, which downloads the modules — private ones hosted

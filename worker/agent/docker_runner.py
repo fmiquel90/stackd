@@ -29,6 +29,7 @@ from typing import Any
 
 from agent.cancel import current as current_cancel
 from agent.docker_engine import DockerEngine, LineSplitter
+from agent.orphans import JOB_LABEL, WORKSPACE_LABEL
 
 # The runner images' user (deploy/images): a root agent hands the workspace to it.
 RUNNER_UID = 10001
@@ -146,7 +147,12 @@ class DockerRunner:
             "User": user,
             "Tty": False,
             "OpenStdin": False,
-            "Labels": {"io.stackd.job": self._job_id, "io.stackd.repo-only": str(self._repo_only)},
+            "Labels": {
+                JOB_LABEL: self._job_id,
+                # What the startup reaper tells an orphan by (agent.orphans): its workspace's lock.
+                WORKSPACE_LABEL: str(self._workspace),
+                "io.stackd.repo-only": str(self._repo_only),
+            },
             "HostConfig": host,
         }
 

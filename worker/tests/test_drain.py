@@ -301,7 +301,7 @@ def agent_env(monkeypatch: pytest.MonkeyPatch) -> Iterator[threading.Event]:
     saved = {s: signal.getsignal(s) for s in (signal.SIGTERM, signal.SIGINT)}
     release = threading.Event()
 
-    def plan(client: Any, job: dict, settings: Settings, checks: list) -> None:
+    def plan(client: Any, job: dict, settings: Settings, checks: list, **_kw: Any) -> None:
         token = cancel.current()
         assert token is not None
         while not release.is_set():

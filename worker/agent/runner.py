@@ -533,6 +533,7 @@ def run_hooks(
     streamer: LogStreamer,
     platform_files: Callable[[], AbstractContextManager[object]] = nullcontext,
     runner: Runner = LOCAL,
+    bound: Callable[[int], int] | None = None,
 ) -> tuple[list[dict], bool]:
     """Run a stage's hooks. Returns (check_results, aborted). A `fail` hook aborts; `warn` continues
     but is surfaced and will force manual confirmation (§8.3). A hook running past its timeout
@@ -540,12 +541,12 @@ def run_hooks(
     secrets / cloud creds) and `runner.for_repo()` — on the docker runner, a container that sees the
     checkout only; platform hooks get `platform_env` and the job's runner, and run inside
     `platform_files()` (the secret files only they may read, on disk only while one of them
-    runs)."""
+    runs). `bound` cuts a hook's timeout to the job's credential deadline (agent.deadline)."""
     results: list[dict] = []
     for hook in hooks:
         section = f"hook:{hook['name']}"
         repo = hook.get("source") == "repo"
-        timeout = _hook_timeout()
+        timeout = bound(_hook_timeout()) if bound else _hook_timeout()
         with nullcontext() if repo else platform_files():
             code = run_command(
                 ["sh", "-c", hook["command"]],
