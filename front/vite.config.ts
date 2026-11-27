@@ -3,7 +3,8 @@ import react from "@vitejs/plugin-react";
 import tailwindcss from "@tailwindcss/vite";
 import path from "node:path";
 
-const apiTarget = process.env.VITE_API_PROXY ?? "http://localhost:8000";
+// Not VITE_-prefixed: Vite would also expose it to the browser bundle, which never needs it.
+const apiTarget = process.env.API_PROXY_TARGET ?? "http://localhost:8000";
 
 export default defineConfig({
   plugins: [react(), tailwindcss()],
