@@ -20,6 +20,7 @@ import { isStalePlan } from "@/features/overview/attention";
 import { formatCounts, outcomeOf, planCounts } from "@/lib/runOutcome";
 import { formatDuration } from "@/lib/time";
 import { Button } from "@/ui/Button";
+import { ErrorBoundary } from "@/ui/ErrorBoundary";
 import {
   Banner,
   Badge,
@@ -424,11 +425,17 @@ export function RunPage() {
       <div className="flex gap-6 px-4 pt-3 pb-6 lg:px-6">
         <aside className="hidden w-44 shrink-0 lg:block">
           <div className="sticky top-40">
-            <PhaseRail segments={segments} onSelect={openSegment} />
+            <ErrorBoundary what="The phase rail" resetKey={runId}>
+              <PhaseRail segments={segments} onSelect={openSegment} />
+            </ErrorBoundary>
           </div>
         </aside>
         <div className="flex min-w-0 flex-1 flex-col gap-3">
-          <PhaseRail variant="horizontal" segments={segments} onSelect={openSegment} className="lg:hidden" />
+          <div className="lg:hidden">
+            <ErrorBoundary what="The phase rail" resetKey={runId}>
+              <PhaseRail variant="horizontal" segments={segments} onSelect={openSegment} />
+            </ErrorBoundary>
+          </div>
           <Tabs value={tab} onValueChange={(v) => setParam({ tab: v, line: null }, false)}>
             <TabsList>
               <TabsTrigger value="plan">
@@ -486,47 +493,51 @@ export function RunPage() {
                   </Banner>
                 </div>
               )}
-              <PlanDiff
-                lines={d.planText}
-                counts={counts}
-                query={params.get("plan_q") ?? ""}
-                onQueryChange={(q) => setParam({ plan_q: q })}
-                emptyHint={
-                  <>
-                    {run.state === "failed"
-                      ? "The run failed before the plan output was produced."
-                      : ["queued", "preparing", "planning"].includes(run.state)
-                        ? "The plan is not computed yet."
-                        : "This run produced no plan output."}{" "}
-                    <button type="button" className="link" onClick={() => setParam({ tab: "logs" }, false)}>
-                      Open the logs
-                    </button>
-                  </>
-                }
-                resourceAction={(r) => {
-                  const n = resourceThreads(r.address).length;
-                  return (
-                    <Button
-                      size="sm"
-                      variant="ghost"
-                      onClick={(e) => {
-                        e.preventDefault();
-                        setResourceDraft(r.address);
-                      }}
-                      icon={<MessageSquarePlus size={13} aria-hidden />}
-                      aria-label={`Comment on ${r.address}`}
-                    >
-                      {n > 0 ? `${n}` : ""}
-                    </Button>
-                  );
-                }}
-              />
+              <ErrorBoundary what="The plan" resetKey={runId}>
+                <PlanDiff
+                  lines={d.planText}
+                  counts={counts}
+                  query={params.get("plan_q") ?? ""}
+                  onQueryChange={(q) => setParam({ plan_q: q })}
+                  emptyHint={
+                    <>
+                      {run.state === "failed"
+                        ? "The run failed before the plan output was produced."
+                        : ["queued", "preparing", "planning"].includes(run.state)
+                          ? "The plan is not computed yet."
+                          : "This run produced no plan output."}{" "}
+                      <button type="button" className="link" onClick={() => setParam({ tab: "logs" }, false)}>
+                        Open the logs
+                      </button>
+                    </>
+                  }
+                  resourceAction={(r) => {
+                    const n = resourceThreads(r.address).length;
+                    return (
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        onClick={(e) => {
+                          e.preventDefault();
+                          setResourceDraft(r.address);
+                        }}
+                        icon={<MessageSquarePlus size={13} aria-hidden />}
+                        aria-label={`Comment on ${r.address}`}
+                      >
+                        {n > 0 ? `${n}` : ""}
+                      </Button>
+                    );
+                  }}
+                />
+              </ErrorBoundary>
             </TabsContent>
 
             <TabsContent value="checks" className="pt-3">
               <h2 className="sr-only">Checks</h2>
               {checks.length ? (
-                <CheckList checkResults={run.check_results} />
+                <ErrorBoundary what="The checks" resetKey={runId}>
+                  <CheckList checkResults={run.check_results} />
+                </ErrorBoundary>
               ) : (
                 <EmptyState title="No hook checks ran for this run." />
               )}
@@ -534,69 +545,72 @@ export function RunPage() {
 
             <TabsContent value="logs" className="pt-3">
               <h2 className="sr-only">Logs</h2>
-              <LogViewer
-                chunks={d.logs}
-                live={!outcome}
-                failedHooks={failedHooks}
-                initialLine={params.get("line") ?? (run.state === "failed" ? firstErrorId : null)}
-                onLineLink={(id) => {
-                  setParam({ tab: "logs", line: id });
-                  const url = new URL(window.location.href);
-                  url.searchParams.set("tab", "logs");
-                  url.searchParams.set("line", id);
-                  void navigator.clipboard?.writeText(url.toString());
-                }}
-                lineAction={(l) => (
-                  <button
-                    type="button"
-                    aria-label={`Comment on line ${l.id}`}
-                    className="rounded-base p-0.5 text-muted hover:bg-raised hover:text-primary"
-                    onClick={() =>
-                      setLineDraft({ phase: l.phase, seq: l.seq, idx: l.idx, snippet: l.msg.slice(0, 120) })
-                    }
-                  >
-                    <MessageSquarePlus size={13} strokeWidth={1.5} aria-hidden />
-                  </button>
-                )}
-                renderAfterLine={(l) => {
-                  const k = lineKey(l.phase, l.seq, l.idx);
-                  const roots = threadsByLine.get(k) ?? [];
-                  const drafting = lineDraft && lineKey(lineDraft.phase, lineDraft.seq, lineDraft.idx) === k;
-                  if (!roots.length && !drafting) return null;
-                  return (
-                    <div className="my-1 ml-14 flex flex-col gap-2 border-l-2 border-line pl-3 font-sans whitespace-normal">
-                      {roots.map((root) => (
-                        <CommentThread
-                          key={root.id}
-                          runId={run.id}
-                          root={root}
-                          replies={repliesOf(root.id)}
-                          meId={me.id}
-                          hideAnchor
-                        />
-                      ))}
-                      {drafting && (
-                        <CommentComposer
-                          runId={run.id}
-                          anchor={{
-                            kind: "plan_line",
-                            phase: l.phase,
-                            seq: l.seq,
-                            line_start: l.idx,
-                            line_end: l.idx,
-                            snippet: lineDraft.snippet,
-                          }}
-                          placeholder="Comment on this line…"
-                          autoFocus
-                          onPosted={() => setLineDraft(null)}
-                          onCancel={() => setLineDraft(null)}
-                        />
-                      )}
-                    </div>
-                  );
-                }}
-                className="h-[70vh] min-h-[420px]"
-              />
+              <ErrorBoundary what="The logs" resetKey={runId}>
+                <LogViewer
+                  chunks={d.logs}
+                  live={!outcome}
+                  failedHooks={failedHooks}
+                  initialLine={params.get("line") ?? (run.state === "failed" ? firstErrorId : null)}
+                  onLineLink={(id) => {
+                    setParam({ tab: "logs", line: id });
+                    const url = new URL(window.location.href);
+                    url.searchParams.set("tab", "logs");
+                    url.searchParams.set("line", id);
+                    void navigator.clipboard?.writeText(url.toString());
+                  }}
+                  lineAction={(l) => (
+                    <button
+                      type="button"
+                      aria-label={`Comment on line ${l.id}`}
+                      className="rounded-base p-0.5 text-muted hover:bg-raised hover:text-primary"
+                      onClick={() =>
+                        setLineDraft({ phase: l.phase, seq: l.seq, idx: l.idx, snippet: l.msg.slice(0, 120) })
+                      }
+                    >
+                      <MessageSquarePlus size={13} strokeWidth={1.5} aria-hidden />
+                    </button>
+                  )}
+                  renderAfterLine={(l) => {
+                    const k = lineKey(l.phase, l.seq, l.idx);
+                    const roots = threadsByLine.get(k) ?? [];
+                    const drafting =
+                      lineDraft && lineKey(lineDraft.phase, lineDraft.seq, lineDraft.idx) === k;
+                    if (!roots.length && !drafting) return null;
+                    return (
+                      <div className="my-1 ml-14 flex flex-col gap-2 border-l-2 border-line pl-3 font-sans whitespace-normal">
+                        {roots.map((root) => (
+                          <CommentThread
+                            key={root.id}
+                            runId={run.id}
+                            root={root}
+                            replies={repliesOf(root.id)}
+                            meId={me.id}
+                            hideAnchor
+                          />
+                        ))}
+                        {drafting && (
+                          <CommentComposer
+                            runId={run.id}
+                            anchor={{
+                              kind: "plan_line",
+                              phase: l.phase,
+                              seq: l.seq,
+                              line_start: l.idx,
+                              line_end: l.idx,
+                              snippet: lineDraft.snippet,
+                            }}
+                            placeholder="Comment on this line…"
+                            autoFocus
+                            onPosted={() => setLineDraft(null)}
+                            onCancel={() => setLineDraft(null)}
+                          />
+                        )}
+                      </div>
+                    );
+                  }}
+                  className="h-[70vh] min-h-[420px]"
+                />
+              </ErrorBoundary>
             </TabsContent>
 
             <TabsContent value="inputs" className="pt-3">
