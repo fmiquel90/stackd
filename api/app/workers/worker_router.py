@@ -41,11 +41,14 @@ from app.models.worker import Worker
 from app.models.worker_command import WorkerCommand
 from app.oidc.issuer import WorkloadSigningError, WorkloadSigningUnavailable
 from app.runs.artifacts import (
+    ERRORED_STATE_FILE,
+    MAX_ERRORED_STATE_BYTES,
     MAX_PLAN_BYTES,
     PLAN_FILE,
     SAVED_PLAN_TYPES,
     SavedPlanUnreadable,
     load_plan,
+    save_errored_state,
     save_plan,
 )
 from app.runs.transition import ALLOWED, transition
@@ -711,6 +714,8 @@ async def put_artifact(
     job_id: uuid.UUID, name: str, request: Request, worker: CurrentWorker, session: DbSession
 ) -> Response:
     run = await _load_owned_run(session, worker, job_id)
+    if name == ERRORED_STATE_FILE:
+        return await _put_errored_state(session, run, request)
     if name != PLAN_FILE:
         await request.body()  # drain — S3 archival of plan.json/outputs.json is a follow-up (§11.3)
         return Response(status_code=204)
@@ -739,6 +744,35 @@ async def put_artifact(
     _log.info(
         "saved plan stored",
         extra={"event": "worker.plan_saved", "run_id": str(job_id), "size_bytes": len(data)},
+    )
+    return Response(status_code=204)
+
+
+async def _put_errored_state(session: AsyncSession, run: Run, request: Request) -> Response:
+    """The state an apply (or a mutating command) could not persist (§7.3): stored encrypted and
+    audited, from the job holding the run's write credentials only, while it executes."""
+    if run.state not in WORKER_EXECUTING_STATES or not holds_apply_credentials(run):
+        raise ProblemException(
+            409, "Not a state write", "Only an executing job holding apply credentials sends one."
+        )
+    await session.commit()  # hold no DB connection while the body streams in
+    data = await _read_capped(request, MAX_ERRORED_STATE_BYTES)
+    if not data:
+        raise ProblemException(400, "Empty artifact", "The errored state is empty.")
+    key = await save_errored_state(run.id, data)
+    await record_audit(
+        session,
+        action="run.errored_state_saved",
+        actor_kind=AuditActorKind.worker,
+        actor_id=run.worker_id,
+        target_kind="run",
+        target_id=run.id,
+        context={"environment_id": str(run.environment_id), "key": key, "size_bytes": len(data)},
+    )
+    await session.commit()
+    _log.warning(
+        "errored state stored",
+        extra={"event": "worker.errored_state_saved", "run_id": str(run.id), "key": key},
     )
     return Response(status_code=204)
 

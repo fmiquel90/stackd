@@ -22,6 +22,7 @@ export const KNOWN_ACTIONS = [
   "run.canceled",
   "run.applied",
   "run.apply_failed",
+  "run.errored_state_saved",
   "run.promoted",
   "dependency.created",
   "dependency.deleted",
