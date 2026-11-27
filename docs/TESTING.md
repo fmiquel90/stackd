@@ -189,6 +189,7 @@ all. Counts in parentheses include parametrized cases and drift as tests are add
 | `test_worker_heartbeat.py` (2) | `in_flight` drives busy/idle; a bodyless heartbeat keeps the worker online. |
 | `test_worker_register.py` (3) | Re-registering under the same name reuses the worker row; a worker's effective labels are its pool's plus its own (its own win per key); a labelled environment's run is claimed only by a worker carrying its labels — its own or its pool's — never by an unlabelled one. |
 | `test_ws_notify.py` (1) | Each `transition()` emits a `LISTEN/NOTIFY` signal on the run channel. |
+| `test_ws_hub.py` (8) | LISTEN connection supervision: after `pg_terminate_backend` or a half-open connection (a frozen TCP relay) the hub signals a resync, reconnects and the existing subscriptions receive notifications again; subscriber queues are bounded and keep the newest; a socket's repeated subscription is deduplicated (one copy per signal), the distinct-channel cap closes with 1008 and unsubscribes, a lost hub connection closes sockets with 1012, a missing auth message times out with 4401. |
 | `test_ws_auth.py` (2) | WebSocket auth only from the first message: a `?token=` in the URL is never read, a non-auth first message or a bad token closes with 4401. |
 | `test_seed.py` (1) | The demo seed is idempotent and yields exactly the DEV §7 graph. |
 

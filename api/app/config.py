@@ -88,6 +88,11 @@ class Settings(BaseSettings):
     # Environment rollouts (§21.6): how long an approval lets creates-only plans apply unattended.
     stackd_rollout_approval_ttl_seconds: int = 24 * 3600
 
+    # Live WebSocket (§5.3): the auth message must arrive within this delay (else 4401), and one
+    # socket holds at most this many distinct channels (else it is closed with 1008).
+    stackd_ws_auth_timeout_seconds: int = 10
+    stackd_ws_max_subscriptions: int = 1000
+
     # Background scheduler (§7.5) — disabled under tests so it can't fail runs mid-assertion.
     stackd_run_scheduler: bool = True
 
