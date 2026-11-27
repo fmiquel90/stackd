@@ -101,6 +101,26 @@ async def test_pr_closed_cancels_proposed_run(client: httpx.AsyncClient) -> None
     assert runs[0]["state"] == "canceled"
 
 
+async def test_pr_closed_leaves_the_same_pr_number_in_another_repo(
+    client: httpx.AsyncClient,
+) -> None:
+    """PR numbers are per repository: closing #12 in one repo must not cancel #12's run in
+    another."""
+    admin = await login(client, "admin")
+    _sa, env_a, repo_a = await _stack(client, admin, "vcs-close-scope-a")
+    _sb, env_b, repo_b = await _stack(client, admin, "vcs-close-scope-b")
+    assert (await _pr(client, repo_a, sha="prsha-scope-a", number=12)).status_code == 200
+    assert (await _pr(client, repo_b, sha="prsha-scope-b", number=12)).status_code == 200
+
+    closed = await _pr(client, repo_a, sha="prsha-scope-a", number=12, action="closed")
+    assert closed.status_code == 200
+
+    runs_a = (await client.get(f"/api/v1/environments/{env_a}/runs", headers=admin)).json()
+    runs_b = (await client.get(f"/api/v1/environments/{env_b}/runs", headers=admin)).json()
+    assert runs_a[0]["state"] == "canceled"
+    assert runs_b[0]["state"] == "queued"
+
+
 async def test_dispatch_posts_status_and_comment(
     client: httpx.AsyncClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:

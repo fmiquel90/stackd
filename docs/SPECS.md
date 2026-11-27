@@ -2368,7 +2368,8 @@ user. A `repo_secret` without write scope → post-back fails soft (run unaffect
 
 On `pull_request` (`opened`/`synchronize`/`reopened`): create the `proposed` run as today **and**
 persist `pr_number`, `vcs_provider='github'`, `vcs_head_sha = pr.head.sha`. On `closed`: best-effort
-end of the still-in-flight proposed runs for that PR (reason `pr_closed`): a `queued` one is
+end of the still-in-flight proposed runs for that PR on the stacks the delivery authenticated —
+a PR number is only unique within its repository — (reason `pr_closed`): a `queued` one is
 `transition()`ed to `canceled`; one a worker is executing gets the stop request of §4.1 (system actor,
 `run.cancel_requested`, a `cancel_job` for its worker) and ends `canceled` when the worker reports.
 
