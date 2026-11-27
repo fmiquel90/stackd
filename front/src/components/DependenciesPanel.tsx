@@ -11,7 +11,7 @@ export function DependenciesPanel({ envId }: { envId: string }) {
   const graph = useQuery({ queryKey: ["graph"], queryFn: graphApi.get });
   const stackList = useQuery({ queryKey: ["stacks"], queryFn: stacks.list });
 
-  const stackName = (sid: string) => stackList.data?.find((s) => s.id === sid)?.name ?? sid.slice(0, 6);
+  const stackName = (sid: string) => stackList.data?.find((s) => s.id === sid)?.name ?? shortId(sid);
   const envOptions = (graph.data?.nodes ?? [])
     .filter((n) => n.id !== envId)
     .map((n) => ({ id: n.id, label: `${stackName(n.stack_id)}/${n.name}` }));
