@@ -2304,7 +2304,8 @@ the human who confirmed it.</p>
 <hr />
 <h2 id="11-webhooks-git-staleness">11. Webhooks &amp; Git staleness<a class="headerlink" href="#11-webhooks-git-staleness" title="Permanent link">&para;</a></h2>
 <p>A Git webhook (HMAC-verified, secret per stack) maps a pushed branch to the environments tracking it,
-filtered by <code>project_root</code>:</p>
+filtered by the paths that concern the stack — its <code>project_root</code>, plus its <code>trigger_paths</code> globs
+(shared modules or configuration outside the folder, e.g. <code>modules/**</code>):</p>
 <ul>
 <li><strong>push</strong> → a <code>tracked</code> run per matching environment, and <code>head_sha</code> advances.</li>
 <li><strong>pull request</strong> → a <code>proposed</code> run: plan-only, read-only state, mocks allowed, and <strong>no

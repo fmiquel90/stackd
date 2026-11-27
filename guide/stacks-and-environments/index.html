@@ -480,6 +480,17 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
+  <a href="#trigger-paths-code-shared-outside-the-project-root" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Trigger paths: code shared outside the project root
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#private-repositories-and-private-modules" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -1288,6 +1299,17 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
+  <a href="#trigger-paths-code-shared-outside-the-project-root" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Trigger paths: code shared outside the project root
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#private-repositories-and-private-modules" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -1445,8 +1467,21 @@
 </code></pre></div>
 <div class="admonition tip">
 <p class="admonition-title">One repo, several stacks</p>
-<p>A single repo can host many stacks by giving each a distinct <code>project_root</code> (e.g. <code>network</code>, <code>db</code>, <code>app</code>). One GitHub webhook per repo (<code>POST /api/v1/webhooks/github</code>) serves them all, but each stack holds <strong>its own</strong> HMAC secret (<code>webhook_secret</code>, write-only, set with <code>PATCH /api/v1/stacks/{id}</code> or in the stack's <strong>Settings → General</strong>): a delivery acts only on the stacks of that repo whose secret verifies its signature, so give the stacks fed by one webhook the same secret. On a push, the API then picks the environments tracking the pushed branch and triggers a run only when the push touches the stack's <code>project_root</code>. See <a href="../../SPECS/">SPECS §3.1</a>.</p>
+<p>A single repo can host many stacks by giving each a distinct <code>project_root</code> (e.g. <code>network</code>, <code>db</code>, <code>app</code>). One GitHub webhook per repo (<code>POST /api/v1/webhooks/github</code>) serves them all, but each stack holds <strong>its own</strong> HMAC secret (<code>webhook_secret</code>, write-only, set with <code>PATCH /api/v1/stacks/{id}</code> or in the stack's <strong>Settings → General</strong>): a delivery acts only on the stacks of that repo whose secret verifies its signature, so give the stacks fed by one webhook the same secret. On a push, the API then picks the environments tracking the pushed branch and triggers a run only when the push touches the stack's <code>project_root</code> or one of its <code>trigger_paths</code> (below). See <a href="../../SPECS/">SPECS §3.1</a>.</p>
 </div>
+<h3 id="trigger-paths-code-shared-outside-the-project-root">Trigger paths: code shared outside the project root<a class="headerlink" href="#trigger-paths-code-shared-outside-the-project-root" title="Permanent link">&para;</a></h3>
+<p>In a monorepo a stack usually depends on code outside its folder — local modules reached through <code>../../modules/x</code>, shared configuration files. List them in <code>trigger_paths</code> (stack <strong>Settings → General</strong>, one per line, or the API): glob patterns relative to the <strong>repository root</strong>. A push that touches one of them concerns the stack exactly like a change under its <code>project_root</code>: it triggers the stack's autodeploy runs, and it counts for staleness.</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>curl<span class="w"> </span>-s<span class="w"> </span>-X<span class="w"> </span>PATCH<span class="w"> </span>localhost:8000/api/v1/stacks/<span class="nv">$STACK</span><span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="w">  </span>-H<span class="w"> </span><span class="s2">&quot;Authorization: Bearer </span><span class="nv">$TOKEN</span><span class="s2">&quot;</span><span class="w"> </span>-H<span class="w"> </span><span class="s1">&#39;content-type: application/json&#39;</span><span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a><span class="w">  </span>-d<span class="w"> </span><span class="s1">&#39;{&quot;trigger_paths&quot;:[&quot;modules/vpc&quot;,&quot;modules/shared/**&quot;,&quot;config/*.hcl&quot;]}&#39;</span>
+</code></pre></div>
+<ul>
+<li><code>*</code> matches within one folder level, <code>**</code> (as a whole segment) any number of levels: <code>modules/**</code>, <code>**/*.tf</code>.</li>
+<li>A pattern that names a folder covers everything in it: <code>modules/vpc</code> is the same as <code>modules/vpc/**</code>.</li>
+<li>A renamed file counts by both its old and its new path.</li>
+<li>At most 32 patterns; each relative (no leading <code>/</code>, no <code>..</code>). <code>null</code> or <code>[]</code> clears the list.</li>
+</ul>
+<p>The worker still clones the whole repository; trigger paths only decide which changes concern the stack.</p>
 <div class="admonition note">
 <p class="admonition-title">Redelivering a GitHub webhook</p>
 <p>Each delivery is acted on once: the API remembers its <code>X-GitHub-Delivery</code> id for <strong>5 minutes</strong>. A delivery GitHub sends again within that window — including <strong>Redeliver</strong> in the repo's webhook settings, which reuses the id — gets a <code>200</code> with <code>"duplicate": true</code> and does nothing. Past 5 minutes a Redeliver is processed again; a delivery that failed (5xx) can be redelivered at once. A request without the <code>X-GitHub-Delivery</code> header is refused (<code>400</code>). See <a href="../../SPECS/">SPECS §13</a>.</p>
@@ -1485,7 +1520,7 @@
 <li><strong>Deploy key</strong> — git uses that key only, for the clone and for <code>init</code>. It reaches whatever the key is granted: on GitHub and GitLab a deploy key belongs to <strong>one</strong> repository, so modules from another private repository need that repository to accept the key too (GitLab can enable one deploy key on several projects; on GitHub, use a machine user's key or a token instead).</li>
 </ul>
 <p>Add a deploy key:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>ssh-keygen<span class="w"> </span>-t<span class="w"> </span>ed25519<span class="w"> </span>-N<span class="w"> </span><span class="s1">&#39;&#39;</span><span class="w"> </span>-C<span class="w"> </span>stackd-core-network<span class="w"> </span>-f<span class="w"> </span>stackd_deploy_key<span class="w">   </span><span class="c1"># no passphrase</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>ssh-keygen<span class="w"> </span>-t<span class="w"> </span>ed25519<span class="w"> </span>-N<span class="w"> </span><span class="s1">&#39;&#39;</span><span class="w"> </span>-C<span class="w"> </span>stackd-core-network<span class="w"> </span>-f<span class="w"> </span>stackd_deploy_key<span class="w">   </span><span class="c1"># no passphrase</span>
 </code></pre></div>
 <ol>
 <li>Register the <strong>public</strong> half (<code>stackd_deploy_key.pub</code>) on the repository, <strong>read-only</strong>:<ul>
@@ -1495,10 +1530,10 @@
 </li>
 <li>
 <p>Give Stackd the <strong>private</strong> half (<code>stackd_deploy_key</code>):</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>curl<span class="w"> </span>-s<span class="w"> </span>-X<span class="w"> </span>PATCH<span class="w"> </span>localhost:8000/api/v1/stacks/<span class="nv">$STACK</span><span class="w"> </span><span class="se">\</span>
-<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="w">  </span>-H<span class="w"> </span><span class="s2">&quot;Authorization: Bearer </span><span class="nv">$TOKEN</span><span class="s2">&quot;</span><span class="w"> </span>-H<span class="w"> </span><span class="s1">&#39;content-type: application/json&#39;</span><span class="w"> </span><span class="se">\</span>
-<a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a><span class="w">  </span>-d<span class="w"> </span><span class="s2">&quot;</span><span class="k">$(</span>jq<span class="w"> </span>-n<span class="w"> </span>--rawfile<span class="w"> </span>key<span class="w"> </span>stackd_deploy_key<span class="w"> </span><span class="se">\</span>
-<a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a><span class="w">        </span><span class="s1">&#39;{repo_url:&quot;git@github.com:acme/infra.git&quot;, repo_auth_kind:&quot;deploy_key&quot;, repo_secret:$key}&#39;</span><span class="k">)</span><span class="s2">&quot;</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a>curl<span class="w"> </span>-s<span class="w"> </span>-X<span class="w"> </span>PATCH<span class="w"> </span>localhost:8000/api/v1/stacks/<span class="nv">$STACK</span><span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a><span class="w">  </span>-H<span class="w"> </span><span class="s2">&quot;Authorization: Bearer </span><span class="nv">$TOKEN</span><span class="s2">&quot;</span><span class="w"> </span>-H<span class="w"> </span><span class="s1">&#39;content-type: application/json&#39;</span><span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a><span class="w">  </span>-d<span class="w"> </span><span class="s2">&quot;</span><span class="k">$(</span>jq<span class="w"> </span>-n<span class="w"> </span>--rawfile<span class="w"> </span>key<span class="w"> </span>stackd_deploy_key<span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a><span class="w">        </span><span class="s1">&#39;{repo_url:&quot;git@github.com:acme/infra.git&quot;, repo_auth_kind:&quot;deploy_key&quot;, repo_secret:$key}&#39;</span><span class="k">)</span><span class="s2">&quot;</span>
 </code></pre></div>
 <p>or paste it in <strong>Settings → General</strong> (the <em>Deploy key</em> field keeps its line breaks).
 3. Delete the private key file from your machine, then <a href="#validating-the-repo">validate the repo</a>.</p>
@@ -1511,21 +1546,21 @@
 </div>
 <h3 id="validating-the-repo">Validating the repo<a class="headerlink" href="#validating-the-repo" title="Permanent link">&para;</a></h3>
 <p>Before creating environments, check that Stackd can reach the repo with the configured auth:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a>curl<span class="w"> </span>-s<span class="w"> </span>-X<span class="w"> </span>POST<span class="w"> </span>localhost:8000/api/v1/stacks/<span class="nv">$STACK</span>/check-repo<span class="w"> </span><span class="se">\</span>
-<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a><span class="w">  </span>-H<span class="w"> </span><span class="s2">&quot;Authorization: Bearer </span><span class="nv">$TOKEN</span><span class="s2">&quot;</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a>curl<span class="w"> </span>-s<span class="w"> </span>-X<span class="w"> </span>POST<span class="w"> </span>localhost:8000/api/v1/stacks/<span class="nv">$STACK</span>/check-repo<span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a><span class="w">  </span>-H<span class="w"> </span><span class="s2">&quot;Authorization: Bearer </span><span class="nv">$TOKEN</span><span class="s2">&quot;</span>
 </code></pre></div>
 <h2 id="defining-environments">Defining environments<a class="headerlink" href="#defining-environments" title="Permanent link">&para;</a></h2>
 <p>Each environment is an instance of the stack. The same code runs against physically separate state and variables.</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="c1"># dev — permissive</span>
-<a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a>curl<span class="w"> </span>-s<span class="w"> </span>-X<span class="w"> </span>POST<span class="w"> </span>localhost:8000/api/v1/stacks/<span class="nv">$STACK</span>/environments<span class="w"> </span><span class="se">\</span>
-<a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a><span class="w">  </span>-H<span class="w"> </span><span class="s2">&quot;Authorization: Bearer </span><span class="nv">$TOKEN</span><span class="s2">&quot;</span><span class="w"> </span>-H<span class="w"> </span><span class="s1">&#39;content-type: application/json&#39;</span><span class="w"> </span><span class="se">\</span>
-<a id="__codelineno-4-4" name="__codelineno-4-4" href="#__codelineno-4-4"></a><span class="w">  </span>-d<span class="w"> </span><span class="s1">&#39;{&quot;name&quot;:&quot;dev&quot;,&quot;tier&quot;:&quot;dev&quot;,&quot;branch&quot;:&quot;main&quot;}&#39;</span>
-<a id="__codelineno-4-5" name="__codelineno-4-5" href="#__codelineno-4-5"></a>
-<a id="__codelineno-4-6" name="__codelineno-4-6" href="#__codelineno-4-6"></a><span class="c1"># prod — protected, second pair of eyes</span>
-<a id="__codelineno-4-7" name="__codelineno-4-7" href="#__codelineno-4-7"></a>curl<span class="w"> </span>-s<span class="w"> </span>-X<span class="w"> </span>POST<span class="w"> </span>localhost:8000/api/v1/stacks/<span class="nv">$STACK</span>/environments<span class="w"> </span><span class="se">\</span>
-<a id="__codelineno-4-8" name="__codelineno-4-8" href="#__codelineno-4-8"></a><span class="w">  </span>-H<span class="w"> </span><span class="s2">&quot;Authorization: Bearer </span><span class="nv">$TOKEN</span><span class="s2">&quot;</span><span class="w"> </span>-H<span class="w"> </span><span class="s1">&#39;content-type: application/json&#39;</span><span class="w"> </span><span class="se">\</span>
-<a id="__codelineno-4-9" name="__codelineno-4-9" href="#__codelineno-4-9"></a><span class="w">  </span>-d<span class="w"> </span><span class="s1">&#39;{&quot;name&quot;:&quot;prod&quot;,&quot;tier&quot;:&quot;prod&quot;,&quot;branch&quot;:&quot;main&quot;,</span>
-<a id="__codelineno-4-10" name="__codelineno-4-10" href="#__codelineno-4-10"></a><span class="s1">       &quot;protected&quot;:true,&quot;require_second_pair_of_eyes&quot;:true}&#39;</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="c1"># dev — permissive</span>
+<a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a>curl<span class="w"> </span>-s<span class="w"> </span>-X<span class="w"> </span>POST<span class="w"> </span>localhost:8000/api/v1/stacks/<span class="nv">$STACK</span>/environments<span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a><span class="w">  </span>-H<span class="w"> </span><span class="s2">&quot;Authorization: Bearer </span><span class="nv">$TOKEN</span><span class="s2">&quot;</span><span class="w"> </span>-H<span class="w"> </span><span class="s1">&#39;content-type: application/json&#39;</span><span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-5-4" name="__codelineno-5-4" href="#__codelineno-5-4"></a><span class="w">  </span>-d<span class="w"> </span><span class="s1">&#39;{&quot;name&quot;:&quot;dev&quot;,&quot;tier&quot;:&quot;dev&quot;,&quot;branch&quot;:&quot;main&quot;}&#39;</span>
+<a id="__codelineno-5-5" name="__codelineno-5-5" href="#__codelineno-5-5"></a>
+<a id="__codelineno-5-6" name="__codelineno-5-6" href="#__codelineno-5-6"></a><span class="c1"># prod — protected, second pair of eyes</span>
+<a id="__codelineno-5-7" name="__codelineno-5-7" href="#__codelineno-5-7"></a>curl<span class="w"> </span>-s<span class="w"> </span>-X<span class="w"> </span>POST<span class="w"> </span>localhost:8000/api/v1/stacks/<span class="nv">$STACK</span>/environments<span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-5-8" name="__codelineno-5-8" href="#__codelineno-5-8"></a><span class="w">  </span>-H<span class="w"> </span><span class="s2">&quot;Authorization: Bearer </span><span class="nv">$TOKEN</span><span class="s2">&quot;</span><span class="w"> </span>-H<span class="w"> </span><span class="s1">&#39;content-type: application/json&#39;</span><span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-5-9" name="__codelineno-5-9" href="#__codelineno-5-9"></a><span class="w">  </span>-d<span class="w"> </span><span class="s1">&#39;{&quot;name&quot;:&quot;prod&quot;,&quot;tier&quot;:&quot;prod&quot;,&quot;branch&quot;:&quot;main&quot;,</span>
+<a id="__codelineno-5-10" name="__codelineno-5-10" href="#__codelineno-5-10"></a><span class="s1">       &quot;protected&quot;:true,&quot;require_second_pair_of_eyes&quot;:true}&#39;</span>
 </code></pre></div>
 <h3 id="fields-that-matter">Fields that matter<a class="headerlink" href="#fields-that-matter" title="Permanent link">&para;</a></h3>
 <ul>
@@ -1547,10 +1582,10 @@
 </div>
 <h3 id="refreshing-the-tracked-head">Refreshing the tracked head<a class="headerlink" href="#refreshing-the-tracked-head" title="Permanent link">&para;</a></h3>
 <p>Staleness compares the commit of the last finished tracked run (every run is pinned to the commit it planned) to the branch head. <code>head_sha</code> updates via the push webhook or the 15-min <code>git ls-remote</code> polling; force it manually (audited <code>environment.head_refreshed</code>):</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a>curl<span class="w"> </span>-s<span class="w"> </span>-X<span class="w"> </span>POST<span class="w"> </span>localhost:8000/api/v1/environments/<span class="nv">$ENV</span>/refresh-head<span class="w"> </span><span class="se">\</span>
-<a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a><span class="w">  </span>-H<span class="w"> </span><span class="s2">&quot;Authorization: Bearer </span><span class="nv">$TOKEN</span><span class="s2">&quot;</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a>curl<span class="w"> </span>-s<span class="w"> </span>-X<span class="w"> </span>POST<span class="w"> </span>localhost:8000/api/v1/environments/<span class="nv">$ENV</span>/refresh-head<span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a><span class="w">  </span>-H<span class="w"> </span><span class="s2">&quot;Authorization: Bearer </span><span class="nv">$TOKEN</span><span class="s2">&quot;</span>
 </code></pre></div>
-<p><code>GET /api/v1/environments/{id}</code> then exposes <code>head_sha</code>, <code>commits_ahead</code>, <code>affects_project_root</code> and <code>stale</code>. An environment with nothing applied yet is never <code>stale</code>. Changing an environment's <code>branch</code> clears its recorded head until the next poll, and a push that deletes the branch clears it too. See <a href="../../SPECS/">SPECS §9.6</a>.</p>
+<p><code>GET /api/v1/environments/{id}</code> then exposes <code>head_sha</code>, <code>commits_ahead</code>, <code>affects_project_root</code> and <code>stale</code> (<code>affects_project_root</code>, when known, means the commits ahead touch the stack — its <code>project_root</code> or its <code>trigger_paths</code>). An environment with nothing applied yet is never <code>stale</code>. Changing an environment's <code>branch</code> clears its recorded head until the next poll, and a push that deletes the branch clears it too. See <a href="../../SPECS/">SPECS §9.6</a>.</p>
 <h2 id="deleting-a-stack-or-an-environment">Deleting a stack or an environment<a class="headerlink" href="#deleting-a-stack-or-an-environment" title="Permanent link">&para;</a></h2>
 <p><code>DELETE /api/v1/stacks/{id}</code> and <code>DELETE /api/v1/environments/{id}</code> are <strong>refused with <code>409 Active
 run</code></strong> while one of the environments involved has a run in an active state (<code>preparing</code> through
@@ -1573,10 +1608,10 @@ left behind.</p>
 declare it <strong>once</strong>, modelled on the environment each stack already has under a reference name. In
 the UI: <strong>New environment from…</strong> (on the overview, or an environment's <strong>More</strong> menu), which
 shows a review before anything is created. Over the API:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a>curl<span class="w"> </span>-s<span class="w"> </span>-X<span class="w"> </span>POST<span class="w"> </span>localhost:8000/api/v1/spaces/<span class="nv">$SPACE</span>/environment-clones<span class="w"> </span><span class="se">\</span>
-<a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a><span class="w">  </span>-H<span class="w"> </span><span class="s2">&quot;Authorization: Bearer </span><span class="nv">$TOKEN</span><span class="s2">&quot;</span><span class="w"> </span>-H<span class="w"> </span><span class="s1">&#39;content-type: application/json&#39;</span><span class="w"> </span><span class="se">\</span>
-<a id="__codelineno-6-3" name="__codelineno-6-3" href="#__codelineno-6-3"></a><span class="w">  </span>-d<span class="w"> </span><span class="s1">&#39;{&quot;reference_name&quot;:&quot;prod&quot;,&quot;name&quot;:&quot;prod-euw3&quot;,</span>
-<a id="__codelineno-6-4" name="__codelineno-6-4" href="#__codelineno-6-4"></a><span class="s1">       &quot;overrides&quot;:{&quot;labels&quot;:{&quot;region&quot;:&quot;eu-west-3&quot;}},&quot;dry_run&quot;:true}&#39;</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a>curl<span class="w"> </span>-s<span class="w"> </span>-X<span class="w"> </span>POST<span class="w"> </span>localhost:8000/api/v1/spaces/<span class="nv">$SPACE</span>/environment-clones<span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-7-2" name="__codelineno-7-2" href="#__codelineno-7-2"></a><span class="w">  </span>-H<span class="w"> </span><span class="s2">&quot;Authorization: Bearer </span><span class="nv">$TOKEN</span><span class="s2">&quot;</span><span class="w"> </span>-H<span class="w"> </span><span class="s1">&#39;content-type: application/json&#39;</span><span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-7-3" name="__codelineno-7-3" href="#__codelineno-7-3"></a><span class="w">  </span>-d<span class="w"> </span><span class="s1">&#39;{&quot;reference_name&quot;:&quot;prod&quot;,&quot;name&quot;:&quot;prod-euw3&quot;,</span>
+<a id="__codelineno-7-4" name="__codelineno-7-4" href="#__codelineno-7-4"></a><span class="s1">       &quot;overrides&quot;:{&quot;labels&quot;:{&quot;region&quot;:&quot;eu-west-3&quot;}},&quot;dry_run&quot;:true}&#39;</span>
 </code></pre></div>
 <ul>
 <li><strong>Targets</strong>: every stack of the space that has a <code>reference_name</code> environment, or only

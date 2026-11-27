@@ -1844,6 +1844,10 @@ all. Counts in parentheses include parametrized cases and drift as tests are add
 <td>Push updates the head and triggers; bad signature → 401; PR → proposed run; a branch-deletion push clears the head and triggers nothing; an env re-pointed meanwhile is skipped; a closed PR stops its executing proposed run through the worker (system stop request) and cancels its queued one; anti-replay: a repeated <code>X-GitHub-Delivery</code> within 5 min is a <code>200</code> no-op, processed again past the window, a missing id → 400 (a forged signature doesn't burn the id), old ids purged.</td>
 </tr>
 <tr>
+<td><code>test_trigger_paths.py</code> (28)</td>
+<td>Stack <code>trigger_paths</code> (SPECS §3.1): the glob matcher's edge cases (<code>**</code> as a whole segment or inside one, <code>*</code>/<code>?</code> within a segment, character classes, an unclosed <code>[</code>, a folder pattern covering its content, dotfiles, case); <code>touches_stack</code> combining <code>project_root</code> and the globs, a rename's old path counting; validation and normalization (count, length, absolute, <code>..</code>/<code>.</code>/empty segment, backslash, control characters, trailing <code>/</code>, duplicates); the stack API validates, normalizes, clears on <code>null</code> and audits <code>stack.updated</code>; a push touching only a trigger path triggers the stack listing it and not its sibling (whose head still advances), an unrelated push triggers nothing, a rename out of the shared folder still triggers.</td>
+</tr>
+<tr>
 <td><code>test_vcs.py</code> (6)</td>
 <td>GitHub post-back: owner/repo parsing, PR metadata persisted, PR close cancels proposed runs, status + one comment per run, a bad secret fails only its row, resync.</td>
 </tr>
@@ -1865,7 +1869,7 @@ all. Counts in parentheses include parametrized cases and drift as tests are add
 </tr>
 <tr>
 <td><code>test_portability.py</code> (7)</td>
-<td>Configuration export / import (SPECS §22): the export is by name and never carries a secret (sensitive values, repo token, source credential), audited; a round trip into a new space re-creates the configuration and reports what it could not (sensitive values, a missing secret source), keeps a new autodeploy env off while secrets are missing, every write audited <code>via: import</code>; re-importing the same document changes nothing and keeps existing secrets, a changed setting is applied; dry run writes nothing; a hand-filled secret is stored encrypted; strict validation (unknown field, duplicate keys, unknown tier, a dependency cycle) aborts with nothing written; permissions (space admin; tiers, cloud integrations and pools reserved to an instance admin; a pool token returned once).</td>
+<td>Configuration export / import (SPECS §22): the export is by name and never carries a secret (sensitive values, repo token, source credential), audited; a round trip into a new space re-creates the configuration (stack <code>trigger_paths</code> included) and reports what it could not (sensitive values, a missing secret source), keeps a new autodeploy env off while secrets are missing, every write audited <code>via: import</code>; re-importing the same document changes nothing and keeps existing secrets, a changed setting is applied (a changed <code>trigger_paths</code> normalized and audited <code>stack.updated</code>); dry run writes nothing; a hand-filled secret is stored encrypted; strict validation (unknown field, duplicate keys, an invalid trigger path, unknown tier, a dependency cycle) aborts with nothing written; permissions (space admin; tiers, cloud integrations and pools reserved to an instance admin; a pool token returned once).</td>
 </tr>
 <tr>
 <td><code>test_deploy_key.py</code> (19)</td>
