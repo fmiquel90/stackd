@@ -676,14 +676,14 @@ POST /worker/v1/jobs/{id}/logs
 
 ### 5.3 Live distribution
 
-Single multiplexed WebSocket `/api/v1/ws` (the access token goes in the first message, `{"type": "auth", "token": …}`, not in the URL): `{"sub": "run:<id>"}` → light signals `{"kind": "log", run_id, phase, max_seq}` and `{"kind": "run_event", run_id, to_state}` — never the content. On a `log` signal the front fetches the new chunks with REST `GET …/logs?phase=&after_seq=`; on a `run_event` it invalidates its queries. Reconnection → the same REST GET `after_seq` fills the gap, then the stream.
+Single multiplexed WebSocket `/api/v1/ws` (the access token goes in the first message, `{"type": "auth", "token": …}`, not in the URL): `{"sub": "run:<id>"}` → light signals `{"kind": "log", run_id, phase, max_seq}` and `{"kind": "run_event", run_id, environment_id, to_state}` — never the content. On a `log` signal the front fetches the new chunks with REST `GET …/logs?phase=&after_seq=`; on a `run_event` it invalidates its queries. Reconnection → the same REST GET `after_seq` fills the gap, then the stream.
 
 **Auth in the first message, never in the URL.** The server accepts the connection, then the client's first message must be `{"type": "auth", "token": "<access token>"}` (a fresh one on every reconnect); anything else, an invalid or expired token, or a disabled user closes the socket with code **4401**. A `?token=` query parameter is ignored: a URL leaks to proxy/LB logs, browser history and `Referer`. Subscriptions are checked per channel against the caller's spaces.
 
 **Multi-replica fan-out (without a broker).** A WS client is connected to **one** API replica; the event (transition or log chunk) may be produced on **another** replica. The bridge is **Postgres `LISTEN/NOTIFY`**:
 
 - `transition()` (§4.2) and log ingestion (§5.1) emit a `NOTIFY` on a per-entity channel (`run_<id>`, `env_<id>`) **in the same transaction** as the write.
-- The `NOTIFY` payload carries only a **lightweight signal** — `{kind, run_id, phase, max_seq}` for a log chunk, `{kind, run_id, to_state}` for a transition — never the content (8 KB `NOTIFY` cap, and log lines can be large).
+- The `NOTIFY` payload carries only a **lightweight signal** — `{kind, run_id, phase, max_seq}` for a log chunk, `{kind, run_id, environment_id, to_state}` for a transition (the environment lets a client refresh only the env that owns a run it has not seen yet) — never the content (8 KB `NOTIFY` cap, and log lines can be large).
 - On receipt, each replica forwards the signal as is to its locally subscribed WS clients, which re-read the source over REST (`run_logs` after `after_seq`, or the run). The front sees the same sequence as on REST reconnection — a single read path, idempotent by `seq`.
 
 **Resilience and bounds** (`app/ws/`):
