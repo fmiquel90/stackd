@@ -160,7 +160,7 @@ export function ModifierChips({
         key="stale"
         title={
           attenuated
-            ? "The branch moved ahead, but not this folder"
+            ? "The branch moved ahead, but not in this stack's paths"
             : n
               ? `The branch is ${n} commit${n > 1 ? "s" : ""} ahead of the deployed commit`
               : "The branch is ahead of the deployed commit"

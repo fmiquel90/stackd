@@ -7,6 +7,7 @@ import { useSpaces } from "@/app/SpaceContext";
 import { useIsAdmin, useSession } from "@/auth/session";
 import { Button as UiButton } from "@/ui/Button";
 import { TypeNameDialog } from "@/ui/TypeNameDialog";
+import { Field as HelpField } from "@/ui/primitives";
 import { Button, Card, Field, LabelsEditor, Select, TextInput } from "@/components/ui";
 
 // Deleting a stack cascades its environments, runs and state — high impact, so it sits behind the
@@ -46,11 +47,15 @@ function DeleteStackPanel({ stackId, name }: { stackId: string; name: string }) 
   );
 }
 
+const TEXTAREA =
+  "min-h-16 w-full rounded-base border border-control bg-base px-2 py-1.5 font-data text-[12px] text-primary placeholder:text-muted";
+
 interface FormState {
   name: string;
   description: string;
   repo_url: string;
   project_root: string;
+  trigger_paths: string; // one glob per line
   tool: Tool;
   tool_version: string;
   repo_auth_kind: RepoAuthKind;
@@ -80,6 +85,7 @@ function StackGeneralForm({ stack }: { stack: Stack }) {
     description: stack.description ?? "",
     repo_url: stack.repo_url,
     project_root: stack.project_root,
+    trigger_paths: stack.trigger_paths.join("\n"),
     tool: stack.tool,
     tool_version: stack.tool_version,
     repo_auth_kind: stack.repo_auth_kind,
@@ -105,6 +111,10 @@ function StackGeneralForm({ stack }: { stack: Stack }) {
       description: form.description || null,
       repo_url: form.repo_url,
       project_root: form.project_root,
+      trigger_paths: form.trigger_paths
+        .split("\n")
+        .map((l) => l.trim())
+        .filter(Boolean),
       tool: form.tool,
       tool_version: form.tool_version,
       repo_auth_kind: form.repo_auth_kind,
@@ -163,6 +173,20 @@ function StackGeneralForm({ stack }: { stack: Stack }) {
             </Field>
           </div>
 
+          <HelpField
+            label="Trigger paths"
+            help="One glob per line, relative to the repository root. A push touching one of them concerns this stack like a change under its project root (autodeploy, staleness). A pattern matching a folder covers everything in it; ** spans folders."
+          >
+            <textarea
+              value={form.trigger_paths}
+              rows={3}
+              spellCheck={false}
+              placeholder={"modules/**\nconfig/shared.hcl"}
+              onChange={(e) => set({ trigger_paths: e.target.value })}
+              className="min-h-16 w-full rounded-base border border-control bg-base px-2 py-1.5 font-data text-[12px] text-primary placeholder:text-muted"
+            />
+          </HelpField>
+
           <div className="flex flex-wrap items-end gap-3">
             <Field label="Repo auth">
               <Select
@@ -174,17 +198,45 @@ function StackGeneralForm({ stack }: { stack: Stack }) {
                 <option value="deploy_key">deploy_key</option>
               </Select>
             </Field>
-            {form.repo_auth_kind !== "none" && (
-              <Field label={`Credential${stack.has_repo_secret ? " (set — leave blank to keep)" : ""}`}>
+            {form.repo_auth_kind === "token" && (
+              <Field label={`Token${stack.has_repo_secret ? " (set — leave blank to keep)" : ""}`}>
                 <TextInput
                   type="password"
                   value={form.repo_secret}
-                  placeholder={stack.has_repo_secret ? "••••••••" : "token / deploy key"}
+                  placeholder={stack.has_repo_secret ? "••••••••" : "read-only access token"}
                   onChange={(e) => set({ repo_secret: e.target.value })}
                 />
               </Field>
             )}
           </div>
+          {form.repo_auth_kind === "deploy_key" && (
+            // A private key spans lines: a textarea keeps them (an <input> would drop them).
+            // Write-only like the token: never filled back, blank keeps the stored key.
+            <Field
+              label={`Deploy key — SSH private key, no passphrase${stack.has_repo_secret ? " (set — leave blank to keep)" : ""}`}
+            >
+              <textarea
+                value={form.repo_secret}
+                rows={4}
+                spellCheck={false}
+                autoComplete="off"
+                placeholder={
+                  stack.has_repo_secret
+                    ? "••••••••"
+                    : "SSH private key, as ssh-keygen writes it (several lines)"
+                }
+                onChange={(e) => set({ repo_secret: e.target.value })}
+                className={TEXTAREA}
+              />
+            </Field>
+          )}
+          {form.repo_auth_kind !== "none" && (
+            <p className="text-[12px] text-muted">
+              {form.repo_auth_kind === "deploy_key"
+                ? "Needs an ssh:// or git@host:path URL. The same key lets init download the private modules of this repository."
+                : "Also sent with init's module downloads from this repository's host."}
+            </p>
+          )}
 
           {/* Webhook HMAC secret (§3.1) — writer, like the rest of the stack. Write-only: blank keeps
               the stored value. */}

@@ -17,6 +17,16 @@ type Form = EnvironmentPatch & { backend_config: Record<string, string>; labels:
 const toStrings = (o: Record<string, unknown> | null) =>
   Object.fromEntries(Object.entries(o ?? {}).map(([k, v]) => [k, String(v)]));
 
+/** Repo var files (SPECS §3.4), one path per line: trimmed, blank lines dropped, order kept. */
+export const parseVarFiles = (text: string) =>
+  text
+    .split("\n")
+    .map((l) => l.trim())
+    .filter(Boolean);
+
+const TEXTAREA =
+  "min-h-16 w-full rounded-base border border-control bg-base px-2 py-1.5 font-data text-[12px] text-primary placeholder:text-muted disabled:cursor-not-allowed disabled:border-dashed disabled:text-muted";
+
 /** Changes that weaken a safety control, with what they mean (DESIGN §5.7). */
 function weakenings(env: Environment, f: Form, fourEyesTier: boolean): string[] {
   const out: string[] = [];
@@ -66,6 +76,7 @@ export function EnvSettings({
     backend_config: toStrings(env.backend_config),
     labels: toStrings(env.labels),
   });
+  const [varFiles, setVarFiles] = useState((env.var_files ?? []).join("\n"));
   const [confirming, setConfirming] = useState(false);
   const set = (patch: Partial<Form>) => setForm((f) => ({ ...f, ...patch }));
   const fourEyesTier = !!catalog.data?.find((t) => t.name === form.tier)?.requires_four_eyes;
@@ -77,6 +88,7 @@ export function EnvSettings({
         ...form,
         backend_config_file: form.backend_config_file || null,
         backend_config: Object.keys(form.backend_config).length ? form.backend_config : null,
+        var_files: parseVarFiles(varFiles),
       }),
     onSuccess: (updated) => {
       qc.invalidateQueries({ queryKey: ["environments", env.stack_id] });
@@ -186,6 +198,23 @@ export function EnvSettings({
               </Field>
             </>
           )}
+        </fieldset>
+
+        <fieldset disabled={disabled}>
+          <legend className="eyebrow mb-1 text-muted">Variables</legend>
+          <Field
+            label="Variable files"
+            help="The repository's own tfvars files, one per line, relative to the stack's project root. Passed in this order as -var-file to plan, import and refresh — a later file wins; Stackd's variables always win over them. A missing file fails the run."
+          >
+            <textarea
+              value={varFiles}
+              rows={2}
+              spellCheck={false}
+              placeholder={"envs/prod.tfvars\n../shared/prod.tfvars"}
+              onChange={(e) => setVarFiles(e.target.value)}
+              className={TEXTAREA}
+            />
+          </Field>
         </fieldset>
 
         <fieldset disabled={disabled}>

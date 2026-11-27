@@ -1,7 +1,7 @@
 """cloud integrations: named AWS profiles (SPECS §10.6)
 
-Revision ID: 0038
-Revises: 0036
+Revision ID: 0041
+Revises: 0040
 Create Date: 2026-11-27
 """
 
@@ -13,8 +13,8 @@ import sqlalchemy as sa
 from alembic import op
 from sqlalchemy.dialects import postgresql
 
-revision: str = "0038"
-down_revision: str | None = "0036"
+revision: str = "0041"
+down_revision: str | None = "0040"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 

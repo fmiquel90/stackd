@@ -33,6 +33,7 @@ from app.oidc.profiles import for_phase as profiles_for_phase
 from app.runs.artifacts import SAVED_PLAN_TYPES
 from app.runs.commands import is_mutating
 from app.runs.transition import transition
+from app.stacks.credentials import credential_mask_values
 from app.statebackend.tokens import StateScope, mint_state_token
 from app.variables.resolution import ResolvedVariable, provenance_snapshot, resolve_variables
 from app.workers.hooks import platform_hooks
@@ -276,11 +277,14 @@ async def build_job_payload(session: AsyncSession, run: Run) -> dict:
     provenance.update({rv.injected_name: f"shadowed:{rv.provenance}" for rv in shadowed})
     run.variable_provenance = provenance
 
-    # The repo token stays with a proposed run: it clones the pull request's commit, and reaches
-    # neither tofu nor a hook (§8.3 — it is in no environment and nowhere under the checkout).
+    # The repo credential stays with a proposed run: it clones the pull request's commit and lets
+    # `init` fetch the modules hosted next to it; no hook ever gets it (§8.3).
     repo_credentials: dict[str, str | None] = {"kind": stack.repo_auth_kind.value}
+    repo_secret = None
     if stack.repo_auth_kind != RepoAuthKind.none and stack.repo_secret_encrypted is not None:
-        repo_credentials["token"] = decrypt(stack.repo_secret_encrypted)
+        repo_secret = decrypt(stack.repo_secret_encrypted)
+        field = "ssh_private_key" if stack.repo_auth_kind == RepoAuthKind.deploy_key else "token"
+        repo_credentials[field] = repo_secret
 
     # An apply or a mutating subcommand gets the apply role; a plan or a read-only subcommand the
     # (read-only) plan role. A plan/apply job's type is its credential phase.
@@ -320,15 +324,15 @@ async def build_job_payload(session: AsyncSession, run: Run) -> dict:
     cloud_credentials = await _cloud_credentials(session, integration, env, stack, run, cred_phase)
 
     # Literal secret values the agent masks in ALL log output (§5.1) — sensitive variables, the
-    # short-lived state-backend and OIDC tokens, and the repo auth token (it rides inside the clone
-    # URL, so a failed `git clone` could otherwise echo it to logs).
+    # short-lived state-backend and OIDC tokens, and the repo credential (a token rides inside
+    # URLs, so a failed `git clone` or module download could otherwise echo it to logs).
     mask_values = [rv.value for rv in resolved if _is_secret(rv) and rv.value]
     if backend:
         mask_values.append(backend["password"])
     if cloud_credentials and cloud_credentials.get("oidc_token"):
         mask_values.append(cloud_credentials["oidc_token"])
-    if repo_credentials.get("token"):
-        mask_values.append(repo_credentials["token"])
+    if repo_secret:
+        mask_values.extend(credential_mask_values(stack.repo_auth_kind, repo_secret))
 
     return {
         "job_id": str(run.id),
@@ -379,6 +383,9 @@ async def build_job_payload(session: AsyncSession, run: Run) -> dict:
         # `-backend-config` settings passed at init.
         "backend_config_file": None if env.managed_state else env.backend_config_file,
         "backend_config": None if env.managed_state else env.backend_config,
+        # §3.4: the repo's tfvars files, managed state or not — the agent passes them as
+        # `-var-file=` to the commands that read variables, Stackd's own files after them.
+        "var_files": list(env.var_files or []),
         "cloud_credentials": cloud_credentials,
         "resolved_inputs": {f"TF_VAR_{k}": v for k, v in dep.resolved_inputs.items()},
         "mock_inputs": {f"TF_VAR_{k}": v for k, v in dep.mock_inputs.items()},

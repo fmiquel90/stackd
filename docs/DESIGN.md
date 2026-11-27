@@ -262,7 +262,7 @@ Two forms:
 |---|---|---|---|
 | Mocked | `◆ MOCKED` | `mock` | not real; blocks apply unless `allow_mock_apply` (SPECS §9.3) |
 | Fallback | `◈ FALLBACK` | `state-decision` | a secret came from a fallback; blocks apply unless `allow_fallback_apply` (SPECS §15.5) — it demands a decision, hence amber |
-| Stale | `↑3` (or `↑` until AUDIT A6) | `text-secondary` | branch ahead of the deployed commit; attenuated (`text-secondary`, dotted underline) when `affects_project_root=false` |
+| Stale | `↑3` (or `↑` until AUDIT A6) | `text-secondary` | branch ahead of the deployed commit; attenuated (`text-secondary`, dotted underline) when `affects_project_root=false` (the commits ahead touch neither the project root nor the trigger paths, SPECS §3.1) |
 | Drift | `≈ DRIFT` / `≈? DRIFT CHECK FAILED` | `text-primary` | neutral per SPECS §19.5 — a fact to investigate, not a decision |
 | Locked | `⚿ LOCKED` | `text-primary` | |
 | PR | `PR` | `state-queued` (outlined) | the env's active run is a proposed run |
@@ -651,7 +651,7 @@ variables, hooks, notifications, secret sources; URL `?tab=settings&sub=`).
 
 - **Header**: `stack / env`, badges (tier, `four-eyes`, `protected`, `second pair of eyes`, `autodeploy`, `managed state`); a summary strip with the env's `EnvCell` (active run or last outcome), branch, deployed commit and head (`↑` when ahead; a Refresh button, writer+), drift (`≈ DRIFT` + "see the drift" → drift run, or "No drift detected · checked 1h ago" / "Drift detection off"), lock.
 - **Primary actions** (writer+): **Plan** (primary button), and a "More" menu: Plan with downstream (`with_downstream`), Promote from a sibling… (SPECS §9.7), Run a command… (allowlist, SPECS §4.3), New environment from… (this env preselected as the model), Roll out every “<name>” environment… (SPECS §21, DESIGN §5.11) and Plan a destroy… (shown only with `can_destroy`; opens a dialog explaining the run will need typed confirmation at apply).
-- **Tabs** (URL): **Runs** (default) — history table: run short ID, kind (`tracked`, `destroy`, `PR`, `drift`, `command`), outcome badge, mini rail, commit, trigger (who/how), start, duration; filter by kind (`?kind=`); paginated client-side, 50 at a time **[today]**. **Inputs** (Resolved with provenance / Environment overrides / Discover inputs), **Outputs**, **Dependencies**, **State** (versions; force-unlock admin-only per §5.7), **Settings** (name, tier, branch, flags with the §5.7 friction, backend config, labels, hooks, notifications, cloud integration — default plan/apply roles, then its named AWS profiles as rows of name + roles + region, SPECS §10.6), and a **Danger zone** at the bottom of Settings (delete environment, typed name).
+- **Tabs** (URL): **Runs** (default) — history table: run short ID, kind (`tracked`, `destroy`, `PR`, `drift`, `command`), outcome badge, mini rail, commit, trigger (who/how), start, duration; filter by kind (`?kind=`); paginated client-side, 50 at a time **[today]**. **Inputs** (Resolved with provenance / Environment overrides / Discover inputs), **Outputs**, **Dependencies**, **State** (versions; force-unlock admin-only per §5.7), **Settings** (name, tier, branch, flags with the §5.7 friction, backend config, variable files (one repo path per line, in `-var-file` order, SPECS §3.4), labels, hooks, notifications, cloud integration — default plan/apply roles, then its named AWS profiles as rows of name + roles + region, SPECS §10.6), and a **Danger zone** at the bottom of Settings (delete environment, typed name).
 
 ### 5.9 `/workers` — workers & pools
 

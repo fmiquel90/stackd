@@ -22,6 +22,7 @@ from app.audit import record_audit
 from app.dependencies.router import _create_edge
 from app.enums import AttachmentTarget, AuditActorKind, RepoAuthKind, Role, SecretFallback
 from app.environments.router import lock_attach_target
+from app.environments.var_files import require_inside_checkout
 from app.errors import ProblemException
 from app.models.dependency import EnvDependency, OutputReference
 from app.models.environment import Environment
@@ -50,6 +51,7 @@ from app.portability.schemas import (
 )
 from app.security import hash_token
 from app.spaces import require_space_access
+from app.stacks.credentials import check_repo_auth
 from app.variables.crud import variables_for
 from app.variables.values import set_reference, store_value
 
@@ -67,6 +69,7 @@ _ENV_FIELDS = (
     "drift_check_enabled",
     "backend_config_file",
     "backend_config",
+    "var_files",
     "labels",
     "position",
 )
@@ -75,6 +78,7 @@ _STACK_FIELDS = (
     "repo_url",
     "repo_auth_kind",
     "project_root",
+    "trigger_paths",
     "tool",
     "tool_version",
     "labels",
@@ -362,6 +366,11 @@ class Importer:
 
     async def _stack(self, doc: Any) -> None:
         path = f"stacks/{doc.name}"
+        # Checked here, not on StackDoc: an export of an existing stack must never fail on it.
+        try:
+            check_repo_auth(doc.repo_auth_kind, doc.repo_url)
+        except ProblemException as exc:
+            raise ProblemException(exc.status, exc.title, f"{path}: {exc.detail}") from exc
         values = {f: getattr(doc, f) for f in _STACK_FIELDS}
         stack = self.stacks.get(doc.name)
         if stack is None:
@@ -374,7 +383,12 @@ class Importer:
             self.report.change("created", "stack", path)
             self.stacks[doc.name] = stack
         else:
+            kinds = {stack.repo_auth_kind, doc.repo_auth_kind}
             changed = _assign(stack, values)
+            if kinds == {RepoAuthKind.token, RepoAuthKind.deploy_key}:
+                # A token is no deploy key, nor the reverse: the stored one can't serve the new
+                # kind, so it goes, and the import reports it missing (below).
+                stack.repo_secret_encrypted = None
             if changed:
                 await self._audit("stack.updated", "stack", stack.id, fields=changed)
             self.report.change("updated" if changed else "unchanged", "stack", path, changed)
@@ -389,6 +403,10 @@ class Importer:
 
     async def _environment(self, stack: Stack, doc: EnvironmentDoc) -> None:
         path = f"stacks/{stack.name}/environments/{doc.name}"
+        try:
+            require_inside_checkout(stack.project_root, doc.var_files)
+        except ProblemException as exc:
+            raise ProblemException(exc.status, exc.title, f"{path}: {exc.detail}") from exc
         values = {f: getattr(doc, f) for f in _ENV_FIELDS}
         if values["protected"]:
             values["autodeploy"] = False  # protected forces manual confirmation (§3.2)

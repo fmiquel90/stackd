@@ -78,6 +78,7 @@ _COPIED = (
     "require_second_pair_of_eyes",
     "managed_state",
     "drift_check_enabled",
+    "var_files",  # same stack, same repo: like the env variables, copied as they are (§21.2)
     "position",
 )
 

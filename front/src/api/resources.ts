@@ -75,6 +75,7 @@ export interface StackPatch {
   repo_secret?: string; // write-only; "" clears it, omit to keep
   webhook_secret?: string; // write-only HMAC secret; "" clears it, omit to keep
   project_root?: string;
+  trigger_paths?: string[];
   tool?: Tool;
   tool_version?: string;
   labels?: Record<string, string> | null;
@@ -177,6 +178,7 @@ export interface EnvironmentPatch {
   drift_check_enabled?: boolean;
   backend_config_file?: string | null;
   backend_config?: Record<string, string> | null;
+  var_files?: string[];
   labels?: Record<string, string> | null;
 }
 

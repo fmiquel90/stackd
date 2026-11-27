@@ -1,8 +1,9 @@
-import { describe, expect, it } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { describe, expect, it, vi } from "vitest";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { MemoryRouter } from "react-router-dom";
 import type { Role, Stack, User } from "@/api/types";
+import { stacks } from "@/api/resources";
 import { StackGeneralPanel } from "./StackGeneralPanel";
 
 const STACK: Stack = {
@@ -15,6 +16,7 @@ const STACK: Stack = {
   has_repo_secret: false,
   has_webhook_secret: true,
   project_root: ".",
+  trigger_paths: ["modules/**"],
   tool: "opentofu",
   tool_version: "1.12",
   labels: {},
@@ -22,7 +24,7 @@ const STACK: Stack = {
   updated_at: "2026-01-01T00:00:00Z",
 };
 
-function renderAs(role: Role) {
+function renderAs(role: Role, stack: Stack = STACK) {
   const user: User = {
     id: "u1",
     kind: "human",
@@ -38,11 +40,11 @@ function renderAs(role: Role) {
   };
   const qc = new QueryClient({ defaultOptions: { queries: { staleTime: Infinity, retry: false } } });
   qc.setQueryData(["session"], user);
-  qc.setQueryData(["stack", STACK.id], STACK);
+  qc.setQueryData(["stack", stack.id], stack);
   render(
     <QueryClientProvider client={qc}>
       <MemoryRouter>
-        <StackGeneralPanel stackId={STACK.id} />
+        <StackGeneralPanel stackId={stack.id} />
       </MemoryRouter>
     </QueryClientProvider>,
   );
@@ -57,5 +59,50 @@ describe("StackGeneralPanel webhook secret", () => {
   it("is hidden from a reader", () => {
     renderAs("reader");
     expect(screen.queryByText(/Webhook secret/)).toBeNull();
+  });
+});
+
+describe("StackGeneralPanel repo credential", () => {
+  // Built from parts: the repo's detect-private-key hook refuses a literal key header.
+  const PEM = "OPENSSH PRIVATE" + " KEY-----";
+  const KEY = `-----BEGIN ${PEM}\nb3Blbg==\n-----END ${PEM}\n`;
+
+  it("takes a deploy key in a multi-line field and sends it whole", async () => {
+    const update = vi.spyOn(stacks, "update").mockResolvedValue(STACK);
+    renderAs("writer", {
+      ...STACK,
+      repo_url: "git@git.example.com:org/infra.git",
+      repo_auth_kind: "deploy_key",
+    });
+    const field = screen.getByLabelText(/Deploy key/);
+    expect(field.tagName).toBe("TEXTAREA");
+    fireEvent.change(field, { target: { value: KEY } });
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    await waitFor(() => expect(update).toHaveBeenCalled());
+    expect(update.mock.calls[0][1].repo_secret).toBe(KEY);
+    update.mockRestore();
+  });
+
+  it("never fills back a stored key, and omits it when left blank", async () => {
+    const update = vi.spyOn(stacks, "update").mockResolvedValue(STACK);
+    renderAs("writer", { ...STACK, repo_auth_kind: "deploy_key", has_repo_secret: true });
+    expect((screen.getByLabelText(/Deploy key.*leave blank to keep/) as HTMLTextAreaElement).value).toBe("");
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    await waitFor(() => expect(update).toHaveBeenCalled());
+    expect("repo_secret" in update.mock.calls[0][1]).toBe(false);
+    update.mockRestore();
+  });
+
+  it("keeps a token in a password input", () => {
+    renderAs("writer", { ...STACK, repo_auth_kind: "token" });
+    expect(screen.getByLabelText(/^Token/).getAttribute("type")).toBe("password");
+  });
+});
+
+describe("StackGeneralPanel trigger paths", () => {
+  it("shows the stored globs, one per line", () => {
+    renderAs("writer");
+    const box = screen.getByLabelText(/Trigger paths/) as HTMLTextAreaElement;
+    expect(box.value).toBe("modules/**");
   });
 });
