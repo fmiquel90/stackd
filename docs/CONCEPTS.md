@@ -631,6 +631,10 @@ bypasses the apply gate.
   already ran with them). The outcome lands on the environment's `drift_status` — `drifted` (eligible
   approvers get an inbox alert), `in_sync` or `error` — and a successful apply clears it (not a
   targeted `-target` apply, which is partial). Drift is never auto-remediated.
+- **Changes made outside Stackd.** With `managed_state: false` someone can still apply by hand. Each
+  job of reviewed code reads the state's `serial`/`lineage` (nothing else) and the API compares them
+  with the last pair it saw: a difference flags the environment `⇄ CHANGED OUTSIDE`, notifies its
+  approvers and is audited, until a full apply or a human's acknowledgement (SPECS §19.7).
 - **Environment clones & rollouts.** `POST /api/v1/spaces/{space_id}/environment-clones` creates, in
   several stacks of a space at once, an environment modelled on an existing one — settings,
   governance and dependency edges. A **rollout** then plans and applies a set of environments along
@@ -688,10 +692,11 @@ bypasses the apply gate.
 | **Outbox** | run-event notifications enqueued in-txn, drained by the scheduler (at-least-once) |
 | **Cancel / stop** | ends a waiting run at once; asks the worker to stop an executing one (`failed` if it held apply credentials) |
 | **Drift run** | scheduled read-only `-refresh-only` plan of the applied commit; sets `drift_status`, never remediates |
+| **Out-of-band change** | an unmanaged state's serial/lineage differs from the last Stackd observed: written outside Stackd; flagged until a full apply or an acknowledgement |
 | **Environment clone** | one-shot creation of an environment in several stacks, modelled on an existing one |
 | **Rollout** | plan → apply of a set of environments along their dependencies under one approval |
 | **Plan comment** | threaded, optionally anchored review comment on a run; advisory |
-| **Inbox** | per-user in-app notifications (approval requests, run outcomes, mentions, drift, rollouts) |
+| **Inbox** | per-user in-app notifications (approval requests, run outcomes, mentions, drift, out-of-band changes, rollouts) |
 | **Secret source** | external secrets manager a variable references; fetched at claim, never stored |
 | **Service account** | a non-human user for automation, with expiring API tokens; reads and plans, never confirms (SPECS §23) |
 | **Config export / import** | a space's configuration as a JSON document by names (no secret); imported back by merge, never deleting (SPECS §22) |

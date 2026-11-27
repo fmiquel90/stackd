@@ -67,7 +67,7 @@ exhaustive list):
 | Auth | `GET /auth/google/start` + `/callback`, `POST /auth/refresh`, `POST /auth/logout`, `GET /auth/me`, `POST /auth/me/onboarded`; dev only: `GET /auth/dev/personas`, `POST /auth/dev/login` |
 | Spaces | `GET/POST /spaces`, `GET/PUT /spaces/{id}/members`, `DELETE /spaces/{id}/members/{user_id}`, secret sources under `/spaces/{id}/secret-sources`, `POST /spaces/{id}/environment-clones`, configuration `GET /spaces/{id}/export` / `POST /spaces/{id}/import[?dry_run=true]` (space admin, [Backup & restore](guide/backup-restore.md)) |
 | Stacks | `GET/POST /stacks`, `GET/PATCH/DELETE /stacks/{id}` (409 while a run is active), `POST /stacks/{id}/check-repo` |
-| Environments | `POST /stacks/{id}/environments`, `GET /environments/{id}/resolved-variables`, `POST /environments/{id}/refresh-head`, `POST /environments/{id}/discover-inputs` |
+| Environments | `POST /stacks/{id}/environments`, `GET /environments/{id}/resolved-variables`, `POST /environments/{id}/refresh-head`, `POST /environments/{id}/discover-inputs`, `POST /environments/{id}/out-of-band-change/acknowledge` (a state changed outside Stackd, SPECS §19.7) |
 | Variables & sets | variables CRUD (stack/env/set), variable sets + attachments (tier/stack/env of the set's space) |
 | Runs | `POST /environments/{id}/runs` (optional `targets`/`replace`: a targeted / replace plan), `/commands` (incl. `force-unlock` on an unmanaged backend, admin), `/promote`; `GET /environments/{id}/runs`; `GET /runs/{id}`, `POST /runs/{id}/confirm`/`discard`/`cancel`, `GET /runs/{id}/logs` (+ `/logs/download`)/`plan`/`checks`, `POST /runs/{id}/vcs/resync` |
 | Rollouts | `GET/POST /rollouts`, `GET /rollouts/{id}`, `POST /rollouts/{id}/approve`/`retry`/`cancel` |

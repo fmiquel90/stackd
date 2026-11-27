@@ -78,6 +78,16 @@ export function attentionOf(entry: EnvEntry, envHref: string): AttentionItem | n
       href: env.drift_run_id ? `/runs/${env.drift_run_id}?tab=plan` : envHref,
     };
   }
+  if (summary.modifiers.outOfBand) {
+    return {
+      group: "drift",
+      entry,
+      run: null,
+      stalePlan: false,
+      reason: "the state was changed outside Stackd",
+      href: envHref,
+    };
+  }
   return null;
 }
 
@@ -121,7 +131,7 @@ export function matchesState(entry: EnvEntry, f: StateFilter, envHref: string): 
     case "failed":
       return summary.outcome === "failed" || summary.outcome === "failed_during_apply";
     case "drift":
-      return !!summary.modifiers.drift;
+      return !!summary.modifiers.drift || summary.modifiers.outOfBand;
     case "stale":
       return !!summary.modifiers.stale;
   }

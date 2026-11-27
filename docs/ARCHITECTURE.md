@@ -153,6 +153,13 @@ read and lock while planning, never write), `rw` (an apply or a mutating command
 apply budget + grace). A token whose run has ended can no longer write or lock. The worker hands it
 to tofu only, as `TF_HTTP_*` environment variables — hooks never see it.
 
+**State observed on unmanaged backends.** On a `managed_state: false` environment, a job of
+reviewed code (tracked/destroy/drift plan, apply, mutating command) is handed `observe_state`: after
+`init` the worker runs `state pull` into memory and reports the state's `serial` and `lineage` only
+(`state_observed`), and again after the apply / command as the new baseline. The API flags the
+environment when a check differs from the last pair it saw — a write made outside Stackd (SPECS
+§19.7). Best effort: never fails nor moves the run.
+
 **Hooks and checks.** Platform hooks run first, then the repo's `.stackd.yml` hooks; a repo hook gets
 no secret (an allowlisted env, a masked `plan.json`, no tfvars or token file on disk). Every check
 result, with the stage it ran at, is kept on the run (`check_results`). A failing `fail` check stops

@@ -6,6 +6,8 @@ import { isActive, outcomeOf, type Outcome } from "./runOutcome";
 
 export interface EnvModifiers {
   drift: "drifted" | "error" | null;
+  /** The state was written outside Stackd (SPECS §19.7, unmanaged state). */
+  outOfBand: boolean;
   /** Branch head ahead of the deployed commit; `commitsAhead` is null until the API computes it. */
   stale: { commitsAhead: number | null; affectsProjectRoot: boolean | null } | null;
   locked: boolean;
@@ -53,6 +55,7 @@ export function summarizeEnv(env: Environment, runs: Run[]): EnvSummary {
     deployedSha: deployed?.commit_sha ?? null,
     modifiers: {
       drift: env.drift_status === "drifted" || env.drift_status === "error" ? env.drift_status : null,
+      outOfBand: env.out_of_band_change !== null,
       stale: env.stale
         ? { commitsAhead: env.commits_ahead, affectsProjectRoot: env.affects_project_root }
         : null,
@@ -68,7 +71,7 @@ export function summarizeEnv(env: Environment, runs: Run[]): EnvSummary {
 export function severity(s: EnvSummary): number {
   if (s.primary?.state === "unconfirmed") return 0;
   if (s.outcome === "failed" || s.outcome === "failed_during_apply") return 1;
-  if (s.modifiers.drift) return 2;
+  if (s.modifiers.drift || s.modifiers.outOfBand) return 2;
   if (s.active) return 3;
   if (s.primary) return 4;
   return 5;

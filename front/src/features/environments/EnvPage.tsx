@@ -19,7 +19,7 @@ import { NewEnvironmentDialog, useCloneEntries } from "@/features/rollouts/NewEn
 import { EnvCell } from "@/identity/EnvCell";
 import { ModifierChips } from "@/identity/StateBadge";
 import { summarizeEnv } from "@/lib/envSummary";
-import { needsYouOn } from "@/lib/permissions";
+import { applyReasonsOn, needsYouOn } from "@/lib/permissions";
 import { Button } from "@/ui/Button";
 import { Dialog, DialogContent, Menu, MenuContent, MenuItem, MenuTrigger } from "@/ui/overlays";
 import {
@@ -107,6 +107,10 @@ export function EnvPage() {
     mutationFn: () => environments.refreshHead(env!.id),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["environments", env!.stack_id] }),
   });
+  const acknowledge = useMutation({
+    mutationFn: () => environments.acknowledgeOutOfBand(env!.id),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["environments", env!.stack_id] }),
+  });
 
   if (stackList.isLoading || envs.isLoading) return <Skeleton className="h-64 w-full" />;
   if (!space || !stack || !env)
@@ -136,7 +140,8 @@ export function EnvPage() {
   const stackPath = `/s/${encodeURIComponent(space.name)}/stacks/${encodeURIComponent(stack.name)}`;
   const emailOf = (id: string | null) => (id ? (people.data?.find((u) => u.id === id)?.email ?? null) : null);
   const siblings = (envs.data ?? []).filter((e) => e.id !== env.id).map((e) => ({ id: e.id, name: e.name }));
-  const error = [plan, refresh, rollOut].find((m) => m.error)?.error;
+  const error = [plan, refresh, rollOut, acknowledge].find((m) => m.error)?.error;
+  const oob = env.out_of_band_change;
 
   return (
     <div className="flex flex-col gap-4">
@@ -236,6 +241,32 @@ export function EnvPage() {
                     {" "}
                     · checked <RelativeTime value={env.last_drift_checked_at} />
                   </>
+                )}
+              </span>
+            )}
+            {oob && (
+              <span className="flex flex-wrap items-center gap-2">
+                <ModifierChips modifiers={{ outOfBand: true }} />
+                <span className="text-muted">
+                  serial <span className="font-data">{oob.expected_serial ?? "none"}</span> expected,{" "}
+                  <span className="font-data">{oob.observed_serial ?? "none"}</span> found
+                  {oob.observed_lineage !== oob.expected_lineage && " (another state lineage)"} ·{" "}
+                  <RelativeTime value={oob.detected_at} />
+                </span>
+                {oob.run_id && (
+                  <Link to={`/runs/${oob.run_id}`} className="underline underline-offset-2">
+                    seen by this run
+                  </Link>
+                )}
+                {me && applyReasonsOn(env, me).length === 0 && (
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    loading={acknowledge.isPending}
+                    onClick={() => acknowledge.mutate()}
+                  >
+                    Acknowledge
+                  </Button>
                 )}
               </span>
             )}

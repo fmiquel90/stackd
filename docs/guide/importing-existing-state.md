@@ -30,6 +30,29 @@ by default) re-plans it read-only (`-refresh-only`) every 6 h (`STACKD_DRIFT_INT
     must have access to your state bucket (and lock table, if any). You keep your own locking; you
     don't get Stackd's scoped state tokens / visible locking for this env.
 
+### Changes made outside Stackd
+
+With your own backend, `tofu apply` by hand stays possible — a fallback during an incident, or while
+a team moves over. Stackd then no longer knows what is deployed: its last applied commit, the
+outputs it propagates to downstream environments, the branch-ahead marker all describe the state
+*it* left. So every job of reviewed code (a plan of the tracked branch, a drift check, an apply, a
+mutating command) reads the state's `serial` and `lineage` — `tofu state pull`, kept in the
+worker's memory, nothing else of the state ever leaving it — and compares them with the last pair
+Stackd saw. Any difference means someone wrote the state outside Stackd: the environment shows
+`⇄ CHANGED OUTSIDE` (overview and environment page, with the expected and found serials), the users
+who may apply on it get an inbox notification, and the audit log records
+`environment.out_of_band_change_detected`.
+
+The marker clears when Stackd applies a full plan on the environment again — that plan was computed
+on the changed state and reviewed — or when someone who may apply there clicks **Acknowledge**
+(`POST /api/v1/environments/{id}/out-of-band-change/acknowledge`), e.g. once the hand-made change is
+also in the code. An empty plan does not clear it: the outputs Stackd recorded may predate the
+change. Changing the environment's backend settings starts over from the next observed state.
+
+It is best effort: a failed read only logs a warning, and a commit that changes the backend `key`
+also reads as a change (acknowledge it). Managed-state environments need none of this: every state
+write goes through Stackd. Details: [SPECS §19.7](../SPECS.md).
+
 ## Path 2 — adopt Stackd-managed state (`managed_state: true`)
 
 Hand state to Stackd (state in S3 behind its HTTP backend, per-job scoped tokens, visible locking,

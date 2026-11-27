@@ -127,6 +127,26 @@ describe("EnvCell", () => {
     const row = screen.getByText(/failed during apply/i).closest("span.flex");
     expect(row?.className).toContain("flex-wrap");
   });
+  it("says in words, with a glyph, that the state changed outside Stackd (SPECS §19.7)", () => {
+    const run = makeRun({ state: "finished", confirmed_at: "x", finished_at: "2026-10-10T20:02:00Z" });
+    const changed = makeEnv({
+      managed_state: false,
+      out_of_band_change: {
+        detected_at: "2026-11-20T10:00:00Z",
+        run_id: "run-9",
+        expected_serial: 41,
+        expected_lineage: "lin-a",
+        observed_serial: 43,
+        observed_lineage: "lin-a",
+      },
+    });
+    const { rerender } = render(<EnvCell summary={summarizeEnv(changed, [run])} />);
+    const chip = screen.getByText("OUTSIDE");
+    expect(chip.closest("[title]")?.getAttribute("title")).toMatch(/changed outside Stackd/);
+    expect(chip.parentElement?.textContent).toContain("⇄");
+    rerender(<EnvCell summary={summarizeEnv(makeEnv(), [run])} />);
+    expect(screen.queryByText("OUTSIDE")).toBeNull();
+  });
 });
 
 describe("RunActionBar — stopping a run a worker executes", () => {
