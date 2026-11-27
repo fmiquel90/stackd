@@ -1319,7 +1319,7 @@ exhaustive list):</p>
 </tr>
 <tr>
 <td>Environments</td>
-<td><code>POST /stacks/{id}/environments</code>, <code>GET/PATCH/DELETE /environments/{id}</code> (settings, incl. the repo <code>var_files</code> passed as <code>-var-file=</code>, SPECS §3.4), <code>GET /environments/{id}/resolved-variables</code>, <code>POST /environments/{id}/refresh-head</code>, <code>POST /environments/{id}/discover-inputs</code></td>
+<td><code>POST /stacks/{id}/environments</code>, <code>GET/PATCH/DELETE /environments/{id}</code> (settings, incl. the repo <code>var_files</code> passed as <code>-var-file=</code>, SPECS §3.4), <code>GET /environments/{id}/resolved-variables</code>, <code>POST /environments/{id}/refresh-head</code>, <code>POST /environments/{id}/discover-inputs</code>, <code>POST /environments/{id}/out-of-band-change/acknowledge</code> (a state changed outside Stackd, SPECS §19.7)</td>
 </tr>
 <tr>
 <td>Variables &amp; sets</td>

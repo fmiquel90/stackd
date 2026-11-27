@@ -2622,6 +2622,12 @@ Two forms:</p>
 <td>neutral per SPECS §19.5 — a fact to investigate, not a decision</td>
 </tr>
 <tr>
+<td>Changed outside</td>
+<td><code>⇄ CHANGED OUTSIDE</code> (compact <code>⇄ OUTSIDE</code>)</td>
+<td><code>text-primary</code></td>
+<td>unmanaged state written outside Stackd since its last observation (SPECS §19.7) — neutral, like drift</td>
+</tr>
+<tr>
 <td>Locked</td>
 <td><code>⚿ LOCKED</code></td>
 <td><code>text-primary</code></td>
@@ -2819,10 +2825,10 @@ is reserved to the decision. Zero counts are rendered in <code>text-secondary</c
 <td>—</td>
 </tr>
 <tr>
-<td>Drift, stale, lock, PR</td>
+<td>Drift, changed outside, stale, lock, PR</td>
 <td>no hue</td>
-<td><code>≈ ↑ ⚿ PR</code></td>
-<td>DRIFT / ↑3 / LOCKED / PR</td>
+<td><code>≈ ⇄ ↑ ⚿ PR</code></td>
+<td>DRIFT / CHANGED OUTSIDE / ↑3 / LOCKED / PR</td>
 </tr>
 <tr>
 <td>Diff create / destroy / replace / update</td>
@@ -3043,7 +3049,7 @@ disabled from the user menu or Settings → Preferences (WCAG 2.1.4); the settin
 </code></pre></div>
 <p><strong>Attention zone</strong> (pinned above the matrix, never auto-collapsed while it holds a <em>needs you</em> item):</p>
 <ul>
-<li>Groups, in order: <strong>Needs you</strong> (unconfirmed, the user can confirm), <strong>Waiting on someone</strong> (unconfirmed, the user cannot confirm — with the missing condition in words), <strong>Blocked</strong> (unconfirmed, and nobody can confirm: mocked or fallback with apply not allowed on the env), <strong>Failed</strong> (env's primary run failed, during apply or before), <strong>Drift</strong> (<code>drifted</code> or check error). A row appears in the first matching group only. A stale plan (unconfirmed run whose commit ≠ env head) is a <code>↑ stale plan</code> tag on its row — every unconfirmed run already falls in one of the first three groups.</li>
+<li>Groups, in order: <strong>Needs you</strong> (unconfirmed, the user can confirm), <strong>Waiting on someone</strong> (unconfirmed, the user cannot confirm — with the missing condition in words), <strong>Blocked</strong> (unconfirmed, and nobody can confirm: mocked or fallback with apply not allowed on the env), <strong>Failed</strong> (env's primary run failed, during apply or before), <strong>Drift</strong> (<code>drifted</code>, check error, or a state changed outside Stackd — SPECS §19.7). A row appears in the first matching group only. A stale plan (unconfirmed run whose commit ≠ env head) is a <code>↑ stale plan</code> tag on its row — every unconfirmed run already falls in one of the first three groups.</li>
 <li>Row: badge (compact) + <code>stack / env</code> + plan summary + who/age + the reason or next step + Enter target (the run page: Plan tab for decisions, Logs tab — opening at the first error — for failures; for drift, the drift run's Plan tab, else the env page).</li>
 <li>Empty zone: one line, "Nothing needs attention in demo." — not hidden, so its absence is never ambiguous.</li>
 </ul>
@@ -3051,7 +3057,7 @@ disabled from the user menu or Settings → Preferences (WCAG 2.1.4); the settin
 <ul>
 <li>Rows = stacks of the space, by name (sorting by "worst state" or last activity is <strong>[not built yet]</strong>). Columns = environment <strong>names</strong> present in the space, ordered by tier <code>position</code>, then env <code>position</code>, then name; a stack without that env shows <code>—</code>. A column header shows the env name, plus <code>four-eyes</code> when every env in the column is on a <code>requires_four_eyes</code> tier.</li>
 <li>Sticky header row and first column. A wide matrix scrolls horizontally inside its own container, never the page.</li>
-<li><strong><code>EnvCell</code></strong> (one per env, 180 px min): line 1 = mini rail + compact state badge (wrapping under the rail when the cell is narrow); line 2 = relative age (+ plan summary when unconfirmed) + modifiers (<code>↑</code> <code>≈</code> <code>⚿</code> <code>◆</code> <code>◈</code> <code>PR</code>). Cell background stays the matrix's <code>bg-surface</code>, except <code>decision-tint</code> when the cell <em>needs you</em>.</li>
+<li><strong><code>EnvCell</code></strong> (one per env, 180 px min): line 1 = mini rail + compact state badge (wrapping under the rail when the cell is narrow); line 2 = relative age (+ plan summary when unconfirmed) + modifiers (<code>↑</code> <code>≈</code> <code>⇄</code> <code>⚿</code> <code>◆</code> <code>◈</code> <code>PR</code>). Cell background stays the matrix's <code>bg-surface</code>, except <code>decision-tint</code> when the cell <em>needs you</em>.</li>
 <li><strong>Selection details</strong>: clicking or focusing a cell selects it (<code>?sel=stack/env</code>) and opens a panel under the matrix: <code>stack / env</code>, tier, branch, modifiers, deployed commit, branch head, active run or last outcome with who/age, "Confirm needs …" for a pending run, and the actions the user can take (Show downstream, Open run, Open environment, Plan — writer+, when no run is active). A hover popover on the cell is <strong>[not built yet]</strong>.</li>
 <li><strong>Cascade preview on demand</strong>: <code>s</code> (or "Show downstream" in the selection panel; <code>?cascade=1</code>) outlines the selected cell's downstream cells (BFS over <code>GET /graph</code> edges) with a dashed selection mark and a <code>↳ will plan</code> / <code>↳ plans if outputs change</code> line, and the panel lists them ("demo-app/prod (if outputs change)"). <code>s</code> again or "Hide downstream" clears.</li>
 <li><strong>Filters</strong> in a top bar, reflected in the URL: text (stack or env name), state (All, Needs attention, Needs you, Running, Failed, Drift, Branch ahead), tier. Filtering by state hides non-matching rows, not cells.</li>
@@ -3293,7 +3299,7 @@ variables, hooks, notifications, secret sources; URL <code>?tab=settings&amp;sub
 </ul>
 <p><strong>Environment page</strong> <code>/s/:space/stacks/:stack/envs/:env</code> (new in v2):</p>
 <ul>
-<li><strong>Header</strong>: <code>stack / env</code>, badges (tier, <code>four-eyes</code>, <code>protected</code>, <code>second pair of eyes</code>, <code>autodeploy</code>, <code>managed state</code>); a summary strip with the env's <code>EnvCell</code> (active run or last outcome), branch, deployed commit and head (<code>↑</code> when ahead; a Refresh button, writer+), drift (<code>≈ DRIFT</code> + "see the drift" → drift run, or "No drift detected · checked 1h ago" / "Drift detection off"), lock.</li>
+<li><strong>Header</strong>: <code>stack / env</code>, badges (tier, <code>four-eyes</code>, <code>protected</code>, <code>second pair of eyes</code>, <code>autodeploy</code>, <code>managed state</code>); a summary strip with the env's <code>EnvCell</code> (active run or last outcome), branch, deployed commit and head (<code>↑</code> when ahead; a Refresh button, writer+), drift (<code>≈ DRIFT</code> + "see the drift" → drift run, or "No drift detected · checked 1h ago" / "Drift detection off"), a state changed outside Stackd (<code>⇄ CHANGED OUTSIDE</code> + "serial 41 expected, 43 found · 2h ago", "seen by this run" → the run that saw it, and <em>Acknowledge</em> for a user passing <code>can_apply</code>, SPECS §19.7), lock.</li>
 <li><strong>Primary actions</strong> (writer+): <strong>Plan</strong> (primary button), and a "More" menu: Plan with downstream (<code>with_downstream</code>), Promote from a sibling… (SPECS §9.7), Run a command… (allowlist, SPECS §4.3), New environment from… (this env preselected as the model), Roll out every “<name>” environment… (SPECS §21, DESIGN §5.11) and Plan a destroy… (shown only with <code>can_destroy</code>; opens a dialog explaining the run will need typed confirmation at apply).</li>
 <li><strong>Tabs</strong> (URL): <strong>Runs</strong> (default) — history table: run short ID, kind (<code>tracked</code>, <code>destroy</code>, <code>PR</code>, <code>drift</code>, <code>command</code>), outcome badge, mini rail, commit, trigger (who/how), start, duration; filter by kind (<code>?kind=</code>); paginated client-side, 50 at a time <strong>[today]</strong>. <strong>Inputs</strong> (Resolved with provenance / Environment overrides / Discover inputs), <strong>Outputs</strong>, <strong>Dependencies</strong>, <strong>State</strong> (versions; force-unlock admin-only per §5.7), <strong>Settings</strong> (name, tier, branch, flags with the §5.7 friction, backend config, variable files (one repo path per line, in <code>-var-file</code> order, SPECS §3.4), labels, hooks, notifications, cloud integration — default plan/apply roles, then its named AWS profiles as rows of name + roles + region, SPECS §10.6), and a <strong>Danger zone</strong> at the bottom of Settings (delete environment, typed name).</li>
 </ul>

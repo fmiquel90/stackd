@@ -2464,6 +2464,10 @@ bypasses the apply gate.</p>
   already ran with them). The outcome lands on the environment's <code>drift_status</code> — <code>drifted</code> (eligible
   approvers get an inbox alert), <code>in_sync</code> or <code>error</code> — and a successful apply clears it (not a
   targeted <code>-target</code> apply, which is partial). Drift is never auto-remediated.</li>
+<li><strong>Changes made outside Stackd.</strong> With <code>managed_state: false</code> someone can still apply by hand. Each
+  job of reviewed code reads the state's <code>serial</code>/<code>lineage</code> (nothing else) and the API compares them
+  with the last pair it saw: a difference flags the environment <code>⇄ CHANGED OUTSIDE</code>, notifies its
+  approvers and is audited, until a full apply or a human's acknowledgement (SPECS §19.7).</li>
 <li><strong>Environment clones &amp; rollouts.</strong> <code>POST /api/v1/spaces/{space_id}/environment-clones</code> creates, in
   several stacks of a space at once, an environment modelled on an existing one — settings,
   governance and dependency edges. A <strong>rollout</strong> then plans and applies a set of environments along
@@ -2604,6 +2608,10 @@ bypasses the apply gate.</p>
 <td>scheduled read-only <code>-refresh-only</code> plan of the applied commit; sets <code>drift_status</code>, never remediates</td>
 </tr>
 <tr>
+<td><strong>Out-of-band change</strong></td>
+<td>an unmanaged state's serial/lineage differs from the last Stackd observed: written outside Stackd; flagged until a full apply or an acknowledgement</td>
+</tr>
+<tr>
 <td><strong>Environment clone</strong></td>
 <td>one-shot creation of an environment in several stacks, modelled on an existing one</td>
 </tr>
@@ -2617,7 +2625,7 @@ bypasses the apply gate.</p>
 </tr>
 <tr>
 <td><strong>Inbox</strong></td>
-<td>per-user in-app notifications (approval requests, run outcomes, mentions, drift, rollouts)</td>
+<td>per-user in-app notifications (approval requests, run outcomes, mentions, drift, out-of-band changes, rollouts)</td>
 </tr>
 <tr>
 <td><strong>Secret source</strong></td>

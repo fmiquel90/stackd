@@ -2184,6 +2184,17 @@
   
 </li>
         
+          <li class="md-nav__item">
+  <a href="#197-out-of-band-state-changes-unmanaged-state" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        19.7 Out-of-band state changes (unmanaged state)
+      
+    </span>
+  </a>
+  
+</li>
+        
       </ul>
     </nav>
   
@@ -3799,6 +3810,17 @@
   
 </li>
         
+          <li class="md-nav__item">
+  <a href="#197-out-of-band-state-changes-unmanaged-state" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        19.7 Out-of-band state changes (unmanaged state)
+      
+    </span>
+  </a>
+  
+</li>
+        
       </ul>
     </nav>
   
@@ -4276,7 +4298,7 @@ migration). The WS <code>run:</code>/<code>environment:</code> subscriptions are
 <a id="__codelineno-5-18" name="__codelineno-5-18" href="#__codelineno-5-18"></a>locked bool, labels jsonb, position int,
 <a id="__codelineno-5-19" name="__codelineno-5-19" href="#__codelineno-5-19"></a>created_at, updated_at
 </code></pre></div>
-<p>The external-secret (<code>allow_fallback_apply</code>, §15.5), unmanaged-backend (<code>backend_config_file</code>, <code>backend_config</code>, §11.3) and drift (§19) columns are listed in their own sections.</p>
+<p>The external-secret (<code>allow_fallback_apply</code>, §15.5), unmanaged-backend (<code>backend_config_file</code>, <code>backend_config</code>, §11.3), drift (§19) and out-of-band state (<code>state_serial</code>, <code>out_of_band_*</code>, §19.7) columns are listed in their own sections.</p>
 <p>Why not Terraform workspaces: weak isolation (shared code/backend/credentials, state suffix), easy targeting mistakes. A Stackd environment = physically separate state, variables, protections and its own worker pool.</p>
 <p><strong>Deletion.</strong> Deleting an environment — or a stack, which takes its environments with it — is refused with <strong>409 <code>Active run</code></strong> (problem+json carrying <code>run_id</code>) while one of them has a run in an active state (§3.5): the cascade would remove that run outside <code>transition()</code> (§4.2) while a worker executes it — and with <strong>409 <code>Active rollout</code></strong> (carrying <code>rollout_id</code>) while one is a member of a rollout in progress (§21.3). Queued runs go with their environment. Everything that targets what is deleted by <code>target_kind</code>/<code>target_id</code> (no FK) is removed in the same transaction, each removal audited with a <code>reason</code> (<code>stack_deleted</code> | <code>environment_deleted</code>): variable-set attachments (§3.4, <code>variable_set.detached</code>), platform hooks (§8.1, <code>hook.deleted</code>) and notification targets (<code>notification_target.deleted</code>). The deletion holds the stack/env rows <code>FOR UPDATE</code>; attaching one of these to a stack or an env locks that row <code>FOR KEY SHARE</code> until it commits, so an attach either waits and then finds no target (404) or commits first and is removed by the deletion — never an orphan.</p>
 <h3 id="33-variables-stack-and-environment-level">3.3 <code>variables</code> — stack and environment level<a class="headerlink" href="#33-variables-stack-and-environment-level" title="Permanent link">&para;</a></h3>
@@ -4776,61 +4798,65 @@ application code. A chunk ingested after its run was archived is not re-archived
 <a id="__codelineno-23-8" name="__codelineno-23-8" href="#__codelineno-23-8"></a>environment.head_refreshed        # manual head refresh (§9.6) — context: branch, old_sha, new_sha
 <a id="__codelineno-23-9" name="__codelineno-23-9" href="#__codelineno-23-9"></a>environment.inputs_discovered     # discover-inputs created placeholder env variables (§20.3)
 <a id="__codelineno-23-10" name="__codelineno-23-10" href="#__codelineno-23-10"></a>environment.drift_detected / environment.drift_cleared               # §19.4
-<a id="__codelineno-23-11" name="__codelineno-23-11" href="#__codelineno-23-11"></a>variable.created / variable.updated / variable.deleted   # stack, env and set variables — context:
-<a id="__codelineno-23-12" name="__codelineno-23-12" href="#__codelineno-23-12"></a>                                                          #   name, sensitive — NEVER the value
-<a id="__codelineno-23-13" name="__codelineno-23-13" href="#__codelineno-23-13"></a>variable_set.created / variable_set.updated / variable_set.deleted
-<a id="__codelineno-23-14" name="__codelineno-23-14" href="#__codelineno-23-14"></a>variable_set.attached / variable_set.detached   # detached: manual, or with its target — context
-<a id="__codelineno-23-15" name="__codelineno-23-15" href="#__codelineno-23-15"></a>                                                #   reason = stack_deleted | environment_deleted
-<a id="__codelineno-23-16" name="__codelineno-23-16" href="#__codelineno-23-16"></a>                                                #   | tier_deleted (§3.2, §3.4)
-<a id="__codelineno-23-17" name="__codelineno-23-17" href="#__codelineno-23-17"></a>hook.created / hook.updated / hook.deleted      # deleted: manual, or with its stack/env (reason, §3.2)
-<a id="__codelineno-23-18" name="__codelineno-23-18" href="#__codelineno-23-18"></a>notification_target.created / notification_target.updated / notification_target.deleted
-<a id="__codelineno-23-19" name="__codelineno-23-19" href="#__codelineno-23-19"></a>                                                # deleted: manual, or with its stack/env (reason, §3.2)
-<a id="__codelineno-23-20" name="__codelineno-23-20" href="#__codelineno-23-20"></a>run.triggered / run.destroy_triggered / run.command_triggered / run.promoted   # §4.3, §9.7
-<a id="__codelineno-23-21" name="__codelineno-23-21" href="#__codelineno-23-21"></a>                                  # triggered / destroy_triggered: context environment_id, type,
-<a id="__codelineno-23-22" name="__codelineno-23-22" href="#__codelineno-23-22"></a>                                  #   tier, + plan_options for a targeted / replace plan (§3.5)
-<a id="__codelineno-23-23" name="__codelineno-23-23" href="#__codelineno-23-23"></a>                                  # run.triggered by the system: context via = cascade (§9.2) |
-<a id="__codelineno-23-24" name="__codelineno-23-24" href="#__codelineno-23-24"></a>                                  #   rollout (§21.4: rollout_id, environment_id, commit)
-<a id="__codelineno-23-25" name="__codelineno-23-25" href="#__codelineno-23-25"></a>run.confirmed ⭐                  # a human confirm, or the system: on autodeploy (context
-<a id="__codelineno-23-26" name="__codelineno-23-26" href="#__codelineno-23-26"></a>                                  #   autodeploy), or under a rollout&#39;s approval (context via =
-<a id="__codelineno-23-27" name="__codelineno-23-27" href="#__codelineno-23-27"></a>                                  #   rollout, rollout_id, approved_by, approved_by_email, §21.5)
-<a id="__codelineno-23-28" name="__codelineno-23-28" href="#__codelineno-23-28"></a>run.cancel_requested              # a user asked the worker to stop an executing run (§4.1) — once per run;
-<a id="__codelineno-23-29" name="__codelineno-23-29" href="#__codelineno-23-29"></a>                                  #   or the system, for a closed PR&#39;s proposed run (reason pr_closed, §18.3)
-<a id="__codelineno-23-30" name="__codelineno-23-30" href="#__codelineno-23-30"></a>run.discarded / run.canceled      # canceled: also the worker, on `job_canceled` (context reason cancel_requested); a user, or the system when a PR closes (reason pr_closed);
-<a id="__codelineno-23-31" name="__codelineno-23-31" href="#__codelineno-23-31"></a>                                  #   a rollout&#39;s cancel: the canceller, context via = rollout (§21.8)
-<a id="__codelineno-23-32" name="__codelineno-23-32" href="#__codelineno-23-32"></a>run.plan_finished                 # plan-only terminal: empty diff, or a proposed/drift run
-<a id="__codelineno-23-33" name="__codelineno-23-33" href="#__codelineno-23-33"></a>run.applied ⭐ / run.command_executed
-<a id="__codelineno-23-34" name="__codelineno-23-34" href="#__codelineno-23-34"></a>run.apply_failed                  # any failed run, whatever its phase, unless a check failed it —
-<a id="__codelineno-23-35" name="__codelineno-23-35" href="#__codelineno-23-35"></a>                                  #   context phase, or reason: cancel_requested (a stopped apply, §4.1) |
-<a id="__codelineno-23-36" name="__codelineno-23-36" href="#__codelineno-23-36"></a>                                  #   worker_lost | commit_mismatch | dependency | secret | oidc
-<a id="__codelineno-23-37" name="__codelineno-23-37" href="#__codelineno-23-37"></a>                                  #   (§7.2/§7.3, §3.11)
-<a id="__codelineno-23-38" name="__codelineno-23-38" href="#__codelineno-23-38"></a>run.check_failed                  # a hook check with on_failure=fail failed the run, at any stage
-<a id="__codelineno-23-39" name="__codelineno-23-39" href="#__codelineno-23-39"></a>                                  #   (§8.3) — context phase = the failing stage
-<a id="__codelineno-23-40" name="__codelineno-23-40" href="#__codelineno-23-40"></a>run.check_warned                  # a job (plan or apply) ended — finished, failed or stopped — with warn
-<a id="__codelineno-23-41" name="__codelineno-23-41" href="#__codelineno-23-41"></a>                                  #   checks; context: checks (their names), stages (where they ran)
-<a id="__codelineno-23-42" name="__codelineno-23-42" href="#__codelineno-23-42"></a>state.force_unlocked / state.import_session_created   # §11.2, §11.4
-<a id="__codelineno-23-43" name="__codelineno-23-43" href="#__codelineno-23-43"></a>dependency.created / dependency.deleted / dependency.mock_consumed   # created: also via link-by-name,
-<a id="__codelineno-23-44" name="__codelineno-23-44" href="#__codelineno-23-44"></a>                                  #   or a clone (via = clone, upstream_kind, §21.2)
-<a id="__codelineno-23-45" name="__codelineno-23-45" href="#__codelineno-23-45"></a>dependency.updated                # policy / output references changed by a config import (§22.3)
-<a id="__codelineno-23-46" name="__codelineno-23-46" href="#__codelineno-23-46"></a>variable_set.attachment_updated   # an attachment&#39;s priority changed by a config import (§22.3)
-<a id="__codelineno-23-47" name="__codelineno-23-47" href="#__codelineno-23-47"></a>service_account.created / api_token.created / api_token.revoked   # §23 — never the token
-<a id="__codelineno-23-48" name="__codelineno-23-48" href="#__codelineno-23-48"></a>space.config_exported / space.config_imported   # §22 — every item an import writes is also
-<a id="__codelineno-23-49" name="__codelineno-23-49" href="#__codelineno-23-49"></a>                                  #   audited under its own action, context via = import
-<a id="__codelineno-23-50" name="__codelineno-23-50" href="#__codelineno-23-50"></a>cloud_integration.created / cloud_integration.updated / cloud_integration.deleted
-<a id="__codelineno-23-51" name="__codelineno-23-51" href="#__codelineno-23-51"></a>                                  # created/updated: context profiles (their names, §10.6)
-<a id="__codelineno-23-52" name="__codelineno-23-52" href="#__codelineno-23-52"></a>oidc_key.rotated / oidc_key.retired            # issuer signing key (§3.11)
-<a id="__codelineno-23-53" name="__codelineno-23-53" href="#__codelineno-23-53"></a>worker_pool.created / worker_pool.deleted
-<a id="__codelineno-23-54" name="__codelineno-23-54" href="#__codelineno-23-54"></a>worker.rejected                                # a non-docker runner refused in production (§7.4)
-<a id="__codelineno-23-55" name="__codelineno-23-55" href="#__codelineno-23-55"></a>worker.diagnostics_requested                   # read-only debug bundle (cf. §observability)
-<a id="__codelineno-23-56" name="__codelineno-23-56" href="#__codelineno-23-56"></a>user.role_changed / user.apply_tier_changed / user.destroy_permission_changed / user.disabled
-<a id="__codelineno-23-57" name="__codelineno-23-57" href="#__codelineno-23-57"></a>tier.created / tier.updated / tier.deleted     # configurable tier catalog (§2.4)
-<a id="__codelineno-23-58" name="__codelineno-23-58" href="#__codelineno-23-58"></a>secret_source.created / secret_source.updated / secret_source.token_rotated / secret_source.deleted
-<a id="__codelineno-23-59" name="__codelineno-23-59" href="#__codelineno-23-59"></a>secret.fallback_used / secret.fallback_overridden                    # §15
-<a id="__codelineno-23-60" name="__codelineno-23-60" href="#__codelineno-23-60"></a>environment.cloned                                                   # §21.2
-<a id="__codelineno-23-61" name="__codelineno-23-61" href="#__codelineno-23-61"></a>rollout.created / rollout.approved / rollout.paused / rollout.resumed    # §21.8
-<a id="__codelineno-23-62" name="__codelineno-23-62" href="#__codelineno-23-62"></a>rollout.retried / rollout.canceled / rollout.succeeded / rollout.failed  # §21.8
-<a id="__codelineno-23-63" name="__codelineno-23-63" href="#__codelineno-23-63"></a>comment.created / comment.updated / comment.resolved / comment.reopened / comment.deleted
-<a id="__codelineno-23-64" name="__codelineno-23-64" href="#__codelineno-23-64"></a>                                  # plan-review comments (§16.3) — target the comment; context
-<a id="__codelineno-23-65" name="__codelineno-23-65" href="#__codelineno-23-65"></a>                                  #   run_id (+ parent_id, anchor_kind) — NEVER the body
+<a id="__codelineno-23-11" name="__codelineno-23-11" href="#__codelineno-23-11"></a>environment.out_of_band_change_detected   # §19.7 — actor system; context run_id, expected_serial,
+<a id="__codelineno-23-12" name="__codelineno-23-12" href="#__codelineno-23-12"></a>                                          #   observed_serial, lineage_changed
+<a id="__codelineno-23-13" name="__codelineno-23-13" href="#__codelineno-23-13"></a>environment.out_of_band_change_cleared    # §19.7 — reason applied (actor system, run_id) |
+<a id="__codelineno-23-14" name="__codelineno-23-14" href="#__codelineno-23-14"></a>                                          #   acknowledged (the user; expected/observed serials)
+<a id="__codelineno-23-15" name="__codelineno-23-15" href="#__codelineno-23-15"></a>variable.created / variable.updated / variable.deleted   # stack, env and set variables — context:
+<a id="__codelineno-23-16" name="__codelineno-23-16" href="#__codelineno-23-16"></a>                                                          #   name, sensitive — NEVER the value
+<a id="__codelineno-23-17" name="__codelineno-23-17" href="#__codelineno-23-17"></a>variable_set.created / variable_set.updated / variable_set.deleted
+<a id="__codelineno-23-18" name="__codelineno-23-18" href="#__codelineno-23-18"></a>variable_set.attached / variable_set.detached   # detached: manual, or with its target — context
+<a id="__codelineno-23-19" name="__codelineno-23-19" href="#__codelineno-23-19"></a>                                                #   reason = stack_deleted | environment_deleted
+<a id="__codelineno-23-20" name="__codelineno-23-20" href="#__codelineno-23-20"></a>                                                #   | tier_deleted (§3.2, §3.4)
+<a id="__codelineno-23-21" name="__codelineno-23-21" href="#__codelineno-23-21"></a>hook.created / hook.updated / hook.deleted      # deleted: manual, or with its stack/env (reason, §3.2)
+<a id="__codelineno-23-22" name="__codelineno-23-22" href="#__codelineno-23-22"></a>notification_target.created / notification_target.updated / notification_target.deleted
+<a id="__codelineno-23-23" name="__codelineno-23-23" href="#__codelineno-23-23"></a>                                                # deleted: manual, or with its stack/env (reason, §3.2)
+<a id="__codelineno-23-24" name="__codelineno-23-24" href="#__codelineno-23-24"></a>run.triggered / run.destroy_triggered / run.command_triggered / run.promoted   # §4.3, §9.7
+<a id="__codelineno-23-25" name="__codelineno-23-25" href="#__codelineno-23-25"></a>                                  # triggered / destroy_triggered: context environment_id, type,
+<a id="__codelineno-23-26" name="__codelineno-23-26" href="#__codelineno-23-26"></a>                                  #   tier, + plan_options for a targeted / replace plan (§3.5)
+<a id="__codelineno-23-27" name="__codelineno-23-27" href="#__codelineno-23-27"></a>                                  # run.triggered by the system: context via = cascade (§9.2) |
+<a id="__codelineno-23-28" name="__codelineno-23-28" href="#__codelineno-23-28"></a>                                  #   rollout (§21.4: rollout_id, environment_id, commit)
+<a id="__codelineno-23-29" name="__codelineno-23-29" href="#__codelineno-23-29"></a>run.confirmed ⭐                  # a human confirm, or the system: on autodeploy (context
+<a id="__codelineno-23-30" name="__codelineno-23-30" href="#__codelineno-23-30"></a>                                  #   autodeploy), or under a rollout&#39;s approval (context via =
+<a id="__codelineno-23-31" name="__codelineno-23-31" href="#__codelineno-23-31"></a>                                  #   rollout, rollout_id, approved_by, approved_by_email, §21.5)
+<a id="__codelineno-23-32" name="__codelineno-23-32" href="#__codelineno-23-32"></a>run.cancel_requested              # a user asked the worker to stop an executing run (§4.1) — once per run;
+<a id="__codelineno-23-33" name="__codelineno-23-33" href="#__codelineno-23-33"></a>                                  #   or the system, for a closed PR&#39;s proposed run (reason pr_closed, §18.3)
+<a id="__codelineno-23-34" name="__codelineno-23-34" href="#__codelineno-23-34"></a>run.discarded / run.canceled      # canceled: also the worker, on `job_canceled` (context reason cancel_requested); a user, or the system when a PR closes (reason pr_closed);
+<a id="__codelineno-23-35" name="__codelineno-23-35" href="#__codelineno-23-35"></a>                                  #   a rollout&#39;s cancel: the canceller, context via = rollout (§21.8)
+<a id="__codelineno-23-36" name="__codelineno-23-36" href="#__codelineno-23-36"></a>run.plan_finished                 # plan-only terminal: empty diff, or a proposed/drift run
+<a id="__codelineno-23-37" name="__codelineno-23-37" href="#__codelineno-23-37"></a>run.applied ⭐ / run.command_executed
+<a id="__codelineno-23-38" name="__codelineno-23-38" href="#__codelineno-23-38"></a>run.apply_failed                  # any failed run, whatever its phase, unless a check failed it —
+<a id="__codelineno-23-39" name="__codelineno-23-39" href="#__codelineno-23-39"></a>                                  #   context phase, or reason: cancel_requested (a stopped apply, §4.1) |
+<a id="__codelineno-23-40" name="__codelineno-23-40" href="#__codelineno-23-40"></a>                                  #   worker_lost | commit_mismatch | dependency | secret | oidc
+<a id="__codelineno-23-41" name="__codelineno-23-41" href="#__codelineno-23-41"></a>                                  #   (§7.2/§7.3, §3.11)
+<a id="__codelineno-23-42" name="__codelineno-23-42" href="#__codelineno-23-42"></a>run.check_failed                  # a hook check with on_failure=fail failed the run, at any stage
+<a id="__codelineno-23-43" name="__codelineno-23-43" href="#__codelineno-23-43"></a>                                  #   (§8.3) — context phase = the failing stage
+<a id="__codelineno-23-44" name="__codelineno-23-44" href="#__codelineno-23-44"></a>run.check_warned                  # a job (plan or apply) ended — finished, failed or stopped — with warn
+<a id="__codelineno-23-45" name="__codelineno-23-45" href="#__codelineno-23-45"></a>                                  #   checks; context: checks (their names), stages (where they ran)
+<a id="__codelineno-23-46" name="__codelineno-23-46" href="#__codelineno-23-46"></a>state.force_unlocked / state.import_session_created   # §11.2, §11.4
+<a id="__codelineno-23-47" name="__codelineno-23-47" href="#__codelineno-23-47"></a>dependency.created / dependency.deleted / dependency.mock_consumed   # created: also via link-by-name,
+<a id="__codelineno-23-48" name="__codelineno-23-48" href="#__codelineno-23-48"></a>                                  #   or a clone (via = clone, upstream_kind, §21.2)
+<a id="__codelineno-23-49" name="__codelineno-23-49" href="#__codelineno-23-49"></a>dependency.updated                # policy / output references changed by a config import (§22.3)
+<a id="__codelineno-23-50" name="__codelineno-23-50" href="#__codelineno-23-50"></a>variable_set.attachment_updated   # an attachment&#39;s priority changed by a config import (§22.3)
+<a id="__codelineno-23-51" name="__codelineno-23-51" href="#__codelineno-23-51"></a>service_account.created / api_token.created / api_token.revoked   # §23 — never the token
+<a id="__codelineno-23-52" name="__codelineno-23-52" href="#__codelineno-23-52"></a>space.config_exported / space.config_imported   # §22 — every item an import writes is also
+<a id="__codelineno-23-53" name="__codelineno-23-53" href="#__codelineno-23-53"></a>                                  #   audited under its own action, context via = import
+<a id="__codelineno-23-54" name="__codelineno-23-54" href="#__codelineno-23-54"></a>cloud_integration.created / cloud_integration.updated / cloud_integration.deleted
+<a id="__codelineno-23-55" name="__codelineno-23-55" href="#__codelineno-23-55"></a>                                  # created/updated: context profiles (their names, §10.6)
+<a id="__codelineno-23-56" name="__codelineno-23-56" href="#__codelineno-23-56"></a>oidc_key.rotated / oidc_key.retired            # issuer signing key (§3.11)
+<a id="__codelineno-23-57" name="__codelineno-23-57" href="#__codelineno-23-57"></a>worker_pool.created / worker_pool.deleted
+<a id="__codelineno-23-58" name="__codelineno-23-58" href="#__codelineno-23-58"></a>worker.rejected                                # a non-docker runner refused in production (§7.4)
+<a id="__codelineno-23-59" name="__codelineno-23-59" href="#__codelineno-23-59"></a>worker.diagnostics_requested                   # read-only debug bundle (cf. §observability)
+<a id="__codelineno-23-60" name="__codelineno-23-60" href="#__codelineno-23-60"></a>user.role_changed / user.apply_tier_changed / user.destroy_permission_changed / user.disabled
+<a id="__codelineno-23-61" name="__codelineno-23-61" href="#__codelineno-23-61"></a>tier.created / tier.updated / tier.deleted     # configurable tier catalog (§2.4)
+<a id="__codelineno-23-62" name="__codelineno-23-62" href="#__codelineno-23-62"></a>secret_source.created / secret_source.updated / secret_source.token_rotated / secret_source.deleted
+<a id="__codelineno-23-63" name="__codelineno-23-63" href="#__codelineno-23-63"></a>secret.fallback_used / secret.fallback_overridden                    # §15
+<a id="__codelineno-23-64" name="__codelineno-23-64" href="#__codelineno-23-64"></a>environment.cloned                                                   # §21.2
+<a id="__codelineno-23-65" name="__codelineno-23-65" href="#__codelineno-23-65"></a>rollout.created / rollout.approved / rollout.paused / rollout.resumed    # §21.8
+<a id="__codelineno-23-66" name="__codelineno-23-66" href="#__codelineno-23-66"></a>rollout.retried / rollout.canceled / rollout.succeeded / rollout.failed  # §21.8
+<a id="__codelineno-23-67" name="__codelineno-23-67" href="#__codelineno-23-67"></a>comment.created / comment.updated / comment.resolved / comment.reopened / comment.deleted
+<a id="__codelineno-23-68" name="__codelineno-23-68" href="#__codelineno-23-68"></a>                                  # plan-review comments (§16.3) — target the comment; context
+<a id="__codelineno-23-69" name="__codelineno-23-69" href="#__codelineno-23-69"></a>                                  #   run_id (+ parent_id, anchor_kind) — NEVER the body
 </code></pre></div>
 <p>Not audited by a dedicated action: a run failed because an external secret could not resolve is
 <code>run.apply_failed</code> with <code>reason: secret</code> (§15.6); a pool token is not rotatable through the API
@@ -4941,22 +4967,26 @@ shown on the Workers page to spot a lagging host.</p>
 <a id="__codelineno-26-71" name="__codelineno-26-71" href="#__codelineno-26-71"></a>                                           # plan); hooks never get them; inherited TF_HTTP_* dropped
 <a id="__codelineno-26-72" name="__codelineno-26-72" href="#__codelineno-26-72"></a>    &quot;backend_config_file&quot;: null,           # unmanaged state only (§11.3): -backend-config=&lt;file&gt;
 <a id="__codelineno-26-73" name="__codelineno-26-73" href="#__codelineno-26-73"></a>    &quot;backend_config&quot;: null,                # unmanaged state only (§11.3): -backend-config=k=v
-<a id="__codelineno-26-74" name="__codelineno-26-74" href="#__codelineno-26-74"></a>    &quot;var_files&quot;: [&quot;envs/prod.tfvars&quot;],     # §3.4, managed state or not: the repo&#39;s tfvars files,
-<a id="__codelineno-26-75" name="__codelineno-26-75" href="#__codelineno-26-75"></a>                                           # relative to project_root, in order → -var-file= on
-<a id="__codelineno-26-76" name="__codelineno-26-76" href="#__codelineno-26-76"></a>                                           # the plan and import/refresh, Stackd&#39;s files after them
-<a id="__codelineno-26-77" name="__codelineno-26-77" href="#__codelineno-26-77"></a>    &quot;cloud_credentials&quot;: {                 # §10, if cloud_integration configured, else null
-<a id="__codelineno-26-78" name="__codelineno-26-78" href="#__codelineno-26-78"></a>      &quot;provider&quot;: &quot;aws&quot;,
-<a id="__codelineno-26-79" name="__codelineno-26-79" href="#__codelineno-26-79"></a>      &quot;oidc_token&quot;: &quot;&lt;signed workload JWT&gt;&quot;,
-<a id="__codelineno-26-80" name="__codelineno-26-80" href="#__codelineno-26-80"></a>      &quot;role_arn&quot;: &quot;arn:aws:iam::123:role/stackd-prod-plan&quot;,   # role of the cred_phase
-<a id="__codelineno-26-81" name="__codelineno-26-81" href="#__codelineno-26-81"></a>      &quot;region&quot;: &quot;eu-west-1&quot;,
-<a id="__codelineno-26-82" name="__codelineno-26-82" href="#__codelineno-26-82"></a>      &quot;profiles&quot;: {                        # named profiles (§10.6), the cred_phase&#39;s role each;
-<a id="__codelineno-26-83" name="__codelineno-26-83" href="#__codelineno-26-83"></a>        &quot;tfstates&quot;: { &quot;role_arn&quot;: &quot;arn:aws:iam::456:role/stackd-tfstates-plan&quot;,   # {} if none
-<a id="__codelineno-26-84" name="__codelineno-26-84" href="#__codelineno-26-84"></a>                      &quot;region&quot;: null }
-<a id="__codelineno-26-85" name="__codelineno-26-85" href="#__codelineno-26-85"></a>      }
-<a id="__codelineno-26-86" name="__codelineno-26-86" href="#__codelineno-26-86"></a>    },
-<a id="__codelineno-26-87" name="__codelineno-26-87" href="#__codelineno-26-87"></a>    &quot;resolved_inputs&quot;: { &quot;TF_VAR_vpc_id&quot;: &quot;vpc-0abc...&quot; },          # informational: already
-<a id="__codelineno-26-88" name="__codelineno-26-88" href="#__codelineno-26-88"></a>    &quot;mock_inputs&quot;: { &quot;TF_VAR_nlb_dns&quot;: &quot;mock.example.internal&quot; }    # in tfvars_json (§9.3)
-<a id="__codelineno-26-89" name="__codelineno-26-89" href="#__codelineno-26-89"></a>  }
+<a id="__codelineno-26-74" name="__codelineno-26-74" href="#__codelineno-26-74"></a>    &quot;observe_state&quot;: false,                # §19.7: read the state&#39;s serial/lineage (`state pull`)
+<a id="__codelineno-26-75" name="__codelineno-26-75" href="#__codelineno-26-75"></a>                                           # and report them (`state_observed`, §7.3) — unmanaged
+<a id="__codelineno-26-76" name="__codelineno-26-76" href="#__codelineno-26-76"></a>                                           # state, reviewed code only: a tracked/destroy/drift
+<a id="__codelineno-26-77" name="__codelineno-26-77" href="#__codelineno-26-77"></a>                                           # plan, an apply, a mutating command; absent → false
+<a id="__codelineno-26-78" name="__codelineno-26-78" href="#__codelineno-26-78"></a>    &quot;var_files&quot;: [&quot;envs/prod.tfvars&quot;],     # §3.4, managed state or not: the repo&#39;s tfvars files,
+<a id="__codelineno-26-79" name="__codelineno-26-79" href="#__codelineno-26-79"></a>                                           # relative to project_root, in order → -var-file= on
+<a id="__codelineno-26-80" name="__codelineno-26-80" href="#__codelineno-26-80"></a>                                           # the plan and import/refresh, Stackd&#39;s files after them
+<a id="__codelineno-26-81" name="__codelineno-26-81" href="#__codelineno-26-81"></a>    &quot;cloud_credentials&quot;: {                 # §10, if cloud_integration configured, else null
+<a id="__codelineno-26-82" name="__codelineno-26-82" href="#__codelineno-26-82"></a>      &quot;provider&quot;: &quot;aws&quot;,
+<a id="__codelineno-26-83" name="__codelineno-26-83" href="#__codelineno-26-83"></a>      &quot;oidc_token&quot;: &quot;&lt;signed workload JWT&gt;&quot;,
+<a id="__codelineno-26-84" name="__codelineno-26-84" href="#__codelineno-26-84"></a>      &quot;role_arn&quot;: &quot;arn:aws:iam::123:role/stackd-prod-plan&quot;,   # role of the cred_phase
+<a id="__codelineno-26-85" name="__codelineno-26-85" href="#__codelineno-26-85"></a>      &quot;region&quot;: &quot;eu-west-1&quot;,
+<a id="__codelineno-26-86" name="__codelineno-26-86" href="#__codelineno-26-86"></a>      &quot;profiles&quot;: {                        # named profiles (§10.6), the cred_phase&#39;s role each;
+<a id="__codelineno-26-87" name="__codelineno-26-87" href="#__codelineno-26-87"></a>        &quot;tfstates&quot;: { &quot;role_arn&quot;: &quot;arn:aws:iam::456:role/stackd-tfstates-plan&quot;,   # {} if none
+<a id="__codelineno-26-88" name="__codelineno-26-88" href="#__codelineno-26-88"></a>                      &quot;region&quot;: null }
+<a id="__codelineno-26-89" name="__codelineno-26-89" href="#__codelineno-26-89"></a>      }
+<a id="__codelineno-26-90" name="__codelineno-26-90" href="#__codelineno-26-90"></a>    },
+<a id="__codelineno-26-91" name="__codelineno-26-91" href="#__codelineno-26-91"></a>    &quot;resolved_inputs&quot;: { &quot;TF_VAR_vpc_id&quot;: &quot;vpc-0abc...&quot; },          # informational: already
+<a id="__codelineno-26-92" name="__codelineno-26-92" href="#__codelineno-26-92"></a>    &quot;mock_inputs&quot;: { &quot;TF_VAR_nlb_dns&quot;: &quot;mock.example.internal&quot; }    # in tfvars_json (§9.3)
+<a id="__codelineno-26-93" name="__codelineno-26-93" href="#__codelineno-26-93"></a>  }
 </code></pre></div>
 <p>Three distinct notions, never to be conflated (CLAUDE.md §7): the <strong>job phase</strong> (<code>phase</code>, the execution type), the <strong>credential phase</strong> (<code>cred_phase</code>, which credentials the job holds — the single definition is <code>holds_apply_credentials(run)</code>, shared with the worker-lost reclaim cutoff §7.5), and the <strong>run state</strong> (§4, the fine-grained <code>preparing</code>/<code>planning</code>/… the run moves through, which the logs also use as their phase). A plan or apply job's credential phase equals its job phase; a command job's depends on the command. The agent never re-derives the credential phase from the command name: it reads <code>cred_phase</code>.</p>
 <p>Atomic claim:</p>
@@ -5008,8 +5038,17 @@ shown on the Workers page to spot a lagging host.</p>
 <a id="__codelineno-28-23" name="__codelineno-28-23" href="#__codelineno-28-23"></a>  job_canceled carries &quot;result&quot;: {&quot;checks&quot;: [...]} — the job stopped on a stop request (a
 <a id="__codelineno-28-24" name="__codelineno-28-24" href="#__codelineno-28-24"></a>      user&#39;s, or a closed PR&#39;s, §4.1/§18.3); 409 unless `runs.cancel_requested_at` is set
 <a id="__codelineno-28-25" name="__codelineno-28-25" href="#__codelineno-28-25"></a>
-<a id="__codelineno-28-26" name="__codelineno-28-26" href="#__codelineno-28-26"></a>PUT /worker/v1/jobs/{id}/artifacts/plan.tfplan | plan.json | outputs.json
-<a id="__codelineno-28-27" name="__codelineno-28-27" href="#__codelineno-28-27"></a>GET /worker/v1/jobs/{id}/artifacts/plan.tfplan          # the apply job&#39;s saved plan
+<a id="__codelineno-28-26" name="__codelineno-28-26" href="#__codelineno-28-26"></a>POST /worker/v1/jobs/{id}/events
+<a id="__codelineno-28-27" name="__codelineno-28-27" href="#__codelineno-28-27"></a>  { &quot;event&quot;: &quot;state_observed&quot;, &quot;result&quot;: {&quot;serial&quot;: 42, &quot;lineage&quot;: &quot;&lt;uuid&gt;&quot;, &quot;baseline&quot;: false} }
+<a id="__codelineno-28-28" name="__codelineno-28-28" href="#__codelineno-28-28"></a>      # §19.7: the state as the job found it (baseline=false, after init) or left it (baseline=true,
+<a id="__codelineno-28-29" name="__codelineno-28-29" href="#__codelineno-28-29"></a>      # after the apply / mutating command); serial and lineage both null for an empty state.
+<a id="__codelineno-28-30" name="__codelineno-28-30" href="#__codelineno-28-30"></a>      # Changes no run state. 409 unless the run is executing (as job_failed) and its job was handed
+<a id="__codelineno-28-31" name="__codelineno-28-31" href="#__codelineno-28-31"></a>      # `observe_state` (unmanaged state, reviewed code); baseline=true also needs a job holding
+<a id="__codelineno-28-32" name="__codelineno-28-32" href="#__codelineno-28-32"></a>      # apply credentials. 400 on a malformed pair (serial an integer ≥ 0, lineage ≤ 64 chars of
+<a id="__codelineno-28-33" name="__codelineno-28-33" href="#__codelineno-28-33"></a>      # [A-Za-z0-9-], both set or both null). Never anything else of the state
+<a id="__codelineno-28-34" name="__codelineno-28-34" href="#__codelineno-28-34"></a>
+<a id="__codelineno-28-35" name="__codelineno-28-35" href="#__codelineno-28-35"></a>PUT /worker/v1/jobs/{id}/artifacts/plan.tfplan | plan.json | outputs.json
+<a id="__codelineno-28-36" name="__codelineno-28-36" href="#__codelineno-28-36"></a>GET /worker/v1/jobs/{id}/artifacts/plan.tfplan          # the apply job&#39;s saved plan
 </code></pre></div>
 <p><strong>Saved plan.</strong> What a human confirms is the plan file the plan job made, and the apply applies exactly that file (<code>tofu apply plan.tfplan</code>) — never a fresh plan:</p>
 <ul>
@@ -5074,76 +5113,89 @@ shown on the Workers page to spot a lagging host.</p>
 <a id="__codelineno-29-52" name="__codelineno-29-52" href="#__codelineno-29-52"></a><span class="c1"># into `checks` with &quot;stage&quot;: name. A failing `fail` hook → report job_failed(phase=name, checks) and</span>
 <a id="__codelineno-29-53" name="__codelineno-29-53" href="#__codelineno-29-53"></a><span class="c1"># stop, before the next tofu step. Every job_failed below carries the `checks` gathered so far.</span>
 <a id="__codelineno-29-54" name="__codelineno-29-54" href="#__codelineno-29-54"></a>
-<a id="__codelineno-29-55" name="__codelineno-29-55" href="#__codelineno-29-55"></a><span class="k">if</span> <span class="n">job</span><span class="o">.</span><span class="n">phase</span> <span class="o">==</span> <span class="s2">&quot;plan&quot;</span><span class="p">:</span>
-<a id="__codelineno-29-56" name="__codelineno-29-56" href="#__codelineno-29-56"></a>    <span class="n">write_backend_override</span><span class="p">(</span><span class="n">ws</span><span class="p">)</span>               <span class="c1"># `terraform { backend &quot;http&quot; {} }`, managed state only</span>
-<a id="__codelineno-29-57" name="__codelineno-29-57" href="#__codelineno-29-57"></a>    <span class="n">report</span><span class="p">(</span><span class="n">phase_started</span><span class="p">,</span> <span class="n">phase</span><span class="o">=</span><span class="s2">&quot;planning&quot;</span><span class="p">,</span> <span class="n">commit_sha</span><span class="o">=</span><span class="n">ws</span><span class="o">.</span><span class="n">head_sha</span><span class="p">())</span>   <span class="c1"># the API pins the run</span>
-<a id="__codelineno-29-58" name="__codelineno-29-58" href="#__codelineno-29-58"></a>    <span class="n">stage</span><span class="p">(</span><span class="s2">&quot;before_init&quot;</span><span class="p">)</span>
-<a id="__codelineno-29-59" name="__codelineno-29-59" href="#__codelineno-29-59"></a>    <span class="k">with</span> <span class="n">with_files</span><span class="p">(),</span> <span class="n">init_creds</span><span class="p">()</span> <span class="k">as</span> <span class="n">git_env</span><span class="p">:</span>
-<a id="__codelineno-29-60" name="__codelineno-29-60" href="#__codelineno-29-60"></a>        <span class="n">run</span><span class="p">(</span><span class="n">tf</span><span class="p">,</span> <span class="s2">&quot;init&quot;</span><span class="p">,</span> <span class="s2">&quot;-input=false&quot;</span><span class="p">,</span> <span class="n">env</span><span class="o">=</span><span class="p">{</span><span class="o">**</span><span class="n">tofu_env</span><span class="p">,</span> <span class="o">**</span><span class="n">git_env</span><span class="p">})</span>   <span class="c1"># module downloads</span>
-<a id="__codelineno-29-61" name="__codelineno-29-61" href="#__codelineno-29-61"></a>    <span class="n">stage</span><span class="p">(</span><span class="s2">&quot;after_init&quot;</span><span class="p">);</span> <span class="n">stage</span><span class="p">(</span><span class="s2">&quot;before_plan&quot;</span><span class="p">)</span>
-<a id="__codelineno-29-62" name="__codelineno-29-62" href="#__codelineno-29-62"></a>    <span class="c1"># plan/apply run with -json: the agent streams each event&#39;s human @message to the log (masked)</span>
-<a id="__codelineno-29-63" name="__codelineno-29-63" href="#__codelineno-29-63"></a>    <span class="c1"># AND collects the structured events — the `change_summary` event gives the authoritative</span>
-<a id="__codelineno-29-64" name="__codelineno-29-64" href="#__codelineno-29-64"></a>    <span class="c1"># add/change/destroy counts and `diagnostic` events surface the real error as the run&#39;s `error`.</span>
-<a id="__codelineno-29-65" name="__codelineno-29-65" href="#__codelineno-29-65"></a>    <span class="n">plan_file</span> <span class="o">=</span> <span class="n">ws</span><span class="o">.</span><span class="n">private_path</span><span class="p">(</span><span class="s2">&quot;plan.tfplan&quot;</span><span class="p">)</span>             <span class="c1"># outside the checkout (§8.3)</span>
-<a id="__codelineno-29-66" name="__codelineno-29-66" href="#__codelineno-29-66"></a>    <span class="k">with</span> <span class="n">with_files</span><span class="p">():</span>
-<a id="__codelineno-29-67" name="__codelineno-29-67" href="#__codelineno-29-67"></a>        <span class="n">code</span><span class="p">,</span> <span class="n">events</span> <span class="o">=</span> <span class="n">run_json</span><span class="p">(</span><span class="n">tf</span><span class="p">,</span> <span class="s2">&quot;plan&quot;</span><span class="p">,</span> <span class="s2">&quot;-input=false&quot;</span><span class="p">,</span> <span class="s2">&quot;-json&quot;</span><span class="p">,</span> <span class="s2">&quot;-detailed-exitcode&quot;</span><span class="p">,</span>
-<a id="__codelineno-29-68" name="__codelineno-29-68" href="#__codelineno-29-68"></a>                                <span class="sa">f</span><span class="s2">&quot;-out=</span><span class="si">{</span><span class="n">plan_file</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">,</span> <span class="o">*</span><span class="p">([</span><span class="s2">&quot;-destroy&quot;</span><span class="p">]</span> <span class="k">if</span> <span class="n">job</span><span class="o">.</span><span class="n">destroy</span> <span class="k">else</span> <span class="p">[]),</span>
-<a id="__codelineno-29-69" name="__codelineno-29-69" href="#__codelineno-29-69"></a>                                <span class="o">*</span><span class="n">var_file_flags</span><span class="p">(</span><span class="n">job</span><span class="p">),</span>   <span class="c1"># §3.4: repo files, then Stackd&#39;s, or none</span>
-<a id="__codelineno-29-70" name="__codelineno-29-70" href="#__codelineno-29-70"></a>                                <span class="o">*</span><span class="p">([</span><span class="s2">&quot;-refresh-only&quot;</span><span class="p">]</span> <span class="k">if</span> <span class="n">job</span><span class="o">.</span><span class="n">refresh_only</span> <span class="k">else</span> <span class="p">[]),</span>   <span class="c1"># drift, §19</span>
-<a id="__codelineno-29-71" name="__codelineno-29-71" href="#__codelineno-29-71"></a>                                <span class="o">*</span><span class="p">[</span><span class="sa">f</span><span class="s2">&quot;-target=</span><span class="si">{</span><span class="n">a</span><span class="si">}</span><span class="s2">&quot;</span> <span class="k">for</span> <span class="n">a</span> <span class="ow">in</span> <span class="n">job</span><span class="o">.</span><span class="n">plan_options</span><span class="o">.</span><span class="n">targets</span><span class="p">],</span>  <span class="c1"># §3.5, one</span>
-<a id="__codelineno-29-72" name="__codelineno-29-72" href="#__codelineno-29-72"></a>                                <span class="o">*</span><span class="p">[</span><span class="sa">f</span><span class="s2">&quot;-replace=</span><span class="si">{</span><span class="n">a</span><span class="si">}</span><span class="s2">&quot;</span> <span class="k">for</span> <span class="n">a</span> <span class="ow">in</span> <span class="n">job</span><span class="o">.</span><span class="n">plan_options</span><span class="o">.</span><span class="n">replace</span><span class="p">])</span> <span class="c1"># argv each</span>
-<a id="__codelineno-29-73" name="__codelineno-29-73" href="#__codelineno-29-73"></a>    <span class="c1"># 0 = no changes, 2 = changes; anything else (1 = error, 124 = killed past its time budget, a</span>
-<a id="__codelineno-29-74" name="__codelineno-29-74" href="#__codelineno-29-74"></a>    <span class="c1"># signal) → job_failed with the reason — never &quot;no changes&quot;. apply/commands: any non-zero fails.</span>
-<a id="__codelineno-29-75" name="__codelineno-29-75" href="#__codelineno-29-75"></a>    <span class="k">with</span> <span class="n">with_files</span><span class="p">(</span><span class="n">tfvars</span><span class="o">=</span><span class="kc">False</span><span class="p">):</span>
-<a id="__codelineno-29-76" name="__codelineno-29-76" href="#__codelineno-29-76"></a>        <span class="n">run</span><span class="p">(</span><span class="n">tf</span><span class="p">,</span> <span class="s2">&quot;show&quot;</span><span class="p">,</span> <span class="s2">&quot;-no-color&quot;</span><span class="p">,</span> <span class="n">plan_file</span><span class="p">)</span>              <span class="c1"># the human-readable diff, to the log</span>
-<a id="__codelineno-29-77" name="__codelineno-29-77" href="#__codelineno-29-77"></a>        <span class="n">plan_json</span> <span class="o">=</span> <span class="n">run</span><span class="p">(</span><span class="n">tf</span><span class="p">,</span> <span class="s2">&quot;show&quot;</span><span class="p">,</span> <span class="s2">&quot;-json&quot;</span><span class="p">,</span> <span class="n">plan_file</span><span class="p">)</span>  <span class="c1"># failed, or no JSON object → job_failed</span>
-<a id="__codelineno-29-78" name="__codelineno-29-78" href="#__codelineno-29-78"></a>                                                             <span class="c1"># (&quot;plan JSON unavailable&quot;), never `{}`</span>
-<a id="__codelineno-29-79" name="__codelineno-29-79" href="#__codelineno-29-79"></a>    <span class="n">masked_json</span> <span class="o">=</span> <span class="n">mask_plan_json</span><span class="p">(</span><span class="n">plan_json</span><span class="p">)</span>                  <span class="c1"># §8.3</span>
-<a id="__codelineno-29-80" name="__codelineno-29-80" href="#__codelineno-29-80"></a>    <span class="n">upload_artifact</span><span class="p">(</span><span class="s2">&quot;plan.json&quot;</span><span class="p">,</span> <span class="n">masked_json</span><span class="p">)</span>
-<a id="__codelineno-29-81" name="__codelineno-29-81" href="#__codelineno-29-81"></a>    <span class="n">saved_plan</span> <span class="o">=</span> <span class="n">read</span><span class="p">(</span><span class="n">plan_file</span><span class="p">)</span> <span class="k">if</span> <span class="n">code</span> <span class="o">==</span> <span class="mi">2</span> <span class="ow">and</span> <span class="n">job</span><span class="o">.</span><span class="n">save_plan</span> <span class="k">else</span> <span class="kc">None</span>
-<a id="__codelineno-29-82" name="__codelineno-29-82" href="#__codelineno-29-82"></a>    <span class="n">delete</span><span class="p">(</span><span class="n">plan_file</span><span class="p">)</span>                                        <span class="c1"># before any hook runs</span>
-<a id="__codelineno-29-83" name="__codelineno-29-83" href="#__codelineno-29-83"></a>    <span class="k">if</span> <span class="n">saved_plan</span><span class="p">:</span>
-<a id="__codelineno-29-84" name="__codelineno-29-84" href="#__codelineno-29-84"></a>        <span class="n">upload_artifact</span><span class="p">(</span><span class="s2">&quot;plan.tfplan&quot;</span><span class="p">,</span> <span class="n">saved_plan</span><span class="p">)</span>           <span class="c1"># the saved plan (§7.3)</span>
-<a id="__codelineno-29-85" name="__codelineno-29-85" href="#__codelineno-29-85"></a>    <span class="k">if</span> <span class="n">hooks</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;after_plan&quot;</span><span class="p">):</span>
-<a id="__codelineno-29-86" name="__codelineno-29-86" href="#__codelineno-29-86"></a>        <span class="n">report</span><span class="p">(</span><span class="n">phase_started</span><span class="p">,</span> <span class="n">phase</span><span class="o">=</span><span class="s2">&quot;checking&quot;</span><span class="p">)</span>
-<a id="__codelineno-29-87" name="__codelineno-29-87" href="#__codelineno-29-87"></a>    <span class="n">stage</span><span class="p">(</span><span class="s2">&quot;after_plan&quot;</span><span class="p">)</span>   <span class="c1"># checking phase: platform hooks read plan.json = plan_json, then the repo</span>
-<a id="__codelineno-29-88" name="__codelineno-29-88" href="#__codelineno-29-88"></a>                          <span class="c1"># hooks plan.json = masked_json (§8.3)</span>
-<a id="__codelineno-29-89" name="__codelineno-29-89" href="#__codelineno-29-89"></a>    <span class="n">report</span><span class="p">(</span><span class="n">phase_finished</span><span class="p">,</span> <span class="n">has_changes</span><span class="o">=</span><span class="p">(</span><span class="n">code</span> <span class="o">==</span> <span class="mi">2</span><span class="p">),</span> <span class="n">summary</span><span class="o">=...</span><span class="p">,</span> <span class="n">checks</span><span class="o">=</span><span class="n">checks</span><span class="p">)</span>
-<a id="__codelineno-29-90" name="__codelineno-29-90" href="#__codelineno-29-90"></a>
-<a id="__codelineno-29-91" name="__codelineno-29-91" href="#__codelineno-29-91"></a><span class="k">elif</span> <span class="n">job</span><span class="o">.</span><span class="n">phase</span> <span class="o">==</span> <span class="s2">&quot;apply&quot;</span><span class="p">:</span>                   <span class="c1"># a fresh clone of the pinned commit (§7.3)</span>
-<a id="__codelineno-29-92" name="__codelineno-29-92" href="#__codelineno-29-92"></a>    <span class="n">write_backend_override</span><span class="p">(</span><span class="n">ws</span><span class="p">)</span>
-<a id="__codelineno-29-93" name="__codelineno-29-93" href="#__codelineno-29-93"></a>    <span class="n">hooks</span> <span class="o">=</span> <span class="n">skip_repo_apply_hooks</span><span class="p">(</span><span class="n">hooks</span><span class="p">)</span> <span class="k">if</span> <span class="ow">not</span> <span class="n">job</span><span class="o">.</span><span class="n">repo_hooks_at_apply</span> <span class="k">else</span> <span class="n">hooks</span>   <span class="c1"># warn, §8.3</span>
-<a id="__codelineno-29-94" name="__codelineno-29-94" href="#__codelineno-29-94"></a>    <span class="k">with</span> <span class="n">with_files</span><span class="p">(),</span> <span class="n">init_creds</span><span class="p">()</span> <span class="k">as</span> <span class="n">git_env</span><span class="p">:</span>
-<a id="__codelineno-29-95" name="__codelineno-29-95" href="#__codelineno-29-95"></a>        <span class="n">run</span><span class="p">(</span><span class="n">tf</span><span class="p">,</span> <span class="s2">&quot;init&quot;</span><span class="p">,</span> <span class="s2">&quot;-input=false&quot;</span><span class="p">,</span> <span class="n">env</span><span class="o">=</span><span class="p">{</span><span class="o">**</span><span class="n">tofu_env</span><span class="p">,</span> <span class="o">**</span><span class="n">git_env</span><span class="p">})</span>   <span class="c1"># module downloads</span>
-<a id="__codelineno-29-96" name="__codelineno-29-96" href="#__codelineno-29-96"></a>    <span class="n">plan</span> <span class="o">=</span> <span class="n">download_artifact</span><span class="p">(</span><span class="s2">&quot;plan.tfplan&quot;</span><span class="p">)</span>  <span class="c1"># missing/unreadable → fail closed, NEVER re-plan</span>
-<a id="__codelineno-29-97" name="__codelineno-29-97" href="#__codelineno-29-97"></a>    <span class="n">stage</span><span class="p">(</span><span class="s2">&quot;before_apply&quot;</span><span class="p">)</span>                    <span class="c1"># a failing check → nothing applied</span>
-<a id="__codelineno-29-98" name="__codelineno-29-98" href="#__codelineno-29-98"></a>    <span class="n">write_plan</span><span class="p">(</span><span class="n">plan</span><span class="p">)</span>                         <span class="c1"># 0600; removed right after the apply</span>
-<a id="__codelineno-29-99" name="__codelineno-29-99" href="#__codelineno-29-99"></a>    <span class="k">with</span> <span class="n">with_files</span><span class="p">():</span>                       <span class="c1"># the tfvars too: tofu refuses changed inputs (§7.3)</span>
-<a id="__codelineno-29-100" name="__codelineno-29-100" href="#__codelineno-29-100"></a>        <span class="n">run</span><span class="p">(</span><span class="n">tf</span><span class="p">,</span> <span class="s2">&quot;apply&quot;</span><span class="p">,</span> <span class="s2">&quot;-input=false&quot;</span><span class="p">,</span> <span class="s2">&quot;-json&quot;</span><span class="p">,</span> <span class="s2">&quot;plan.tfplan&quot;</span><span class="p">,</span>   <span class="c1"># stale → tofu refuses → failed</span>
-<a id="__codelineno-29-101" name="__codelineno-29-101" href="#__codelineno-29-101"></a>            <span class="n">timeout</span><span class="o">=</span><span class="n">job</span><span class="o">.</span><span class="n">apply_timeout_seconds</span><span class="p">)</span>
-<a id="__codelineno-29-102" name="__codelineno-29-102" href="#__codelineno-29-102"></a>    <span class="n">cancel_token</span><span class="o">.</span><span class="n">disarm</span><span class="p">()</span>                    <span class="c1"># applied: a stop request no longer interrupts (§4.1)</span>
-<a id="__codelineno-29-103" name="__codelineno-29-103" href="#__codelineno-29-103"></a>    <span class="k">with</span> <span class="n">with_files</span><span class="p">(</span><span class="n">tfvars</span><span class="o">=</span><span class="kc">False</span><span class="p">):</span> <span class="n">outputs</span> <span class="o">=</span> <span class="n">run</span><span class="p">(</span><span class="n">tf</span><span class="p">,</span> <span class="s2">&quot;output&quot;</span><span class="p">,</span> <span class="s2">&quot;-json&quot;</span><span class="p">)</span>
-<a id="__codelineno-29-104" name="__codelineno-29-104" href="#__codelineno-29-104"></a>    <span class="n">upload_artifacts</span><span class="p">(</span><span class="n">outputs</span><span class="p">,</span> <span class="s2">&quot;outputs.json&quot;</span><span class="p">)</span>
-<a id="__codelineno-29-105" name="__codelineno-29-105" href="#__codelineno-29-105"></a>    <span class="n">stage</span><span class="p">(</span><span class="s2">&quot;after_apply&quot;</span><span class="p">)</span>                     <span class="c1"># a failing check → job_failed(after_apply) carrying</span>
-<a id="__codelineno-29-106" name="__codelineno-29-106" href="#__codelineno-29-106"></a>                                             <span class="c1"># `outputs`: recorded, drift cleared, no</span>
-<a id="__codelineno-29-107" name="__codelineno-29-107" href="#__codelineno-29-107"></a>                                             <span class="c1"># cascade (§8.3)</span>
-<a id="__codelineno-29-108" name="__codelineno-29-108" href="#__codelineno-29-108"></a>    <span class="n">report</span><span class="p">(</span><span class="n">phase_finished</span><span class="p">,</span> <span class="n">outputs</span><span class="o">=</span><span class="n">outputs</span><span class="p">,</span> <span class="n">checks</span><span class="o">=</span><span class="n">checks</span><span class="p">)</span>
-<a id="__codelineno-29-109" name="__codelineno-29-109" href="#__codelineno-29-109"></a>
-<a id="__codelineno-29-110" name="__codelineno-29-110" href="#__codelineno-29-110"></a><span class="k">else</span><span class="p">:</span>                                        <span class="c1"># command job (§4.3): no hooks, no plan/apply phases</span>
-<a id="__codelineno-29-111" name="__codelineno-29-111" href="#__codelineno-29-111"></a>    <span class="n">write_backend_override</span><span class="p">(</span><span class="n">ws</span><span class="p">)</span>
-<a id="__codelineno-29-112" name="__codelineno-29-112" href="#__codelineno-29-112"></a>    <span class="n">report</span><span class="p">(</span><span class="n">phase_started</span><span class="p">,</span> <span class="n">phase</span><span class="o">=</span><span class="s2">&quot;running&quot;</span><span class="p">)</span>
-<a id="__codelineno-29-113" name="__codelineno-29-113" href="#__codelineno-29-113"></a>    <span class="k">with</span> <span class="n">with_files</span><span class="p">(),</span> <span class="n">init_creds</span><span class="p">()</span> <span class="k">as</span> <span class="n">git_env</span><span class="p">:</span>
-<a id="__codelineno-29-114" name="__codelineno-29-114" href="#__codelineno-29-114"></a>        <span class="n">run</span><span class="p">(</span><span class="n">tf</span><span class="p">,</span> <span class="s2">&quot;init&quot;</span><span class="p">,</span> <span class="s2">&quot;-input=false&quot;</span><span class="p">,</span> <span class="n">env</span><span class="o">=</span><span class="p">{</span><span class="o">**</span><span class="n">tofu_env</span><span class="p">,</span> <span class="o">**</span><span class="n">git_env</span><span class="p">})</span>   <span class="c1"># module downloads</span>
-<a id="__codelineno-29-115" name="__codelineno-29-115" href="#__codelineno-29-115"></a>    <span class="k">with</span> <span class="n">with_files</span><span class="p">():</span>
-<a id="__codelineno-29-116" name="__codelineno-29-116" href="#__codelineno-29-116"></a>        <span class="n">run</span><span class="p">(</span><span class="n">tf</span><span class="p">,</span> <span class="o">*</span><span class="n">job</span><span class="o">.</span><span class="n">command</span><span class="o">.</span><span class="n">name</span><span class="o">.</span><span class="n">split</span><span class="p">(),</span>
-<a id="__codelineno-29-117" name="__codelineno-29-117" href="#__codelineno-29-117"></a>            <span class="o">*</span><span class="p">([</span><span class="s2">&quot;-force&quot;</span><span class="p">]</span> <span class="k">if</span> <span class="n">job</span><span class="o">.</span><span class="n">command</span><span class="o">.</span><span class="n">name</span> <span class="o">==</span> <span class="s2">&quot;force-unlock&quot;</span> <span class="k">else</span> <span class="p">[]),</span>  <span class="c1"># never prompts</span>
-<a id="__codelineno-29-118" name="__codelineno-29-118" href="#__codelineno-29-118"></a>            <span class="o">*</span><span class="n">job</span><span class="o">.</span><span class="n">command</span><span class="o">.</span><span class="n">args</span><span class="p">,</span>                       <span class="c1"># verbatim: the API validated and ordered them</span>
-<a id="__codelineno-29-119" name="__codelineno-29-119" href="#__codelineno-29-119"></a>            <span class="n">timeout</span><span class="o">=</span><span class="n">default_cap</span> <span class="k">if</span> <span class="n">job</span><span class="o">.</span><span class="n">cred_phase</span> <span class="o">==</span> <span class="s2">&quot;plan&quot;</span> <span class="k">else</span> <span class="n">job</span><span class="o">.</span><span class="n">apply_timeout_seconds</span><span class="p">)</span>
-<a id="__codelineno-29-120" name="__codelineno-29-120" href="#__codelineno-29-120"></a>    <span class="n">report</span><span class="p">(</span><span class="n">phase_finished</span><span class="p">,</span> <span class="n">command</span><span class="o">=</span><span class="n">job</span><span class="o">.</span><span class="n">command</span><span class="o">.</span><span class="n">name</span><span class="p">)</span>
-<a id="__codelineno-29-121" name="__codelineno-29-121" href="#__codelineno-29-121"></a>
-<a id="__codelineno-29-122" name="__codelineno-29-122" href="#__codelineno-29-122"></a><span class="n">ws</span><span class="o">.</span><span class="n">cleanup</span><span class="p">()</span>                                 <span class="c1"># in a `finally`, whatever ended the job</span>
-<a id="__codelineno-29-123" name="__codelineno-29-123" href="#__codelineno-29-123"></a><span class="c1"># A stop request (§7.1) interrupts the running subprocess (or the next one, before it starts):</span>
-<a id="__codelineno-29-124" name="__codelineno-29-124" href="#__codelineno-29-124"></a><span class="c1"># the job ends with report(job_canceled, checks=checks) instead of job_failed.</span>
+<a id="__codelineno-29-55" name="__codelineno-29-55" href="#__codelineno-29-55"></a><span class="c1"># observe(baseline): only when job.observe_state (§19.7) — `state pull` captured in memory, never on</span>
+<a id="__codelineno-29-56" name="__codelineno-29-56" href="#__codelineno-29-56"></a><span class="c1"># disk nor in a log; only serial + lineage are reported (state_observed). Any failure: a warning,</span>
+<a id="__codelineno-29-57" name="__codelineno-29-57" href="#__codelineno-29-57"></a><span class="c1"># the job goes on.</span>
+<a id="__codelineno-29-58" name="__codelineno-29-58" href="#__codelineno-29-58"></a>
+<a id="__codelineno-29-59" name="__codelineno-29-59" href="#__codelineno-29-59"></a><span class="k">if</span> <span class="n">job</span><span class="o">.</span><span class="n">phase</span> <span class="o">==</span> <span class="s2">&quot;plan&quot;</span><span class="p">:</span>
+<a id="__codelineno-29-60" name="__codelineno-29-60" href="#__codelineno-29-60"></a>    <span class="n">write_backend_override</span><span class="p">(</span><span class="n">ws</span><span class="p">)</span>               <span class="c1"># `terraform { backend &quot;http&quot; {} }`, managed state only</span>
+<a id="__codelineno-29-61" name="__codelineno-29-61" href="#__codelineno-29-61"></a>    <span class="n">report</span><span class="p">(</span><span class="n">phase_started</span><span class="p">,</span> <span class="n">phase</span><span class="o">=</span><span class="s2">&quot;planning&quot;</span><span class="p">,</span> <span class="n">commit_sha</span><span class="o">=</span><span class="n">ws</span><span class="o">.</span><span class="n">head_sha</span><span class="p">())</span>   <span class="c1"># the API pins the run</span>
+<a id="__codelineno-29-62" name="__codelineno-29-62" href="#__codelineno-29-62"></a>    <span class="n">stage</span><span class="p">(</span><span class="s2">&quot;before_init&quot;</span><span class="p">)</span>
+<a id="__codelineno-29-63" name="__codelineno-29-63" href="#__codelineno-29-63"></a>    <span class="k">with</span> <span class="n">with_files</span><span class="p">(),</span> <span class="n">init_creds</span><span class="p">()</span> <span class="k">as</span> <span class="n">git_env</span><span class="p">:</span>
+<a id="__codelineno-29-64" name="__codelineno-29-64" href="#__codelineno-29-64"></a>        <span class="n">run</span><span class="p">(</span><span class="n">tf</span><span class="p">,</span> <span class="s2">&quot;init&quot;</span><span class="p">,</span> <span class="s2">&quot;-input=false&quot;</span><span class="p">,</span> <span class="n">env</span><span class="o">=</span><span class="p">{</span><span class="o">**</span><span class="n">tofu_env</span><span class="p">,</span> <span class="o">**</span><span class="n">git_env</span><span class="p">})</span>   <span class="c1"># module downloads</span>
+<a id="__codelineno-29-65" name="__codelineno-29-65" href="#__codelineno-29-65"></a>    <span class="n">observe</span><span class="p">(</span><span class="n">baseline</span><span class="o">=</span><span class="kc">False</span><span class="p">)</span>                  <span class="c1"># the state as Stackd finds it, before the plan</span>
+<a id="__codelineno-29-66" name="__codelineno-29-66" href="#__codelineno-29-66"></a>    <span class="n">stage</span><span class="p">(</span><span class="s2">&quot;after_init&quot;</span><span class="p">);</span> <span class="n">stage</span><span class="p">(</span><span class="s2">&quot;before_plan&quot;</span><span class="p">)</span>
+<a id="__codelineno-29-67" name="__codelineno-29-67" href="#__codelineno-29-67"></a>    <span class="c1"># plan/apply run with -json: the agent streams each event&#39;s human @message to the log (masked)</span>
+<a id="__codelineno-29-68" name="__codelineno-29-68" href="#__codelineno-29-68"></a>    <span class="c1"># AND collects the structured events — the `change_summary` event gives the authoritative</span>
+<a id="__codelineno-29-69" name="__codelineno-29-69" href="#__codelineno-29-69"></a>    <span class="c1"># add/change/destroy counts and `diagnostic` events surface the real error as the run&#39;s `error`.</span>
+<a id="__codelineno-29-70" name="__codelineno-29-70" href="#__codelineno-29-70"></a>    <span class="n">plan_file</span> <span class="o">=</span> <span class="n">ws</span><span class="o">.</span><span class="n">private_path</span><span class="p">(</span><span class="s2">&quot;plan.tfplan&quot;</span><span class="p">)</span>             <span class="c1"># outside the checkout (§8.3)</span>
+<a id="__codelineno-29-71" name="__codelineno-29-71" href="#__codelineno-29-71"></a>    <span class="k">with</span> <span class="n">with_files</span><span class="p">():</span>
+<a id="__codelineno-29-72" name="__codelineno-29-72" href="#__codelineno-29-72"></a>        <span class="n">code</span><span class="p">,</span> <span class="n">events</span> <span class="o">=</span> <span class="n">run_json</span><span class="p">(</span><span class="n">tf</span><span class="p">,</span> <span class="s2">&quot;plan&quot;</span><span class="p">,</span> <span class="s2">&quot;-input=false&quot;</span><span class="p">,</span> <span class="s2">&quot;-json&quot;</span><span class="p">,</span> <span class="s2">&quot;-detailed-exitcode&quot;</span><span class="p">,</span>
+<a id="__codelineno-29-73" name="__codelineno-29-73" href="#__codelineno-29-73"></a>                                <span class="sa">f</span><span class="s2">&quot;-out=</span><span class="si">{</span><span class="n">plan_file</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">,</span> <span class="o">*</span><span class="p">([</span><span class="s2">&quot;-destroy&quot;</span><span class="p">]</span> <span class="k">if</span> <span class="n">job</span><span class="o">.</span><span class="n">destroy</span> <span class="k">else</span> <span class="p">[]),</span>
+<a id="__codelineno-29-74" name="__codelineno-29-74" href="#__codelineno-29-74"></a>                                <span class="o">*</span><span class="n">var_file_flags</span><span class="p">(</span><span class="n">job</span><span class="p">),</span>   <span class="c1"># §3.4: repo files, then Stackd&#39;s, or none</span>
+<a id="__codelineno-29-75" name="__codelineno-29-75" href="#__codelineno-29-75"></a>                                <span class="o">*</span><span class="p">([</span><span class="s2">&quot;-refresh-only&quot;</span><span class="p">]</span> <span class="k">if</span> <span class="n">job</span><span class="o">.</span><span class="n">refresh_only</span> <span class="k">else</span> <span class="p">[]),</span>   <span class="c1"># drift, §19</span>
+<a id="__codelineno-29-76" name="__codelineno-29-76" href="#__codelineno-29-76"></a>                                <span class="o">*</span><span class="p">[</span><span class="sa">f</span><span class="s2">&quot;-target=</span><span class="si">{</span><span class="n">a</span><span class="si">}</span><span class="s2">&quot;</span> <span class="k">for</span> <span class="n">a</span> <span class="ow">in</span> <span class="n">job</span><span class="o">.</span><span class="n">plan_options</span><span class="o">.</span><span class="n">targets</span><span class="p">],</span>  <span class="c1"># §3.5, one</span>
+<a id="__codelineno-29-77" name="__codelineno-29-77" href="#__codelineno-29-77"></a>                                <span class="o">*</span><span class="p">[</span><span class="sa">f</span><span class="s2">&quot;-replace=</span><span class="si">{</span><span class="n">a</span><span class="si">}</span><span class="s2">&quot;</span> <span class="k">for</span> <span class="n">a</span> <span class="ow">in</span> <span class="n">job</span><span class="o">.</span><span class="n">plan_options</span><span class="o">.</span><span class="n">replace</span><span class="p">])</span> <span class="c1"># argv each</span>
+<a id="__codelineno-29-78" name="__codelineno-29-78" href="#__codelineno-29-78"></a>    <span class="c1"># 0 = no changes, 2 = changes; anything else (1 = error, 124 = killed past its time budget, a</span>
+<a id="__codelineno-29-79" name="__codelineno-29-79" href="#__codelineno-29-79"></a>    <span class="c1"># signal) → job_failed with the reason — never &quot;no changes&quot;. apply/commands: any non-zero fails.</span>
+<a id="__codelineno-29-80" name="__codelineno-29-80" href="#__codelineno-29-80"></a>    <span class="k">with</span> <span class="n">with_files</span><span class="p">(</span><span class="n">tfvars</span><span class="o">=</span><span class="kc">False</span><span class="p">):</span>
+<a id="__codelineno-29-81" name="__codelineno-29-81" href="#__codelineno-29-81"></a>        <span class="n">run</span><span class="p">(</span><span class="n">tf</span><span class="p">,</span> <span class="s2">&quot;show&quot;</span><span class="p">,</span> <span class="s2">&quot;-no-color&quot;</span><span class="p">,</span> <span class="n">plan_file</span><span class="p">)</span>              <span class="c1"># the human-readable diff, to the log</span>
+<a id="__codelineno-29-82" name="__codelineno-29-82" href="#__codelineno-29-82"></a>        <span class="n">plan_json</span> <span class="o">=</span> <span class="n">run</span><span class="p">(</span><span class="n">tf</span><span class="p">,</span> <span class="s2">&quot;show&quot;</span><span class="p">,</span> <span class="s2">&quot;-json&quot;</span><span class="p">,</span> <span class="n">plan_file</span><span class="p">)</span>  <span class="c1"># failed, or no JSON object → job_failed</span>
+<a id="__codelineno-29-83" name="__codelineno-29-83" href="#__codelineno-29-83"></a>                                                             <span class="c1"># (&quot;plan JSON unavailable&quot;), never `{}`</span>
+<a id="__codelineno-29-84" name="__codelineno-29-84" href="#__codelineno-29-84"></a>    <span class="n">masked_json</span> <span class="o">=</span> <span class="n">mask_plan_json</span><span class="p">(</span><span class="n">plan_json</span><span class="p">)</span>                  <span class="c1"># §8.3</span>
+<a id="__codelineno-29-85" name="__codelineno-29-85" href="#__codelineno-29-85"></a>    <span class="n">upload_artifact</span><span class="p">(</span><span class="s2">&quot;plan.json&quot;</span><span class="p">,</span> <span class="n">masked_json</span><span class="p">)</span>
+<a id="__codelineno-29-86" name="__codelineno-29-86" href="#__codelineno-29-86"></a>    <span class="n">saved_plan</span> <span class="o">=</span> <span class="n">read</span><span class="p">(</span><span class="n">plan_file</span><span class="p">)</span> <span class="k">if</span> <span class="n">code</span> <span class="o">==</span> <span class="mi">2</span> <span class="ow">and</span> <span class="n">job</span><span class="o">.</span><span class="n">save_plan</span> <span class="k">else</span> <span class="kc">None</span>
+<a id="__codelineno-29-87" name="__codelineno-29-87" href="#__codelineno-29-87"></a>    <span class="n">delete</span><span class="p">(</span><span class="n">plan_file</span><span class="p">)</span>                                        <span class="c1"># before any hook runs</span>
+<a id="__codelineno-29-88" name="__codelineno-29-88" href="#__codelineno-29-88"></a>    <span class="k">if</span> <span class="n">saved_plan</span><span class="p">:</span>
+<a id="__codelineno-29-89" name="__codelineno-29-89" href="#__codelineno-29-89"></a>        <span class="n">upload_artifact</span><span class="p">(</span><span class="s2">&quot;plan.tfplan&quot;</span><span class="p">,</span> <span class="n">saved_plan</span><span class="p">)</span>           <span class="c1"># the saved plan (§7.3)</span>
+<a id="__codelineno-29-90" name="__codelineno-29-90" href="#__codelineno-29-90"></a>    <span class="k">if</span> <span class="n">hooks</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;after_plan&quot;</span><span class="p">):</span>
+<a id="__codelineno-29-91" name="__codelineno-29-91" href="#__codelineno-29-91"></a>        <span class="n">report</span><span class="p">(</span><span class="n">phase_started</span><span class="p">,</span> <span class="n">phase</span><span class="o">=</span><span class="s2">&quot;checking&quot;</span><span class="p">)</span>
+<a id="__codelineno-29-92" name="__codelineno-29-92" href="#__codelineno-29-92"></a>    <span class="n">stage</span><span class="p">(</span><span class="s2">&quot;after_plan&quot;</span><span class="p">)</span>   <span class="c1"># checking phase: platform hooks read plan.json = plan_json, then the repo</span>
+<a id="__codelineno-29-93" name="__codelineno-29-93" href="#__codelineno-29-93"></a>                          <span class="c1"># hooks plan.json = masked_json (§8.3)</span>
+<a id="__codelineno-29-94" name="__codelineno-29-94" href="#__codelineno-29-94"></a>    <span class="n">report</span><span class="p">(</span><span class="n">phase_finished</span><span class="p">,</span> <span class="n">has_changes</span><span class="o">=</span><span class="p">(</span><span class="n">code</span> <span class="o">==</span> <span class="mi">2</span><span class="p">),</span> <span class="n">summary</span><span class="o">=...</span><span class="p">,</span> <span class="n">checks</span><span class="o">=</span><span class="n">checks</span><span class="p">)</span>
+<a id="__codelineno-29-95" name="__codelineno-29-95" href="#__codelineno-29-95"></a>
+<a id="__codelineno-29-96" name="__codelineno-29-96" href="#__codelineno-29-96"></a><span class="k">elif</span> <span class="n">job</span><span class="o">.</span><span class="n">phase</span> <span class="o">==</span> <span class="s2">&quot;apply&quot;</span><span class="p">:</span>                   <span class="c1"># a fresh clone of the pinned commit (§7.3)</span>
+<a id="__codelineno-29-97" name="__codelineno-29-97" href="#__codelineno-29-97"></a>    <span class="n">write_backend_override</span><span class="p">(</span><span class="n">ws</span><span class="p">)</span>
+<a id="__codelineno-29-98" name="__codelineno-29-98" href="#__codelineno-29-98"></a>    <span class="n">hooks</span> <span class="o">=</span> <span class="n">skip_repo_apply_hooks</span><span class="p">(</span><span class="n">hooks</span><span class="p">)</span> <span class="k">if</span> <span class="ow">not</span> <span class="n">job</span><span class="o">.</span><span class="n">repo_hooks_at_apply</span> <span class="k">else</span> <span class="n">hooks</span>   <span class="c1"># warn, §8.3</span>
+<a id="__codelineno-29-99" name="__codelineno-29-99" href="#__codelineno-29-99"></a>    <span class="k">with</span> <span class="n">with_files</span><span class="p">(),</span> <span class="n">init_creds</span><span class="p">()</span> <span class="k">as</span> <span class="n">git_env</span><span class="p">:</span>
+<a id="__codelineno-29-100" name="__codelineno-29-100" href="#__codelineno-29-100"></a>        <span class="n">run</span><span class="p">(</span><span class="n">tf</span><span class="p">,</span> <span class="s2">&quot;init&quot;</span><span class="p">,</span> <span class="s2">&quot;-input=false&quot;</span><span class="p">,</span> <span class="n">env</span><span class="o">=</span><span class="p">{</span><span class="o">**</span><span class="n">tofu_env</span><span class="p">,</span> <span class="o">**</span><span class="n">git_env</span><span class="p">})</span>   <span class="c1"># module downloads</span>
+<a id="__codelineno-29-101" name="__codelineno-29-101" href="#__codelineno-29-101"></a>    <span class="n">observe</span><span class="p">(</span><span class="n">baseline</span><span class="o">=</span><span class="kc">False</span><span class="p">)</span>                  <span class="c1"># a write since the plan job is caught here</span>
+<a id="__codelineno-29-102" name="__codelineno-29-102" href="#__codelineno-29-102"></a>    <span class="n">plan</span> <span class="o">=</span> <span class="n">download_artifact</span><span class="p">(</span><span class="s2">&quot;plan.tfplan&quot;</span><span class="p">)</span>  <span class="c1"># missing/unreadable → fail closed, NEVER re-plan</span>
+<a id="__codelineno-29-103" name="__codelineno-29-103" href="#__codelineno-29-103"></a>    <span class="n">stage</span><span class="p">(</span><span class="s2">&quot;before_apply&quot;</span><span class="p">)</span>                    <span class="c1"># a failing check → nothing applied</span>
+<a id="__codelineno-29-104" name="__codelineno-29-104" href="#__codelineno-29-104"></a>    <span class="n">write_plan</span><span class="p">(</span><span class="n">plan</span><span class="p">)</span>                         <span class="c1"># 0600; removed right after the apply</span>
+<a id="__codelineno-29-105" name="__codelineno-29-105" href="#__codelineno-29-105"></a>    <span class="k">try</span><span class="p">:</span>
+<a id="__codelineno-29-106" name="__codelineno-29-106" href="#__codelineno-29-106"></a>        <span class="k">with</span> <span class="n">with_files</span><span class="p">():</span>                   <span class="c1"># the tfvars too: tofu refuses changed inputs (§7.3)</span>
+<a id="__codelineno-29-107" name="__codelineno-29-107" href="#__codelineno-29-107"></a>            <span class="n">run</span><span class="p">(</span><span class="n">tf</span><span class="p">,</span> <span class="s2">&quot;apply&quot;</span><span class="p">,</span> <span class="s2">&quot;-input=false&quot;</span><span class="p">,</span> <span class="s2">&quot;-json&quot;</span><span class="p">,</span> <span class="s2">&quot;plan.tfplan&quot;</span><span class="p">,</span>   <span class="c1"># stale → tofu refuses → failed</span>
+<a id="__codelineno-29-108" name="__codelineno-29-108" href="#__codelineno-29-108"></a>                <span class="n">timeout</span><span class="o">=</span><span class="n">job</span><span class="o">.</span><span class="n">apply_timeout_seconds</span><span class="p">)</span>
+<a id="__codelineno-29-109" name="__codelineno-29-109" href="#__codelineno-29-109"></a>    <span class="k">finally</span><span class="p">:</span>
+<a id="__codelineno-29-110" name="__codelineno-29-110" href="#__codelineno-29-110"></a>        <span class="n">observe</span><span class="p">(</span><span class="n">baseline</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>               <span class="c1"># whatever the exit (a partial apply writes state)</span>
+<a id="__codelineno-29-111" name="__codelineno-29-111" href="#__codelineno-29-111"></a>    <span class="n">cancel_token</span><span class="o">.</span><span class="n">disarm</span><span class="p">()</span>                    <span class="c1"># applied: a stop request no longer interrupts (§4.1)</span>
+<a id="__codelineno-29-112" name="__codelineno-29-112" href="#__codelineno-29-112"></a>    <span class="k">with</span> <span class="n">with_files</span><span class="p">(</span><span class="n">tfvars</span><span class="o">=</span><span class="kc">False</span><span class="p">):</span> <span class="n">outputs</span> <span class="o">=</span> <span class="n">run</span><span class="p">(</span><span class="n">tf</span><span class="p">,</span> <span class="s2">&quot;output&quot;</span><span class="p">,</span> <span class="s2">&quot;-json&quot;</span><span class="p">)</span>
+<a id="__codelineno-29-113" name="__codelineno-29-113" href="#__codelineno-29-113"></a>    <span class="n">upload_artifacts</span><span class="p">(</span><span class="n">outputs</span><span class="p">,</span> <span class="s2">&quot;outputs.json&quot;</span><span class="p">)</span>
+<a id="__codelineno-29-114" name="__codelineno-29-114" href="#__codelineno-29-114"></a>    <span class="n">stage</span><span class="p">(</span><span class="s2">&quot;after_apply&quot;</span><span class="p">)</span>                     <span class="c1"># a failing check → job_failed(after_apply) carrying</span>
+<a id="__codelineno-29-115" name="__codelineno-29-115" href="#__codelineno-29-115"></a>                                             <span class="c1"># `outputs`: recorded, drift cleared, no</span>
+<a id="__codelineno-29-116" name="__codelineno-29-116" href="#__codelineno-29-116"></a>                                             <span class="c1"># cascade (§8.3)</span>
+<a id="__codelineno-29-117" name="__codelineno-29-117" href="#__codelineno-29-117"></a>    <span class="n">report</span><span class="p">(</span><span class="n">phase_finished</span><span class="p">,</span> <span class="n">outputs</span><span class="o">=</span><span class="n">outputs</span><span class="p">,</span> <span class="n">checks</span><span class="o">=</span><span class="n">checks</span><span class="p">)</span>
+<a id="__codelineno-29-118" name="__codelineno-29-118" href="#__codelineno-29-118"></a>
+<a id="__codelineno-29-119" name="__codelineno-29-119" href="#__codelineno-29-119"></a><span class="k">else</span><span class="p">:</span>                                        <span class="c1"># command job (§4.3): no hooks, no plan/apply phases</span>
+<a id="__codelineno-29-120" name="__codelineno-29-120" href="#__codelineno-29-120"></a>    <span class="n">write_backend_override</span><span class="p">(</span><span class="n">ws</span><span class="p">)</span>
+<a id="__codelineno-29-121" name="__codelineno-29-121" href="#__codelineno-29-121"></a>    <span class="n">report</span><span class="p">(</span><span class="n">phase_started</span><span class="p">,</span> <span class="n">phase</span><span class="o">=</span><span class="s2">&quot;running&quot;</span><span class="p">)</span>
+<a id="__codelineno-29-122" name="__codelineno-29-122" href="#__codelineno-29-122"></a>    <span class="k">with</span> <span class="n">with_files</span><span class="p">(),</span> <span class="n">init_creds</span><span class="p">()</span> <span class="k">as</span> <span class="n">git_env</span><span class="p">:</span>
+<a id="__codelineno-29-123" name="__codelineno-29-123" href="#__codelineno-29-123"></a>        <span class="n">run</span><span class="p">(</span><span class="n">tf</span><span class="p">,</span> <span class="s2">&quot;init&quot;</span><span class="p">,</span> <span class="s2">&quot;-input=false&quot;</span><span class="p">,</span> <span class="n">env</span><span class="o">=</span><span class="p">{</span><span class="o">**</span><span class="n">tofu_env</span><span class="p">,</span> <span class="o">**</span><span class="n">git_env</span><span class="p">})</span>   <span class="c1"># module downloads</span>
+<a id="__codelineno-29-124" name="__codelineno-29-124" href="#__codelineno-29-124"></a>    <span class="n">observe</span><span class="p">(</span><span class="n">baseline</span><span class="o">=</span><span class="kc">False</span><span class="p">)</span>                  <span class="c1"># observe_state: mutating commands only</span>
+<a id="__codelineno-29-125" name="__codelineno-29-125" href="#__codelineno-29-125"></a>    <span class="k">try</span><span class="p">:</span>
+<a id="__codelineno-29-126" name="__codelineno-29-126" href="#__codelineno-29-126"></a>        <span class="k">with</span> <span class="n">with_files</span><span class="p">():</span>
+<a id="__codelineno-29-127" name="__codelineno-29-127" href="#__codelineno-29-127"></a>            <span class="n">run</span><span class="p">(</span><span class="n">tf</span><span class="p">,</span> <span class="o">*</span><span class="n">job</span><span class="o">.</span><span class="n">command</span><span class="o">.</span><span class="n">name</span><span class="o">.</span><span class="n">split</span><span class="p">(),</span>
+<a id="__codelineno-29-128" name="__codelineno-29-128" href="#__codelineno-29-128"></a>                <span class="o">*</span><span class="p">([</span><span class="s2">&quot;-force&quot;</span><span class="p">]</span> <span class="k">if</span> <span class="n">job</span><span class="o">.</span><span class="n">command</span><span class="o">.</span><span class="n">name</span> <span class="o">==</span> <span class="s2">&quot;force-unlock&quot;</span> <span class="k">else</span> <span class="p">[]),</span>  <span class="c1"># never prompts</span>
+<a id="__codelineno-29-129" name="__codelineno-29-129" href="#__codelineno-29-129"></a>                <span class="o">*</span><span class="n">job</span><span class="o">.</span><span class="n">command</span><span class="o">.</span><span class="n">args</span><span class="p">,</span>                   <span class="c1"># verbatim: the API validated and ordered them</span>
+<a id="__codelineno-29-130" name="__codelineno-29-130" href="#__codelineno-29-130"></a>                <span class="n">timeout</span><span class="o">=</span><span class="n">default_cap</span> <span class="k">if</span> <span class="n">job</span><span class="o">.</span><span class="n">cred_phase</span> <span class="o">==</span> <span class="s2">&quot;plan&quot;</span> <span class="k">else</span> <span class="n">job</span><span class="o">.</span><span class="n">apply_timeout_seconds</span><span class="p">)</span>
+<a id="__codelineno-29-131" name="__codelineno-29-131" href="#__codelineno-29-131"></a>    <span class="k">finally</span><span class="p">:</span>
+<a id="__codelineno-29-132" name="__codelineno-29-132" href="#__codelineno-29-132"></a>        <span class="n">observe</span><span class="p">(</span><span class="n">baseline</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+<a id="__codelineno-29-133" name="__codelineno-29-133" href="#__codelineno-29-133"></a>    <span class="n">report</span><span class="p">(</span><span class="n">phase_finished</span><span class="p">,</span> <span class="n">command</span><span class="o">=</span><span class="n">job</span><span class="o">.</span><span class="n">command</span><span class="o">.</span><span class="n">name</span><span class="p">)</span>
+<a id="__codelineno-29-134" name="__codelineno-29-134" href="#__codelineno-29-134"></a>
+<a id="__codelineno-29-135" name="__codelineno-29-135" href="#__codelineno-29-135"></a><span class="n">ws</span><span class="o">.</span><span class="n">cleanup</span><span class="p">()</span>                                 <span class="c1"># in a `finally`, whatever ended the job</span>
+<a id="__codelineno-29-136" name="__codelineno-29-136" href="#__codelineno-29-136"></a><span class="c1"># A stop request (§7.1) interrupts the running subprocess (or the next one, before it starts):</span>
+<a id="__codelineno-29-137" name="__codelineno-29-137" href="#__codelineno-29-137"></a><span class="c1"># the job ends with report(job_canceled, checks=checks) instead of job_failed.</span>
 </code></pre></div>
 <p>Every tofu subcommand gets <code>tofu_env</code> — those that reach the state (<code>init</code>, <code>plan</code>, <code>apply</code>,
 <code>output</code>, a command) need it, and the two <code>show</code> of the local plan file run with it too, so none
@@ -5460,6 +5512,8 @@ unprotected environment, with no mock and no <code>warn</code> check.
 - <code>↑N</code> chip on the env cell (DESIGN.md §5.1) and the env header; attenuated variant if <code>affects_project_root = false</code> ("the branch moved ahead, but not in this stack's paths"). Shipped: the chip (<code>ModifierChips</code>, overview matrix and env header) and the banner below (run page).
 - <strong>Obsolete <code>unconfirmed</code> run</strong>: if <code>head_sha</code> advances while a plan awaits confirmation, banner on the run page — "plan computed on <code>abc1234</code>, the branch advanced by N commits" — with a <em>Re-plan</em> action (discard + new run on the head). Confirmation remains <strong>possible</strong> (applying a specific commit is legitimate) but the obsolescence is impossible to miss.
 - No automatic action: staleness is information, never a trigger (that is the role of webhooks).
+- On an unmanaged-state env, "last applied" is what <em>Stackd</em> applied: a change made outside it (a
+  hand-run apply) is not seen here, but by the state observation of §19.7, which flags the env.
 - <code>GET /api/v1/environments/{id}</code> exposes <code>head_sha</code>, <code>commits_ahead</code>, <code>affects_project_root</code>, <code>stale</code>.</p>
 <h3 id="97-environment-promotion-trunk-based">9.7 Environment promotion (trunk-based)<a class="headerlink" href="#97-environment-promotion-trunk-based" title="Permanent link">&para;</a></h3>
 <p><code>POST /api/v1/environments/{target_id}/promote</code> <code>{from_environment_id}</code> re-deploys the <strong>exact commit
@@ -5670,7 +5724,7 @@ the API logs a warning (<code>s3.bucket_setting_unsupported</code>) instead of f
 the API does not request SSE-KMS on its writes yet — encryption at rest is the bucket's default
 encryption (PLAN Phase 3).</p>
 <p><code>artifacts/{run_id}/plan.tfplan</code> is the run's <strong>saved plan</strong> (§7.3): it holds the run's variable values in clear, sensitive ones included, so the API encrypts it <strong>AES-256-GCM with the application key</strong> before it reaches S3 (layout <code>nonce(12) || ciphertext || tag</code>, AAD = <code>stackd:artifact:&lt;s3 key&gt;</code> so a blob moved under another run's key does not decrypt) — on top of the bucket's SSE. Its key is recorded on the run (<code>runs.plan_artifact_key</code>). <strong>Retention</strong>: it lives only while the run can still be applied. On any transition to a terminal state (<code>finished</code>, <code>failed</code>, <code>discarded</code>, <code>canceled</code> — whatever the path: worker event, user, scheduler), <code>transition()</code> clears <code>plan_artifact_key</code> in the same transaction and the object is deleted once that transaction commits (best effort: a failed delete is logged; the blob stays encrypted and the API serves it to nobody, since only an <code>applying</code> run's worker can download it). <code>plan.json</code>/<code>outputs.json</code> are accepted but not archived yet.</p>
-<p><code>managed_state: false</code> → no HTTP backend injected, the repo keeps its own <code>backend</code> block. For a <strong>partial</strong> backend, set either/both (per-env, applied at init in this order — later <code>-backend-config</code> wins): <code>environments.backend_config_file</code> (repo-relative <code>.config</code>/<code>.tfbackend</code> path → <code>-backend-config=&lt;file&gt;</code>) and <code>environments.backend_config</code> (a <code>{key: value}</code> map → one <code>-backend-config=key=value</code> each, e.g. <code>bucket</code>/<code>key</code>/<code>region</code>/<code>dynamodb_table</code>/<code>use_lockfile</code>). The inline map is the way to onboard a new tier on shared code without a per-env <code>.config</code> file: set its own <code>key</code> so it doesn't collide with another env's state. Mutually exclusive with the managed HTTP backend. The repo's per-env tfvars files are not backend settings: they are the env's <code>var_files</code> (§3.4), managed state or not — the usual "one <code>&lt;env&gt;.config</code> + <code>&lt;env&gt;.tfvars</code> pair per environment" layout sets <code>backend_config_file: prod.config</code> and <code>var_files: [prod.tfvars]</code>.</p>
+<p><code>managed_state: false</code> → no HTTP backend injected, the repo keeps its own <code>backend</code> block. For a <strong>partial</strong> backend, set either/both (per-env, applied at init in this order — later <code>-backend-config</code> wins): <code>environments.backend_config_file</code> (repo-relative <code>.config</code>/<code>.tfbackend</code> path → <code>-backend-config=&lt;file&gt;</code>) and <code>environments.backend_config</code> (a <code>{key: value}</code> map → one <code>-backend-config=key=value</code> each, e.g. <code>bucket</code>/<code>key</code>/<code>region</code>/<code>dynamodb_table</code>/<code>use_lockfile</code>). The inline map is the way to onboard a new tier on shared code without a per-env <code>.config</code> file: set its own <code>key</code> so it doesn't collide with another env's state. Mutually exclusive with the managed HTTP backend. The repo's per-env tfvars files are not backend settings: they are the env's <code>var_files</code> (§3.4), managed state or not — the usual "one <code>&lt;env&gt;.config</code> + <code>&lt;env&gt;.tfvars</code> pair per environment" layout sets <code>backend_config_file: prod.config</code> and <code>var_files: [prod.tfvars]</code>. Such a backend can be written outside Stackd (an operator's <code>tofu apply</code> by hand, another tool): Stackd watches its <code>serial</code>/<code>lineage</code> and flags such a change on the environment (§19.7).</p>
 <h3 id="114-importing-an-existing-stack">11.4 Importing an existing stack<a class="headerlink" href="#114-importing-an-existing-stack" title="Permanent link">&para;</a></h3>
 <p>To adopt a stack that already has remote state into Stackd-managed state (<code>managed_state: true</code>):
 <code>POST /api/v1/environments/{env_id}/state/import-session</code> (admin; 409 unless the env has
@@ -5719,111 +5773,112 @@ second backend block fails <code>init</code>. For stacks that should keep their 
 <a id="__codelineno-42-29" name="__codelineno-42-29" href="#__codelineno-42-29"></a>POST /api/v1/stacks/{id}/check-repo                                    #   a run or rollout is active (§3.2)
 <a id="__codelineno-42-30" name="__codelineno-42-30" href="#__codelineno-42-30"></a>GET|POST /api/v1/stacks/{id}/environments ; GET|PATCH|DELETE /api/v1/environments/{id}
 <a id="__codelineno-42-31" name="__codelineno-42-31" href="#__codelineno-42-31"></a>POST /api/v1/environments/{id}/refresh-head        # Git staleness, §9.6
-<a id="__codelineno-42-32" name="__codelineno-42-32" href="#__codelineno-42-32"></a>POST /api/v1/environments/{id}/discover-inputs     # shallow clone + HCL parse → placeholder
-<a id="__codelineno-42-33" name="__codelineno-42-33" href="#__codelineno-42-33"></a>                                                   #   env variables for required inputs (§20.3)
-<a id="__codelineno-42-34" name="__codelineno-42-34" href="#__codelineno-42-34"></a>GET|POST /api/v1/stacks/{id}/variables ; PATCH|DELETE /api/v1/stacks/{id}/variables/{vid}
-<a id="__codelineno-42-35" name="__codelineno-42-35" href="#__codelineno-42-35"></a>GET|POST /api/v1/environments/{id}/variables ; PATCH|DELETE /api/v1/environments/{id}/variables/{vid}
-<a id="__codelineno-42-36" name="__codelineno-42-36" href="#__codelineno-42-36"></a>
-<a id="__codelineno-42-37" name="__codelineno-42-37" href="#__codelineno-42-37"></a># Variable sets
-<a id="__codelineno-42-38" name="__codelineno-42-38" href="#__codelineno-42-38"></a>GET|POST /api/v1/variable-sets ; GET|PATCH|DELETE /api/v1/variable-sets/{id}
-<a id="__codelineno-42-39" name="__codelineno-42-39" href="#__codelineno-42-39"></a>GET|POST /api/v1/variable-sets/{id}/variables ; PATCH|DELETE /api/v1/variable-sets/{id}/variables/{vid}
-<a id="__codelineno-42-40" name="__codelineno-42-40" href="#__codelineno-42-40"></a>GET|POST /api/v1/variable-sets/{id}/attachments ; DELETE /api/v1/variable-sets/{id}/attachments/{aid}
-<a id="__codelineno-42-41" name="__codelineno-42-41" href="#__codelineno-42-41"></a>GET /api/v1/environments/{id}/resolved-variables    # merged view + provenance
-<a id="__codelineno-42-42" name="__codelineno-42-42" href="#__codelineno-42-42"></a>
-<a id="__codelineno-42-43" name="__codelineno-42-43" href="#__codelineno-42-43"></a># Hooks (platform)
-<a id="__codelineno-42-44" name="__codelineno-42-44" href="#__codelineno-42-44"></a>GET|POST /api/v1/stacks/{id}/hooks ; PATCH|DELETE /api/v1/stacks/{id}/hooks/{hid}
-<a id="__codelineno-42-45" name="__codelineno-42-45" href="#__codelineno-42-45"></a>GET|POST /api/v1/environments/{id}/hooks ; PATCH|DELETE /api/v1/environments/{id}/hooks/{hid}
-<a id="__codelineno-42-46" name="__codelineno-42-46" href="#__codelineno-42-46"></a>
-<a id="__codelineno-42-47" name="__codelineno-42-47" href="#__codelineno-42-47"></a># Notification targets (outbound Slack/webhook)
-<a id="__codelineno-42-48" name="__codelineno-42-48" href="#__codelineno-42-48"></a>GET|POST /api/v1/stacks/{id}/notifications ; PATCH|DELETE /api/v1/stacks/{id}/notifications/{tid}
-<a id="__codelineno-42-49" name="__codelineno-42-49" href="#__codelineno-42-49"></a>POST /api/v1/stacks/{id}/notifications/{tid}/test
-<a id="__codelineno-42-50" name="__codelineno-42-50" href="#__codelineno-42-50"></a>GET|POST /api/v1/environments/{id}/notifications ; PATCH|DELETE /api/v1/environments/{id}/notifications/{tid}
-<a id="__codelineno-42-51" name="__codelineno-42-51" href="#__codelineno-42-51"></a>POST /api/v1/environments/{id}/notifications/{tid}/test
-<a id="__codelineno-42-52" name="__codelineno-42-52" href="#__codelineno-42-52"></a>
-<a id="__codelineno-42-53" name="__codelineno-42-53" href="#__codelineno-42-53"></a># In-app notifications (§17) — the caller&#39;s own feed
-<a id="__codelineno-42-54" name="__codelineno-42-54" href="#__codelineno-42-54"></a>GET /api/v1/notifications ; POST /api/v1/notifications/read
-<a id="__codelineno-42-55" name="__codelineno-42-55" href="#__codelineno-42-55"></a>DELETE /api/v1/notifications/{nid} ; DELETE /api/v1/notifications     # the latter: clear read ones
-<a id="__codelineno-42-56" name="__codelineno-42-56" href="#__codelineno-42-56"></a>
-<a id="__codelineno-42-57" name="__codelineno-42-57" href="#__codelineno-42-57"></a># Cloud integrations (OIDC)
-<a id="__codelineno-42-58" name="__codelineno-42-58" href="#__codelineno-42-58"></a>GET|PUT|DELETE /api/v1/environments/{id}/cloud-integration   # PUT/DELETE: admin
-<a id="__codelineno-42-59" name="__codelineno-42-59" href="#__codelineno-42-59"></a>POST /api/v1/environments/{id}/cloud-integration/test    # admin; verification AssumeRole
-<a id="__codelineno-42-60" name="__codelineno-42-60" href="#__codelineno-42-60"></a>
-<a id="__codelineno-42-61" name="__codelineno-42-61" href="#__codelineno-42-61"></a># Runs
-<a id="__codelineno-42-62" name="__codelineno-42-62" href="#__codelineno-42-62"></a>POST /api/v1/environments/{id}/runs      { type?, with_downstream?, commit_sha?, secret_overrides?,
-<a id="__codelineno-42-63" name="__codelineno-42-63" href="#__codelineno-42-63"></a>                                           targets?, replace? }
-<a id="__codelineno-42-64" name="__codelineno-42-64" href="#__codelineno-42-64"></a>                                         # type: tracked (default) | destroy — 422 otherwise;
-<a id="__codelineno-42-65" name="__codelineno-42-65" href="#__codelineno-42-65"></a>                                         # targets/replace: resource addresses (§3.5), replace
-<a id="__codelineno-42-66" name="__codelineno-42-66" href="#__codelineno-42-66"></a>                                         # tracked only — 422 on an invalid list
-<a id="__codelineno-42-67" name="__codelineno-42-67" href="#__codelineno-42-67"></a>POST /api/v1/environments/{id}/commands  { command, args, commit_sha? }     # §4.3 — 400 outside
-<a id="__codelineno-42-68" name="__codelineno-42-68" href="#__codelineno-42-68"></a>                                         # the allowlists; force-unlock: admin, 409 on managed state
-<a id="__codelineno-42-69" name="__codelineno-42-69" href="#__codelineno-42-69"></a>POST /api/v1/environments/{id}/promote   { from_environment_id }           # §9.7
-<a id="__codelineno-42-70" name="__codelineno-42-70" href="#__codelineno-42-70"></a>GET  /api/v1/environments/{id}/runs ; GET /api/v1/runs/{id}   # the latter adds run_group (§9.2) and
-<a id="__codelineno-42-71" name="__codelineno-42-71" href="#__codelineno-42-71"></a>                                    # confirmed_via: user | autodeploy | rollout (§21.5); both
-<a id="__codelineno-42-72" name="__codelineno-42-72" href="#__codelineno-42-72"></a>                                    # carry plan_options (§3.5)
-<a id="__codelineno-42-73" name="__codelineno-42-73" href="#__codelineno-42-73"></a>POST /api/v1/runs/{id}/confirm | /discard | /cancel   # cancel of an executing run = a stop
-<a id="__codelineno-42-74" name="__codelineno-42-74" href="#__codelineno-42-74"></a>                                    # request to its worker (§4.1); can_apply if it holds apply creds
-<a id="__codelineno-42-75" name="__codelineno-42-75" href="#__codelineno-42-75"></a>POST /api/v1/runs/{id}/vcs/resync                                          # §18.5
-<a id="__codelineno-42-76" name="__codelineno-42-76" href="#__codelineno-42-76"></a>GET  /api/v1/runs/{id}/logs ?phase=&amp;after_seq=          # hot or archived tier (§5.2)
-<a id="__codelineno-42-77" name="__codelineno-42-77" href="#__codelineno-42-77"></a>GET  /api/v1/runs/{id}/logs/download ?phase=all|&lt;phase&gt; # plain text attachment (§5.2)
-<a id="__codelineno-42-78" name="__codelineno-42-78" href="#__codelineno-42-78"></a>GET  /api/v1/runs/{id}/plan ; GET /api/v1/runs/{id}/checks
-<a id="__codelineno-42-79" name="__codelineno-42-79" href="#__codelineno-42-79"></a>WS   /api/v1/ws                     sub: run:{id}, environment:{id}, user:{own id}, rollout:{id}
-<a id="__codelineno-42-80" name="__codelineno-42-80" href="#__codelineno-42-80"></a>
-<a id="__codelineno-42-81" name="__codelineno-42-81" href="#__codelineno-42-81"></a># Dependencies
-<a id="__codelineno-42-82" name="__codelineno-42-82" href="#__codelineno-42-82"></a>GET|POST /api/v1/environments/{id}/dependencies          # references with mock_value
-<a id="__codelineno-42-83" name="__codelineno-42-83" href="#__codelineno-42-83"></a>POST /api/v1/stacks/{id}/dependencies/link-by-name       { upstream_stack_id, trigger_policy? }
-<a id="__codelineno-42-84" name="__codelineno-42-84" href="#__codelineno-42-84"></a>DELETE /api/v1/dependencies/{id}
-<a id="__codelineno-42-85" name="__codelineno-42-85" href="#__codelineno-42-85"></a>GET /api/v1/environments/{id}/outputs ; GET /api/v1/graph
-<a id="__codelineno-42-86" name="__codelineno-42-86" href="#__codelineno-42-86"></a>
-<a id="__codelineno-42-87" name="__codelineno-42-87" href="#__codelineno-42-87"></a># Environment clones &amp; rollouts (§21)
-<a id="__codelineno-42-88" name="__codelineno-42-88" href="#__codelineno-42-88"></a>POST /api/v1/spaces/{space_id}/environment-clones
-<a id="__codelineno-42-89" name="__codelineno-42-89" href="#__codelineno-42-89"></a>POST /api/v1/rollouts ; GET /api/v1/rollouts ; GET /api/v1/rollouts/{id}
-<a id="__codelineno-42-90" name="__codelineno-42-90" href="#__codelineno-42-90"></a>POST /api/v1/rollouts/{id}/approve | /retry | /cancel
-<a id="__codelineno-42-91" name="__codelineno-42-91" href="#__codelineno-42-91"></a>
-<a id="__codelineno-42-92" name="__codelineno-42-92" href="#__codelineno-42-92"></a># Plan-review comments (§16)
-<a id="__codelineno-42-93" name="__codelineno-42-93" href="#__codelineno-42-93"></a>GET|POST /api/v1/runs/{id}/comments ; PATCH|DELETE /api/v1/runs/{id}/comments/{cid}
-<a id="__codelineno-42-94" name="__codelineno-42-94" href="#__codelineno-42-94"></a>
-<a id="__codelineno-42-95" name="__codelineno-42-95" href="#__codelineno-42-95"></a># Audit (admin)
-<a id="__codelineno-42-96" name="__codelineno-42-96" href="#__codelineno-42-96"></a>GET /api/v1/audit ; GET /api/v1/audit/export
-<a id="__codelineno-42-97" name="__codelineno-42-97" href="#__codelineno-42-97"></a>
-<a id="__codelineno-42-98" name="__codelineno-42-98" href="#__codelineno-42-98"></a># Users &amp; permissions
-<a id="__codelineno-42-99" name="__codelineno-42-99" href="#__codelineno-42-99"></a>GET   /api/v1/users              # admin
-<a id="__codelineno-42-100" name="__codelineno-42-100" href="#__codelineno-42-100"></a>PATCH /api/v1/users/{id}         # admin: role, allowed_tiers, can_destroy, disabled (audited)
-<a id="__codelineno-42-101" name="__codelineno-42-101" href="#__codelineno-42-101"></a>GET   /api/v1/users/mentionable  # minimal directory (id/email/display_name) for @mention, any auth
-<a id="__codelineno-42-102" name="__codelineno-42-102" href="#__codelineno-42-102"></a>
-<a id="__codelineno-42-103" name="__codelineno-42-103" href="#__codelineno-42-103"></a># Tiers (catalog, §2.4) — listing open; create/update/delete admin
-<a id="__codelineno-42-104" name="__codelineno-42-104" href="#__codelineno-42-104"></a>GET /api/v1/tiers ; POST /api/v1/tiers ; PATCH|DELETE /api/v1/tiers/{id}
-<a id="__codelineno-42-105" name="__codelineno-42-105" href="#__codelineno-42-105"></a>
-<a id="__codelineno-42-106" name="__codelineno-42-106" href="#__codelineno-42-106"></a># Workers &amp; execution queue
-<a id="__codelineno-42-107" name="__codelineno-42-107" href="#__codelineno-42-107"></a>GET|POST /api/v1/worker-pools ; DELETE /api/v1/worker-pools/{id}       # admin
-<a id="__codelineno-42-108" name="__codelineno-42-108" href="#__codelineno-42-108"></a>GET /api/v1/workers
-<a id="__codelineno-42-109" name="__codelineno-42-109" href="#__codelineno-42-109"></a>GET /api/v1/queue          # runs in progress + waiting, with computed blocking reason
-<a id="__codelineno-42-110" name="__codelineno-42-110" href="#__codelineno-42-110"></a>                           # (active_run|env_locked|no_compatible_worker|apply_affinity_hold)
-<a id="__codelineno-42-111" name="__codelineno-42-111" href="#__codelineno-42-111"></a>POST|GET /api/v1/workers/{id}/diagnostics   # admin: read-only debug bundle (via heartbeat)
-<a id="__codelineno-42-112" name="__codelineno-42-112" href="#__codelineno-42-112"></a>
-<a id="__codelineno-42-113" name="__codelineno-42-113" href="#__codelineno-42-113"></a># Observability
-<a id="__codelineno-42-114" name="__codelineno-42-114" href="#__codelineno-42-114"></a>GET /healthz               # unauthenticated liveness probe
-<a id="__codelineno-42-115" name="__codelineno-42-115" href="#__codelineno-42-115"></a>GET /metrics               # unauthenticated Prometheus scrape (§20.1)
-<a id="__codelineno-42-116" name="__codelineno-42-116" href="#__codelineno-42-116"></a>GET /api/v1/health         # any auth: DB, workers (online + heartbeat), active/queued runs, recent errors
-<a id="__codelineno-42-117" name="__codelineno-42-117" href="#__codelineno-42-117"></a>GET /api/v1/logs           # admin: structured JSON buffer, filters level/logger/event/worker_id/
-<a id="__codelineno-42-118" name="__codelineno-42-118" href="#__codelineno-42-118"></a>                           #   run_id/request_id/q, limit
-<a id="__codelineno-42-119" name="__codelineno-42-119" href="#__codelineno-42-119"></a>
-<a id="__codelineno-42-120" name="__codelineno-42-120" href="#__codelineno-42-120"></a># State
-<a id="__codelineno-42-121" name="__codelineno-42-121" href="#__codelineno-42-121"></a>GET /api/v1/environments/{id}/state/versions
-<a id="__codelineno-42-122" name="__codelineno-42-122" href="#__codelineno-42-122"></a>POST /api/v1/environments/{id}/state/import-session      # admin, audited (§11.4)
-<a id="__codelineno-42-123" name="__codelineno-42-123" href="#__codelineno-42-123"></a>DELETE /api/v1/environments/{id}/state/lock              # force-unlock (admin, audited)
-<a id="__codelineno-42-124" name="__codelineno-42-124" href="#__codelineno-42-124"></a>
-<a id="__codelineno-42-125" name="__codelineno-42-125" href="#__codelineno-42-125"></a># Webhooks
-<a id="__codelineno-42-126" name="__codelineno-42-126" href="#__codelineno-42-126"></a>POST /api/v1/webhooks/github                             # HMAC + X-GitHub-Delivery anti-replay (§13)
-<a id="__codelineno-42-127" name="__codelineno-42-127" href="#__codelineno-42-127"></a>
-<a id="__codelineno-42-128" name="__codelineno-42-128" href="#__codelineno-42-128"></a># Worker API (agents — detail §7)
-<a id="__codelineno-42-129" name="__codelineno-42-129" href="#__codelineno-42-129"></a>POST /worker/v1/register | /heartbeat | /jobs/claim
-<a id="__codelineno-42-130" name="__codelineno-42-130" href="#__codelineno-42-130"></a>POST /worker/v1/jobs/{id}/events | /jobs/{id}/logs
-<a id="__codelineno-42-131" name="__codelineno-42-131" href="#__codelineno-42-131"></a>PUT  /worker/v1/jobs/{id}/artifacts/{name}               # plan.tfplan (saved plan) | plan.json | outputs.json
-<a id="__codelineno-42-132" name="__codelineno-42-132" href="#__codelineno-42-132"></a>GET  /worker/v1/jobs/{id}/artifacts/plan.tfplan          # the apply job&#39;s saved plan (§7.3)
-<a id="__codelineno-42-133" name="__codelineno-42-133" href="#__codelineno-42-133"></a>POST /worker/v1/commands/{id}/result        # result of a downstream command (diagnostics…)
-<a id="__codelineno-42-134" name="__codelineno-42-134" href="#__codelineno-42-134"></a>
-<a id="__codelineno-42-135" name="__codelineno-42-135" href="#__codelineno-42-135"></a># State backend HTTP (Terraform — detail §11)
-<a id="__codelineno-42-136" name="__codelineno-42-136" href="#__codelineno-42-136"></a>GET|POST /state/v1/{env_id} ; LOCK|UNLOCK /state/v1/{env_id}/lock
+<a id="__codelineno-42-32" name="__codelineno-42-32" href="#__codelineno-42-32"></a>POST /api/v1/environments/{id}/out-of-band-change/acknowledge   # can_apply; clears the flag (§19.7)
+<a id="__codelineno-42-33" name="__codelineno-42-33" href="#__codelineno-42-33"></a>POST /api/v1/environments/{id}/discover-inputs     # shallow clone + HCL parse → placeholder
+<a id="__codelineno-42-34" name="__codelineno-42-34" href="#__codelineno-42-34"></a>                                                   #   env variables for required inputs (§20.3)
+<a id="__codelineno-42-35" name="__codelineno-42-35" href="#__codelineno-42-35"></a>GET|POST /api/v1/stacks/{id}/variables ; PATCH|DELETE /api/v1/stacks/{id}/variables/{vid}
+<a id="__codelineno-42-36" name="__codelineno-42-36" href="#__codelineno-42-36"></a>GET|POST /api/v1/environments/{id}/variables ; PATCH|DELETE /api/v1/environments/{id}/variables/{vid}
+<a id="__codelineno-42-37" name="__codelineno-42-37" href="#__codelineno-42-37"></a>
+<a id="__codelineno-42-38" name="__codelineno-42-38" href="#__codelineno-42-38"></a># Variable sets
+<a id="__codelineno-42-39" name="__codelineno-42-39" href="#__codelineno-42-39"></a>GET|POST /api/v1/variable-sets ; GET|PATCH|DELETE /api/v1/variable-sets/{id}
+<a id="__codelineno-42-40" name="__codelineno-42-40" href="#__codelineno-42-40"></a>GET|POST /api/v1/variable-sets/{id}/variables ; PATCH|DELETE /api/v1/variable-sets/{id}/variables/{vid}
+<a id="__codelineno-42-41" name="__codelineno-42-41" href="#__codelineno-42-41"></a>GET|POST /api/v1/variable-sets/{id}/attachments ; DELETE /api/v1/variable-sets/{id}/attachments/{aid}
+<a id="__codelineno-42-42" name="__codelineno-42-42" href="#__codelineno-42-42"></a>GET /api/v1/environments/{id}/resolved-variables    # merged view + provenance
+<a id="__codelineno-42-43" name="__codelineno-42-43" href="#__codelineno-42-43"></a>
+<a id="__codelineno-42-44" name="__codelineno-42-44" href="#__codelineno-42-44"></a># Hooks (platform)
+<a id="__codelineno-42-45" name="__codelineno-42-45" href="#__codelineno-42-45"></a>GET|POST /api/v1/stacks/{id}/hooks ; PATCH|DELETE /api/v1/stacks/{id}/hooks/{hid}
+<a id="__codelineno-42-46" name="__codelineno-42-46" href="#__codelineno-42-46"></a>GET|POST /api/v1/environments/{id}/hooks ; PATCH|DELETE /api/v1/environments/{id}/hooks/{hid}
+<a id="__codelineno-42-47" name="__codelineno-42-47" href="#__codelineno-42-47"></a>
+<a id="__codelineno-42-48" name="__codelineno-42-48" href="#__codelineno-42-48"></a># Notification targets (outbound Slack/webhook)
+<a id="__codelineno-42-49" name="__codelineno-42-49" href="#__codelineno-42-49"></a>GET|POST /api/v1/stacks/{id}/notifications ; PATCH|DELETE /api/v1/stacks/{id}/notifications/{tid}
+<a id="__codelineno-42-50" name="__codelineno-42-50" href="#__codelineno-42-50"></a>POST /api/v1/stacks/{id}/notifications/{tid}/test
+<a id="__codelineno-42-51" name="__codelineno-42-51" href="#__codelineno-42-51"></a>GET|POST /api/v1/environments/{id}/notifications ; PATCH|DELETE /api/v1/environments/{id}/notifications/{tid}
+<a id="__codelineno-42-52" name="__codelineno-42-52" href="#__codelineno-42-52"></a>POST /api/v1/environments/{id}/notifications/{tid}/test
+<a id="__codelineno-42-53" name="__codelineno-42-53" href="#__codelineno-42-53"></a>
+<a id="__codelineno-42-54" name="__codelineno-42-54" href="#__codelineno-42-54"></a># In-app notifications (§17) — the caller&#39;s own feed
+<a id="__codelineno-42-55" name="__codelineno-42-55" href="#__codelineno-42-55"></a>GET /api/v1/notifications ; POST /api/v1/notifications/read
+<a id="__codelineno-42-56" name="__codelineno-42-56" href="#__codelineno-42-56"></a>DELETE /api/v1/notifications/{nid} ; DELETE /api/v1/notifications     # the latter: clear read ones
+<a id="__codelineno-42-57" name="__codelineno-42-57" href="#__codelineno-42-57"></a>
+<a id="__codelineno-42-58" name="__codelineno-42-58" href="#__codelineno-42-58"></a># Cloud integrations (OIDC)
+<a id="__codelineno-42-59" name="__codelineno-42-59" href="#__codelineno-42-59"></a>GET|PUT|DELETE /api/v1/environments/{id}/cloud-integration   # PUT/DELETE: admin
+<a id="__codelineno-42-60" name="__codelineno-42-60" href="#__codelineno-42-60"></a>POST /api/v1/environments/{id}/cloud-integration/test    # admin; verification AssumeRole
+<a id="__codelineno-42-61" name="__codelineno-42-61" href="#__codelineno-42-61"></a>
+<a id="__codelineno-42-62" name="__codelineno-42-62" href="#__codelineno-42-62"></a># Runs
+<a id="__codelineno-42-63" name="__codelineno-42-63" href="#__codelineno-42-63"></a>POST /api/v1/environments/{id}/runs      { type?, with_downstream?, commit_sha?, secret_overrides?,
+<a id="__codelineno-42-64" name="__codelineno-42-64" href="#__codelineno-42-64"></a>                                           targets?, replace? }
+<a id="__codelineno-42-65" name="__codelineno-42-65" href="#__codelineno-42-65"></a>                                         # type: tracked (default) | destroy — 422 otherwise;
+<a id="__codelineno-42-66" name="__codelineno-42-66" href="#__codelineno-42-66"></a>                                         # targets/replace: resource addresses (§3.5), replace
+<a id="__codelineno-42-67" name="__codelineno-42-67" href="#__codelineno-42-67"></a>                                         # tracked only — 422 on an invalid list
+<a id="__codelineno-42-68" name="__codelineno-42-68" href="#__codelineno-42-68"></a>POST /api/v1/environments/{id}/commands  { command, args, commit_sha? }     # §4.3 — 400 outside
+<a id="__codelineno-42-69" name="__codelineno-42-69" href="#__codelineno-42-69"></a>                                         # the allowlists; force-unlock: admin, 409 on managed state
+<a id="__codelineno-42-70" name="__codelineno-42-70" href="#__codelineno-42-70"></a>POST /api/v1/environments/{id}/promote   { from_environment_id }           # §9.7
+<a id="__codelineno-42-71" name="__codelineno-42-71" href="#__codelineno-42-71"></a>GET  /api/v1/environments/{id}/runs ; GET /api/v1/runs/{id}   # the latter adds run_group (§9.2) and
+<a id="__codelineno-42-72" name="__codelineno-42-72" href="#__codelineno-42-72"></a>                                    # confirmed_via: user | autodeploy | rollout (§21.5); both
+<a id="__codelineno-42-73" name="__codelineno-42-73" href="#__codelineno-42-73"></a>                                    # carry plan_options (§3.5)
+<a id="__codelineno-42-74" name="__codelineno-42-74" href="#__codelineno-42-74"></a>POST /api/v1/runs/{id}/confirm | /discard | /cancel   # cancel of an executing run = a stop
+<a id="__codelineno-42-75" name="__codelineno-42-75" href="#__codelineno-42-75"></a>                                    # request to its worker (§4.1); can_apply if it holds apply creds
+<a id="__codelineno-42-76" name="__codelineno-42-76" href="#__codelineno-42-76"></a>POST /api/v1/runs/{id}/vcs/resync                                          # §18.5
+<a id="__codelineno-42-77" name="__codelineno-42-77" href="#__codelineno-42-77"></a>GET  /api/v1/runs/{id}/logs ?phase=&amp;after_seq=          # hot or archived tier (§5.2)
+<a id="__codelineno-42-78" name="__codelineno-42-78" href="#__codelineno-42-78"></a>GET  /api/v1/runs/{id}/logs/download ?phase=all|&lt;phase&gt; # plain text attachment (§5.2)
+<a id="__codelineno-42-79" name="__codelineno-42-79" href="#__codelineno-42-79"></a>GET  /api/v1/runs/{id}/plan ; GET /api/v1/runs/{id}/checks
+<a id="__codelineno-42-80" name="__codelineno-42-80" href="#__codelineno-42-80"></a>WS   /api/v1/ws                     sub: run:{id}, environment:{id}, user:{own id}, rollout:{id}
+<a id="__codelineno-42-81" name="__codelineno-42-81" href="#__codelineno-42-81"></a>
+<a id="__codelineno-42-82" name="__codelineno-42-82" href="#__codelineno-42-82"></a># Dependencies
+<a id="__codelineno-42-83" name="__codelineno-42-83" href="#__codelineno-42-83"></a>GET|POST /api/v1/environments/{id}/dependencies          # references with mock_value
+<a id="__codelineno-42-84" name="__codelineno-42-84" href="#__codelineno-42-84"></a>POST /api/v1/stacks/{id}/dependencies/link-by-name       { upstream_stack_id, trigger_policy? }
+<a id="__codelineno-42-85" name="__codelineno-42-85" href="#__codelineno-42-85"></a>DELETE /api/v1/dependencies/{id}
+<a id="__codelineno-42-86" name="__codelineno-42-86" href="#__codelineno-42-86"></a>GET /api/v1/environments/{id}/outputs ; GET /api/v1/graph
+<a id="__codelineno-42-87" name="__codelineno-42-87" href="#__codelineno-42-87"></a>
+<a id="__codelineno-42-88" name="__codelineno-42-88" href="#__codelineno-42-88"></a># Environment clones &amp; rollouts (§21)
+<a id="__codelineno-42-89" name="__codelineno-42-89" href="#__codelineno-42-89"></a>POST /api/v1/spaces/{space_id}/environment-clones
+<a id="__codelineno-42-90" name="__codelineno-42-90" href="#__codelineno-42-90"></a>POST /api/v1/rollouts ; GET /api/v1/rollouts ; GET /api/v1/rollouts/{id}
+<a id="__codelineno-42-91" name="__codelineno-42-91" href="#__codelineno-42-91"></a>POST /api/v1/rollouts/{id}/approve | /retry | /cancel
+<a id="__codelineno-42-92" name="__codelineno-42-92" href="#__codelineno-42-92"></a>
+<a id="__codelineno-42-93" name="__codelineno-42-93" href="#__codelineno-42-93"></a># Plan-review comments (§16)
+<a id="__codelineno-42-94" name="__codelineno-42-94" href="#__codelineno-42-94"></a>GET|POST /api/v1/runs/{id}/comments ; PATCH|DELETE /api/v1/runs/{id}/comments/{cid}
+<a id="__codelineno-42-95" name="__codelineno-42-95" href="#__codelineno-42-95"></a>
+<a id="__codelineno-42-96" name="__codelineno-42-96" href="#__codelineno-42-96"></a># Audit (admin)
+<a id="__codelineno-42-97" name="__codelineno-42-97" href="#__codelineno-42-97"></a>GET /api/v1/audit ; GET /api/v1/audit/export
+<a id="__codelineno-42-98" name="__codelineno-42-98" href="#__codelineno-42-98"></a>
+<a id="__codelineno-42-99" name="__codelineno-42-99" href="#__codelineno-42-99"></a># Users &amp; permissions
+<a id="__codelineno-42-100" name="__codelineno-42-100" href="#__codelineno-42-100"></a>GET   /api/v1/users              # admin
+<a id="__codelineno-42-101" name="__codelineno-42-101" href="#__codelineno-42-101"></a>PATCH /api/v1/users/{id}         # admin: role, allowed_tiers, can_destroy, disabled (audited)
+<a id="__codelineno-42-102" name="__codelineno-42-102" href="#__codelineno-42-102"></a>GET   /api/v1/users/mentionable  # minimal directory (id/email/display_name) for @mention, any auth
+<a id="__codelineno-42-103" name="__codelineno-42-103" href="#__codelineno-42-103"></a>
+<a id="__codelineno-42-104" name="__codelineno-42-104" href="#__codelineno-42-104"></a># Tiers (catalog, §2.4) — listing open; create/update/delete admin
+<a id="__codelineno-42-105" name="__codelineno-42-105" href="#__codelineno-42-105"></a>GET /api/v1/tiers ; POST /api/v1/tiers ; PATCH|DELETE /api/v1/tiers/{id}
+<a id="__codelineno-42-106" name="__codelineno-42-106" href="#__codelineno-42-106"></a>
+<a id="__codelineno-42-107" name="__codelineno-42-107" href="#__codelineno-42-107"></a># Workers &amp; execution queue
+<a id="__codelineno-42-108" name="__codelineno-42-108" href="#__codelineno-42-108"></a>GET|POST /api/v1/worker-pools ; DELETE /api/v1/worker-pools/{id}       # admin
+<a id="__codelineno-42-109" name="__codelineno-42-109" href="#__codelineno-42-109"></a>GET /api/v1/workers
+<a id="__codelineno-42-110" name="__codelineno-42-110" href="#__codelineno-42-110"></a>GET /api/v1/queue          # runs in progress + waiting, with computed blocking reason
+<a id="__codelineno-42-111" name="__codelineno-42-111" href="#__codelineno-42-111"></a>                           # (active_run|env_locked|no_compatible_worker|apply_affinity_hold)
+<a id="__codelineno-42-112" name="__codelineno-42-112" href="#__codelineno-42-112"></a>POST|GET /api/v1/workers/{id}/diagnostics   # admin: read-only debug bundle (via heartbeat)
+<a id="__codelineno-42-113" name="__codelineno-42-113" href="#__codelineno-42-113"></a>
+<a id="__codelineno-42-114" name="__codelineno-42-114" href="#__codelineno-42-114"></a># Observability
+<a id="__codelineno-42-115" name="__codelineno-42-115" href="#__codelineno-42-115"></a>GET /healthz               # unauthenticated liveness probe
+<a id="__codelineno-42-116" name="__codelineno-42-116" href="#__codelineno-42-116"></a>GET /metrics               # unauthenticated Prometheus scrape (§20.1)
+<a id="__codelineno-42-117" name="__codelineno-42-117" href="#__codelineno-42-117"></a>GET /api/v1/health         # any auth: DB, workers (online + heartbeat), active/queued runs, recent errors
+<a id="__codelineno-42-118" name="__codelineno-42-118" href="#__codelineno-42-118"></a>GET /api/v1/logs           # admin: structured JSON buffer, filters level/logger/event/worker_id/
+<a id="__codelineno-42-119" name="__codelineno-42-119" href="#__codelineno-42-119"></a>                           #   run_id/request_id/q, limit
+<a id="__codelineno-42-120" name="__codelineno-42-120" href="#__codelineno-42-120"></a>
+<a id="__codelineno-42-121" name="__codelineno-42-121" href="#__codelineno-42-121"></a># State
+<a id="__codelineno-42-122" name="__codelineno-42-122" href="#__codelineno-42-122"></a>GET /api/v1/environments/{id}/state/versions
+<a id="__codelineno-42-123" name="__codelineno-42-123" href="#__codelineno-42-123"></a>POST /api/v1/environments/{id}/state/import-session      # admin, audited (§11.4)
+<a id="__codelineno-42-124" name="__codelineno-42-124" href="#__codelineno-42-124"></a>DELETE /api/v1/environments/{id}/state/lock              # force-unlock (admin, audited)
+<a id="__codelineno-42-125" name="__codelineno-42-125" href="#__codelineno-42-125"></a>
+<a id="__codelineno-42-126" name="__codelineno-42-126" href="#__codelineno-42-126"></a># Webhooks
+<a id="__codelineno-42-127" name="__codelineno-42-127" href="#__codelineno-42-127"></a>POST /api/v1/webhooks/github                             # HMAC + X-GitHub-Delivery anti-replay (§13)
+<a id="__codelineno-42-128" name="__codelineno-42-128" href="#__codelineno-42-128"></a>
+<a id="__codelineno-42-129" name="__codelineno-42-129" href="#__codelineno-42-129"></a># Worker API (agents — detail §7)
+<a id="__codelineno-42-130" name="__codelineno-42-130" href="#__codelineno-42-130"></a>POST /worker/v1/register | /heartbeat | /jobs/claim
+<a id="__codelineno-42-131" name="__codelineno-42-131" href="#__codelineno-42-131"></a>POST /worker/v1/jobs/{id}/events | /jobs/{id}/logs
+<a id="__codelineno-42-132" name="__codelineno-42-132" href="#__codelineno-42-132"></a>PUT  /worker/v1/jobs/{id}/artifacts/{name}               # plan.tfplan (saved plan) | plan.json | outputs.json
+<a id="__codelineno-42-133" name="__codelineno-42-133" href="#__codelineno-42-133"></a>GET  /worker/v1/jobs/{id}/artifacts/plan.tfplan          # the apply job&#39;s saved plan (§7.3)
+<a id="__codelineno-42-134" name="__codelineno-42-134" href="#__codelineno-42-134"></a>POST /worker/v1/commands/{id}/result        # result of a downstream command (diagnostics…)
+<a id="__codelineno-42-135" name="__codelineno-42-135" href="#__codelineno-42-135"></a>
+<a id="__codelineno-42-136" name="__codelineno-42-136" href="#__codelineno-42-136"></a># State backend HTTP (Terraform — detail §11)
+<a id="__codelineno-42-137" name="__codelineno-42-137" href="#__codelineno-42-137"></a>GET|POST /state/v1/{env_id} ; LOCK|UNLOCK /state/v1/{env_id}/lock
 </code></pre></div>
 <p>Specified but <strong>not served yet</strong>: <code>GET /api/v1/run-groups/{id}</code> (§9.4).</p>
 <hr />
@@ -6210,9 +6265,10 @@ change (<code>transition()</code> untouched), live over the existing <code>LISTE
 <h3 id="171-model-events">17.1 Model &amp; events<a class="headerlink" href="#171-model-events" title="Permanent link">&para;</a></h3>
 <p><code>user_notifications</code> (per user): <code>user_id</code>, <code>kind</code>, <code>run_id?</code>, <code>comment_id?</code>, <code>context jsonb</code>,
 <code>read_at?</code>, <code>created_at</code>. <code>kind ∈ approval_request | run_finished | run_failed | comment_reply |
-mention | drift_detected | rollout_paused | rollout_succeeded | rollout_failed |
-rollout_upstream_changed</code> (<code>drift_detected</code>: §19.4; the <code>rollout_*</code> ones: §21.7, context
-<code>{rollout_id, name, …}</code>, no <code>run_id</code>). Each row is created <strong>in the same transaction</strong> as its trigger:</p>
+mention | drift_detected | out_of_band_change | rollout_paused | rollout_succeeded | rollout_failed |
+rollout_upstream_changed</code> (<code>drift_detected</code>: §19.4; <code>out_of_band_change</code>: §19.7, the detecting
+run, context <code>{environment_id, environment, tier, expected_serial, observed_serial}</code>; the
+<code>rollout_*</code> ones: §21.7, context <code>{rollout_id, name, …}</code>, no <code>run_id</code>). Each row is created <strong>in the same transaction</strong> as its trigger:</p>
 <ul>
 <li><strong><code>transition()</code></strong> (§4.2): <code>→ unconfirmed</code> fans out <code>approval_request</code> to every eligible approver
   — the users who pass <code>can_apply</code> on the env (§2.4), evaluated with their <strong>effective</strong> space
@@ -6349,6 +6405,89 @@ alone — DESIGN §7) on the env page (linking the drift run's plan) and in the 
 <li>The env status change rides the run <code>transition()</code> txn — a rolled-back completion changes
    nothing; the notification is same-txn (§17.4).</li>
 </ol>
+<h3 id="197-out-of-band-state-changes-unmanaged-state">19.7 Out-of-band state changes (unmanaged state)<a class="headerlink" href="#197-out-of-band-state-changes-unmanaged-state" title="Permanent link">&para;</a></h3>
+<blockquote>
+<p>Status: <strong>shipped</strong>. With <code>managed_state=false</code> (§11.3) the state lives in the repo's own backend,
+and anyone holding its credentials — an operator falling back to <code>tofu apply</code> by hand, another
+tool — can write it between two Stackd runs. Stackd would keep presenting its last applied commit
+(§9.6), outputs (§9.1) and cascades (§9.2) as current while the infrastructure moved. Stackd
+cannot prevent such a write; it makes it <strong>visible</strong>. Never auto-remediated, never a trigger.</p>
+</blockquote>
+<p><strong>Signal: the state's <code>serial</code> and <code>lineage</code>.</strong> Every state write bumps <code>serial</code>; a new state (a
+re-created or replaced one, another backend key) has another <code>lineage</code>. Stackd records per
+environment the last pair it observed — its <strong>baseline</strong> — and compares each observation with it.
+Nothing else of the state ever reaches the API: it holds secrets (sensitive outputs, attributes).</p>
+<p><strong>Model</strong> (<code>environments</code>, add): <code>state_serial int?</code>, <code>state_lineage text?</code> (the baseline; no
+baseline while <code>state_lineage</code> is null), <code>state_observed_at timestamptz?</code> (last observation),
+<code>out_of_band_detected_at timestamptz?</code> (set = flagged), <code>out_of_band_run_id uuid?</code> (the run whose
+observation last saw a change), <code>out_of_band_expected_serial int?</code>, <code>out_of_band_expected_lineage
+text?</code> (the baseline when the change was first seen), <code>out_of_band_observed_serial int?</code>,
+<code>out_of_band_observed_lineage text?</code> (the latest differing observation).</p>
+<p><strong>Observation (agent).</strong> The claim sets <code>observe_state</code> (§7.2) for the jobs of an unmanaged-state
+env that run <strong>reviewed code</strong> and already hold the credentials that read the state: a
+<code>tracked</code>/<code>destroy</code> plan, a drift plan (§19.3), an apply, a mutating command (§4.3). Never a pull
+request's proposed run — its unreviewed code may point the backend elsewhere (a false alarm, or a
+way to raise one) — nor a read-only command. The agent runs <code>&lt;tool&gt; state pull</code> with the job's
+backend settings and credentials, its output <strong>captured in memory only</strong> — never written to disk
+(the checkout or elsewhere), never logged nor streamed to the run's log — parses it and keeps two
+fields, sent in a <code>state_observed</code> event (§7.3):</p>
+<ul>
+<li>a <strong>check</strong> (<code>baseline: false</code>), right after <code>init</code>: the state as the job finds it — before the
+  plan, before the apply (a write since the plan job), before a mutating command;</li>
+<li>a <strong>baseline</strong> (<code>baseline: true</code>), in an apply or a mutating command job, right after the apply /
+  command ran, whatever its exit (a failed or stopped apply may have written part of the state):
+  the state as Stackd left it.</li>
+</ul>
+<p>An empty output — no state yet, a first deploy — reports <code>serial</code> and <code>lineage</code> as null. <strong>Best
+effort</strong>: a failed read (non-zero exit, output not a state document, past its 2 min budget) or a
+refused report is a warning — in the agent's log and as one line in the run's log, never the tool's
+output — and the job goes on. Detection never fails nor moves a run (<code>transition()</code> untouched).</p>
+<p><strong>Comparison (API, in the event's transaction, the env row locked).</strong> <code>obs</code> = the reported pair,
+<code>base</code> = (<code>state_serial</code>, <code>state_lineage</code>):</p>
+<ul>
+<li><strong>check</strong> — no baseline: <code>obs</code> becomes it (a new env, or one adopted from hand-run Terraform;
+  an empty state records nothing). <code>obs = base</code>: nothing. Otherwise <strong>out-of-band change</strong> — any
+  difference, a lower serial or a state gone empty included, since Stackd wrote none of it: the
+  baseline becomes <code>obs</code>, <code>out_of_band_observed_*</code> = <code>obs</code>, <code>out_of_band_run_id</code> = the run; on the
+  edge into the flag only (not flagged yet): <code>out_of_band_detected_at</code> = now,
+  <code>out_of_band_expected_*</code> = <code>base</code>, audit <code>environment.out_of_band_change_detected</code> (actor
+  <code>system</code>) and the in-app <code>out_of_band_change</code> notification to the env's eligible approvers (the
+  drift audience, §19.4) — debounced while it stays flagged, like drift. A system observation, not a
+  human mutation: an <code>audit_event</code>, no <code>run_event</code> (those record transitions, §3.6).</li>
+<li><strong>baseline</strong> — <code>obs</code> becomes the baseline (<code>obs = base</code>: the job wrote nothing). It never raises
+  nor clears the flag by itself.</li>
+</ul>
+<p><strong>Clearing.</strong> The flag clears:</p>
+<ol>
+<li>when a <strong>full apply finishes</strong> (<code>applying → finished</code>, or the after_apply-failure path of §8.3 —
+   a <code>tracked</code>/<code>destroy</code> apply, not targeted, §3.5), in that transaction: its plan was computed on
+   the changed state and reviewed, and tofu refuses a saved plan whose state moved since (§7.3) — the
+   environment is Stackd's again. Audit <code>environment.out_of_band_change_cleared</code>, actor <code>system</code>,
+   <code>reason: applied</code>. A targeted apply or a mutating command only moves the baseline (as drift,
+   §19.4: they reconcile part of the env at most);</li>
+<li>when a human <strong>acknowledges</strong> it: <code>POST /api/v1/environments/{id}/out-of-band-change/acknowledge</code>
+   — <code>can_apply(user, env)</code> (§2.4: the people who could clear it by applying), 409 when nothing is
+   flagged — clears the <code>out_of_band_*</code> fields (the baseline already is the observed state). Audit
+   <code>environment.out_of_band_change_cleared</code>, the user as actor, <code>reason: acknowledged</code>.</li>
+</ol>
+<p>An empty plan does <strong>not</strong> clear it: a plan writes no state and captures no outputs (§9.1), so the
+env's recorded outputs — what cascades propagate — may predate the change; only an apply, which
+re-captures them, or a human who checked, says the env is consistent again.</p>
+<p><strong>Reset.</strong> A PATCH changing <code>managed_state</code>, <code>backend_config</code> or <code>backend_config_file</code> points the env
+at another state: the baseline and the flag are cleared (part of its <code>environment.updated</code> audit),
+and the next observation adopts the new state.</p>
+<p><strong>Managed state: not observed.</strong> Every write goes through the API's state backend (§11.2) and is a
+<code>state_version</code> linked to its run; the only run-less write is an admin's import session (§11.4),
+itself audited. The claim never sets <code>observe_state</code> there.</p>
+<p><strong>API / front.</strong> The env out carries <code>state_serial</code>, <code>state_lineage</code>, <code>state_observed_at</code> and
+<code>out_of_band_change</code> (<code>{detected_at, run_id, expected_serial, expected_lineage, observed_serial,
+observed_lineage}</code>, null when not flagged). Front: a neutral <code>⇄ CHANGED OUTSIDE</code> chip (glyph +
+label, never colour alone — DESIGN §3.6) in the env cell and the env header, which also says
+expected vs observed serial, links the detecting run and offers <em>Acknowledge</em> (can_apply).</p>
+<p><strong>Limits.</strong> Best effort, not a guarantee: several outside writes between two observations show as
+one change; a write made while a Stackd job that writes the state runs (between its check and its
+baseline) — or right after a check that failed — is absorbed into the baseline; a commit that
+changes the backend block (another <code>key</code>) reads as a new lineage: acknowledge it.</p>
 <hr />
 <h2 id="20-observability-api-guardrails-post-mvp-phase-h">20. Observability &amp; API guardrails (post-MVP, Phase H)<a class="headerlink" href="#20-observability-api-guardrails-post-mvp-phase-h" title="Permanent link">&para;</a></h2>
 <h3 id="201-metrics-get-metrics-prometheus">20.1 Metrics — <code>GET /metrics</code> (Prometheus)<a class="headerlink" href="#201-metrics-get-metrics-prometheus" title="Permanent link">&para;</a></h3>

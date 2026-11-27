@@ -1455,6 +1455,12 @@ next to the repo included: the deploy key as a <code>0600</code> file outside th
 <code>GIT_SSH_COMMAND</code>, present only while git or <code>init</code> runs; the token as <code>url.&lt;authed&gt;.insteadOf</code> git
 config in <code>init</code>'s environment, scoped to the repo's host and written nowhere. No hook, platform or
 repo, gets either (SPECS §8.3).</p>
+<p><strong>State observed on unmanaged backends.</strong> On a <code>managed_state: false</code> environment, a job of
+reviewed code (tracked/destroy/drift plan, apply, mutating command) is handed <code>observe_state</code>: after
+<code>init</code> the worker runs <code>state pull</code> into memory and reports the state's <code>serial</code> and <code>lineage</code> only
+(<code>state_observed</code>), and again after the apply / command as the new baseline. The API flags the
+environment when a check differs from the last pair it saw — a write made outside Stackd (SPECS
+§19.7). Best effort: never fails nor moves the run.</p>
 <p><strong>Hooks and checks.</strong> Platform hooks run first, then the repo's <code>.stackd.yml</code> hooks; a repo hook gets
 no secret (an allowlisted env, a masked <code>plan.json</code>, no tfvars, token file or AWS config file on disk). Every check
 result, with the stage it ran at, is kept on the run (<code>check_results</code>). A failing <code>fail</code> check stops
