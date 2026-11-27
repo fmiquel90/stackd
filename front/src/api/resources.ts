@@ -513,14 +513,29 @@ export interface CloudIntegration {
   apply_role_arn: string;
   region: string | null;
   session_duration: number;
+  /** Named AWS profiles (SPECS §10.6): the profile name the Terraform code uses → its roles. */
+  profiles: Record<string, CloudProfile>;
   /** Configuration warnings (SPECS §10.5) — e.g. static AWS credentials the roles replace. */
   warnings: { code: string; variables: string[]; detail: string }[];
 }
 
+export interface CloudProfile {
+  plan_role_arn: string;
+  apply_role_arn: string;
+  region: string | null;
+}
+
 export const cloudApi = {
   get: (envId: string) => api<CloudIntegration>(`/environments/${envId}/cloud-integration`),
-  put: (envId: string, body: { plan_role_arn: string; apply_role_arn: string; region?: string | null }) =>
-    api<CloudIntegration>(`/environments/${envId}/cloud-integration`, { method: "PUT", body }),
+  put: (
+    envId: string,
+    body: {
+      plan_role_arn: string;
+      apply_role_arn: string;
+      region?: string | null;
+      profiles?: Record<string, CloudProfile>;
+    },
+  ) => api<CloudIntegration>(`/environments/${envId}/cloud-integration`, { method: "PUT", body }),
   remove: (envId: string) => api<void>(`/environments/${envId}/cloud-integration`, { method: "DELETE" }),
   test: (envId: string) =>
     api<{ assumed_role: string }>(`/environments/${envId}/cloud-integration/test`, { method: "POST" }),
