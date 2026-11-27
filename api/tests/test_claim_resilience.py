@@ -229,8 +229,9 @@ async def test_transient_failure_backs_off_and_lets_the_queue_move(
 
 
 async def test_claim_candidates_use_the_partial_index(client: httpx.AsyncClient) -> None:
-    """With a history of terminal runs, the claim reads the queued/confirmed runs through
-    `ix_runs_claimable` instead of scanning `runs`."""
+    """With a history of terminal runs, the claim reads the queued/confirmed runs through a
+    partial index (`ix_runs_claimable`, or the planner's equivalent pick `ix_runs_non_terminal_state`)
+    instead of scanning `runs`."""
     from app.workers.claim import _SELECT_CANDIDATE
 
     admin = await login(client, "admin")
@@ -258,7 +259,9 @@ async def test_claim_candidates_use_the_partial_index(client: httpx.AsyncClient)
                 )
             )
         ).scalars()
-        assert "ix_runs_claimable" in "\n".join(plan)
+        text_plan = "\n".join(plan)
+        assert "Seq Scan on runs" not in text_plan
+        assert "ix_runs_claimable" in text_plan or "ix_runs_non_terminal_state" in text_plan
 
 
 async def test_api_connections_carry_the_server_side_timeouts(client: httpx.AsyncClient) -> None:

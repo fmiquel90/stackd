@@ -1,7 +1,7 @@
 """claim backoff columns + claimable-runs partial index (SPECS §3.5, §7.2)
 
 Revision ID: 0043
-Revises: 0042
+Revises: 0046
 Create Date: 2026-11-27
 """
 
@@ -13,7 +13,7 @@ import sqlalchemy as sa
 from alembic import op
 
 revision: str = "0043"
-down_revision: str | None = "0042"
+down_revision: str | None = "0046"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
