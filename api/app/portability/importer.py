@@ -38,6 +38,7 @@ from app.models.variable import Variable
 from app.models.variable_set import VariableSet, VariableSetAttachment
 from app.models.worker import WorkerPool
 from app.notifications.dispatcher import ensure_url_safe
+from app.oidc.profiles import stored as stored_profiles
 from app.portability.schemas import (
     AttachmentDoc,
     CloudIntegrationDoc,
@@ -811,7 +812,7 @@ class Importer:
 
     async def _cloud(self, env: Environment, doc: CloudIntegrationDoc, owner: str) -> None:
         path = f"{owner}/cloud_integration"
-        values = doc.model_dump()
+        values = {**doc.model_dump(), "profiles": stored_profiles(doc.profiles)}
         ci = (
             await self.s.execute(
                 select(CloudIntegration).where(CloudIntegration.environment_id == env.id)
@@ -834,6 +835,7 @@ class Importer:
             "cloud_integration.created" if created else "cloud_integration.updated",
             "environment",
             env.id,
+            profiles=sorted(doc.profiles),
         )
         self.report.change(
             "created" if created else "updated",

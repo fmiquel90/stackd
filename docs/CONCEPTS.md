@@ -500,11 +500,19 @@ runs. The
 `AWS_ROLE_SESSION_NAME = stackd-<run_id>` ties every CloudTrail action back to the run — and thus to
 the human who confirmed it.
 
+**Named profiles.** Code written for humans often says `profile = "tfstates"` (provider, backend
+config, remote state). The integration maps such names to their own plan/apply roles; the worker
+writes them into a generated AWS config file (`[profile tfstates]` with `role_arn` and the job's
+token file), so that code runs unchanged — each profile's role is assumed with the same token, so
+its trust policy pins tier and phase like the default roles' (SPECS §10.6).
+
 ```bash
 curl -s -X PUT localhost:8000/api/v1/environments/$PROD/cloud-integration -H "$AUTH" \
   -H 'content-type: application/json' -d '{
   "plan_role_arn":"arn:aws:iam::123:role/stackd-prod-plan",
-  "apply_role_arn":"arn:aws:iam::123:role/stackd-prod-apply","region":"eu-west-1"}'
+  "apply_role_arn":"arn:aws:iam::123:role/stackd-prod-apply","region":"eu-west-1",
+  "profiles":{"tfstates":{"plan_role_arn":"arn:aws:iam::456789012345:role/tfstates-plan",
+                          "apply_role_arn":"arn:aws:iam::456789012345:role/tfstates-apply"}}}'
 curl -s -X POST localhost:8000/api/v1/environments/$PROD/cloud-integration/test -H "$AUTH"  # verify AssumeRole
 ```
 

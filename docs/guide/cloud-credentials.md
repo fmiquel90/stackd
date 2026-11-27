@@ -134,6 +134,55 @@ Writing or deleting it is admin-only and audited (`cloud_integration.created`, `
 `.deleted`); `session_duration` defaults to 3600 s and is capped per phase as above. AWS is the MVP
 target; GCP and Azure come later.
 
+### Named AWS profiles
+
+Terraform written for people who sign in with AWS SSO usually **names its profiles**: a provider
+with `profile = "prod-admin"`, a backend `.config` file with `profile = "tfstates"`, a
+`terraform_remote_state` whose `config` carries a `profile` — often in other AWS accounts. Under a
+single OIDC role such code fails (`failed to get shared config profile`). Rather than rewrite it,
+map each profile name to a pair of roles on the integration:
+
+```bash
+curl -s -X PUT localhost:8000/api/v1/environments/$PROD/cloud-integration -H "$AUTH" \
+  -H 'content-type: application/json' -d '{
+  "plan_role_arn":  "arn:aws:iam::111111111111:role/stackd-prod-plan",
+  "apply_role_arn": "arn:aws:iam::111111111111:role/stackd-prod-apply",
+  "region": "eu-west-1",
+  "profiles": {
+    "prod-admin": {
+      "plan_role_arn":  "arn:aws:iam::111111111111:role/stackd-prod-plan",
+      "apply_role_arn": "arn:aws:iam::111111111111:role/stackd-prod-apply"
+    },
+    "tfstates": {
+      "plan_role_arn":  "arn:aws:iam::222222222222:role/stackd-tfstates-plan",
+      "apply_role_arn": "arn:aws:iam::222222222222:role/stackd-tfstates-apply",
+      "region": "eu-west-1"
+    }
+  }
+}'
+```
+
+The same code keeps running by hand: people keep their own `~/.aws/config` with the same profile
+names, and Stackd's runs resolve them to the roles above. Each job gets the role of its phase for
+every profile — the plan roles for a plan, the apply roles for an apply — all assumed with the
+job's one token.
+
+Rules (a `422` otherwise): at most 50 profiles; a name of letters, digits, `.`, `_` and `-`
+(64 characters at most, starting with a letter or digit); `default` is reserved (it is the
+integration's own roles); both role ARNs are IAM role ARNs; `region` is optional. A `PUT` replaces
+the whole set. In the UI, the environment's **Settings → Cloud integration** panel edits them as
+rows.
+
+**IAM side.** A profile's role is a role like the others: in **its** account, create the IAM OIDC
+identity provider for Stackd's issuer, and give the role a trust policy with the **same** `aud` and
+`sub` conditions as the default roles — `tier` and `phase` pinned, so a profile's apply role trusts
+`run:prod:*:apply` and nothing else.
+
+!!! note "A plan role on an S3 backend with `use_lockfile`"
+    With unmanaged state on an S3 backend using `use_lockfile = true`, a plan takes the state lock:
+    the plan role of the backend's profile needs `s3:PutObject` and `s3:DeleteObject` on the
+    `<key>.tflock` objects (and only read access to the state object itself).
+
 ## 3. Test it
 
 A built-in **AssumeRole test** verifies the trust chain without launching a run:
@@ -145,7 +194,8 @@ curl -s -X POST localhost:8000/api/v1/environments/$PROD/cloud-integration/test 
 It (admin-only) signs a probe `plan` token and attempts the `AssumeRoleWithWebIdentity` on the
 **plan role** end to end — a fast way to catch a missing identity provider, a too-narrow `sub`
 condition, or an unreachable issuer. It returns the assumed role's ARN, or a `422` with the STS
-error. The apply role is not exercised: its trust policy is only tested by a real apply.
+error. The apply role is not exercised: its trust policy is only tested by a real apply. Nor are
+the named profiles' roles: a plan job is their first test.
 
 ## What the agent injects
 
@@ -156,10 +206,19 @@ AWS_WEB_IDENTITY_TOKEN_FILE = <path to the token file, outside the checkout>
 AWS_ROLE_ARN                = <plan_role_arn | apply_role_arn for this phase>
 AWS_ROLE_SESSION_NAME       = stackd-<run_id>
 AWS_REGION                  = <region, when the integration sets one>
+AWS_CONFIG_FILE             = <path to a generated AWS config file, beside the token file>
+AWS_SHARED_CREDENTIALS_FILE = /dev/null
 ```
 
-The token file is written right before each tofu command or platform hook and deleted right
-after: it is never on disk while a repo hook runs.
+The generated config file has a `[default]` section with the phase's default role, and one
+`[profile <name>]` section per named profile, each with `role_arn`, `web_identity_token_file`
+(the job's token), `role_session_name = stackd-<run_id>` and its `region` when set. `AWS_PROFILE`
+is never set: code that names no profile runs as the default role, code that names one gets that
+profile's role. Region precedence is the AWS SDK's: a `region` in the code, then `AWS_REGION`
+(the integration's, else a run variable), then the profile's own `region`.
+
+The token file and the config file are written right before each tofu command or platform hook
+and deleted right after: neither is ever on disk while a repo hook runs.
 
 The AWS SDK inside the providers performs the AssumeRoleWithWebIdentity natively. The
 session name ties every CloudTrail entry back to the run — and thus to the human who
@@ -176,8 +235,9 @@ With no `cloud_integration`, Stackd falls back to classic static variables (for 
 
 With a `cloud_integration`, the OIDC role is the job's **only** AWS identity: Stackd drops every
 static AWS credential resolved for the environment (`AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`,
-`AWS_SESSION_TOKEN`, `AWS_PROFILE`, the credential files…) before the job starts — the AWS SDK
-would otherwise use them before the OIDC token — and the worker drops its own. The environment's
+`AWS_SESSION_TOKEN`, `AWS_PROFILE`, `AWS_CONFIG_FILE`, the credential files…) before the job
+starts — the AWS SDK would otherwise use them before the OIDC token — and the worker drops its own;
+the only AWS config a job reads is the generated one. The environment's
 cloud panel warns about each one it drops (by name), and the run's inputs show it as
 `NOT PASSED (OIDC)`. Settings such as `AWS_REGION` are kept.
 

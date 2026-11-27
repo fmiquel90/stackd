@@ -17,6 +17,14 @@ from tests.conftest_phase2 import login
 
 PLAN_ROLE = "arn:aws:iam::123456789012:role/plan"
 APPLY_ROLE = "arn:aws:iam::123456789012:role/apply"
+# A named AWS profile (§10.6), in another account.
+PROFILES = {
+    "tfstates": {
+        "plan_role_arn": "arn:aws:iam::210987654321:role/tfstates-plan",
+        "apply_role_arn": "arn:aws:iam::210987654321:role/tfstates-apply",
+        "region": "eu-west-3",
+    }
+}
 SLACK = "https://hooks.slack.com/services/T000/B000/xyz"
 
 
@@ -134,7 +142,7 @@ async def _world(client: httpx.AsyncClient, admin: dict, prefix: str) -> dict[st
     r = await client.put(
         f"/api/v1/environments/{net_prod}/cloud-integration",
         headers=admin,
-        json={"plan_role_arn": PLAN_ROLE, "apply_role_arn": APPLY_ROLE},
+        json={"plan_role_arn": PLAN_ROLE, "apply_role_arn": APPLY_ROLE, "profiles": PROFILES},
     )
     assert r.status_code == 200, r.text
     await _post(
@@ -198,6 +206,7 @@ async def test_export_is_by_name_and_never_carries_a_secret(client: httpx.AsyncC
         "fallback_mode": "error",
     }
     assert prod["cloud_integration"]["apply_role_arn"] == APPLY_ROLE
+    assert prod["cloud_integration"]["profiles"] == PROFILES
     assert prod["notification_targets"][0]["url"] == SLACK
     assert network["hooks"][0]["name"] == "no-destroy"
     assert {t["name"] for t in doc["tiers"]} == {"dev", "prod"}
@@ -262,6 +271,7 @@ async def test_round_trip_into_a_new_space(client: httpx.AsyncClient) -> None:
     assert network["trigger_paths"] == ["modules/**", "config/network.hcl"]
     assert prod["protected"] is True
     assert prod["cloud_integration"]["plan_role_arn"] == PLAN_ROLE
+    assert prod["cloud_integration"]["profiles"] == PROFILES
     assert again["dependencies"] == doc["dependencies"]
     assert again["variable_sets"] == doc["variable_sets"]
     # A secret left to fill: the new autodeploy env is created with autodeploy off (§22.3).
@@ -413,6 +423,22 @@ async def test_import_validation(client: httpx.AsyncClient) -> None:
     r = await _import(client, admin, target, {"stacks": [{**stack, "environments": [env]}]})
     assert r.status_code == 422 and "nope" in r.text
     assert (await _export(client, admin, target))["stacks"] == []
+    # A named profile follows the endpoint's rules (§10.6): a typo'd field, a reserved name.
+    cloud = {"plan_role_arn": PLAN_ROLE, "apply_role_arn": APPLY_ROLE}
+    for profiles in (
+        {"x": {**cloud, "regoin": "eu-west-1"}},
+        {"default": cloud},
+        {"bad name": cloud},
+        {"x": {**cloud, "apply_role_arn": "arn:aws:iam::123:user/x"}},
+    ):
+        env = {
+            "name": "x",
+            "tier": "dev",
+            "branch": "main",
+            "cloud_integration": {**cloud, "profiles": profiles},
+        }
+        r = await _import(client, admin, target, {"stacks": [{**stack, "environments": [env]}]})
+        assert r.status_code == 422, profiles
     # A dependency cycle aborts the whole import.
     envs = [
         {"name": "a", "tier": "dev", "branch": "m"},

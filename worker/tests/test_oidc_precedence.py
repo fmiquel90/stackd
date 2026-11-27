@@ -4,6 +4,7 @@ hook. Without them, the static fallback (§10.4) is untouched."""
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 import pytest
@@ -28,7 +29,7 @@ def test_oidc_job_drops_host_aws_credentials(tmp_path: Path, host_aws: None) -> 
     env = _run_env(ws, {**JOB, "cloud_credentials": OIDC})
     for name in ("AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY", "AWS_PROFILE"):
         assert name not in env
-    assert "AWS_SHARED_CREDENTIALS_FILE" not in env
+    assert env["AWS_SHARED_CREDENTIALS_FILE"] == os.devnull  # the host's file is masked (§10.6)
     assert env["AWS_ROLE_ARN"] == OIDC["role_arn"]
     assert env["AWS_REGION"] == "eu-west-1"
 

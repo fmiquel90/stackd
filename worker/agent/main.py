@@ -5,6 +5,7 @@ import logging
 
 import httpx
 import os
+import re
 import signal
 import subprocess
 import sys
@@ -12,7 +13,7 @@ import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
 from collections.abc import Callable, Iterator
-from contextlib import AbstractContextManager, ExitStack, contextmanager, nullcontext
+from contextlib import ExitStack, contextmanager
 from pathlib import Path
 from typing import Any
 from urllib.parse import quote
@@ -326,6 +327,9 @@ def _tool_bin(tool: str) -> str:
 
 
 _OIDC_TOKEN_FILE = "oidc_token"
+_AWS_CONFIG_FILE = "aws_config"
+# The API's rule for a named profile (§10.6), checked again: the name becomes an INI section header.
+_AWS_PROFILE_NAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
 
 
 # What the AWS SDK's credential chain reads before the web identity token (§10.5): static keys, a
@@ -353,27 +357,32 @@ def _run_env(ws: Workspace, job: dict[str, Any], runner: str = "local") -> dict[
     credentials, the worker host's own AWS credentials (a mounted ~/.aws on the trusted-dev `local`
     runner) are dropped: the role the integration names is the job's only identity (§10.5). The
     API drops the run's static AWS credentials at claim for the same reason."""
-    base = _job_environ(runner)
-    if job.get("cloud_credentials"):
-        base = {k: v for k, v in base.items() if k not in _STATIC_AWS_CREDENTIAL_VARS}
-    return {
-        **base,
+    env = {
+        **_job_environ(runner),
         **job.get("env", {}),
         **job.get("sensitive_env", {}),
-        **_cloud_env(ws, job),
     }
+    if job.get("cloud_credentials"):
+        # The run's own layers too, in depth: the API already dropped them at claim.
+        env = {k: v for k, v in env.items() if k not in _STATIC_AWS_CREDENTIAL_VARS}
+    return {**env, **_cloud_env(ws, job)}
 
 
 def _cloud_env(ws: Workspace, job: dict) -> dict[str, str]:
     """OIDC workload env for terraform and platform hooks only (§10.4 / §8.3 — never for repo
-    hooks). The token file it names is on disk only while one of them runs (`_cloud_token`)."""
+    hooks). The token and config files it names are on disk only while one of them runs
+    (`_cloud_files`). No AWS_PROFILE: a named profile is used where the code names one (§10.6);
+    the worker host's credentials file is masked, so it can't define a profile's credentials."""
     creds = job.get("cloud_credentials")
     if not creds:
         return {}
+    _aws_config(ws, job)  # a payload the file can't be written from fails the job up front
     env = {
         "AWS_WEB_IDENTITY_TOKEN_FILE": str(ws.secret_path(_OIDC_TOKEN_FILE)),
         "AWS_ROLE_ARN": creds["role_arn"],
         "AWS_ROLE_SESSION_NAME": f"stackd-{job['job_id']}",
+        "AWS_CONFIG_FILE": str(ws.secret_path(_AWS_CONFIG_FILE)),
+        "AWS_SHARED_CREDENTIALS_FILE": os.devnull,
     }
     if creds.get("region"):
         env["AWS_REGION"] = creds["region"]
@@ -407,11 +416,47 @@ def _tofu_env(base: dict[str, str], backend: dict | None) -> dict[str, str]:
     return env
 
 
-def _cloud_token(ws: Workspace, job: dict[str, Any]) -> AbstractContextManager[object]:
-    """The OIDC token file `_cloud_env` points at, written for one tofu command or platform hook
-    and removed right after: never on disk while a repo hook runs (§8.3)."""
-    token = (job.get("cloud_credentials") or {}).get("oidc_token")
-    return ws.secret_file(_OIDC_TOKEN_FILE, token) if token else nullcontext()
+def _aws_config(ws: Workspace, job: dict[str, Any]) -> str:
+    """The AWS config file of a job holding OIDC credentials (§10.6): `[default]` mirrors the
+    default role, then one `[profile <name>]` per named profile with the role of the job's
+    credential phase, every one assumed with the job's token. Built from the payload only; a value
+    that could break out of its line or section fails the job instead of being written."""
+    creds = job["cloud_credentials"]
+    common = {
+        "web_identity_token_file": str(ws.secret_path(_OIDC_TOKEN_FILE)),
+        "role_session_name": f"stackd-{job['job_id']}",
+    }
+    default = {"role_arn": creds["role_arn"], **common, "region": creds.get("region")}
+    sections = [("default", default)]
+    for name, profile in sorted((creds.get("profiles") or {}).items()):
+        if name == "default" or not _AWS_PROFILE_NAME.match(name):
+            raise RuntimeError(f"invalid AWS profile name: {name!r}")
+        values = {"role_arn": profile["role_arn"], **common, "region": profile.get("region")}
+        sections.append((f"profile {name}", values))
+    lines = []
+    for header, values in sections:
+        lines.append(f"[{header}]")
+        for key, value in values.items():
+            if value is None:
+                continue
+            if not isinstance(value, str) or any(c in value for c in "\r\n"):
+                raise RuntimeError(f"invalid AWS config value for {key} in [{header}]")
+            lines.append(f"{key} = {value}")
+        lines.append("")
+    return "\n".join(lines)
+
+
+@contextmanager
+def _cloud_files(ws: Workspace, job: dict[str, Any]) -> Iterator[None]:
+    """The OIDC token file and the AWS config file `_cloud_env` points at, written for one tofu
+    command or platform hook and removed right after: never on disk while a repo hook runs
+    (§8.3)."""
+    creds = job.get("cloud_credentials") or {}
+    with ExitStack() as files:
+        if creds.get("oidc_token"):
+            files.enter_context(ws.secret_file(_OIDC_TOKEN_FILE, creds["oidc_token"]))
+            files.enter_context(ws.secret_file(_AWS_CONFIG_FILE, _aws_config(ws, job)))
+        yield
 
 
 @contextmanager
@@ -419,9 +464,10 @@ def _tofu_files(
     ws: Workspace, cwd: Path, job: dict[str, Any], *, tfvars: bool = True
 ) -> Iterator[None]:
     """What one tofu command reads from disk that no repo hook may find (§8.3), present only while
-    it runs: the OIDC token file, and the run's variable files unless the command reads none."""
+    it runs: the OIDC token and AWS config files, and the run's variable files unless the command
+    reads none."""
     with ExitStack() as files:
-        files.enter_context(_cloud_token(ws, job))
+        files.enter_context(_cloud_files(ws, job))
         if tfvars:
             files.enter_context(
                 ws.tfvars(cwd, job.get("tfvars_json", {}), job.get("hcl_tfvars", {}))
@@ -566,7 +612,7 @@ def handle_plan(
                 repo_env=repo_env,
                 phase="planning",
                 streamer=streamer,
-                platform_files=lambda: _cloud_token(ws, job),
+                platform_files=lambda: _cloud_files(ws, job),
                 runner=runner,
             )
             checks.extend({**r, "stage": name} for r in results)
@@ -696,7 +742,7 @@ def handle_plan(
                 repo_env=repo_env,
                 phase="checking",
                 streamer=streamer,
-                platform_files=lambda: _cloud_token(ws, job),
+                platform_files=lambda: _cloud_files(ws, job),
                 runner=runner,
             )
             checks.extend({**r, "stage": "after_plan"} for r in results)
@@ -757,7 +803,7 @@ def handle_apply(
                 repo_env=repo_env,
                 phase="applying",
                 streamer=streamer,
-                platform_files=lambda: _cloud_token(ws, job),
+                platform_files=lambda: _cloud_files(ws, job),
                 runner=runner,
             )
             checks.extend({**r, "stage": name} for r in results)

@@ -536,6 +536,7 @@ async def _clone(
                     apply_role_arn=ci.apply_role_arn,
                     region=ci.region,
                     session_duration=ci.session_duration,
+                    profiles=dict(ci.profiles or {}),
                 )
             )
             await record_audit(
@@ -544,7 +545,7 @@ async def _clone(
                 **actor,
                 target_kind="environment",
                 target_id=env.id,
-                context={"cloned_from": str(t.ref.id)},
+                context={"cloned_from": str(t.ref.id), "profiles": sorted(ci.profiles or {})},
             )
 
     # Dependency edges (§21.2): an incoming edge of a reference env is re-created on its clone,
