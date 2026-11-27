@@ -10,7 +10,7 @@ covers all three:
 | **Keys** | your secret manager / deployment config | `STACKD_ENCRYPTION_KEY` (master key), `STACKD_JWT_SECRET`, the KMS signing key (if `STACKD_OIDC_SIGNER=kms`), the Google OAuth client | see below — the master key is the one you can't lose |
 
 !!! danger "The master key is part of the backup"
-    `STACKD_ENCRYPTION_KEY` encrypts (AES-256-GCM) every sensitive variable, every repo token and
+    `STACKD_ENCRYPTION_KEY` encrypts (AES-256-GCM) every sensitive variable, every repo token or deploy key and
     webhook secret, every secret source credential, every static secret fallback, the local OIDC
     signing key and the saved plans. A database restored **without the same key** has all of them
     unreadable — there is no recovery path. Back it up, but **separately** from the database dumps:
@@ -148,7 +148,7 @@ for:
   deleted and resets what was changed, and **never deletes** anything that is not in the file.
 - **Moving or cloning a space to another instance** — export → create the secret sources on the
   target (their credentials are not exported) → import with `dry_run=true`, read the report →
-  import → fill `missing_secrets` (sensitive variables, repo tokens, webhook secrets) → move each
+  import → fill `missing_secrets` (sensitive variables, repo tokens and deploy keys, webhook secrets) → move each
   managed-state environment's state with an import session, using the report's `id_map`
   (source environment id → new id) → only then let runs flow. A new environment declared with
   `autodeploy: true` stays off while secrets are missing.

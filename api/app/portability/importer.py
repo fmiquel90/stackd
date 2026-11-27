@@ -50,6 +50,7 @@ from app.portability.schemas import (
 )
 from app.security import hash_token
 from app.spaces import require_space_access
+from app.stacks.credentials import check_repo_auth
 from app.variables.crud import variables_for
 from app.variables.values import set_reference, store_value
 
@@ -363,6 +364,11 @@ class Importer:
 
     async def _stack(self, doc: Any) -> None:
         path = f"stacks/{doc.name}"
+        # Checked here, not on StackDoc: an export of an existing stack must never fail on it.
+        try:
+            check_repo_auth(doc.repo_auth_kind, doc.repo_url)
+        except ProblemException as exc:
+            raise ProblemException(exc.status, exc.title, f"{path}: {exc.detail}") from exc
         values = {f: getattr(doc, f) for f in _STACK_FIELDS}
         stack = self.stacks.get(doc.name)
         if stack is None:
@@ -375,7 +381,12 @@ class Importer:
             self.report.change("created", "stack", path)
             self.stacks[doc.name] = stack
         else:
+            kinds = {stack.repo_auth_kind, doc.repo_auth_kind}
             changed = _assign(stack, values)
+            if kinds == {RepoAuthKind.token, RepoAuthKind.deploy_key}:
+                # A token is no deploy key, nor the reverse: the stored one can't serve the new
+                # kind, so it goes, and the import reports it missing (below).
+                stack.repo_secret_encrypted = None
             if changed:
                 await self._audit("stack.updated", "stack", stack.id, fields=changed)
             self.report.change("updated" if changed else "unchanged", "stack", path, changed)

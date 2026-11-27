@@ -2,19 +2,39 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import os
+import shlex
 import shutil
 import stat
 import tempfile
+from collections.abc import Iterator
 from pathlib import Path
 from urllib.parse import quote, urlsplit, urlunsplit
 
 from app.enums import RepoAuthKind
 from app.errors import ProblemException
 
-_GIT_ENV = {
-    "GIT_TERMINAL_PROMPT": "0",
-    "GIT_SSH_COMMAND": "ssh -o BatchMode=yes -o StrictHostKeyChecking=accept-new",
-}
+_SSH_OPTIONS = "-o BatchMode=yes -o StrictHostKeyChecking=accept-new"
+_GIT_ENV = {"GIT_TERMINAL_PROMPT": "0", "GIT_SSH_COMMAND": f"ssh {_SSH_OPTIONS}"}
+
+
+@contextlib.contextmanager
+def _git_access(
+    repo_url: str, auth_kind: RepoAuthKind, secret: str | None
+) -> Iterator[tuple[str, dict[str, str]]]:
+    """The URL and env git reaches the repository with: a token in the HTTPS URL, or a deploy key
+    (§3.1) in a 0600 file of a private temp dir, removed when git is done — that key only
+    (`IdentitiesOnly`), never prompting."""
+    if auth_kind != RepoAuthKind.deploy_key or not secret:
+        yield _authed_url(repo_url, auth_kind, secret), _GIT_ENV
+        return
+    with tempfile.TemporaryDirectory(prefix="stackd-key-") as tmp:
+        key = Path(tmp) / "deploy_key"
+        fd = os.open(key, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+        with os.fdopen(fd, "w") as f:
+            f.write(secret if secret.endswith("\n") else secret + "\n")
+        ssh = f"ssh -i {shlex.quote(str(key))} -o IdentitiesOnly=yes {_SSH_OPTIONS}"
+        yield repo_url, {**_GIT_ENV, "GIT_SSH_COMMAND": ssh}
 
 
 def _authed_url(repo_url: str, auth_kind: RepoAuthKind, secret: str | None) -> str:
@@ -48,7 +68,7 @@ def _git_error(err: bytes, secret: str | None) -> str | None:
     return _redact(err.decode(errors="replace"), secret).strip()[:500] or None
 
 
-async def _run_git(*args: str) -> tuple[int | None, bytes, bytes]:
+async def _run_git(*args: str, env: dict[str, str] = _GIT_ENV) -> tuple[int | None, bytes, bytes]:
     """Run git non-interactively; callers bound it with `asyncio.timeout`. On timeout (delivered
     here as a cancellation) git is killed AND reaped before the error propagates — left running, a
     clone would keep writing into the dir being deleted, and the process would leak."""
@@ -57,7 +77,7 @@ async def _run_git(*args: str) -> tuple[int | None, bytes, bytes]:
         *args,
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.PIPE,
-        env=_GIT_ENV,
+        env=env,
     )
     try:
         out, err = await proc.communicate()
@@ -74,13 +94,21 @@ async def clone_shallow(
 ) -> Path:
     """Shallow single-branch clone into a fresh temp dir for read-only config introspection (input
     discovery, §3.4) — never runs terraform. The caller MUST clean up the returned path."""
-    url = _authed_url(repo_url, auth_kind, secret)
     dest = Path(tempfile.mkdtemp(prefix="stackd-discover-"))
     try:
-        async with asyncio.timeout(30):
-            rc, _, err = await _run_git(
-                "clone", "--depth", "1", "--single-branch", "--branch", branch, url, str(dest)
-            )
+        with _git_access(repo_url, auth_kind, secret) as (url, env):
+            async with asyncio.timeout(30):
+                rc, _, err = await _run_git(
+                    "clone",
+                    "--depth",
+                    "1",
+                    "--single-branch",
+                    "--branch",
+                    branch,
+                    url,
+                    str(dest),
+                    env=env,
+                )
     except (TimeoutError, FileNotFoundError) as exc:
         await asyncio.to_thread(shutil.rmtree, dest, ignore_errors=True)
         raise ProblemException(502, "Repository clone failed", _redact(str(exc), secret)) from exc
@@ -112,11 +140,11 @@ def enforce_clone_budget(dest: Path, *, max_mb: int) -> None:
 async def check_repo(
     repo_url: str, auth_kind: RepoAuthKind, secret: str | None
 ) -> tuple[bool, list[str], str | None]:
-    """`git ls-remote --heads`: validate reachability + list branches (deploy keys post-MVP)."""
-    url = _authed_url(repo_url, auth_kind, secret)
+    """`git ls-remote --heads`: validate reachability + list branches."""
     try:
-        async with asyncio.timeout(15):
-            rc, out, err = await _run_git("ls-remote", "--heads", url)
+        with _git_access(repo_url, auth_kind, secret) as (url, env):
+            async with asyncio.timeout(15):
+                rc, out, err = await _run_git("ls-remote", "--heads", url, env=env)
     except (TimeoutError, FileNotFoundError) as exc:
         return False, [], _redact(f"git unavailable or timed out: {exc}", secret)
 
@@ -135,10 +163,10 @@ async def ls_remote_sha(
     repo_url: str, auth_kind: RepoAuthKind, secret: str | None, branch: str
 ) -> str | None:
     """HEAD sha of a single branch (staleness polling / manual refresh, §9.6)."""
-    url = _authed_url(repo_url, auth_kind, secret)
     try:
-        async with asyncio.timeout(15):
-            rc, out, _ = await _run_git("ls-remote", url, f"refs/heads/{branch}")
+        with _git_access(repo_url, auth_kind, secret) as (url, env):
+            async with asyncio.timeout(15):
+                rc, out, _ = await _run_git("ls-remote", url, f"refs/heads/{branch}", env=env)
     except (TimeoutError, FileNotFoundError):
         return None
     if rc != 0:

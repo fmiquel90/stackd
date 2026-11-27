@@ -122,6 +122,9 @@ class _FakeWorkspace:
     def git_clone(self, *args: Any, **kw: Any) -> Path:
         return self.root
 
+    def repo_credentials(self, *args: Any, **kw: Any) -> AbstractContextManager[dict]:
+        return nullcontext({})
+
     def head_sha(self) -> str:
         return "a" * 40
 

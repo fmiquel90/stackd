@@ -7,6 +7,7 @@ from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.crypto import decrypt
+from app.enums import RepoAuthKind
 from app.logging import get_logger
 from app.models.environment import Environment
 from app.models.run import Run
@@ -108,8 +109,12 @@ async def dispatch_vcs(session: AsyncSession, now: datetime, *, limit: int = 20)
                 # Inside the try: one stack's undecryptable secret (key rotation, corrupt blob)
                 # fails that row only — retried / dead-lettered — never the rest of the batch.
                 owner_repo = github.parse_owner_repo(stack.repo_url)
+                # A deploy key (§3.1) is no PAT: it is never sent to the VCS API.
                 token = (
-                    decrypt(stack.repo_secret_encrypted) if stack.repo_secret_encrypted else None
+                    decrypt(stack.repo_secret_encrypted)
+                    if stack.repo_secret_encrypted
+                    and stack.repo_auth_kind != RepoAuthKind.deploy_key
+                    else None
                 )
                 if owner_repo is None or token is None:
                     done.append(row_id)  # not postable (no creds / not github) — drop

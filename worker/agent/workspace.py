@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import shlex
 import shutil
 import subprocess
 from collections.abc import Iterator
@@ -21,6 +22,41 @@ _FULL_SHA = re.compile(r"^(?:[0-9a-f]{40}|[0-9a-f]{64})$")
 # The run's variable files (§3.4), auto-loaded by tofu/terraform.
 TFVARS_JSON = "stackd.auto.tfvars.json"
 HCL_TFVARS = "zzz_stackd.auto.tfvars"
+# The stack's deploy key (§3.1), in the job's secret area: outside the checkout.
+_SSH_KEY_FILE = "repo_ssh_key"
+# ssh:// / git@ remotes: never prompt, and trust a host key on first contact (TOFU) so a fresh
+# worker — or a fresh runner container — reaches the host without a pre-seeded known_hosts.
+_SSH_OPTIONS = "-o BatchMode=yes -o StrictHostKeyChecking=accept-new"
+
+
+def ssh_command(key: Path | None = None) -> str:
+    """GIT_SSH_COMMAND: with the stack's deploy key, that key only (`IdentitiesOnly` — never an
+    ssh-agent's or ~/.ssh's)."""
+    if key is None:
+        return f"ssh {_SSH_OPTIONS}"
+    return f"ssh -i {shlex.quote(str(key))} -o IdentitiesOnly=yes {_SSH_OPTIONS}"
+
+
+def module_git_config(repo_url: str, token: str) -> dict[str, str]:
+    """git config, as GIT_CONFIG_COUNT/KEY_n/VALUE_n env vars (git >= 2.31), that sends the repo
+    token with every URL on the stack repo's own host — its `git@host:` and `ssh://git@host/`
+    forms rewritten to HTTPS too (on an https repo): what lets `init` download the private modules
+    hosted next to the repo (§8.3). Scoped to that scheme and host[:port]; any other host is left
+    alone. Nothing reaches the disk: git rewrites at connection time and records the URL as written,
+    so `.terraform/modules` keeps no token. {} for a repo that is not on http(s)."""
+    parts = urlsplit(repo_url)
+    if parts.scheme not in ("http", "https") or not parts.hostname:
+        return {}
+    base = f"{parts.scheme}://{parts.netloc.rpartition('@')[2]}/"
+    authed = _authed_url(base, token)
+    sources = [base]
+    if parts.scheme == "https":
+        sources += [f"git@{parts.hostname}:", f"ssh://git@{parts.hostname}/"]
+    env = {"GIT_CONFIG_COUNT": str(len(sources))}
+    for i, source in enumerate(sources):
+        env[f"GIT_CONFIG_KEY_{i}"] = f"url.{authed}.insteadOf"
+        env[f"GIT_CONFIG_VALUE_{i}"] = source
+    return env
 
 
 def _authed_url(repo_url: str, token: str | None) -> str:
@@ -74,18 +110,31 @@ class Workspace:
         project_root: str,
         token: str | None = None,
         branch: str | None = None,
+        ssh_key: str | None = None,
+    ) -> Path:
+        """Clone the repo (§7.4). `token` (repo_auth_kind=token) is injected into the HTTPS URL;
+        `ssh_key` (deploy_key) is on disk only while git runs (`repo_credentials`)."""
+        with self.repo_credentials(repo_url, ssh_key=ssh_key) as creds:
+            git_env = {
+                **os.environ,
+                "GIT_TERMINAL_PROMPT": "0",
+                "GIT_SSH_COMMAND": ssh_command(),
+                **creds,
+            }
+            return self._clone(repo_url, commit_sha, project_root, token, branch, git_env)
+
+    def _clone(
+        self,
+        repo_url: str,
+        commit_sha: str | None,
+        project_root: str,
+        token: str | None,
+        branch: str | None,
+        git_env: dict[str, str],
     ) -> Path:
         # A source repo may be owned by another uid (e.g. CI bind mounts); the worker image trusts
         # all repos via `git config --system safe.directory '*'` (a `-c` override is ignored by git).
-        # `token` (repo_auth_kind=token) is injected into the HTTPS URL so private repos can clone.
         clone_url = _authed_url(repo_url, token)
-        git_env = {
-            **os.environ,
-            "GIT_TERMINAL_PROMPT": "0",
-            # ssh:// / git@ repos: never prompt, and trust a host key on first contact (TOFU)
-            # so a fresh worker can clone without a pre-seeded known_hosts.
-            "GIT_SSH_COMMAND": "ssh -o BatchMode=yes -o StrictHostKeyChecking=accept-new",
-        }
         clone = ["git", "clone", "--depth", "1"]
         if branch and not commit_sha:
             # No pinned commit: the head of the environment's branch, not the remote's default.
@@ -215,15 +264,33 @@ class Workspace:
         # through (§8.3) — it could point anywhere the agent can write.
         _write_new(cwd / "zzz_stackd_backend.tf", b'terraform {\n  backend "http" {}\n}\n')
 
+    @contextmanager
+    def repo_credentials(
+        self, repo_url: str, *, token: str | None = None, ssh_key: str | None = None
+    ) -> Iterator[dict[str, str]]:
+        """The git env that carries the stack's repo credential (§8.3), for the clone and for
+        `init`'s module downloads only — never for a hook: the token as host-scoped git config
+        (`module_git_config`), or the deploy key as a 0600 file in the secret area (outside the
+        checkout, written fresh, removed on exit) named by GIT_SSH_COMMAND. {} without one."""
+        env: dict[str, str] = {}
+        if token:
+            env = {"GIT_TERMINAL_PROMPT": "0", **module_git_config(repo_url, token)}
+        if not ssh_key:
+            yield env
+            return
+        key = ssh_key if ssh_key.endswith("\n") else ssh_key + "\n"  # ssh refuses it without
+        with self.secret_file(_SSH_KEY_FILE, key) as path:
+            yield {**env, "GIT_TERMINAL_PROMPT": "0", "GIT_SSH_COMMAND": ssh_command(path)}
+
     def secret_path(self, name: str) -> Path:
         """Where `secret_file` puts `name`: in the job's workspace, outside the checkout."""
         return self.path.resolve() / name
 
     @contextmanager
     def secret_file(self, name: str, content: str) -> Iterator[Path]:
-        """A secret file (the OIDC token, §10.4) present only while the command it wraps runs —
-        never while a repo hook does (§8.3). 0600, written fresh (a file or symlink a hook left at
-        its path is replaced, never written through), removed right after."""
+        """A secret file (the OIDC token §10.4, the deploy key §8.3) present only while what it
+        wraps runs — never while a repo hook does (§8.3). 0600, written fresh (a file or symlink a
+        hook left at its path is replaced, never written through), removed right after."""
         path = self.secret_path(name)
         try:
             yield _write_new(path, content.encode())
