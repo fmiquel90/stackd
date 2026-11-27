@@ -373,7 +373,9 @@ function Breadcrumb() {
   }
   return (
     <nav aria-label="Breadcrumb" className="min-w-0">
-      <ol className="flex min-w-0 items-center gap-1.5 font-data text-[12px] [&>li:first-child>span:first-child]:hidden">
+      {/* < 768 px only the last two crumbs: the page header repeats the rest, and four truncated
+          crumbs ("de… / demo-net… / pr…") say nothing. */}
+      <ol className="flex min-w-0 items-center gap-1.5 font-data text-[12px] [&>li:first-child>span:first-child]:hidden max-md:[&>li:nth-last-child(2)>span:first-child]:hidden max-md:[&>li:not(:nth-last-child(-n+2))]:hidden">
         {crumbs}
       </ol>
     </nav>

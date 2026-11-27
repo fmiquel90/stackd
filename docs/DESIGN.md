@@ -360,7 +360,7 @@ is reserved to the decision. Zero counts are rendered in `text-secondary` withou
 
 - **Side nav (208 px, labels always visible — v1 decision kept)**: Overview (solid amber count badge = decisions that need *you*), Graph, Rollouts (§5.11), Queue (neutral outlined count badge = runs waiting > 2 min), Workers (`online/total` in mono, red when none is online or the API is down), Audit (admin only, §5.6), Variable sets, Settings. At the bottom: the **space switcher** (a Radix dropdown listing the space names, the current one marked; hidden when the user sees a single space) and the user block (email, role, allowed tiers) opening a menu with the theme toggle, keyboard shortcuts, single-key shortcuts on/off and sign out. Active item: selection mark (§2.1).
 - **Top bar**: entity breadcrumb, connection indicator (`● live` / `◌ reconnecting…`), ⌘K button ("Search ⌘K"), notification bell.
-- **Breadcrumb**: built from entities, never from path segments: `space / stack / env / run 01a1276c`. Each segment but the last is a link; the run segment is the current page (its URL is copied with ⌘K "Copy the link to this page").
+- **Breadcrumb**: built from entities, never from path segments: `space / stack / env / run 9ce3880b`. Each segment but the last is a link; the run segment is the current page (its URL is copied with ⌘K "Copy the link to this page"). Below 768 px only the **last two** segments are shown (`prod / run 9ce3880b`): the page header repeats the rest, and four truncated segments say nothing.
 - **Responsive**: ≥ 1024 px as above. 768–1023 px: the side nav becomes a drawer (a sheet from the right) opened from a menu button in the top bar. < 768 px: a **bottom bar** with three destinations (Overview, Queue, Menu — the Menu opens the same drawer; notifications stay in the top bar at every width) and the run page's action bar docked above it.
 
 ### 4.1 URLs (v2)
@@ -504,7 +504,7 @@ Overview · demo                                       filter [ app____ ]  state
 (a `PR plan` badge for proposed runs, a `− destroy` badge for destroys); commit SHA (copy) + message +
 author; branch; how it was triggered (`triggered by bob@…`, `via webhook`, `via dependency`, `via drift
 check` **[today]**; the upstream env / run of a cascade `[with A5]`); the rollout and level (§5.11);
-age (relative, absolute ISO on hover); total duration; the command and its arguments for a `command`
+age (relative, absolute ISO on hover); duration, labelled (`took 2m 33s` once finished, `elapsed 4m` while live); the command and its arguments for a `command`
 run. The worker is **[not shown yet]**.
 
 **`RunActionBar`** — sticky under the top bar on desktop, docked at the bottom on < 768 px:
@@ -558,7 +558,7 @@ permission check (`can_apply` is still evaluated by the API).
 - **Stop requested** (neutral): while an executing run has `cancel_requested_at` — "Stop requested — waiting for the worker." and what the worker does (interrupts the tool as a Ctrl-C would; the run ends when the worker reports it).
 - **Failed during apply** (`failed-tint`, red `✕`): "Failed during apply — infrastructure may be partially changed." + the run's error + "Jump to first error". A stop during apply (`error = canceled_during_apply`) reads "Stopped during apply on request — infrastructure may be partially changed." with "Review what was applied before planning again".
 - **Failed** (other phases): "Failed at <segment> — nothing was applied." + the run's `error`, or the failing check's name, stage and output when there is one **[today]**; "Jump to first error".
-- **Stale plan** (neutral, `↑`): when the run is `unconfirmed` and `env.head_sha ≠ run.commit_sha` — "Plan computed on `2af0351`. The branch head is now `125304e` (N commits ahead / ahead)." + **Re-plan on head** (= Discard + new tracked run, two audited calls). Confirming stays possible and still applies the planned commit.
+- **Stale plan** (neutral, `↑`): when the run is `unconfirmed` and `env.head_sha ≠ run.commit_sha` — "Plan computed on `2af0351`. The branch head is now `125304e` (N commits ahead / ahead)." + **Re-plan on head** (= Discard + new tracked run, two audited calls). Confirming stays possible and still applies the planned commit — said in the same paragraph ("Confirming still applies exactly `2af0351`."), so the banner takes one line on desktop.
 - **Mocked** (`mock-tint`, `◆`): "This plan used mock values — it is not real." The mocked inputs are listed, then "A mocked plan cannot be applied here (allow_mock_apply is off)" or that the env allows it.
 - **Fallback** (`decision` tone, `◈`): "A secret came from a fallback, not the real source." + whether `allow_fallback_apply` lets it through.
 - **Queued** (neutral): the `blocking_reason` from `GET /queue` in words ("Waiting: another run is active on this environment.") + a link to the queue.
@@ -585,10 +585,18 @@ the attention zone), keeping the tab.
 **Live updates**: the badge, rail, banners and bar update in place on WS events; a polite live region
 announces state changes ("Run is now applying."); focus never moves.
 
+**Desktop bar layout**: the actions stay on the state line, top right; the text lines wrap in their
+own column beside them, never pushing the actions to a row of their own. "Your standing" and the
+cascade preview share one wrapping row.
+
 **< 768 px**: the action bar is docked at the bottom with 44 px buttons (Confirm stretches, Discard
 and Cancel/Stop stay visible beside it; Plan again and the next-decision arrows are hidden); the
-confirm popover becomes a bottom sheet; tabs scroll horizontally. Below 1024 px the rail is the
-horizontal strip above the tabs (§2.2). A condensed two-line header is **[not built yet]**.
+bar's text part (state, four-eyes, standing, cascade) stays in the page flow and scrolls away — only
+the docked actions are fixed, so the plan gets the screen. The confirm popover becomes a bottom
+sheet; tabs scroll horizontally, the active one kept in view (a deep link to `?tab=discussion`).
+Below 1024 px the rail is the horizontal strip above the tabs (§2.2). The header condenses to two
+lines: the title, then one line `sha · trigger · age · "message"` (message truncated; branch, author,
+duration, rollout and command are left to the desktop header).
 
 ### 5.3 Log viewer (`LogViewer`)
 
