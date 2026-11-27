@@ -29,6 +29,7 @@ from app.models.stack import Stack
 from app.models.tier import Tier
 from app.models.worker import Worker
 from app.oidc.precedence import split_shadowed
+from app.oidc.profiles import for_phase as profiles_for_phase
 from app.runs.artifacts import SAVED_PLAN_TYPES
 from app.runs.commands import is_mutating
 from app.runs.transition import transition
@@ -441,4 +442,5 @@ async def _cloud_credentials(  # type: ignore[no-untyped-def]
         "oidc_token": token,
         "role_arn": role_arn,
         "region": ci.region,
+        "profiles": profiles_for_phase(ci.profiles or {}, phase),
     }

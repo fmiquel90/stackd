@@ -29,6 +29,7 @@ from app.enums import (
 )
 from app.notifications.dispatcher import check_url_syntax
 from app.notifications.schemas import ALLOWED_STATES
+from app.oidc.profiles import CloudProfiles
 from app.stacks.schemas import _check_tool_version
 
 FORMAT: Literal["stackd.config"] = "stackd.config"
@@ -107,6 +108,7 @@ class CloudIntegrationDoc(_Doc):
     apply_role_arn: str = Field(min_length=1)
     region: str | None = None
     session_duration: int = 3600
+    profiles: CloudProfiles = {}
 
 
 class EnvironmentDoc(_Doc):

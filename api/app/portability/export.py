@@ -23,6 +23,7 @@ from app.models.tier import Tier
 from app.models.variable import Variable
 from app.models.variable_set import VariableSet, VariableSetAttachment
 from app.models.worker import WorkerPool
+from app.oidc.profiles import CloudProfile
 from app.portability.schemas import (
     AttachmentDoc,
     CloudIntegrationDoc,
@@ -244,6 +245,10 @@ async def export_space(session: AsyncSession, space: Space) -> ConfigDocument:
                             apply_role_arn=ci.apply_role_arn,
                             region=ci.region,
                             session_duration=ci.session_duration,
+                            profiles={
+                                name: CloudProfile(**p)
+                                for name, p in sorted((ci.profiles or {}).items())
+                            },
                         )
                         if ci is not None
                         else None
