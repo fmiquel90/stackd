@@ -33,9 +33,13 @@ The **queue is Postgres**, not a broker. A claim is an atomic `SELECT … FOR UP
 
 ### One active run per environment
 
-`SKIP LOCKED` alone does not serialise two workers claiming two *distinct* queued runs of the **same** environment. The hard guarantee is the partial unique index `one_active_run_per_env`: the second claim violates it (SQLSTATE `23505`), is caught, and is treated as "nothing to claim" — that worker simply re-polls. The claim also locks the environment row (`FOR UPDATE OF environment`) so losers skip it and pick other work instead of wasting effort.
+`SKIP LOCKED` alone does not serialise two workers claiming two *distinct* queued runs of the **same** environment. The hard guarantee is the partial unique index `one_active_run_per_env`: the second claim violates it (SQLSTATE `23505`), is caught, and is treated as "nothing to claim" — that worker simply re-polls. The claim also locks the environment row (`FOR NO KEY UPDATE OF environment`) so losers skip it and pick other work instead of wasting effort.
 
 The practical consequence: **the unit of parallelism is the environment.** Two environments of the same stack run in parallel; two runs on the same environment never do.
+
+### A job that cannot be built
+
+When a run is claimed, the API builds its job: variables, [external secrets](external-secrets.md), dependency inputs, the [workload token](cloud-credentials.md). If that fails for a reason a retry can get past (KMS throttled or unreachable, a database hiccup), the claim is undone — the run stays `queued` (or `confirmed`, keeping its approval) — the worker gets a `503` and polls again, and the run is set aside for a backoff (10 s, doubling up to 5 min) so the runs queued behind it are claimed meanwhile. Any other failure — an unresolvable dependency or secret, a key that will never sign, a stored secret that no longer decrypts — fails the run at once (`run.apply_failed`). Either way, one bad run never blocks the queue.
 
 ### Apply affinity
 
@@ -43,7 +47,7 @@ After a plan is confirmed, the originating worker is **preferred** for the apply
 
 ### Worker loss
 
-A worker silent for > 60s (`STACKD_WORKER_OFFLINE_SECONDS` on the API) is marked `offline`. The scheduler (every 10 s) then fails the runs whose job is **executing** on an offline worker — `preparing`, `planning`, `checking`, `running` (a command) or `applying` — as `failed (worker_lost)`, once the job was claimed more than 120s ago (`STACKD_WORKER_LOST_SECONDS`). No human action required.
+A worker silent for > 60s (`STACKD_WORKER_OFFLINE_SECONDS` on the API) is marked `offline`. The scheduler (every 10 s) then fails the runs whose job is **executing** on an offline worker — `preparing`, `planning`, `checking`, `running` (a command) or `applying` — as `failed (worker_lost)`, once the job was claimed more than 120s ago (`STACKD_WORKER_LOST_SECONDS`). The state lock the run held is released with it, so the environment's next run is not blocked. No human action required.
 
 Runs that are **not executing** are never reclaimed: an `unconfirmed` run waits for a human and a `confirmed` one for the apply claim, and neither depends on the plan worker. Losing the worker that planned a run doesn't fail it; another worker applies the saved plan.
 
@@ -185,7 +189,28 @@ There is **no built-in autoscaler**, but the signals you need are exposed:
 
 A `no_compatible_worker` backlog means no online worker carries the environment's labels or can run the stack's `tool_version` — not a capacity problem: adding generic workers will not help; you need workers with the right labels or tool versions. See [Observability](observability.md) for the Workers & health page.
 
-Drift detection adds background load: every environment with `drift_check_enabled` gets a read-only plan every 6 h (`STACKD_DRIFT_INTERVAL_SECONDS` on the API). A claim always takes user runs before these drift plans, then the oldest first.
+### Database connections
+
+A worker waiting on its claim long-poll holds **no** database connection: the API ends the claim's transaction before each 2 s wait (and caps `?wait=` at `STACKD_CLAIM_MAX_WAIT_SECONDS`, default 30). Idle workers therefore cost a few milliseconds of a connection every 2 s each, not a connection each. Size each API process's pool for the requests it serves **at once**:
+
+- the jobs being built at the same moment — a claim holds its connection while it fetches external secrets and signs the workload token (plus a second, briefly, the first time a KMS key is provisioned);
+- workers' events, logs and state-backend calls, and UI/API traffic;
+- up to 4 for the scheduler (two tasks, each with its session and its advisory-lock connection).
+
+| API setting | Default | What it does |
+|---|---|---|
+| `STACKD_DB_POOL_SIZE` | `10` | connections kept open per API process |
+| `STACKD_DB_MAX_OVERFLOW` | `10` | extra connections opened under load, closed when returned |
+| `STACKD_DB_POOL_TIMEOUT_SECONDS` | `30` | how long a request waits for a free connection before failing |
+| `STACKD_DB_IDLE_IN_TRANSACTION_TIMEOUT_SECONDS` | `300` | the server ends a session left idle inside a transaction this long (a leak, a stuck request), releasing its locks |
+| `STACKD_DB_LOCK_TIMEOUT_SECONDS` | `30` | a statement waiting this long for a row or advisory lock fails instead of queueing forever |
+| `STACKD_DB_STATEMENT_TIMEOUT_SECONDS` | `0` (the server's) | cap on any single statement; off by default, as a large retention purge can legitimately run long |
+
+The three timeouts apply to the API's own connections only — `0` leaves the server's (role or database) setting. Migrations (`alembic upgrade`, the `migrate` service) and the audit purge open their own connections and never inherit them.
+
+Postgres must accept every replica's pool at full overflow, plus one `LISTEN` connection per replica (live updates), the migrations and the audit purge: `max_connections` ≥ replicas × (`STACKD_DB_POOL_SIZE` + `STACKD_DB_MAX_OVERFLOW` + 1) + a few. With the defaults that is 21 per replica — Postgres' default of 100 fits four replicas.
+
+Drift detection adds background load: every environment with `drift_check_enabled` gets a read-only plan every 6 h (`STACKD_DRIFT_INTERVAL_SECONDS` on the API) — never a second one while the previous drift plan is still queued. A claim always takes user runs before these drift plans, then the oldest first.
 
 ## See also
 

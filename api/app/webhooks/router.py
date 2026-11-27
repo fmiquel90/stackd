@@ -7,7 +7,7 @@ from datetime import UTC, datetime
 from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, Header, Request
-from sqlalchemy import select, update
+from sqlalchemy import ColumnElement, SQLColumnExpression, case, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.crypto import decrypt
@@ -34,6 +34,12 @@ def _normalize(url: str) -> str:
     return url.removesuffix(".git").rstrip("/")
 
 
+def _normalized_sql(url: SQLColumnExpression[str]) -> ColumnElement[str]:
+    """`_normalize`, in SQL."""
+    stripped = case((func.right(url, 4) == ".git", func.left(url, -4)), else_=url)
+    return func.rtrim(stripped, "/")
+
+
 async def _candidate_stacks(session: AsyncSession, payload: dict) -> list[Stack]:
     repo = payload.get("repository", {})
     urls = {
@@ -46,8 +52,20 @@ async def _candidate_stacks(session: AsyncSession, payload: dict) -> list[Stack]
         )
         if u
     }
-    all_stacks = (await session.execute(select(Stack))).scalars().all()
-    return [s for s in all_stacks if _normalize(s.repo_url) in urls and s.webhook_secret_encrypted]
+    if not urls:
+        return []
+    return list(
+        (
+            await session.execute(
+                select(Stack).where(
+                    _normalized_sql(Stack.repo_url).in_(urls),
+                    Stack.webhook_secret_encrypted.is_not(None),
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
 
 
 def _verify(secret: str, body: bytes, signature: str | None) -> bool:

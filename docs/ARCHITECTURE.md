@@ -37,7 +37,10 @@ flowchart LR
 ```
 
 Only the API holds the S3 and database credentials: workers reach states and saved plans through
-it.
+it. It does S3 I/O with no DB connection or row lock held (a state or plan upload goes to a fresh
+key first, then a short transaction re-checks and records it), and an S3 error is never read as a
+missing object: a state version whose object S3 cannot serve is a 503 (or a 500 if the object is
+gone), never the 404 tofu would read as "no state yet".
 
 **Run logs have two tiers.** The worker streams masked chunks to the API, which keeps them in
 Postgres (`run_logs`) and signals them over `LISTEN/NOTIFY` for the live viewer. Once a run has been
@@ -130,7 +133,7 @@ sequenceDiagram
     A->>A: pin the run to that commit
     Note over W: hooks · init · plan -out=plan.tfplan (tofu → /state/v1 via TF_HTTP_*)
     W->>A: PUT /jobs/{id}/artifacts/plan.tfplan (before after_plan hooks)
-    A->>S: encrypt (AES-256-GCM) → artifacts/{run_id}/plan.tfplan
+    A->>S: encrypt (AES-256-GCM) → artifacts/{run_id}/plan-<id>.tfplan (before the run's row lock)
     Note over W: after_plan hooks (checking)
     W->>A: phase_finished (summary, checks) + streamed logs
     A->>A: transition() → unconfirmed
@@ -151,7 +154,9 @@ sequenceDiagram
 mint time: `ro` (a PR or drift plan, a read-only command: read only, no lock), `plan` (a plan job:
 read and lock while planning, never write), `rw` (an apply or a mutating command: write; TTL = the
 apply budget + grace). A token whose run has ended can no longer write or lock. The worker hands it
-to tofu only, as `TF_HTTP_*` environment variables — hooks never see it.
+to tofu only, as `TF_HTTP_*` environment variables — hooks never see it. A lock records the run whose
+token took it, and `transition()` releases it when that run ends (audited `state.lock_released`): a
+worker lost mid-plan or mid-apply never strands the environment's lock.
 
 **Repo credential.** The stack's token or SSH deploy key rides in the claim (`repo_credentials`).
 The worker uses it for the clone and for `init`, which downloads the modules — private ones hosted
@@ -251,8 +256,15 @@ claim time.
 ## 📈 Scaling
 
 Workers are stateless pull agents, so **scaling out = running more of them** (e.g. bumping an ECS
-service `desiredCount`). Postgres serializes claims with two guards (`FOR UPDATE … SKIP LOCKED` +
+service `desiredCount`). Postgres serializes claims with two guards (`FOR NO KEY UPDATE … SKIP LOCKED` +
 the `one_active_run_per_env` unique index). What's worth knowing:
+
+- 🔌 **Idle workers cost no database connection** — the claim long-poll ends its transaction before
+  each 2 s wait, so the API's pool is sized for requests in flight, not for workers
+  ([sizing](guide/workers-and-scaling.md#database-connections)).
+- 🧯 **One bad run never blocks the queue** — a job that cannot be built for a transient reason
+  (KMS, the database) is set aside for a backoff (`claimable_after`); any other build failure fails
+  the run closed.
 
 - 🧩 **The unit of parallelism is the environment, not the worker** — one active run per env, but
   different envs run concurrently. Throughput ≈ `min(workers, envs with queued work)`.

@@ -219,6 +219,78 @@ async def test_download_phases_in_run_order_across_midnight(client: httpx.AsyncC
     assert heads == [f"===== {p} =====" for p in ("planning", "applying", "alpha", "zeta")]
 
 
+async def test_log_limit_reads_only_the_phases_it_needs(
+    client: httpx.AsyncClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """`limit` caps the chunks by (phase, seq) on both tiers; the archive then downloads and
+    decompresses only the phases the answer needs, and a one-phase download only that phase."""
+    from app.db import SessionLocal
+    from app.runs import logs_archive
+
+    with mock_aws():
+        admin = await login(client, "admin")
+        wh = await register_worker(client, admin, "pool-loglimit")
+        stack = await make_stack(client, admin, "loglimit-stack")
+        env_id = await make_env(client, admin, stack, "dev", "dev")
+        run = (
+            await client.post(f"/api/v1/environments/{env_id}/runs", headers=admin, json={})
+        ).json()
+        logs = f"/worker/v1/jobs/{run['id']}/logs"
+
+        async def log(phase: str, seq: int) -> None:
+            body = {"phase": phase, "seq": seq, "lines": [{"t": "", "msg": f"{phase} {seq}"}]}
+            assert (await client.post(logs, headers=wh, json=body)).status_code == 202
+
+        await client.post("/worker/v1/jobs/claim", headers=wh)
+        await event(client, wh, run["id"], "phase_started", phase="planning")
+        await log("planning", 0)
+        await log("planning", 1)
+        await event(client, wh, run["id"], "phase_finished", result=CHANGES)
+        await client.post(f"/api/v1/runs/{run['id']}/confirm", headers=admin)
+        await client.post("/worker/v1/jobs/claim", headers=wh)
+        await log("applying", 0)
+        await event(client, wh, run["id"], "phase_finished")
+
+        url = f"/api/v1/runs/{run['id']}/logs"
+
+        async def chunks(**params: object) -> list[tuple[str, int]]:
+            resp = await client.get(url, headers=admin, params=params)
+            assert resp.status_code == 200, resp.text
+            return [(c["phase"], c["seq"]) for c in resp.json()]
+
+        async def check() -> None:
+            assert await chunks(limit=1) == [("applying", 0)]
+            assert await chunks(limit=2) == [("applying", 0), ("planning", 0)]
+            assert await chunks(phase="planning", after_seq=0, limit=1) == [("planning", 1)]
+            assert await chunks(limit=10) == await chunks()
+
+        await check()
+        assert (await client.get(url, headers=admin, params={"limit": 0})).status_code == 422
+
+        now = datetime.now(UTC) + timedelta(minutes=2)
+        async with SessionLocal() as session:
+            await logs_archive.archive_run_logs(session, now)
+            await logs_archive.purge_hot_logs(session, now + timedelta(days=8))
+        await check()
+
+        fetched: list[str] = []
+        real_get = logs_archive.get_object
+
+        async def spy(key: str) -> bytes | None:
+            fetched.append(key.rsplit("/", 1)[-1])
+            return await real_get(key)
+
+        monkeypatch.setattr(logs_archive, "get_object", spy)
+        assert await chunks(limit=1) == [("applying", 0)]
+        assert fetched == ["applying.log.gz"]
+
+        fetched.clear()
+        one = await client.get(f"{url}/download", headers=admin, params={"phase": "planning"})
+        assert one.status_code == 200
+        assert one.text.splitlines() == ["===== planning =====", " planning 0", " planning 1"]
+        assert fetched == ["planning.log.gz"]
+
+
 async def test_archive_waits_for_the_grace_window(client: httpx.AsyncClient) -> None:
     """The agent's last buffered chunks can land just after the terminal event."""
     from app.db import SessionLocal

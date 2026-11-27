@@ -446,7 +446,15 @@ async def test_a_transient_signing_failure_leaves_the_run_to_retry(
     assert r.json()["code"] == "kms_throttled" and r.json()["retryable"] is True
     got = await _run(client, admin, run_id)
     assert got["state"] == "confirmed" and got["error"] is None
+    # Not offered again before its backoff (§7.2): the next poll gets nothing…
+    assert (await client.post("/worker/v1/jobs/claim", headers=wh)).status_code == 204
 
+    # …and, once it is over, the apply.
+    async with SessionLocal() as session:
+        run = await session.get(Run, uuid.UUID(run_id))
+        assert run is not None and run.claim_attempts == 1
+        run.claimable_after = datetime.now(UTC) - timedelta(seconds=1)
+        await session.commit()
     monkeypatch.setattr(issuer, "_sign", real)
     r = await client.post("/worker/v1/jobs/claim", headers=wh)
     assert r.status_code == 200, r.text
