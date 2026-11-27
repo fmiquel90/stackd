@@ -234,3 +234,18 @@ def test_a_transient_failure_of_the_401_re_registration_is_retried() -> None:
     client._pool_token, client._name = "pool", "agent-1"
     client.command_result("cmd-1", {"x": 1})
     assert calls.count("/worker/v1/register") == 2
+
+
+def test_heartbeat_retries_stay_within_the_heartbeat_budget() -> None:
+    """The heartbeat thread must not stall past the API's offline threshold: its calls retry for
+    the heartbeat budget only, not the default 60 s."""
+    from agent.client import HEARTBEAT_TIMEOUT_SECONDS
+
+    handler, _ = _script(503)
+    client, clock = _client(handler)
+    with pytest.raises(httpx.HTTPStatusError):
+        client.heartbeat(job_ids=["run-1"])
+    assert clock.now <= HEARTBEAT_TIMEOUT_SECONDS + 15
+    with pytest.raises(httpx.HTTPStatusError):
+        client.command_result("cmd-1", {})
+    assert sum(clock.sleeps) <= 2 * (HEARTBEAT_TIMEOUT_SECONDS + 15)
