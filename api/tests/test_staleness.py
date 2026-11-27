@@ -120,6 +120,7 @@ async def test_env_is_stale_when_head_moved_past_last_applied(client: httpx.Asyn
     env = await _get(client, admin, env_id)
     assert env["head_sha"] == "bbb222"
     assert env["stale"] is True
+    assert env["last_applied_sha"] == "aaa111"
 
     # A plan-only proposed run on the head applies nothing: still stale.
     await _run(client, admin, wh, env_id, "bbb222", run_type="proposed")

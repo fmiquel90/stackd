@@ -96,6 +96,35 @@ async def test_logs_archived_then_hot_purged_and_served_from_s3(client: httpx.As
         assert len(one) == 2
 
 
+async def test_hot_log_purge_runs_in_batches(
+    client: httpx.AsyncClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A backlog of archived runs is purged a batch of runs per transaction, all of it."""
+    from app.db import SessionLocal
+    from app.runs import logs_archive
+
+    monkeypatch.setattr(logs_archive, "_HOT_PURGE_RUNS_PER_BATCH", 2)
+    with mock_aws():
+        runs = [(await _finished_run_with_logs(client, f"batch{i}"))[0] for i in range(5)]
+        now = datetime.now(UTC) + timedelta(minutes=2)
+        async with SessionLocal() as session:
+            await logs_archive.archive_run_logs(session, now)
+        commits = 0
+        async with SessionLocal() as session:
+            real_commit = session.commit
+
+            async def counting_commit() -> None:
+                nonlocal commits
+                commits += 1
+                await real_commit()
+
+            monkeypatch.setattr(session, "commit", counting_commit)
+            assert await logs_archive.purge_hot_logs(session, now + timedelta(days=8)) >= 10
+        for run_id in runs:
+            assert await _count_hot(run_id) == 0
+        assert commits >= 3  # 5 runs, 2 per batch
+
+
 async def test_archived_run_with_hot_rows_never_reads_s3(
     client: httpx.AsyncClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
