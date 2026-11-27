@@ -385,6 +385,12 @@ stay as redirects** (`/stacks/:uuid` → `/s/<space>/stacks/<name>`; `/stacks`, 
 
 **Everything that determines what is on screen is in the URL**: tab (`?tab=plan`), filters (`?q=app&state=attention&tier=prod`), the overview's selected cell and cascade preview (`?sel=demo-network/prod&cascade=1`), log position (`?tab=logs&line=planning.87`), plan search (`?plan_q=nat`), graph filter, view and node (`?env=prod&tier=prod&view=list&node=<id>`), env run-history filter (`?kind=`), stack settings section (`?tab=settings&sub=hooks`). The active space is the URL's, never in-memory state. (No browser storage, CLAUDE §4.8.)
 
+**Tab title** (`app/DocumentTitle.tsx`): most specific name first, brand last, so pinned tabs stay
+readable — `demo-network/prod · demo — StackD`, `Queue — StackD`. A run reads
+`demo-network/staging · run 9ce3880b · unconfirmed — StackD` (the badge's word, lowercased, updated
+live). When decisions need the viewer in the current space, their count leads: `(3) Overview · demo —
+StackD`, so a background tab says a decision is waiting without a notification.
+
 ### 4.2 ⌘K command palette
 
 Opened with ⌘K / Ctrl-K from anywhere (`cmdk` on a Radix dialog). Sections, in order **[today]**:
