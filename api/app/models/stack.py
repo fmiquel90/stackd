@@ -4,7 +4,7 @@ import uuid
 from datetime import datetime
 
 from sqlalchemy import Enum, ForeignKey, LargeBinary, String, UniqueConstraint
-from sqlalchemy.dialects.postgresql import JSONB
+from sqlalchemy.dialects.postgresql import ARRAY, JSONB
 from sqlalchemy.dialects.postgresql import UUID as PGUUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -33,6 +33,10 @@ class Stack(Base):
     webhook_secret_encrypted: Mapped[bytes | None] = mapped_column(LargeBinary, default=None)
 
     project_root: Mapped[str] = mapped_column(String, default=".")
+    # Repo-root-relative globs that concern the stack besides project_root (§3.1, §9.6).
+    trigger_paths: Mapped[list[str]] = mapped_column(
+        ARRAY(String), default=list, server_default="{}"
+    )
     tool: Mapped[Tool] = mapped_column(Enum(Tool, name="tool"), default=Tool.opentofu)
     tool_version: Mapped[str] = mapped_column(String)
 

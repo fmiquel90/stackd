@@ -65,6 +65,7 @@ async def create_stack(
         repo_url=body.repo_url,
         repo_auth_kind=body.repo_auth_kind,
         project_root=body.project_root,
+        trigger_paths=body.trigger_paths,
         tool=body.tool,
         tool_version=body.tool_version,
         labels=body.labels,

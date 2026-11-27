@@ -268,6 +268,7 @@ async def export_space(session: AsyncSession, space: Space) -> ConfigDocument:
                 has_repo_secret=stack.repo_secret_encrypted is not None,
                 has_webhook_secret=stack.webhook_secret_encrypted is not None,
                 project_root=stack.project_root,
+                trigger_paths=list(stack.trigger_paths or []),
                 tool=stack.tool,
                 tool_version=stack.tool_version,
                 labels=stack.labels,

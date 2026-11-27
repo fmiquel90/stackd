@@ -57,6 +57,7 @@ async def _world(client: httpx.AsyncClient, admin: dict, prefix: str) -> dict[st
                     "repo_auth_kind": "token",
                     "repo_secret": "ghp_secret",
                     "project_root": st,
+                    "trigger_paths": ["modules/**", f"config/{st}.hcl"],
                     "tool_version": "1.12",
                     "labels": {"team": "core"},
                 },
@@ -258,6 +259,7 @@ async def test_round_trip_into_a_new_space(client: httpx.AsyncClient) -> None:
     network = next(s for s in again["stacks"] if s["name"] == "network")
     prod = next(e for e in network["environments"] if e["name"] == "prod")
     assert {v["name"] for v in prod["variables"]} == set()  # both secrets left to fill
+    assert network["trigger_paths"] == ["modules/**", "config/network.hcl"]
     assert prod["protected"] is True
     assert prod["cloud_integration"]["plan_role_arn"] == PLAN_ROLE
     assert again["dependencies"] == doc["dependencies"]
@@ -301,9 +303,11 @@ async def test_import_is_idempotent_and_merges(client: httpx.AsyncClient) -> Non
     network = next(s for s in doc["stacks"] if s["name"] == "network")
     network["environments"][0]["branch"] = "release"
     network["variables"][0]["value"] = "eu-west-3"
+    network["trigger_paths"] = ["modules/vpc/", "shared/**"]
     rep = (await _import(client, admin, ids["space"], doc)).json()
     updated = {c["path"]: c.get("fields") for c in rep["changes"] if c["op"] == "updated"}
     assert updated == {
+        "stacks/network": ["trigger_paths"],
         "stacks/network/environments/dev": ["branch"],
         "stacks/network/variables/terraform/region": ["value"],
     }
@@ -317,6 +321,19 @@ async def test_import_is_idempotent_and_merges(client: httpx.AsyncClient) -> Non
             )
         ).scalar_one()
         assert secret.value_encrypted is not None and decrypt(secret.value_encrypted) == "hunter2"
+        stack_audit = (
+            await s.execute(
+                select(AuditEvent).where(
+                    AuditEvent.action == "stack.updated",
+                    AuditEvent.target_id == uuid.UUID(ids["network"]),
+                    AuditEvent.context["via"].astext == "import",
+                )
+            )
+        ).scalar_one()
+        assert stack_audit.context["fields"] == ["trigger_paths"]
+    stacks = (await client.get("/api/v1/stacks", headers=admin)).json()
+    stored = next(st for st in stacks if st["id"] == ids["network"])
+    assert stored["trigger_paths"] == ["modules/vpc", "shared/**"]  # normalized on import
 
 
 async def test_dry_run_reports_and_writes_nothing(client: httpx.AsyncClient) -> None:
@@ -388,6 +405,9 @@ async def test_import_validation(client: httpx.AsyncClient) -> None:
     # Duplicate natural keys → 422.
     r = await _import(client, admin, target, {"stacks": [stack, stack]})
     assert r.status_code == 422 and "duplicate stack" in r.text
+    # A trigger path escaping the repository → 422.
+    r = await _import(client, admin, target, {"stacks": [{**stack, "trigger_paths": ["../x"]}]})
+    assert r.status_code == 422 and "trigger_paths" in r.text
     # An env on a tier neither in the catalog nor in the document → 422, nothing written.
     env = {"name": "x", "tier": "nope", "branch": "main"}
     r = await _import(client, admin, target, {"stacks": [{**stack, "environments": [env]}]})
