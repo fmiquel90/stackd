@@ -4,6 +4,8 @@ terminal. The apply applies exactly it — never a fresh plan."""
 
 from __future__ import annotations
 
+import re
+
 import httpx
 from moto import mock_aws
 
@@ -59,10 +61,18 @@ async def _confirm_and_claim_apply(client, admin, wh, run_id: str) -> dict:
     return job
 
 
+async def _objects(run_id: str) -> list[str]:
+    from app.statebackend.store import list_keys
+
+    return await list_keys(f"artifacts/{run_id}/")
+
+
 async def _stored(run_id: str) -> bytes | None:
     from app.statebackend.store import get_object
 
-    return await get_object(f"artifacts/{run_id}/plan.tfplan")
+    keys = await _objects(run_id)
+    assert len(keys) <= 1, keys
+    return await get_object(keys[0]) if keys else None
 
 
 async def _plan_key(run_id: str) -> str | None:
@@ -85,9 +95,10 @@ async def test_plan_is_saved_encrypted_and_served_to_the_apply_job(
         run_id, plan_job = await _plan(client, admin, wh, env_id)
         assert (plan_job["save_plan"], plan_job["destroy"]) == (True, False)
 
-        key = f"artifacts/{run_id}/plan.tfplan"  # §11.3 layout
-        blob = await _stored(run_id)
-        assert blob is not None and await _plan_key(run_id) == key
+        key = await _plan_key(run_id)
+        assert key is not None and re.fullmatch(rf"artifacts/{run_id}/plan-[0-9a-f-]+\.tfplan", key)
+        blob = await _stored(run_id)  # §11.3 layout
+        assert blob is not None and await _objects(run_id) == [key]
         assert b"SUPER-SECRET-VALUE" not in blob  # encrypted at rest (AES-256-GCM)…
         assert decrypt_bytes(blob, aad=f"stackd:artifact:{key}".encode()) == PLAN  # …app key
 
@@ -148,11 +159,10 @@ async def test_a_plan_moved_to_another_run_does_not_decrypt(client: httpx.AsyncC
         # Run b's object overwritten with a blob encrypted for another key (here: a's plan).
         from app.crypto import encrypt_bytes
 
-        key_a = f"artifacts/{a}/plan.tfplan"
-        await put_object(
-            f"artifacts/{b}/plan.tfplan",
-            encrypt_bytes(b"PK evil", aad=f"stackd:artifact:{key_a}".encode()),
-        )
+        key_a = f"artifacts/{a}/plan-0.tfplan"
+        key_b = await _plan_key(b)
+        assert key_b is not None
+        await put_object(key_b, encrypt_bytes(b"PK evil", aad=f"stackd:artifact:{key_a}".encode()))
         await _confirm_and_claim_apply(client, admin, wh, b)
         got = await client.get(_url(b), headers=wh)
         assert got.status_code == 500, got.text
@@ -236,6 +246,7 @@ async def test_a_rolled_back_terminal_transition_keeps_the_plan(client: httpx.As
     admin, wh, env_id = await _setup(client, "sp-rollback")
     with mock_aws():
         run_id, _ = await _plan(client, admin, wh, env_id)
+        key = await _plan_key(run_id)
         async with SessionLocal() as s:
             run = await s.get(Run, run_id)
             assert run is not None
@@ -246,4 +257,4 @@ async def test_a_rolled_back_terminal_transition_keeps_the_plan(client: httpx.As
             await s.commit()
         await wait_for_purges()
         assert await _stored(run_id) is not None
-        assert await _plan_key(run_id) == f"artifacts/{run_id}/plan.tfplan"
+        assert key is not None and await _plan_key(run_id) == key

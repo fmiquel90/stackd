@@ -20,6 +20,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.audit import record_audit
+from app.aws import client_config
 from app.config import get_settings
 from app.crypto import decrypt, encrypt
 from app.enums import AuditActorKind, JobPhase, OidcKeyStatus
@@ -183,8 +184,9 @@ def _new_local_key() -> OidcSigningKey:
 @functools.lru_cache(maxsize=16)
 def _kms_client_for(region: str) -> Any:
     # One client per region: building one loads the service model and the credential chain, which
-    # does not belong on the claim path (a signature per claimed job).
-    return boto3.client("kms", region_name=region)
+    # does not belong on the claim path (a signature per claimed job). A Session of its own: this
+    # runs in worker threads, where building clients off boto3's default session is not safe.
+    return boto3.session.Session().client("kms", region_name=region, config=client_config())
 
 
 def _kms_client(arn: str) -> Any:

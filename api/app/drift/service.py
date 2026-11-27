@@ -10,6 +10,7 @@ from app.audit import record_audit
 from app.config import get_settings
 from app.enums import (
     ACTIVE_STATES,
+    TERMINAL_STATES,
     AuditActorKind,
     DriftStatus,
     RunState,
@@ -46,8 +47,9 @@ async def _last_applied_sha(session: AsyncSession, env_id: uuid.UUID) -> str | N
 
 async def detect_drift(session: AsyncSession, now: datetime) -> int:
     """Scheduler task (§19, advisory-locked): enqueue a read-only `-refresh-only` proposed run for
-    each due environment with an applied commit and no active run. Idempotent — gated on
-    `last_drift_checked_at + interval`, so re-running before the interval elapses is a no-op."""
+    each due environment with an applied commit, no active run and no drift run still queued.
+    Idempotent — gated on `last_drift_checked_at + interval`, so re-running before the interval
+    elapses is a no-op."""
     from app.runs.service import trigger_run
 
     interval = get_settings().stackd_drift_interval_seconds
@@ -68,14 +70,22 @@ async def detect_drift(session: AsyncSession, now: datetime) -> int:
     )
     triggered = 0
     for env in due:
-        active = (
+        # An active run, or a drift run still queued: one no worker claims (no compatible worker,
+        # env labels) must not be joined by another every interval.
+        busy = (
             await session.execute(
                 select(Run.id)
-                .where(Run.environment_id == env.id, Run.state.in_(list(ACTIVE_STATES)))
+                .where(
+                    Run.environment_id == env.id,
+                    or_(
+                        Run.state.in_(list(ACTIVE_STATES)),
+                        Run.is_drift.is_(True) & Run.state.not_in(list(TERMINAL_STATES)),
+                    ),
+                )
                 .limit(1)
             )
         ).first()
-        if active is not None:
+        if busy is not None:
             continue
         env.last_drift_checked_at = now  # bump regardless, so a no-op env isn't retried every tick
         sha = await _last_applied_sha(session, env.id)

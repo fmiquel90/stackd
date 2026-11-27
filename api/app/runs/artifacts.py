@@ -2,9 +2,12 @@
 
 A plan file carries the run's variable values in clear — sensitive ones included — so it never
 reaches S3 unencrypted: AES-256-GCM with the app key, the AAD binding the blob to its own key (a
-blob copied under another run's key does not decrypt). It is served only to the run's apply job
+blob copied under another key does not decrypt). It is served only to the run's apply job
 (app.workers.worker_router) and deleted as soon as the run is terminal: transition() clears the
-run's pointer in its transaction, and the object is deleted once that transaction commits."""
+run's pointer in its transaction, and the object is deleted once that transaction commits.
+
+Every upload gets a key of its own: the upload happens before the run's row lock is taken, so a
+late upload refused under that lock must never have overwritten the reviewed plan's object."""
 
 from __future__ import annotations
 
@@ -18,6 +21,7 @@ from sqlalchemy.orm import Session
 
 from app.crypto import decrypt_bytes, encrypt_bytes
 from app.enums import RunType
+from app.ids import uuid7
 from app.logging import get_logger
 from app.models.run import Run
 from app.statebackend.store import delete_object, get_object, put_object
@@ -37,8 +41,8 @@ class SavedPlanUnreadable(Exception):
     """The stored plan failed authenticated decryption (wrong key, tampered or truncated blob)."""
 
 
-def artifact_key(run_id: uuid.UUID, name: str) -> str:
-    return f"artifacts/{run_id}/{name}"
+def plan_key(run_id: uuid.UUID) -> str:
+    return f"artifacts/{run_id}/plan-{uuid7()}.tfplan"
 
 
 def _aad(key: str) -> bytes:
@@ -46,20 +50,36 @@ def _aad(key: str) -> bytes:
 
 
 async def save_plan(run_id: uuid.UUID, data: bytes) -> str:
-    """Encrypt and store the run's plan file; returns its S3 key."""
-    key = artifact_key(run_id, PLAN_FILE)
-    await put_object(key, encrypt_bytes(data, aad=_aad(key)))
+    """Encrypt and store a plan file under a new key of the run's; returns that key. The run does
+    not point to it until record_saved_plan()."""
+    key = plan_key(run_id)
+    blob = await asyncio.to_thread(encrypt_bytes, data, aad=_aad(key))
+    await put_object(key, blob)
     return key
 
 
+def record_saved_plan(session: AsyncSession, run: Run, key: str) -> None:
+    """Point the run to its newly stored plan, in the caller's transaction; a plan it replaces (a
+    retried upload) is deleted once that transaction commits."""
+    if run.plan_artifact_key is not None and run.plan_artifact_key != key:
+        session.info.setdefault(_PURGE, set()).add(run.plan_artifact_key)
+    run.plan_artifact_key = key
+
+
+async def drop_unrecorded_plan(key: str) -> None:
+    """A plan stored by an upload refused afterwards: no run points to it."""
+    await _purge([key])
+
+
 async def load_plan(key: str) -> bytes | None:
-    """The decrypted plan file, None if the object is missing; SavedPlanUnreadable if it fails
-    its integrity check. Never falls back to anything."""
+    """The decrypted plan file, None if S3 says the object does not exist; SavedPlanUnreadable if
+    it fails its integrity check; StoreUnavailable (503) if S3 does not answer — a transient error
+    is never reported as a missing plan. Never falls back to anything."""
     blob = await get_object(key)
     if blob is None:
         return None
     try:
-        return decrypt_bytes(blob, aad=_aad(key))
+        return await asyncio.to_thread(decrypt_bytes, blob, aad=_aad(key))
     except InvalidTag as exc:
         raise SavedPlanUnreadable(key) from exc
 

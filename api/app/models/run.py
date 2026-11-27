@@ -89,6 +89,10 @@ class Run(Base):
     plan_artifact_key: Mapped[str | None] = mapped_column(String, default=None)
 
     claimed_at: Mapped[datetime | None] = mapped_column(default=None)
+    # Claim backoff (§7.2): a run whose job could not be built for a transient reason is not
+    # offered again before `claimable_after`; `claim_attempts` (reset by a claim) grows the delay.
+    claimable_after: Mapped[datetime | None] = mapped_column(default=None)
+    claim_attempts: Mapped[int] = mapped_column(Integer, default=0)
     confirmed_at: Mapped[datetime | None] = mapped_column(default=None)
     finished_at: Mapped[datetime | None] = mapped_column(default=None)
     # A user asked to stop the run while a worker executes it (§4.1): the worker is signalled via

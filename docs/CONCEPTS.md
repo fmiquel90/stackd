@@ -368,9 +368,10 @@ register (pool token) → heartbeat (every ~20s) → claim (long-poll)
    → clone → hooks → init → plan/apply → stream logs → report → repeat
 ```
 
-- **Claim** is concurrency-safe: `SELECT … FOR UPDATE OF environment SKIP LOCKED` serialises per
-  environment, and the `one_active_run_per_env` unique index is the hard guarantee (a losing racer gets a
-  `23505` and simply re-polls).
+- **Claim** is concurrency-safe: `SELECT … FOR NO KEY UPDATE OF environment SKIP LOCKED` serialises
+  per environment, and the `one_active_run_per_env` unique index is the hard guarantee (a losing racer
+  gets a `23505` and simply re-polls). A run whose job cannot be built never blocks the queue: a
+  transient failure sets it aside for a backoff, any other fails it.
 - **Labels** target work to pools (e.g. a dedicated `prod` pool): a worker claims only runs whose
   environment labels are a subset of its own, and whose stack's tool version it can run.
 - **Apply affinity**: the worker that produced a plan is preferred for the apply for ~60s; past
@@ -424,7 +425,9 @@ terraform ──backend "http"──▶ Stackd API ──(bucket encryption)─�
 Why: per-job **scoped tokens**, **locking visible in the UI** with audited force-unlock, refusal
 of a regressive serial, and every write tied to the run that produced it. The token's scope follows
 the job: `ro` (PR plans, read-only commands: read only), `plan` (a plan may lock, never write),
-`rw` (an apply or a mutating command). Once its run has ended, a token can no longer write or lock.
+`rw` (an apply or a mutating command). Once its run has ended, a token can no longer write or lock,
+and the lock the run held is released with it (audited): a worker that dies mid-run does not leave
+the environment locked.
 
 The worker adds a bare `backend "http" {}` block and hands the address and the token to tofu
 **only**, as `TF_HTTP_*` environment variables — never `-backend-config`, which tofu would persist
@@ -617,15 +620,17 @@ curl -s -X POST localhost:8000/api/v1/environments/$ENV_ID/notifications -H "$AU
 
 **How it works — a transactional outbox, not a side-effect.** When `transition()` moves a run to a
 notify-worthy state, it inserts a row into `notification_outbox` **in the same DB transaction** as
-the state change (no HTTP in the request path). A background scheduler task drains the outbox under
+the state change (no HTTP in the request path). A background dispatcher loop drains the outbox under
 a `pg_try_advisory_lock` (one replica at a time) with `FOR UPDATE … SKIP LOCKED`, resolves the
 matching targets (those on the run's environment + those on its stack, filtered by `on_states`),
 and POSTs — with no DB transaction held during the HTTP call. Consequences worth knowing:
 
 - a **rolled-back** transition never notifies (the outbox row rolls back with it);
 - two API replicas never double-send (the lock + `SKIP LOCKED`);
-- delivery is **at-least-once** with retries (up to 5 attempts), then the row is dead-lettered and
-  the failure is logged — a flaky Slack never blocks or fails a run.
+- delivery is **at-least-once**: a failed target is retried alone (targets already reached aren't
+  sent the event again), with exponential backoff and jitter, honouring `Retry-After`, for about an
+  hour (12 attempts), then the row is dead-lettered and logged at error level — a flaky Slack never
+  blocks or fails a run.
 
 Deep links use `STACKD_APP_URL` (the SPA base, e.g. `http://localhost:5173`).
 

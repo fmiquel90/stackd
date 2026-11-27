@@ -255,3 +255,149 @@ async def test_worker_lost_spares_runs_awaiting_human_or_apply(client: httpx.Asy
     assert claim.status_code == 200, claim.text
     assert claim.json()["job_id"] == confirmed
     assert claim.json()["phase"] == "apply"
+
+
+def _failures(task: str) -> float:
+    from prometheus_client import REGISTRY
+
+    return REGISTRY.get_sample_value("stackd_scheduler_task_failures_total", {"task": task}) or 0.0
+
+
+async def test_tick_isolates_failing_and_slow_tasks(
+    _database: str, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    """§7.5: a task that raises, or overruns its budget, is logged and counted — and the tick's
+    other tasks still run."""
+    import asyncio
+
+    from app.scheduler import tasks
+
+    ran: list[str] = []
+
+    def record(name: str):  # type: ignore[no-untyped-def]
+        async def task(session, now):  # type: ignore[no-untyped-def]
+            ran.append(name)
+
+        return task
+
+    async def broken(session, now):  # type: ignore[no-untyped-def]
+        raise RuntimeError("boom")
+
+    async def stuck(session, now):  # type: ignore[no-untyped-def]
+        await asyncio.sleep(3600)
+
+    monkeypatch.setattr(tasks, "detect_worker_lost", broken)
+    monkeypatch.setattr(tasks, "detect_drift", stuck)
+    monkeypatch.setattr(tasks, "retire_keys", record("oidc_keys"))
+    monkeypatch.setattr(tasks, "expire_approvals", record("rollouts"))
+    monkeypatch.setattr(tasks, "archive_run_logs", record("log_archive"))
+    monkeypatch.setitem(tasks._TASK_BUDGETS, "drift", 0.2)
+    before = {t: _failures(t) for t in ("worker_lost", "drift")}
+
+    await tasks._tick()
+
+    assert ran == ["oidc_keys", "rollouts", "log_archive"]
+    assert {t: _failures(t) - n for t, n in before.items()} == {"worker_lost": 1, "drift": 1}
+    failed = [r for r in caplog.records if getattr(r, "event", None) == "scheduler.task_failed"]
+    assert [(r.levelname, r.task) for r in failed] == [
+        ("ERROR", "worker_lost"),
+        ("ERROR", "drift"),
+    ]
+    assert failed[0].exc_info is not None  # the traceback is kept
+
+
+async def test_outbox_dispatchers_never_delay_the_tick(
+    _database: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The outbound dispatchers run in loops of their own: a hung delivery doesn't hold up
+    worker_lost detection, and stopping the scheduler cancels and awaits them."""
+    import asyncio
+
+    from app.scheduler import tasks
+
+    ticks: list[datetime] = []
+    three_ticks = asyncio.Event()
+    cancelled: list[str] = []
+
+    async def worker_lost(session, now):  # type: ignore[no-untyped-def]
+        ticks.append(now)
+        if len(ticks) == 3:
+            three_ticks.set()
+
+    async def noop(session, now):  # type: ignore[no-untyped-def]
+        return 0
+
+    def hung(name: str):  # type: ignore[no-untyped-def]
+        async def drain(session, now, *, limit):  # type: ignore[no-untyped-def]
+            try:
+                await asyncio.sleep(3600)
+            except asyncio.CancelledError:
+                cancelled.append(name)
+                raise
+
+        return drain
+
+    monkeypatch.setattr(tasks, "detect_worker_lost", worker_lost)
+    for name in (
+        "detect_drift",
+        "retire_keys",
+        "expire_approvals",
+        "archive_run_logs",
+        "purge_retention",
+        "poll_branch_heads",
+    ):
+        monkeypatch.setattr(tasks, name, noop)
+    monkeypatch.setattr(tasks, "dispatch_pending", hung("notifications"))
+    monkeypatch.setattr(tasks, "dispatch_vcs", hung("vcs"))
+    monkeypatch.setattr(tasks, "_TICK_SECONDS", 0.05)
+
+    loop = asyncio.create_task(tasks.scheduler_loop())
+    async with asyncio.timeout(10):
+        await three_ticks.wait()
+    loop.cancel()
+    await asyncio.gather(loop, return_exceptions=True)
+    assert sorted(cancelled) == ["notifications", "vcs"]
+
+
+async def test_lifespan_shutdown_awaits_scheduler_then_purges_then_disposes(
+    _database: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import asyncio
+
+    from fastapi import FastAPI
+    from sqlalchemy import text
+
+    from app import main
+    from app.config import get_settings
+    from app.db import SessionLocal, get_engine
+    from app.runs import artifacts
+    from app.scheduler import tasks
+
+    steps: list[str] = []
+
+    async def fake_loop() -> None:
+        try:
+            await asyncio.Event().wait()
+        except asyncio.CancelledError:
+            await asyncio.sleep(0.05)  # winding down its children takes a moment
+            steps.append("scheduler stopped")
+            raise
+
+    async def fake_wait_for_purges() -> None:
+        steps.append("purges awaited")
+
+    monkeypatch.setattr(tasks, "scheduler_loop", fake_loop)
+    monkeypatch.setattr(artifacts, "wait_for_purges", fake_wait_for_purges)
+    monkeypatch.setenv("STACKD_RUN_SCHEDULER", "true")
+    get_settings.cache_clear()
+    try:
+        async with main.lifespan(FastAPI()):
+            async with SessionLocal() as session:
+                await session.execute(text("SELECT 1"))
+            assert get_engine().pool.checkedin() >= 1  # type: ignore[attr-defined]
+            steps.append("serving")
+    finally:
+        monkeypatch.delenv("STACKD_RUN_SCHEDULER")
+        get_settings.cache_clear()
+    assert steps == ["serving", "scheduler stopped", "purges awaited"]
+    assert get_engine().pool.checkedin() == 0  # type: ignore[attr-defined]

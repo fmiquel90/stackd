@@ -4,12 +4,15 @@ import asyncio
 import ipaddress
 import socket
 import uuid
-from datetime import datetime
+from dataclasses import dataclass, field
+from datetime import UTC, datetime
+from typing import Any
 
 import httpx
-from sqlalchemy import select, update
+from sqlalchemy import and_, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app import outbox
 from app.config import get_settings
 from app.enums import AttachmentTarget
 from app.logging import get_logger
@@ -17,12 +20,15 @@ from app.models.environment import Environment
 from app.models.notification import NotificationOutbox, NotificationTarget
 from app.models.run import Run
 from app.models.stack import Stack
+from app.observability.metrics import outbox_dead_letters
 
 _log = get_logger("stackd.notifications")
 
-_MAX_ATTEMPTS = 5  # after this, the row is dead-lettered (left unsent, excluded from the poll)
 _HTTP_TIMEOUT = 5.0
 _DNS_TIMEOUT = 5.0
+_DELIVERY_CONCURRENCY = 8  # target POSTs a drain has in flight at once
+# One target's whole delivery — DNS, then every vetted address tried in turn, then the response.
+_DELIVERY_BUDGET = 30.0
 
 # SSRF guard: notification targets are operator-supplied URLs we POST to from inside the cluster,
 # so they must point at a public host over TLS. We reject non-https schemes and any host that
@@ -162,29 +168,19 @@ def _render(
     }
 
 
-async def _matching_targets(
-    session: AsyncSession, stack: Stack, env: Environment, to_state: str
+def _matching_targets(
+    targets: list[NotificationTarget], stack: Stack, env: Environment, to_state: str
 ) -> list[NotificationTarget]:
-    rows = (
-        (
-            await session.execute(
-                select(NotificationTarget).where(
-                    NotificationTarget.enabled.is_(True),
-                    (
-                        (NotificationTarget.target_kind == AttachmentTarget.environment)
-                        & (NotificationTarget.target_id == env.id)
-                    )
-                    | (
-                        (NotificationTarget.target_kind == AttachmentTarget.stack)
-                        & (NotificationTarget.target_id == stack.id)
-                    ),
-                )
-            )
+    """A run notifies its environment's targets plus its stack's, those firing on `to_state`."""
+    return [
+        t
+        for t in targets
+        if (
+            (t.target_kind == AttachmentTarget.environment and t.target_id == env.id)
+            or (t.target_kind == AttachmentTarget.stack and t.target_id == stack.id)
         )
-        .scalars()
-        .all()
-    )
-    return [t for t in rows if to_state in (t.on_states or [])]
+        and to_state in (t.on_states or [])
+    ]
 
 
 async def deliver(target: NotificationTarget, body: dict) -> bool:
@@ -216,22 +212,41 @@ async def deliver(target: NotificationTarget, body: dict) -> bool:
     raise error
 
 
-async def dispatch_pending(session: AsyncSession, now: datetime, *, limit: int = 20) -> int:
-    """Drain the notification outbox without holding a DB transaction across external HTTP I/O.
+@dataclass
+class _Row:
+    id: uuid.UUID
+    run_id: uuid.UUID
+    to_state: str
+    attempt: int
+    delivered: set[uuid.UUID]
+    done: bool = False
+    retry_after: float | None = None
+    failed_targets: list[uuid.UUID] = field(default_factory=list)
 
-    Phase 1 (locked, brief): claim a batch with FOR UPDATE SKIP LOCKED, bump `attempts`, commit —
-    this releases the row locks immediately. Phase 2 (no DB txn held): POST to matching targets.
-    Phase 3: mark the delivered rows `sent_at`. A crash between phases leaves `attempts` bumped
-    and `sent_at` null → retried later (at-least-once); the advisory lock keeps it single."""
-    rows = (
+
+async def dispatch_pending(session: AsyncSession, now: datetime, *, limit: int = 20) -> int:
+    """Drain the due rows of the notification outbox, never holding a DB transaction across
+    external HTTP I/O (§7.5).
+
+    Phase 1 (locked, brief): claim a batch of due rows with FOR UPDATE SKIP LOCKED, bump `attempts`
+    and push `next_attempt_at` by the backoff, commit — this releases the row locks. Then one read
+    of the batch's runs/envs/stacks and their targets, committed too. Phase 2 (no DB transaction):
+    POST to each row's matching targets not delivered yet — at most `_DELIVERY_CONCURRENCY` at
+    once, one run's rows in order. Phase 3: record the delivered targets, mark the fully delivered
+    rows `sent_at`, push a throttled row past its Retry-After, report the rows out of attempts.
+    A crash between phases leaves the row due again after its backoff (at-least-once); the
+    advisory lock keeps the drain single across replicas."""
+    max_attempts = get_settings().stackd_outbox_max_attempts
+    claimed = (
         (
             await session.execute(
                 select(NotificationOutbox)
                 .where(
                     NotificationOutbox.sent_at.is_(None),
-                    NotificationOutbox.attempts < _MAX_ATTEMPTS,
+                    NotificationOutbox.attempts < max_attempts,
+                    NotificationOutbox.next_attempt_at <= now,
                 )
-                .order_by(NotificationOutbox.created_at)
+                .order_by(NotificationOutbox.next_attempt_at, NotificationOutbox.created_at)
                 .limit(limit)
                 .with_for_update(skip_locked=True)
             )
@@ -239,61 +254,137 @@ async def dispatch_pending(session: AsyncSession, now: datetime, *, limit: int =
         .scalars()
         .all()
     )
-    if not rows:
+    if not claimed:
         return 0
 
-    # Phase 1: snapshot what we need, bump attempts, release the locks.
-    batch = [(r.id, r.run_id, r.to_state, r.attempts + 1) for r in rows]
-    for r in rows:
+    rows: list[_Row] = []
+    for r in claimed:
         r.attempts += 1
+        r.next_attempt_at = outbox.next_attempt_at(now, r.attempts)
+        rows.append(_Row(r.id, r.run_id, r.to_state, r.attempts, set(r.delivered_target_ids)))
     await session.commit()
 
-    # Phase 2: deliver with no DB transaction open.
-    delivered: list[uuid.UUID] = []
-    for row_id, run_id, to_state, attempt in batch:
-        run = await session.get(Run, run_id)
-        env = await session.get(Environment, run.environment_id) if run else None
-        stack = await session.get(Stack, env.stack_id) if env else None
-        if run is None or env is None or stack is None:
-            delivered.append(row_id)  # nothing to notify — mark done
-            continue
-        targets = await _matching_targets(session, stack, env, to_state)
-        ok = True
-        for target in targets:
-            try:
-                await deliver(target, _render(target, to_state, run, stack, env))
-            except Exception as exc:  # external endpoint — never crash the loop
-                ok = False
-                _log.warning(
-                    "notification delivery failed",
-                    extra={
-                        "event": "notification.failed",
-                        "target_id": str(target.id),
-                        "run_id": str(run_id),
-                        "state": to_state,
-                        "attempt": attempt,
-                        "error": str(exc),
-                    },
-                )
-        if ok:
-            delivered.append(row_id)
-            if targets:
-                _log.info(
-                    "notifications delivered",
-                    extra={
-                        "event": "notification.delivered",
-                        "run_id": str(run_id),
-                        "state": to_state,
-                        "targets": len(targets),
-                    },
-                )
-
-    # Phase 3: mark the delivered rows done.
-    if delivered:
+    triples = (
         await session.execute(
-            update(NotificationOutbox)
-            .where(NotificationOutbox.id.in_(delivered))
-            .values(sent_at=now)
+            select(Run, Environment, Stack)
+            .join(Environment, Environment.id == Run.environment_id)
+            .join(Stack, Stack.id == Environment.stack_id)
+            .where(Run.id.in_({r.run_id for r in rows}))
         )
-        await session.commit()
-    return len(batch)
+    ).all()
+    by_run = {run.id: (run, env, stack) for run, env, stack in triples}
+    targets = list(
+        (
+            await session.execute(
+                select(NotificationTarget)
+                .where(
+                    NotificationTarget.enabled.is_(True),
+                    or_(
+                        and_(
+                            NotificationTarget.target_kind == AttachmentTarget.environment,
+                            NotificationTarget.target_id.in_({e.id for _, e, _ in triples}),
+                        ),
+                        and_(
+                            NotificationTarget.target_kind == AttachmentTarget.stack,
+                            NotificationTarget.target_id.in_({s.id for _, _, s in triples}),
+                        ),
+                    ),
+                )
+                .order_by(NotificationTarget.created_at)
+            )
+        )
+        .scalars()
+        .all()
+    )
+    # End the read transaction before any HTTP. Commit, not rollback (which would expire the
+    # loaded rows): with expire_on_commit=False they stay usable — plain columns only.
+    await session.commit()
+
+    bound = asyncio.Semaphore(_DELIVERY_CONCURRENCY)
+
+    async def _send(row: _Row, target: NotificationTarget, body: dict[str, Any]) -> bool:
+        try:
+            async with bound, asyncio.timeout(_DELIVERY_BUDGET):
+                await deliver(target, body)
+        except Exception as exc:  # external endpoint — never crash the drain
+            retry_after = outbox.retry_after_seconds(exc, datetime.now(UTC))
+            if retry_after is not None:
+                row.retry_after = max(row.retry_after or 0.0, retry_after)
+            row.failed_targets.append(target.id)
+            _log.warning(
+                "notification delivery failed",
+                extra={
+                    "event": "notification.failed",
+                    "target_id": str(target.id),
+                    "run_id": str(row.run_id),
+                    "state": row.to_state,
+                    "attempt": row.attempt,
+                    "error": str(exc) or type(exc).__name__,
+                },
+            )
+            return False
+        return True
+
+    async def _deliver_row(row: _Row) -> None:
+        if row.run_id not in by_run:
+            row.done = True  # nothing to notify — mark done
+            return
+        run, env, stack = by_run[row.run_id]
+        pending = [
+            t
+            for t in _matching_targets(targets, stack, env, row.to_state)
+            if t.id not in row.delivered
+        ]
+        sent = await asyncio.gather(
+            *(_send(row, t, _render(t, row.to_state, run, stack, env)) for t in pending)
+        )
+        row.delivered |= {t.id for t, ok in zip(pending, sent, strict=True) if ok}
+        row.done = all(sent)
+        if row.done and pending:
+            _log.info(
+                "notifications delivered",
+                extra={
+                    "event": "notification.delivered",
+                    "run_id": str(row.run_id),
+                    "state": row.to_state,
+                    "targets": len(pending),
+                },
+            )
+
+    by_run_rows: dict[uuid.UUID, list[_Row]] = {}
+    for row in rows:
+        by_run_rows.setdefault(row.run_id, []).append(row)
+
+    async def _deliver_run(run_rows: list[_Row]) -> None:
+        for row in run_rows:  # one run's events reach a target in the order they happened
+            await _deliver_row(row)
+
+    await asyncio.gather(*(_deliver_run(run_rows) for run_rows in by_run_rows.values()))
+
+    # Phase 3: persist the outcome.
+    for row in rows:
+        values: dict[str, Any] = {"delivered_target_ids": sorted(row.delivered)}
+        if row.done:
+            values["sent_at"] = now
+        elif row.attempt >= max_attempts:
+            outbox_dead_letters.labels(outbox="notification").inc()
+            _log.error(
+                "notification abandoned after its last attempt",
+                extra={
+                    "event": "notification.dead_lettered",
+                    "outbox_id": str(row.id),
+                    "run_id": str(row.run_id),
+                    "state": row.to_state,
+                    "attempts": row.attempt,
+                    "failed_target_ids": [str(t) for t in row.failed_targets],
+                },
+            )
+        elif row.retry_after is not None:
+            values["next_attempt_at"] = outbox.next_attempt_at(
+                datetime.now(UTC), row.attempt, row.retry_after
+            )
+        await session.execute(
+            update(NotificationOutbox).where(NotificationOutbox.id == row.id).values(**values)
+        )
+    await session.commit()
+    return len(rows)
