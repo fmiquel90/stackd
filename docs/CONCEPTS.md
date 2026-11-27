@@ -387,13 +387,17 @@ register (pool token) → heartbeat (every ~20s) → claim (long-poll)
   A job holding apply credentials (an `applying` run, a mutating command) is only reclaimed after
   the apply budget + grace (15 + 5 min by default), so a long apply isn't failed mid-flight and its
   tokens have expired before another worker takes the environment. `unconfirmed` and `confirmed` runs are
-  never reclaimed: they wait on a human or on the apply claim, not on the plan worker.
+  never reclaimed: they wait on a human or on the apply claim, not on the plan worker. A **live**
+  worker that lost a job (a claim response that never arrived) is caught too: its heartbeat lists
+  the jobs it runs, and a run it leaves out of 2 heartbeats is failed `job_not_running` (same
+  delays). An API or database outage doesn't count as worker silence.
 - **Command channel.** The heartbeat response is also the *downward* channel (still no inbound to
   the worker). It carries **diagnostics**: an admin clicks a button, a `pending` command is
   queued, the worker picks it up on its next heartbeat, runs a **read-only** bundle (versions, disk,
   environment variable *names* — never values, recent agent logs) and posts it back. It also carries
   `cancel_job`, which stops a job the worker is executing (§4): SIGINT to the tool, SIGKILL after
-  `STACKD_CANCEL_GRACE_SECONDS` (120 s). Delivery latency is bounded by the heartbeat interval (~20 s).
+  `STACKD_CANCEL_GRACE_SECONDS` (120 s). Delivery latency is bounded by the heartbeat interval (~20 s). Delivery is at least once: a command
+  without a result after 90 s is delivered again (3 times at most).
 - **Drain.** A worker stopped with SIGTERM/SIGINT claims nothing more, keeps heartbeating, lets
   its running jobs finish and report, then exits; past `STACKD_DRAIN_TIMEOUT_SECONDS` (20 min) or
   on a second signal it stops them as `cancel_job` would, and their runs fail `worker_shutdown`

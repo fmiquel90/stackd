@@ -1120,7 +1120,8 @@ def _handle_command(
     client: ApiClient, cmd: dict, settings: Settings, jobs: cancel.JobRegistry | None = None
 ) -> None:
     """Downward commands delivered via heartbeat (§7.1): read-only diagnostics, and `cancel_job`,
-    which stops a job this worker is executing (§4.1)."""
+    which stops a job this worker is executing (§4.1). Both are idempotent: the API delivers a
+    command again when its result did not reach it."""
     if cmd.get("type") == "cancel_job" and jobs is not None:
         job_id = str((cmd.get("payload") or {}).get("job_id", ""))
         found = jobs.cancel(job_id)
@@ -1131,15 +1132,41 @@ def _handle_command(
         client.command_result(cmd["id"], {"job_id": job_id, "running_here": found})
         return
     if cmd.get("type") == "diagnostics":
-        from agent.diagnostics import collect
-
+        with _diagnostics_lock:
+            if cmd["id"] in _diagnostics_running:  # delivered again while still collecting
+                return
+            _diagnostics_running.add(cmd["id"])
         log.info(
             "running diagnostics", extra={"event": "agent.diagnostics", "command_id": cmd["id"]}
         )
+        # Off the heartbeat thread: its subprocesses can take long enough to make the worker look
+        # offline.
+        threading.Thread(
+            target=_diagnostics, args=(client, cmd["id"], settings), name="diagnostics", daemon=True
+        ).start()
+
+
+_diagnostics_lock = threading.Lock()
+_diagnostics_running: set[str] = set()
+
+
+def _diagnostics(client: ApiClient, command_id: str, settings: Settings) -> None:
+    from agent.diagnostics import collect
+
+    try:
         try:
-            client.command_result(cmd["id"], collect(settings.api_url, settings.runner))
+            result, status = collect(settings.api_url, settings.runner), "done"
         except Exception as exc:  # noqa: BLE001
-            client.command_result(cmd["id"], {"error": str(exc)}, status="failed")
+            result, status = {"error": str(exc)}, "failed"
+        client.command_result(command_id, result, status=status)
+    except Exception as exc:  # noqa: BLE001 — the API delivers the command again
+        log.warning(
+            "diagnostics result not sent",
+            extra={"event": "agent.command_error", "command_id": command_id, "error": str(exc)},
+        )
+    finally:
+        with _diagnostics_lock:
+            _diagnostics_running.discard(command_id)
 
 
 class _InFlight:
@@ -1163,6 +1190,35 @@ class _InFlight:
             return self._n
 
 
+def _beat(
+    client: ApiClient,
+    settings: Settings,
+    inflight: _InFlight,
+    jobs: cancel.JobRegistry | None = None,
+) -> None:
+    """One heartbeat: the in-flight count, the capacity and the jobs running here (§7.1), then the
+    commands it brings back — each on its own, so one failing never drops the others (a
+    `cancel_job` among them)."""
+    commands = client.heartbeat(
+        in_flight=inflight.count(),
+        capacity=settings.max_concurrent_jobs,
+        job_ids=jobs.running() if jobs is not None else None,
+    )
+    for cmd in commands:
+        try:
+            _handle_command(client, cmd, settings, jobs)
+        except Exception as exc:  # noqa: BLE001 — the API delivers it again
+            log.warning(
+                "command failed",
+                extra={
+                    "event": "agent.command_error",
+                    "command_id": cmd.get("id"),
+                    "type": cmd.get("type"),
+                    "error": str(exc),
+                },
+            )
+
+
 def _heartbeat_loop(
     client: ApiClient,
     settings: Settings,
@@ -1171,15 +1227,10 @@ def _heartbeat_loop(
 ) -> None:
     """Beat on a fixed cadence, independent of the claim long-poll and of job execution — otherwise
     a blocking claim (poll_wait) or a long plan/apply would starve the heartbeat and the worker would
-    be marked offline while it's actually fine. Reports in-flight count (→ busy/idle) and capacity.
-    Downward commands are handled here too."""
+    be marked offline while it's actually fine. Downward commands are handled here too."""
     while True:
         try:
-            commands = client.heartbeat(
-                in_flight=inflight.count(), capacity=settings.max_concurrent_jobs
-            )
-            for cmd in commands:
-                _handle_command(client, cmd, settings, jobs)
+            _beat(client, settings, inflight, jobs)
         except Exception as exc:  # noqa: BLE001 — never let a transient API error kill the heartbeat
             log.warning(
                 "heartbeat failed", extra={"event": "agent.heartbeat_error", "error": str(exc)}
