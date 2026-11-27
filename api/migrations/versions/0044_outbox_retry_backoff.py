@@ -1,7 +1,7 @@
 """outbox retries: per-row backoff schedule + per-target notification delivery (SPECS §7.5)
 
 Revision ID: 0044
-Revises: 0042
+Revises: 0043
 Create Date: 2026-11-27
 """
 
@@ -14,7 +14,7 @@ from alembic import op
 from sqlalchemy.dialects import postgresql
 
 revision: str = "0044"
-down_revision: str | None = "0042"
+down_revision: str | None = "0043"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
