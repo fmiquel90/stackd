@@ -62,6 +62,12 @@ class Settings(BaseSettings):
     s3_access_key: str = ""
     s3_secret_key: str = ""
     aws_region: str = "garage"
+    # Every AWS client (S3, KMS, STS); the read timeout bounds each socket read, not a transfer.
+    stackd_aws_connect_timeout_seconds: float = 5
+    stackd_aws_read_timeout_seconds: float = 30
+    stackd_aws_max_attempts: int = 3
+    # Largest state document the HTTP backend accepts (413 past it, §11.2).
+    stackd_state_max_bytes: int = 64 * 1024 * 1024
 
     # Retention (§5.2, §6.1, §7.5): hot log rows are purged this long after the run's logs reach S3;
     # the audit trail is purged past `audit_retention_days` by a distinct DB role, only when its

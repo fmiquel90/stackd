@@ -37,7 +37,10 @@ flowchart LR
 ```
 
 Only the API holds the S3 and database credentials: workers reach states and saved plans through
-it.
+it. It does S3 I/O with no DB connection or row lock held (a state or plan upload goes to a fresh
+key first, then a short transaction re-checks and records it), and an S3 error is never read as a
+missing object: a state version whose object S3 cannot serve is a 503 (or a 500 if the object is
+gone), never the 404 tofu would read as "no state yet".
 
 **Run logs have two tiers.** The worker streams masked chunks to the API, which keeps them in
 Postgres (`run_logs`) and signals them over `LISTEN/NOTIFY` for the live viewer. Once a run has been
@@ -130,7 +133,7 @@ sequenceDiagram
     A->>A: pin the run to that commit
     Note over W: hooks · init · plan -out=plan.tfplan (tofu → /state/v1 via TF_HTTP_*)
     W->>A: PUT /jobs/{id}/artifacts/plan.tfplan (before after_plan hooks)
-    A->>S: encrypt (AES-256-GCM) → artifacts/{run_id}/plan.tfplan
+    A->>S: encrypt (AES-256-GCM) → artifacts/{run_id}/plan-<id>.tfplan (before the run's row lock)
     Note over W: after_plan hooks (checking)
     W->>A: phase_finished (summary, checks) + streamed logs
     A->>A: transition() → unconfirmed
