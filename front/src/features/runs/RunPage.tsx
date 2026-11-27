@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { MessageSquarePlus } from "lucide-react";
@@ -14,7 +14,6 @@ import { PhaseRail } from "@/identity/PhaseRail";
 import { PlanDiff } from "@/identity/PlanDiff";
 import { ProvenanceBadge, isNotReal, parseProvenance } from "@/identity/ProvenanceBadge";
 import { RunActionBar } from "@/identity/RunActionBar";
-import { buildLogModel } from "@/lib/logModel";
 import { runRights, whoMayConfirm } from "@/lib/permissions";
 import { buildSegments, checkEntries, failedSegment, type Segment } from "@/lib/phases";
 import { isStalePlan } from "@/features/overview/attention";
@@ -90,7 +89,7 @@ export function RunPage() {
   } | null>(null);
 
   const { run, env, stack, me } = d;
-  const model = useMemo(() => buildLogModel(d.logs), [d.logs]);
+  const model = d.logModel;
 
   const rights = run && env && me ? runRights(run, env, d.tier, me) : null;
   if (rights && run && run.type !== "tracked" && run.type !== "destroy") rights.replan.visible = false;

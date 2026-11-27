@@ -6,14 +6,17 @@ import type { LogChunk } from "@/api/types";
 import { useAnnounce } from "@/app/announcer";
 import { useSession } from "@/auth/session";
 import { downstreamOf } from "@/lib/cascade";
-import { mergeChunks, planLines } from "@/lib/logModel";
+import { mergeChunks } from "@/lib/logModel";
 import { isTerminal } from "@/lib/runOutcome";
 import { parsePlan } from "@/lib/planParse";
+import { useLogModel } from "@/identity/LogViewer";
 import type { CascadeItem } from "@/identity/TypeToConfirm";
 import { shortId } from "@/lib/ids";
 
 // Everything the run page shows (DESIGN §5.2). Queries are the source of truth; WS signals invalidate
 // them — except logs, which are appended incrementally with `after_seq` (DESIGN §6, SPECS §5.3).
+
+const NO_LOGS: LogChunk[] = [];
 
 export function useRunPage(runId: string) {
   const qc = useQueryClient();
@@ -93,10 +96,10 @@ export function useRunPage(runId: string) {
     return (id: string | null | undefined) => (id ? (m.get(id) ?? null) : null);
   }, [people.data]);
 
-  const planText = useMemo(() => {
-    const lines = planLines(logs.data ?? []);
-    return lines.length ? lines : null;
-  }, [logs.data]);
+  const logModel = useLogModel(logs.data ?? NO_LOGS);
+  // `logModel.plan` keeps its identity while apply lines stream in, so the plan is parsed once — and
+  // only after planning: until then `tofu show` may still be streaming the section.
+  const planText = run.data?.state === "planning" || !logModel.plan.length ? null : logModel.plan;
   const parsed = useMemo(() => (planText ? parsePlan(planText) : null), [planText]);
 
   const cascade = useMemo<CascadeItem[]>(() => {
@@ -123,7 +126,8 @@ export function useRunPage(runId: string) {
     stack: stack.data ?? null,
     tier: catalog.data?.find((t) => t.name === env.data?.tier),
     tiersLoaded: catalog.isSuccess,
-    logs: logs.data ?? [],
+    logs: logs.data ?? NO_LOGS,
+    logModel,
     threads: threads.data ?? [],
     planText,
     parsed,
