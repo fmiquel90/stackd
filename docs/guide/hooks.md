@@ -106,7 +106,7 @@ only while a tofu command runs (their values do show in `plan.json`, sensitive o
 hook's copy). Give a hook what it needs as an environment variable.
 
 While a repo hook runs, none of these is on disk: the saved plan, the run's variable files, the
-cloud token file, the repo token. Sensitive values are masked in every hook's output.
+cloud token and AWS config files, the repo token. Sensitive values are masked in every hook's output.
 
 ### Repo hooks at the apply stages
 

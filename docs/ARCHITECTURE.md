@@ -154,7 +154,7 @@ apply budget + grace). A token whose run has ended can no longer write or lock. 
 to tofu only, as `TF_HTTP_*` environment variables — hooks never see it.
 
 **Hooks and checks.** Platform hooks run first, then the repo's `.stackd.yml` hooks; a repo hook gets
-no secret (an allowlisted env, a masked `plan.json`, no tfvars or token file on disk). Every check
+no secret (an allowlisted env, a masked `plan.json`, no tfvars, token file or AWS config file on disk). Every check
 result, with the stage it ran at, is kept on the run (`check_results`). A failing `fail` check stops
 the job at its stage; a failing `after_apply` check fails the run after the infrastructure changed:
 its outputs are recorded, nothing cascades. At the apply stages, repo hooks run only on a tier with

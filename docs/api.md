@@ -75,7 +75,7 @@ exhaustive list):
 | Hooks | `GET/POST/PATCH/DELETE /stacks/{id}/hooks` and `/environments/{id}/hooks` |
 | Dependencies | `GET/POST /environments/{id}/dependencies`, `DELETE /dependencies/{id}`, `POST /stacks/{id}/dependencies/link-by-name`, `GET /environments/{id}/outputs`, `GET /graph` |
 | State | `GET /environments/{id}/state/versions`, `POST …/state/import-session`, `DELETE …/state/lock` (force-unlock) |
-| Cloud | `GET/PUT/DELETE /environments/{id}/cloud-integration` + `POST …/cloud-integration/test` (AssumeRole test) |
+| Cloud | `GET/PUT/DELETE /environments/{id}/cloud-integration` (default plan/apply roles, region, `profiles`: named AWS profiles → roles, §10.6) + `POST …/cloud-integration/test` (AssumeRole test) |
 | Notifications | targets: `GET/POST/PATCH/DELETE /stacks/{id}/notifications` and `/environments/{id}/notifications`, plus `…/{tid}/test`; your in-app feed: `GET /notifications`, `POST /notifications/read`, `DELETE /notifications/{nid}`, `DELETE /notifications` |
 | Service accounts | `GET/POST /service-accounts`, `GET/POST /service-accounts/{id}/tokens`, `DELETE /service-accounts/{id}/tokens/{tid}` (instance admin) |
 | Users & tiers | `GET /users` (admin), `PATCH /users/{id}` (admin), `GET /users/mentionable`, `GET/POST /tiers`, `PATCH/DELETE /tiers/{id}` |
