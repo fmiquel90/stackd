@@ -1686,7 +1686,9 @@ that is never applied and saves no plan file. See <a href="../../SPECS/">the Git
 it yet: a proposed run gets <strong>none of the environment's secrets</strong>. No sensitive variable, of
 either kind, and no <a href="../external-secrets/">external secret</a> (not even fetched) reaches its job.
 What a plan needs stays: the cloud credentials of the <strong>plan role</strong>, read-only by design (see
-<a href="../cloud-credentials/">Cloud credentials</a>), the read-only state token and the repo token to clone.</p>
+<a href="../cloud-credentials/">Cloud credentials</a>), the read-only state token and the repo credential, to clone and to download the modules (the pull
+request picks the module sources: keep that credential read-only, see
+<a href="../stacks-and-environments/#private-repositories-and-private-modules">Private repositories and private modules</a>).</p>
 <div class="admonition warning">
 <p class="admonition-title">What a proposed run still reaches</p>
 <p>A plan that needs a secret gets no value for it: tofu uses the variable's default, or fails

@@ -1419,7 +1419,7 @@ covers all three:</p>
 </table>
 <div class="admonition danger">
 <p class="admonition-title">The master key is part of the backup</p>
-<p><code>STACKD_ENCRYPTION_KEY</code> encrypts (AES-256-GCM) every sensitive variable, every repo token and
+<p><code>STACKD_ENCRYPTION_KEY</code> encrypts (AES-256-GCM) every sensitive variable, every repo token or deploy key and
 webhook secret, every secret source credential, every static secret fallback, the local OIDC
 signing key and the saved plans. A database restored <strong>without the same key</strong> has all of them
 unreadable — there is no recovery path. Back it up, but <strong>separately</strong> from the database dumps:
@@ -1539,7 +1539,7 @@ for:</p>
   deleted and resets what was changed, and <strong>never deletes</strong> anything that is not in the file.</li>
 <li><strong>Moving or cloning a space to another instance</strong> — export → create the secret sources on the
   target (their credentials are not exported) → import with <code>dry_run=true</code>, read the report →
-  import → fill <code>missing_secrets</code> (sensitive variables, repo tokens, webhook secrets) → move each
+  import → fill <code>missing_secrets</code> (sensitive variables, repo tokens and deploy keys, webhook secrets) → move each
   managed-state environment's state with an import session, using the report's <code>id_map</code>
   (source environment id → new id) → only then let runs flow. A new environment declared with
   <code>autodeploy: true</code> stays off while secrets are missing.</li>

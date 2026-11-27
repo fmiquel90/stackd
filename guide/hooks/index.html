@@ -1489,7 +1489,9 @@ secret</strong>. A platform hook is trusted.</p>
 only while a tofu command runs (their values do show in <code>plan.json</code>, sensitive ones masked in a repo
 hook's copy). Give a hook what it needs as an environment variable.</p>
 <p>While a repo hook runs, none of these is on disk: the saved plan, the run's variable files, the
-cloud token file, the repo token. Sensitive values are masked in every hook's output.</p>
+cloud token file, the repo token or deploy key. No hook, platform or repo, gets the repo credential
+at all: only the clone and <code>init</code> (module downloads) do. Sensitive values are masked in every hook's
+output.</p>
 <h3 id="repo-hooks-at-the-apply-stages">Repo hooks at the apply stages<a class="headerlink" href="#repo-hooks-at-the-apply-stages" title="Permanent link">&para;</a></h3>
 <p><code>before_apply</code> and <code>after_apply</code> run in the job that holds the apply credentials. A repo hook at
 those stages runs only on a <strong>tier that allows it</strong> (Settings → Tiers → <em>Allow repo hooks at

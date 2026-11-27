@@ -1864,6 +1864,10 @@ all. Counts in parentheses include parametrized cases and drift as tests are add
 <td>Configuration export / import (SPECS §22): the export is by name and never carries a secret (sensitive values, repo token, source credential), audited; a round trip into a new space re-creates the configuration and reports what it could not (sensitive values, a missing secret source), keeps a new autodeploy env off while secrets are missing, every write audited <code>via: import</code>; re-importing the same document changes nothing and keeps existing secrets, a changed setting is applied; dry run writes nothing; a hand-filled secret is stored encrypted; strict validation (unknown field, duplicate keys, unknown tier, a dependency cycle) aborts with nothing written; permissions (space admin; tiers, cloud integrations and pools reserved to an instance admin; a pool token returned once).</td>
 </tr>
 <tr>
+<td><code>test_deploy_key.py</code> (19)</td>
+<td><code>repo_auth_kind=deploy_key</code> (SPECS §3.1): keys from <code>ssh-keygen</code> accepted and normalized, a passphrase / public key / non-key refused (422, the value never echoed); write-only, encrypted at rest, not in the audit; SSH URL required, token↔deploy_key switch needs the new credential; the claim hands it as <code>ssh_private_key</code> with its mask values (the token's percent-encoded form too); never exported; the API's git calls use a transient <code>0600</code> key file; never sent to the VCS API.</td>
+</tr>
+<tr>
 <td><code>test_service_accounts.py</code> (4)</td>
 <td>Service accounts &amp; API tokens (SPECS §23): a token authenticates, is shown once and stored hashed, never in the audit; revoked, expired, unknown tokens and a disabled account get 401; the instance role is capped at writer (create and PATCH), management is instance-admin only; no space by default; with a space-admin membership it plans and exports but can't destroy, confirm an apply nor run a mutating command.</td>
 </tr>
@@ -1955,8 +1959,8 @@ The tier gate (an approver without <code>prod</code>) and staleness stay manual 
 <td>At every stage and from both sources: a <code>fail</code> hook fails the job at its stage, a <code>warn</code> one lets it finish and is reported; a failing <code>before_apply</code> hook stops the apply; a hook past <code>STACKD_HOOK_TIMEOUT_SECONDS</code> is killed and fails by its <code>on_failure</code>; a hook's background process is killed when the hook exits, whether it holds the hook's output or not; a job failing on no check (init, plan, plan JSON, apply, an uncaught error) reports the checks of the stages that ran; every check result is reported with its stage, in plan and apply jobs.</td>
 </tr>
 <tr>
-<td><code>test_hook_secrets.py</code> (8)</td>
-<td>What a repo hook can read: no saved plan, raw plan JSON, tfvars, OIDC token file or repo token in the workspace; a masked <code>plan.json</code> at <code>after_plan</code> (platform hooks get the raw one); symlinks a repo plants never receive a secret; the clone leaves no token under <code>.git/</code>; repo hooks get only the allowlisted worker env, platform hooks none of the agent's <code>STACKD_*</code> settings; command runs still read the tfvars; the real OpenTofu end to end.</td>
+<td><code>test_hook_secrets.py</code> (11)</td>
+<td>What a repo hook can read: no saved plan, raw plan JSON, tfvars, OIDC token file or repo token in the workspace; the repo credential reaches the clone and <code>init</code> only, never a repo or platform hook — a deploy key (over a stand-in <code>ssh</code>) as a <code>0600</code> file while git and <code>init</code> run, a token as host-scoped git config with which a module download authenticates and writes no token, masked when <code>init</code> echoes it; a masked <code>plan.json</code> at <code>after_plan</code> (platform hooks get the raw one); symlinks a repo plants never receive a secret; the clone leaves no token under <code>.git/</code>; repo hooks get only the allowlisted worker env, platform hooks none of the agent's <code>STACKD_*</code> settings; command runs still read the tfvars; the real OpenTofu end to end.</td>
 </tr>
 <tr>
 <td><code>test_exit_codes.py</code> (17)</td>
@@ -1969,6 +1973,10 @@ The tier gate (an approver without <code>prod</code>) and staleness stay manual 
 <tr>
 <td><code>test_authed_url.py</code> (45)</td>
 <td>The repo token is percent-encoded into the clone URL (git dials the real host); other URLs unchanged; a failed clone masks both token forms.</td>
+</tr>
+<tr>
+<td><code>test_repo_credentials.py</code> (7)</td>
+<td><code>GIT_SSH_COMMAND</code> with the deploy key only (<code>IdentitiesOnly</code>); the key file <code>0600</code>, outside the checkout, gone after use; a real clone and pinned fetch over a stand-in <code>ssh</code>; the token's <code>insteadOf</code> config rewrites the repo host's https / <code>git@</code> / <code>ssh://</code> URLs and nothing else (checked with <code>git ls-remote --get-url</code>); the masker covers the token's URL form.</td>
 </tr>
 <tr>
 <td><code>test_init_cmd.py</code> (6)</td>
@@ -2110,8 +2118,8 @@ The tier gate (an approver without <code>prod</code>) and staleness stay manual 
 <td>Staged user changes: only real differences, summarised in words.</td>
 </tr>
 <tr>
-<td><code>src/components/StackGeneralPanel.test.tsx</code> (2)</td>
-<td>The webhook secret field follows the API's writer gate: shown to a writer, hidden from a reader.</td>
+<td><code>src/components/StackGeneralPanel.test.tsx</code> (5)</td>
+<td>The webhook secret field follows the API's writer gate: shown to a writer, hidden from a reader; a deploy key goes in a multi-line field and is sent whole, a stored one is never filled back and is omitted when left blank; a token stays a password input.</td>
 </tr>
 </tbody>
 </table>
