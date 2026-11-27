@@ -330,8 +330,14 @@ plan_artifact_key text nullable,     -- S3 key of the encrypted saved plan (§7.
                                      -- applies; set by the plan job's upload, cleared by transition()
                                      -- on any terminal state (migration 0024)
 claimed_at, confirmed_at, finished_at,
+claimable_after timestamptz nullable,      -- §7.2: claim backoff — a run whose job could not be built
+                                     --   for a transient reason is not offered before it (migration 0043)
+claim_attempts int default 0,        -- §7.2: transient build failures since the last claim (grows the
+                                     --   backoff); reset by a claim
 cancel_requested_at timestamptz nullable,  -- §4.1: a user asked the worker to stop the executing run
                                      --   (migration 0032); the state itself only changes on `job_canceled`
+unlisted_heartbeats smallint default 0,    -- §3.7/§7.1: consecutive heartbeats of the run's worker that
+                                     --   did not list its job; reset when one does (migration 0047)
 logs_archived_at timestamptz nullable,     -- §5.2: the run's logs are in S3 (migration 0031)
 error nullable, created_at
 ```
@@ -378,6 +384,30 @@ CREATE INDEX ix_runs_logs_to_archive ON runs (finished_at)
 WHERE finished_at IS NOT NULL AND logs_archived_at IS NULL;
 ```
 
+An environment's run list pages on `(created_at, id)` (`GET /environments/{id}/runs`, §12); its last
+finished tracked run (the last applied commit, §9.6) and the non-terminal runs `/metrics` counts at
+every scrape (§20.1) have their own partial indexes (migration 0046):
+
+```sql
+CREATE INDEX ix_runs_env_created_id ON runs (environment_id, created_at, id);
+CREATE INDEX ix_runs_last_finished_tracked ON runs (environment_id, finished_at DESC, id DESC)
+WHERE type = 'tracked' AND state = 'finished';
+CREATE INDEX ix_runs_non_terminal_state ON runs (state)
+WHERE state NOT IN ('finished', 'failed', 'discarded', 'canceled');
+```
+
+Their queries render the predicate values as SQL literals: a generic plan of a prepared statement
+cannot match a partial index to bind parameters. Every foreign key to `runs` (and
+`user_notifications.comment_id` → `run_comments`) is indexed, so the cascade of a stack or
+environment deletion never scans a table per deleted run.
+
+The claim's candidates (§7.2) — read by every poll of every idle worker — by:
+
+```sql
+CREATE INDEX ix_runs_claimable ON runs (is_drift, created_at)
+WHERE state IN ('queued','confirmed');
+```
+
 ### 3.6 `run_events`
 
 ```
@@ -394,7 +424,7 @@ workers: id, pool_id, name, status(idle|busy|offline), labels jsonb,
          last_heartbeat_at, registered_at
 ```
 
-`offline` if heartbeat > 60 s; run whose job is executing on an offline worker (`preparing`, `planning`, `checking`, `applying`, `running`) → `failed (worker_lost)` once claimed more than 120 s ago (`stackd_worker_lost_seconds`; the job's claim time, not the time the worker went silent) — **except a job holding apply credentials** (an `applying` run, or a mutating command run §4.3), reclaimed only after the apply window = apply budget + grace (`apply_reclaim_window_seconds` = `stackd_apply_timeout_seconds` + `stackd_apply_lost_grace_seconds`, default 15 min + 5 min) so a healthy long apply is never failed mid-flight and two workers can't write the same env's state concurrently (§4.2). Its state token and apply OIDC token are minted for that same window (§10.2/§11.2), so by the time it is reclaimed they have expired. `unconfirmed` and `confirmed` runs are **never** reclaimed: their plan job is over and they wait on a human or on the apply claim. The apply needs nothing from the plan worker: any worker takes it past the affinity window (§7.2), clones the run's pinned commit and applies the **saved plan** it downloads from the API (§7.3) — never a re-plan. Workers are disposable, losing the plan worker must not fail them. Targeting by labels (dedicated prod pool recommended): `workers.labels` holds the worker's **effective** labels, computed at each registration — those the worker sends (`STACKD_WORKER_LABELS`, §7.1), then the pool's `labels` on top: the pool's win on a key both set, since they are set by an admin while the worker's are self-declared by its host (a worker of a `tier: dev` pool cannot claim itself into prod runs) — and the claim matches an environment's labels against them (§7.2).
+`offline` if heartbeat > 60 s — of silence while the API could hear it: a stretch in which the scheduler itself could not run (an API restart, a DB outage) is not counted, since heartbeats could not land either (§7.5); run whose job is executing on an offline worker (`preparing`, `planning`, `checking`, `applying`, `running`) → `failed (worker_lost)` once claimed more than 120 s ago (`stackd_worker_lost_seconds`; the job's claim time, not the time the worker went silent) — **except a job holding apply credentials** (an `applying` run, or a mutating command run §4.3), reclaimed only after the apply window = apply budget + grace (`apply_reclaim_window_seconds` = `stackd_apply_timeout_seconds` + `stackd_apply_lost_grace_seconds`, default 15 min + 5 min) so a healthy long apply is never failed mid-flight and two workers can't write the same env's state concurrently (§4.2). Its state token and apply OIDC token are minted for that same window (§10.2/§11.2), so by the time it is reclaimed they have expired. **A live worker that no longer runs the job** (a claim response lost to an API restart or a proxy error, terminal reports that never got through): its heartbeat lists the ids of the jobs it is running (§7.1), and each heartbeat that leaves out one of its executing runs — counted only once that run's claim is older than `stackd_worker_lost_seconds`, so a claim response still in flight or a beat sent before the claim never counts — increments `runs.unlisted_heartbeats` (a heartbeat listing it resets it). After **2** such heartbeats in a row the scheduler fails the run `failed (job_not_running)`, with the same claim-age cutoffs as `worker_lost` — a job holding apply credentials waits for the apply window, so two agents sharing a worker name, say, can never write the env's state concurrently. A `cancel_job` answered `running_here: false` by the run's worker (§4.1) ends it the same way at once, under the same cutoffs. An agent that sends no job ids (one predating the listing) is only reaped once offline. `unconfirmed` and `confirmed` runs are **never** reclaimed: their plan job is over and they wait on a human or on the apply claim. The apply needs nothing from the plan worker: any worker takes it past the affinity window (§7.2), clones the run's pinned commit and applies the **saved plan** it downloads from the API (§7.3) — never a re-plan. Workers are disposable, losing the plan worker must not fail them. Targeting by labels (dedicated prod pool recommended): `workers.labels` holds the worker's **effective** labels, computed at each registration — those the worker sends (`STACKD_WORKER_LABELS`, §7.1), then the pool's `labels` on top: the pool's win on a key both set, since they are set by an admin while the worker's are self-declared by its host (a worker of a `tier: dev` pool cannot claim itself into prod runs) — and the claim matches an environment's labels against them (§7.2).
 
 ### 3.8 Dependencies, outputs and mocks
 
@@ -432,7 +462,10 @@ state_versions: id, environment_id FK, serial, lineage, size_bytes,
                 s3_key, created_by_run_id nullable, deleted_at nullable (soft delete: reads skip such
                 rows; no endpoint sets it yet),
                 created_at
-state_locks:    environment_id PK, lock_id, info jsonb, locked_at
+state_locks:    environment_id PK, lock_id, info jsonb, locked_at,
+                run_id FK runs nullable (ON DELETE SET NULL; the run whose state token took the
+                lock, NULL for a run-less holder — an import session §11.4; released with that
+                run, §11.2)
 
 hooks (platform, §8): id, target_kind enum('stack','environment'), target_id,
        stage enum(before_init|after_init|before_plan|after_plan|before_apply|after_apply),
@@ -496,7 +529,8 @@ claims and `GET /oidc/jwks` never fail on it.
   API's own credentials mid-refresh, no database connection for the provisioning session (pool
   exhausted — it needs a second connection while the claim holds one — or a connection lost): the
   claim is rolled back, the run keeps its state (`queued`, or `confirmed` — an approved apply keeps
-  its approval), and the worker gets **503** `code=<marker>`, `retryable: true`; it polls again;
+  its approval) and is not offered again before its claim backoff (§7.2), and the worker gets
+  **503** `code=<marker>`, `retryable: true`; it polls again;
 - **permanent** — access denied, key disabled / pending deletion / not found, an unusable key (not
   RSA ≥ 2048 `SIGN_VERIFY` RS256), an invalid ARN, no AWS credentials, anything unrecognized: the
   job's run fails closed at claim, `run.apply_failed` with `reason: oidc`, the worker getting nothing
@@ -554,7 +588,7 @@ context kid, backend, ARN, previous kid, `reactivated`, and for a reactivation `
       └──────────────────┘
 ```
 
-Terminal: `finished`, `failed`, `discarded`, `canceled`. `canceled`: user on `queued`/`confirmed`/`unconfirmed` (not claimed yet, or waiting on a human), the system when a PR closes (its proposed runs not claimed yet; one a worker executes gets the stop request below, §18.3), or a rollout's cancel on its member runs that are `queued`, `unconfirmed` or `confirmed` and not claimed yet (§21.4 step 8 — `confirmed → canceled` is that edge). **Cancelling a run a worker is executing** is a request, not a transition: `POST /runs/{id}/cancel` records `runs.cancel_requested_at`, audits `run.cancel_requested` and queues a `cancel_job` command for the worker's next heartbeat (§7.1) — one transaction. The worker interrupts its tool (SIGINT, a graceful stop: tofu finishes the operation in flight, releases the state lock, exits; SIGKILL only after `STACKD_CANCEL_GRACE_SECONDS`, default 120) and reports `job_canceled`; only then does `transition()` end the run. A job that holds **no apply credentials** (preparing, planning, checking, a read-only command) ends `canceled`; one that does (`applying`, a mutating command, §4.3) ends **`failed` with `error=canceled_during_apply`** — `applying` is never `canceled`, since the infrastructure may be partly changed — and nothing cascades. Stopping a job that holds apply credentials needs `can_apply` (the gate of starting it); any other needs `writer`. Idempotent: asking again re-queues the command (the first may have been lost) without a second audit. If the plan finishes before the stop reaches it, the run ends `canceled` instead of going to `unconfirmed`/`confirmed` — a stopped plan is never auto-confirmed. Once an apply has succeeded the worker ignores a later stop (what is left — recording the outputs — must finish). A worker that is offline never reports: `worker_lost` (§3.7) ends the run. Any terminal state drops the run's saved plan (§11.3).
+Terminal: `finished`, `failed`, `discarded`, `canceled`. `canceled`: user on `queued`/`confirmed`/`unconfirmed` (not claimed yet, or waiting on a human), the system when a PR closes (its proposed runs not claimed yet; one a worker executes gets the stop request below, §18.3), or a rollout's cancel on its member runs that are `queued`, `unconfirmed` or `confirmed` and not claimed yet (§21.4 step 8 — `confirmed → canceled` is that edge). **Cancelling a run a worker is executing** is a request, not a transition: `POST /runs/{id}/cancel` records `runs.cancel_requested_at`, audits `run.cancel_requested` and queues a `cancel_job` command for the worker's next heartbeat (§7.1) — one transaction. The worker interrupts its tool (SIGINT, a graceful stop: tofu finishes the operation in flight, releases the state lock, exits; SIGKILL only after `STACKD_CANCEL_GRACE_SECONDS`, default 120) and reports `job_canceled`; only then does `transition()` end the run. A job that holds **no apply credentials** (preparing, planning, checking, a read-only command) ends `canceled`; one that does (`applying`, a mutating command, §4.3) ends **`failed` with `error=canceled_during_apply`** — `applying` is never `canceled`, since the infrastructure may be partly changed — and nothing cascades. Stopping a job that holds apply credentials needs `can_apply` (the gate of starting it); any other needs `writer`. Idempotent: asking again re-queues the command (the first may have been lost) without a second audit. If the plan finishes before the stop reaches it, the run ends `canceled` instead of going to `unconfirmed`/`confirmed` — a stopped plan is never auto-confirmed. Once an apply has succeeded the worker ignores a later stop (what is left — recording the outputs — must finish). A worker that is offline never reports: `worker_lost` (§3.7) ends the run. A worker that answers `running_here: false` for a run still assigned to it does not run its job (a lost claim response): the run is failed `job_not_running` (§3.7) — at once if its claim is older than `stackd_worker_lost_seconds` (the apply window for a job holding apply credentials); a later stop request or the heartbeat listing ends it otherwise. Any terminal state drops the run's saved plan (§11.3).
 
 Command runs (§4.3) take a shorter path: `queued → preparing → running → finished | failed` (or, on a stop request, `canceled` — a read-only command — or `failed` — a mutating one, as above).
 
@@ -574,9 +608,9 @@ Command runs (§4.3) take a shorter path: `queued → preparing → running → 
 | `unconfirmed → confirmed` | user (or system: a rollout re-approval, §21.6) | `can_apply(user, env)` = role∈{approver,admin} AND `env.tier ∈ allowed_tiers` (§2.4); ≠ triggerer if the tier requires four-eyes, the env is `protected` or sets `require_second_pair_of_eyes`; for a `destroy` run: `can_destroy` required; **blocked if `used_mocks` and `allow_mock_apply=false`** (likewise `used_secret_fallback` and `allow_fallback_apply=false`, §15.5) |
 | `confirmed → applying` | worker (claim) | the plan's worker within the affinity window, then any compatible worker (§7.2); re-checks `allow_mock_apply` and the secret-fallback gate against the apply-time resolution (§9.3/§15.5). The apply job clones the pinned commit and applies the run's **saved plan** (§7.3); a missing or unreadable plan fails the run — it never re-plans |
 | `applying → finished` | worker | apply exit 0 + outputs uploaded + no failing `after_apply` check (one that fails → `failed`, the outputs still recorded, nothing cascades, §8.3) |
-| `* → failed` | worker/system | a tofu command failing (a plan fails on any exit but 0 or 2, an apply or a command on any non-zero exit), the plan JSON unavailable (§8.3), a hook `fail` at any stage (§8.3), timeouts — the worker hard-kills the process group past its budget: the apply (and a mutating command run, §4.3) past `stackd_apply_timeout_seconds` (default 15 min, sent as `apply_timeout_seconds`), a hook past the hook timeout (10 min, `STACKD_HOOK_TIMEOUT_SECONDS`, then it fails by its `on_failure`), any other subprocess past the agent's 2 h cap (separate prepare/plan budgets are not enforced yet); `worker_lost` (§3.7); `commit_mismatch` (§7.3); an unresolvable dependency, secret or workload token at claim — plan or apply claim, the claim having moved the run to `preparing`/`applying` first (§9.3, §15.2, §3.11). A worker-executed state only: `unconfirmed` and `confirmed` have no `→ failed` edge, and a `job_failed` report on a run its worker no longer executes is refused (409, §7.3) |
+| `* → failed` | worker/system | a tofu command failing (a plan fails on any exit but 0 or 2, an apply or a command on any non-zero exit), the plan JSON unavailable (§8.3), a hook `fail` at any stage (§8.3), timeouts — the worker hard-kills the process group past its budget: the apply (and a mutating command run, §4.3) past `stackd_apply_timeout_seconds` (default 15 min, sent as `apply_timeout_seconds`), a hook past the hook timeout (10 min, `STACKD_HOOK_TIMEOUT_SECONDS`, then it fails by its `on_failure`), any other subprocess past the agent's 2 h cap (separate prepare/plan budgets are not enforced yet); `worker_lost` and `job_not_running` (§3.7); `commit_mismatch` (§7.3); an unresolvable dependency, secret or workload token at claim, or any other non-transient error building the job (`job_build_failed:<type>`, §7.2) — plan or apply claim, the claim having moved the run to `preparing`/`applying` first (§9.3, §15.2, §3.11). A worker-executed state only: `unconfirmed` and `confirmed` have no `→ failed` edge, and a `job_failed` report on a run its worker no longer executes is refused (409, §7.3) |
 
-Single function `transition(run, to_state, actor, payload)` (`app/runs/transition.py`): legality (its `ALLOWED` edge table), atomic update guarded on `from_state` — the row re-read `FOR UPDATE` where `state = from_state` (409 `Concurrent modification` if it moved), a rollout member's rollout locked first (§21.3) — `run_event`, audit event when the caller passes one (human or terminal actions), the notification / VCS / in-app outboxes and the rollout's progress (§17, §18, §21), WS publication (`NOTIFY`, §5.3). A terminal state also stamps `finished_at` and drops the saved plan (§11.3). Everything in the caller's transaction: `transition()` never commits. The cascade (§9.2) is run by the caller, after the transition to `finished`.
+Single function `transition(run, to_state, actor, payload)` (`app/runs/transition.py`): legality (its `ALLOWED` edge table), atomic update guarded on `from_state` — the row re-read `FOR UPDATE` where `state = from_state` (409 `Concurrent modification` if it moved), a rollout member's rollout locked first (§21.3) — `run_event`, audit event when the caller passes one (human or terminal actions), the notification / VCS / in-app outboxes and the rollout's progress (§17, §18, §21), WS publication (`NOTIFY`, §5.3). A terminal state also stamps `finished_at`, drops the saved plan (§11.3) and releases the state lock the run holds, if any (audited `state.lock_released`, §11.2). Everything in the caller's transaction: `transition()` never commits. The cascade (§9.2) is run by the caller, after the transition to `finished`.
 
 ### 4.3 Command runs
 
@@ -609,7 +643,7 @@ POST /worker/v1/jobs/{id}/logs
 - `seq` strictly increasing per phase → idempotency of retries.
 - `phase` is a log phase (the run state the lines belong to, §4): `[A-Za-z0-9_.-]{1,64}`, else 422 — it names the chunk's archive object (§5.2).
 - `section` distinguishes hooks from the terraform stream (dedicated sections in the viewer).
-- Agent buffer: 1 s / 32 KB — a command's output is sent once its oldest unsent line has waited 1 s or 32 KB are waiting, and the rest when the command exits (a timer thread sends a quiet command's last lines, the reader never polls). **Masking before sending of ALL the run's sensitive values** — `sensitive_env` *and* the `tfvars` marked `sensitive` (§3.3) — replaced with `***` (one pass over the line whatever the number of values; where two values overlap in the text, the whole overlapping run is one `***`). The agent builds the masking table from the claim payload, not only from `sensitive_env`.
+- Agent buffer: 1 s / 32 KB — a command's output is sent once its oldest unsent line has waited 1 s or 32 KB are waiting, and the rest when the command exits (a timer thread sends a quiet command's last lines, the reader never polls). Shipping is **decoupled from the command**: the reader only masks and queues the lines; one sender thread per job ships the chunks in queue order (so each phase's seq in order) and sends a chunk the API did not take again — after its own retries (§7.3) — for as long as the job runs. A log failure never ends, kills or stalls the command (tofu is never blocked on its stdout). The queue is bounded (8 MiB): past it new lines are dropped and a `[stackd] N log line(s) dropped: …` line takes their place; a chunk refused with a 4xx is dropped. A command's end waits up to 30 s for its output to reach the API (so a job's report follows its logs), the job's end as long for the rest; what is still unsent then is given up (agent log `agent.log_lost`), the job is not held for it. The local runner decodes output as UTF-8 with replacement (a stray byte shows as U+FFFD, never fails the job). **Masking before sending of ALL the run's sensitive values** — `sensitive_env` *and* the `tfvars` marked `sensitive` (§3.3) — replaced with `***` (one pass over the line whatever the number of values; where two values overlap in the text, the whole overlapping run is one `***`). The agent builds the masking table from the claim payload, not only from `sensitive_env`.
 - **`plan.json` and hooks**: `tofu show -json` lists the run's variable values in clear, sensitive ones included. **Repo** hooks only ever read a **masked copy** (§8.3): every value tofu marks sensitive and every value of the masking table above replaced by `***`; the uploaded `plan.json` artifact is that copy too. **Platform** hooks (trusted, §8.1) read the raw JSON: one that dumps it can re-print a sensitive value to its stdout, where the value-based masking above still applies. Residual limit: a short or transformed secret (base64, substring) escapes value-based masking — in hook stdout, and in the repo hooks' copy wherever tofu did not mark the value sensitive itself — a **documented** limit, do not put exploitable secrets in non-sensitive `tfvars`. The check tools (tfsec/checkov/infracost) do not print values by default.
 - **Cleartext tripwire (Phase C)**: after a phase, the agent scans the plan (`show -json`) and apply (`output -json`) for any value Stackd treats as sensitive appearing verbatim in a **non-sensitive** output — terraform only redacts outputs the *repo* marked `sensitive = true`, so a sensitive Stackd variable echoed by an unmarked output leaks. On plan it flags the run with a `secret_leak_suspected` **warn** check (config `STACKD_LEAK_TRIPWIRE=fail` aborts the run before any apply); on apply it is warn-only (a masked log line) since the infra has already changed. The tripwire **narrows, does not eliminate**, the leak surface — a transformed secret still escapes value-based detection. The human-readable `show` already relies on terraform's own `(sensitive value)` redaction; only the masked JSON artifact is uploaded.
 - ANSI sequences preserved (color rendering on the front side).
@@ -621,21 +655,23 @@ POST /worker/v1/jobs/{id}/logs
 | Hot | table `run_logs` | during the run + 7 d | live + recent |
 | Cold | S3 `logs/{run_id}/{phase}.log.gz` | async archiving at end of run | history (1 year then lifecycle) |
 
-`GET /runs/{id}/logs?phase=&after_seq=` serves one or the other transparently. `GET /runs/{id}/logs/download?phase=all`.
+`GET /runs/{id}/logs?phase=&after_seq=&limit=` serves one or the other transparently. `GET /runs/{id}/logs/download?phase=all`.
 
 > **Status**: done. A periodic task (§7.5) archives each run's logs once it has been terminal for
 > 60 s (the agent's last buffered chunks, §5.1; 20 runs per tick) — one gzip'd JSONL
 > object per phase, one `{seq, section, lines}` chunk per line — and stamps `runs.logs_archived_at`;
 > the hot rows are purged `log_hot_retention_days` (7, env `LOG_HOT_RETENTION_DAYS`) after that, by
 > the daily retention task. `GET …/logs` serves the hot rows while the run has any, and falls back
-> to the archive once they are gone (same chunks, same order, `phase`/`after_seq` honoured; a
+> to the archive once they are gone (same chunks, same order, `phase`/`after_seq`/`limit` honoured —
+> the archive downloads and decompresses only the phases the answer needs; `limit` caps the chunks,
+> ordered by (phase, seq): a client pages one phase with `phase` + `after_seq` = its last seq; a
 > `phase` outside `[A-Za-z0-9_.-]{1,64}` — it ends up in an S3 key — is refused with 422 at ingest
 > (§5.1), reads nothing from the archive, and is refused with 400 by the download).
 > `GET …/logs/download?phase=all|<phase>` returns plain text (ANSI kept, phases in the order a run
 > goes through its states — planning, checking, applying, or running; any other after them, by name
 > — never by the lines' `t`, a time of day that would misorder a run crossing midnight; each phase's
-> chunks by `seq`; hooks prefixed `[hook:x]`), from either tier. If S3 is down the run stays unarchived and its
-> hot rows untouched — retried next tick. The 1-year S3 expiry is a bucket lifecycle rule (ops), not
+> chunks by `seq`; hooks prefixed `[hook:x]`), from either tier, streamed one phase at a time. If S3 is down the run stays unarchived and its
+> hot rows untouched — retried next tick; a read that falls back to an archive S3 cannot serve answers 503, never an empty log. The 1-year S3 expiry is a bucket lifecycle rule (ops), not
 > application code. A chunk ingested after its run was archived is not re-archived.
 
 ### 5.3 Live distribution
@@ -649,6 +685,13 @@ Single multiplexed WebSocket `/api/v1/ws` (the access token goes in the first me
 - `transition()` (§4.2) and log ingestion (§5.1) emit a `NOTIFY` on a per-entity channel (`run_<id>`, `env_<id>`) **in the same transaction** as the write.
 - The `NOTIFY` payload carries only a **lightweight signal** — `{kind, run_id, phase, max_seq}` for a log chunk, `{kind, run_id, to_state}` for a transition — never the content (8 KB `NOTIFY` cap, and log lines can be large).
 - On receipt, each replica forwards the signal as is to its locally subscribed WS clients, which re-read the source over REST (`run_logs` after `after_seq`, or the run). The front sees the same sequence as on REST reconnection — a single read path, idempotent by `seq`.
+
+**Resilience and bounds** (`app/ws/`):
+
+- Each replica holds **one** `LISTEN` connection, supervised: a termination listener catches a clean loss, a `SELECT 1` every 30 s (10 s deadline, the same deadline bounding every `LISTEN`/`UNLISTEN`) catches a half-open one. A lost connection is reopened with a capped exponential backoff (0.5 s → 30 s) and re-`LISTEN`s on every channel that still has a subscriber. Signals sent while it was down are gone, so when the loss is detected the replica **closes its clients' sockets with code 1012** (service restart): they reconnect, and meanwhile the front's query polls cover the gap (DESIGN §6). Reconnecting while the hub is still down fails the socket the same way; the client backs off.
+- Queues are bounded (256 signals per socket): when a client stops reading, the **oldest** pending signal is dropped — they are re-read hints, the newest one carries the most.
+- A socket's subscriptions are deduplicated (a repeated `sub` is a no-op) and capped at `STACKD_WS_MAX_SUBSCRIPTIONS` distinct channels (default 1000); one more closes the socket with **1008**. The front never unsubscribes on a live socket, so the reconnect re-subscribes only to what it still wants.
+- The auth message must arrive within `STACKD_WS_AUTH_TIMEOUT_SECONDS` (default 10) of the accept, else **4401**.
 
 In the single-replica MVP, `LISTEN/NOTIFY` remains the mechanism (no "in-process" branch to maintain); it scales as-is up to several replicas before requiring a real bus (abstract `EventBus` interface, like `JobQueue`).
 
@@ -671,7 +714,7 @@ context jsonb,                      -- stack_name, env_name, run_id, commit, pla
 ip, user_agent nullable, created_at
 ```
 
-**Real immutability, not just "no API"**: the absence of an update/delete endpoint does not protect against a bug or an application compromise. The application DB role only has `INSERT` and `SELECT` on `audit_events` (`REVOKE UPDATE, DELETE` — a deployment step for the operator: no migration issues it, since the migrations usually run as the tables' owner), a `BEFORE UPDATE OR DELETE` trigger raises an exception (created by migration 0001: the enforcement that holds even without the REVOKE), and retention purging goes through a distinct role, separate from the application role and itself audited. 2-year retention (`audit_retention_days` = 730, env `AUDIT_RETENTION_DAYS`): a daily task (§7.5) purges older events on a connection of the `stackd_audit_purge` role (created `NOLOGIN` by migration 0031 — an operator gives it a login and sets `STACKD_AUDIT_PURGE_DATABASE_URL`; without that URL no purge runs). The role holds `SELECT, INSERT, DELETE` only, and the append-only trigger lets exactly that role delete; when it deleted anything, it writes an `audit.purged` event (actor `system`, target_kind `audit`, context `deleted`, `before`, `retention_days`) in the same transaction as the delete. Indexes: `(created_at)`, `(actor_id, created_at)`, `(target_kind, target_id, created_at)`, `(action, created_at)`.
+**Real immutability, not just "no API"**: the absence of an update/delete endpoint does not protect against a bug or an application compromise. The application DB role only has `INSERT` and `SELECT` on `audit_events` (`REVOKE UPDATE, DELETE` — a deployment step for the operator: no migration issues it, since the migrations usually run as the tables' owner), a `BEFORE UPDATE OR DELETE` trigger raises an exception (created by migration 0001: the enforcement that holds even without the REVOKE), and retention purging goes through a distinct role, separate from the application role and itself audited. 2-year retention (`audit_retention_days` = 730, env `AUDIT_RETENTION_DAYS`): a daily task (§7.5) purges older events on a connection of the `stackd_audit_purge` role (created `NOLOGIN` by migration 0031 — an operator gives it a login and sets `STACKD_AUDIT_PURGE_DATABASE_URL`; without that URL no purge runs). The role holds `SELECT, INSERT, DELETE` only, and the append-only trigger lets exactly that role delete; it deletes in batches of 5,000 rows, one transaction each (a large backlog never becomes one long, lock-heavy delete), and every batch that deleted anything writes an `audit.purged` event (actor `system`, target_kind `audit`, context `deleted` — that batch's count —, `before`, `retention_days`) in the same transaction as its delete. Indexes: `(created_at)`, `(actor_id, created_at)`, `(target_kind, target_id, created_at)`, `(action, created_at)`.
 
 ### 6.2 Taxonomy
 
@@ -718,13 +761,16 @@ run.plan_finished                 # plan-only terminal: empty diff, or a propose
 run.applied ⭐ / run.command_executed
 run.apply_failed                  # any failed run, whatever its phase, unless a check failed it —
                                   #   context phase, or reason: cancel_requested (a stopped apply, §4.1) |
-                                  #   worker_lost | commit_mismatch | dependency | secret | oidc
+                                  #   worker_lost | job_not_running | commit_mismatch | dependency |
+                                  #   secret | oidc | internal (an unexpected error building the job at claim)
                                   #   (§7.2/§7.3, §3.11)
 run.check_failed                  # a hook check with on_failure=fail failed the run, at any stage
                                   #   (§8.3) — context phase = the failing stage
 run.check_warned                  # a job (plan or apply) ended — finished, failed or stopped — with warn
                                   #   checks; context: checks (their names), stages (where they ran)
 state.force_unlocked / state.import_session_created   # §11.2, §11.4
+state.lock_released               # system: the run holding the managed-state lock ended, so transition()
+                                  #   released it (§11.2) — context reason = run_ended, run_id, run_state, lock_id
 dependency.created / dependency.deleted / dependency.mock_consumed   # created: also via link-by-name,
                                   #   or a clone (via = clone, upstream_kind, §21.2)
 dependency.updated                # policy / output references changed by a config import (§22.3)
@@ -767,6 +813,9 @@ GET /api/v1/audit?actor=&action=&target_kind=&target_id=&from_=&to=&limit=   (ad
 GET /api/v1/audit/export?actor=&action=&target_kind=&target_id=&from_=&to=   (admin, CSV)
 ```
 
+The export streams: rows are read through a server-side cursor (batches of 500) and written as they
+come, newest first, whatever the size of the filtered set.
+
 CSV columns: `created_at, actor_email, action, target_kind, target_id, context` — `context` is the
 event's context as JSON (what the list endpoint returns to the same admins): the "who" of a system
 action lives there, e.g. the approver of a rollout's auto-confirmation (§21.5).
@@ -784,7 +833,7 @@ Filtering by stack or environment goes through `target_kind`/`target_id`; there 
 
 ```
 POST /worker/v1/register   (Bearer pool_token) { "name", "labels"?, "version"?, "runner": "local"|"docker", "tools"? } → worker_id + worker_token
-POST /worker/v1/heartbeat  (20 s) { "in_flight": N, "capacity": M } → { "commands": [{"id": ..., "type": "diagnostics"|"cancel_job", "payload": ...}] }
+POST /worker/v1/heartbeat  (20 s) { "in_flight": N, "capacity": M, "job_ids": [...] } → { "commands": [{"id": ..., "type": "diagnostics"|"cancel_job", "payload": ...}] }
 POST /worker/v1/commands/{id}/result   { "status": "done"|"failed", "result": {...} }
 ```
 
@@ -799,7 +848,9 @@ shown on the Workers page to spot a lagging host.
 
 **Labels.** The agent sends its own labels from `STACKD_WORKER_LABELS`: comma-separated `key=value` pairs (`tier=prod,region=eu-west-3`; blanks trimmed, values are strings, unset or empty = none). A malformed entry (no `=`, an empty key) or a key set twice refuses to start the agent. The API stores the worker's effective labels — the worker's, the pool's on top, the pool winning on a shared key (§3.7) — which the claim matches environments against (§7.2). They are recomputed on every (re-)registration: a changed `STACKD_WORKER_LABELS` takes effect when the agent restarts.
 
-Heartbeat = downstream command channel. No incoming connection. It carries `diagnostics` and `cancel_job` (payload `{job_id}`, cancelling an executing run, §4.1): the agent keeps a registry of its running jobs, flips the job's cancel token — the job's own thread interrupts its subprocess with SIGINT (the `local` runner signals the process group; the `docker` runner signals the container, whose init forwards it), then SIGKILL if it is still running after `STACKD_CANCEL_GRACE_SECONDS` (default 120) — and answers the command with `{job_id, running_here}`. A cancel that beats the job's registration is remembered and applied when it registers. Once an apply has exited 0 the token is disarmed: a later stop no longer interrupts the job (outputs, `after_apply` hooks). The worker reports the end with the job event `job_canceled` (§7.3), refused with 409 unless a cancel was requested. **In-flight count (Phase E)**: the worker reports the number of jobs it is currently executing; the API sets `status = busy` when it is > 0, `idle` when 0 (the worker is authoritative, which also flips a finished worker back to idle). `capacity` (the worker's `STACKD_MAX_CONCURRENT_JOBS`) is advertised for the scheduler to reason about; not persisted this phase (no schema change). A heartbeat with no body is just a liveness ping.
+Heartbeat = downstream command channel. No incoming connection. It carries `diagnostics` and `cancel_job` (payload `{job_id}`, cancelling an executing run, §4.1): the agent keeps a registry of its running jobs, flips the job's cancel token — the job's own thread interrupts its subprocess with SIGINT (the `local` runner signals the process group; the `docker` runner signals the container, whose init forwards it), then SIGKILL if it is still running after `STACKD_CANCEL_GRACE_SECONDS` (default 120) — and answers the command with `{job_id, running_here}`. A cancel that beats the job's registration is remembered and applied when it registers. Once an apply has exited 0 the token is disarmed: a later stop no longer interrupts the job (outputs, `after_apply` hooks). The worker reports the end with the job event `job_canceled` (§7.3), refused with 409 unless a cancel was requested. **In-flight count (Phase E)**: the worker reports the number of jobs it is currently executing; the API sets `status = busy` when it is > 0, `idle` when 0 (the worker is authoritative, which also flips a finished worker back to idle). `capacity` (the worker's `STACKD_MAX_CONCURRENT_JOBS`) is advertised for the scheduler to reason about; not persisted this phase (no schema change). A heartbeat with no body is just a liveness ping. **Job listing**: `job_ids` are the ids of the jobs the agent is running (registered at the claim, until their end is reported); an executing run of the worker left out of 2 heartbeats in a row is failed `job_not_running` (§3.7). Optional: an agent that predates it sends none, and its runs are only reaped when it goes offline.
+
+**Command delivery** is at least once: a command is `sent` with `sent_at` and an `attempts` count; one still without a result **90 s** after it was sent is delivered again on the next heartbeat, up to **3** deliveries, after which it is `failed` (`{"error": "no result from the worker after 3 deliveries"}`). The agent handles both commands idempotently — a repeated `cancel_job` re-requests an already requested stop and answers again; a `diagnostics` delivered while the same command is still being collected is skipped. The agent handles each command on its own (one failing never drops the others), collects diagnostics on a thread of its own (its subprocesses never delay a beat), and gives each heartbeat-thread call (the beat, a command's result) a 10 s timeout, well below the offline threshold.
 
 **Worker concurrency (Phase E).** `STACKD_MAX_CONCURRENT_JOBS` (default `1` = today's serial behaviour) bounds the in-flight jobs a single worker runs at once, each on its own thread (the heartbeat thread is already independent). The claim stays one-run-at-a-time on the wire; the API's `SELECT … FOR UPDATE SKIP LOCKED` (§7.2) and the one-active-run-per-env partial unique index (§3.5) keep concurrent claims safe — **concurrency is across different environments only**. Same-env races are still guarded by the state-backend lock (§11.2).
 
@@ -808,10 +859,11 @@ Heartbeat = downstream command channel. No incoming connection. It carries `diag
 ### 7.2 Claim (long-poll)
 
 ```
-POST /worker/v1/jobs/claim?wait=25
-→ 204 if nothing (or the claimed run just failed closed at claim: §9.3, §10, §15.2)
+POST /worker/v1/jobs/claim?wait=25        # wait capped at stackd_claim_max_wait_seconds (30)
+→ 204 if nothing (or the claimed run just failed closed at claim: §9.3, §10, §15.2, below)
 → 503 problem+json, retryable: true — a transient failure to build the job (workload token not
-       signable right now, §3.11): the claim is undone, the run keeps its state; poll again
+       signable right now, §3.11; the database: code=db_unavailable): the claim is undone, the run
+       keeps its state and gets a claim backoff (below); poll again
 → 200 {
     "job_id": "...",                       # = the run id
     "phase": "plan" | "apply" | "command", # JOB type (what the agent executes) — do not confuse
@@ -912,6 +964,7 @@ WITH next AS (
   SELECT r.id FROM runs r
   JOIN environments e ON e.id = r.environment_id
   WHERE r.state IN ('queued','confirmed')
+    AND (r.claimable_after IS NULL OR r.claimable_after <= now())   -- claim backoff, below
     AND NOT e.locked
     AND e.labels <@ :worker_labels
     AND ...                         -- the worker has the stack's tool version (§7.4)
@@ -920,17 +973,43 @@ WITH next AS (
   ORDER BY (r.state = 'confirmed' AND r.worker_id = :wid) DESC,   -- affinity: the apply
            r.is_drift,                                             -- prefers the worker of
            r.created_at                                            -- the plan; drift last (§19)
-  FOR UPDATE OF e SKIP LOCKED LIMIT 1
+  FOR NO KEY UPDATE OF e SKIP LOCKED LIMIT 1
 )
 -- then transition(run, preparing | applying) with worker_id=:wid, claimed_at=now() (§4.2)
 ```
 
 **The real concurrency guard is the unique index `one_active_run_per_env` (§3.5), not `SKIP LOCKED`.** Two workers claiming two **distinct** `queued` runs of the same env select different rows: `SKIP LOCKED` does not serialize them against each other, and the `NOT EXISTS (active run)` is true for both (none active yet). Both `UPDATE → preparing` go ahead; the second violates the partial unique index. Two protections, **both** to be applied:
 
-1. **Serialize per env**: the `SELECT ... FOR UPDATE` also locks the corresponding `environments` row (`JOIN environments e ... FOR UPDATE OF e SKIP LOCKED`), so that only one claim per env progresses at a time; the others skip the locked env and take another run.
+1. **Serialize per env**: the `SELECT ... FOR NO KEY UPDATE` also locks the corresponding `environments` row (`JOIN environments e ... FOR NO KEY UPDATE OF e SKIP LOCKED`), so that only one claim per env progresses at a time; the others skip the locked env and take another run. `NO KEY`: a row inserted meanwhile that references the env (a new run — its foreign-key check takes `FOR KEY SHARE`) does not wait for the claim to commit; an env deletion (`FOR UPDATE`) still does.
 2. **Safety net**: the violation of `one_active_run_per_env` is **caught** (SQLSTATE `23505`) and treated as "nothing to claim" → `204`, the worker re-polls. This is the correctness guarantee; the lock above is only an optimization to avoid discarded work. A lock not available (`55P03`, e.g. a rollout member whose rollout row is busy — taken `NOWAIT`, §21.3), a deadlock (`40P01`) or a serialization failure (`40001`) gives way the same way.
 
 Apply affinity: a `confirmed` run is reserved for its originating worker for **60 s** (`stackd_apply_affinity_seconds`; `AND (r.worker_id = :wid OR r.confirmed_at < now() - interval '60 seconds')` on confirmed runs). Past that delay (dead or saturated worker), any compatible worker takes it: the apply needs nothing from the plan worker's workspace — it downloads the run's **saved plan** from the API (§7.3) and applies exactly it. There is **no re-plan** on the apply path: no saved plan → the apply fails.
+
+**Long-poll.** `wait` (seconds, capped server-side at `stackd_claim_max_wait_seconds`, default 30 —
+below the agent's HTTP timeout) is spent re-trying the candidate selection every 2 s. Between two
+attempts the claim's transaction is **ended**: a waiting poll holds no database connection, so idle
+workers never starve the API's pool (sizing: [workers & scaling](guide/workers-and-scaling.md#database-connections)).
+
+**Building the job.** Once the run is moved to `preparing`/`applying`, the claim builds its payload
+(variables, external secrets §15, dependency inputs §9.3, the workload token §10) in a savepoint
+(§3.11) and commits the claim and what the build staged together — a job is never handed out without
+its audit events, and a failed build leaves nothing of them. The worker's own row (`status = busy`) is
+written at that commit only, so the build's external calls (secret fetches, KMS) never hold the lock
+the worker's heartbeat and worker-lost detection (§7.5) take. A failed build is one of:
+
+- **transient** — a workload token not signable right now (§3.11), or the database (no pooled
+  connection, a connection lost, a lock or statement timeout, a deadlock, the server shutting down):
+  the claim is undone — the run keeps its state, an approved apply its approval — and gets a **claim
+  backoff**: `claimable_after = now() + min(300 s, 10 s × 2^claim_attempts)`, `claim_attempts + 1`.
+  The candidate selection skips it until then, so the runs queued behind it keep being claimed; a
+  later successful claim resets both. The worker gets **503** `retryable: true`. Not a state change
+  (no `transition()`, no audit; logged `worker.claim_deferred`);
+- **anything else** fails the run closed (`→ failed`, `run.apply_failed`), the worker getting **204**:
+  an unresolvable dependency (§9.3, `reason: dependency`), external secret (§15.2, `secret`) or
+  workload token (§3.11, `oidc`), or an **unexpected error** — e.g. a stored secret that no longer
+  decrypts, a bug — `reason: internal`, `run.error = job_build_failed:<exception type>` (the type
+  only: a message may carry a value; the stack goes to the server log, `worker.claim_build_failed`).
+  A run whose job cannot be built never stays at the head of the queue failing every poll.
 
 ### 7.3 Events and artifacts
 
@@ -973,10 +1052,12 @@ PUT /worker/v1/jobs/{id}/artifacts/plan.tfplan | plan.json | outputs.json
 GET /worker/v1/jobs/{id}/artifacts/plan.tfplan          # the apply job's saved plan
 ```
 
+**Agent retries.** Every worker→API call retries a transient failure — a transport error, `5xx`, `429` (honouring `Retry-After`) — with exponential backoff and jitter (0.5 s doubling, capped at 15 s) for up to 60 s, then raises; any other `4xx` is final. Requests time out after 30 s (connect 10 s; artifacts 120 s; the claim its `wait` + 30 s). The **claim** is not idempotent (a claim whose answer was lost has handed the worker a run): it retries only what the API provably never processed — a connection never made, `503` (the claim was undone, §7.2) and `429`. Events, logs (idempotent on seq, §5.1), artifacts (`PUT` replaces, `GET` reads — a `503` while the object store is unavailable is retried, then the apply fails closed), heartbeats, command results and registration are safe to repeat. A terminal event (`phase_finished`, `job_failed`, `job_canceled`) repeated after an attempt that may have been processed (sent, answer lost, or a `5xx` other than `503`) takes a `409` "Job not executing" / "Illegal transition" as its acknowledgement — never "Not your job". On a `401` the agent re-registers, re-reading `STACKD_POOL_TOKEN_FILE` first (a rotated pool token applies without a restart). **A job that changed the infrastructure is never reported as failed because its report did not get through**: once an apply has exited 0 (or a command has run), its report (`phase_finished`, or `job_failed(after_apply)` with the outputs) is retried every 10 s for as long as its apply window lasts — claim + `apply_timeout_seconds` + 300 s, as the drain's hold (§7.1) — and, if still not delivered, given up with `agent.report_lost`: the run is left to the API (`worker_lost`, §3.7), never turned into a `job_failed`. The `outputs.json` copy is best effort (the report carries the outputs).
+
 **Saved plan.** What a human confirms is the plan file the plan job made, and the apply applies exactly that file (`tofu apply plan.tfplan`) — never a fresh plan:
 
-- **Upload** (`PUT …/plan.tfplan`, worker-authenticated, the run's worker only): accepted only for a `tracked`/`destroy` run (`409` for a proposed or command run) and only during its plan job (`preparing`/`planning`/`checking`, checked under the run's row lock — `409` afterwards: once planned, the reviewed plan is frozen, for every worker). Capped at 64 MiB (`413`, also while streaming), empty → `400`. The API encrypts it (AES-256-GCM, app key, AAD bound to its S3 key — a plan file holds the run's variable values in clear, sensitive ones included), stores it under `artifacts/{run_id}/plan.tfplan` (§11.3) and records the key on the run (`runs.plan_artifact_key`). The agent makes the plan file outside the checkout, reads it right after `plan`/`show`, deletes it and uploads those bytes **before any `after_plan` hook** (a repo hook can neither swap what gets applied nor read it, §8.3).
-- **Download** (`GET …/plan.tfplan`): only by the worker holding the run, only while the run is `applying` (`409` otherwise — not even the worker that planned it before the apply claim). No saved plan / object missing → `404`; integrity failure (wrong key, tampered or moved blob) → `500`. Never anything else in its place.
+- **Upload** (`PUT …/plan.tfplan`, worker-authenticated, the run's worker only): accepted only for a `tracked`/`destroy` run (`409` for a proposed or command run) and only during its plan job (`preparing`/`planning`/`checking`, checked under the run's row lock — `409` afterwards: once planned, the reviewed plan is frozen, for every worker). Capped at 64 MiB (`413`, also while streaming), empty → `400`. The API encrypts it (AES-256-GCM, app key, AAD bound to its S3 key — a plan file holds the run's variable values in clear, sensitive ones included), stores it under a key of its own, `artifacts/{run_id}/plan-<uuid7>.tfplan` (§11.3), and records the key on the run (`runs.plan_artifact_key`). The upload to S3 happens **before** the run's row lock is taken — no DB connection or row lock is held while up to 64 MiB is encrypted and stored — and the phase check is repeated under that lock: an upload refused there is deleted, and since every upload has its own key, a late one never overwrites the reviewed plan's object. A retried upload during the plan job replaces the run's pointer; the object it replaces is deleted once that transaction commits. The agent makes the plan file outside the checkout, reads it right after `plan`/`show`, deletes it and uploads those bytes **before any `after_plan` hook** (a repo hook can neither swap what gets applied nor read it, §8.3).
+- **Download** (`GET …/plan.tfplan`): only by the worker holding the run, only while the run is `applying` (`409` otherwise — not even the worker that planned it before the apply claim). No saved plan / object missing (S3 answers `NoSuchKey`) → `404`; S3 not answering (throttled, 5xx, access denied, timeout) → `503` problem+json `Object storage unavailable` — a transient error is never reported as a missing plan; integrity failure (wrong key, tampered or moved blob) → `500`. Never anything else in its place.
 - **Apply job**: clone the pinned commit, `init`, download the saved plan — on any refusal or error the job **fails closed** (`saved plan unavailable, not applied: …`), before the `before_apply` hooks — then `before_apply` hooks (a failing `fail` check fails the job here: nothing is applied, §8.3), write the plan (`0600`, replacing whatever the checkout has at that path, never through a symlink), `apply -input=false -json plan.tfplan` with the run's tfvars present for that command only, delete the file (the `after_apply` repo hooks never see it). tofu itself refuses a saved plan whose state moved since (`Saved plan is stale`) or whose inputs changed (`Mismatch between input and plan variable value`): the run fails with tofu's detail and "trigger a new plan".
 - **Retention**: deleted once the run is terminal (§11.3).
 
@@ -1167,19 +1248,21 @@ name and hour: the agent keeps retrying, slowly — every 5 min — after a 403,
 
 The scheduler module (PLAN §2.1) carries background tasks that must run **exactly once** even with several API replicas:
 
-The loop ticks every 10 s.
+The loop ticks every 10 s. The every-tick tasks run in turn, each with its own session, error handling and time budget (worker_lost 30 s, drift 60 s, OIDC keys 30 s, rollout expiry 60 s, log archiving 120 s): a task that raises or overruns is cancelled, logged (`scheduler.task_failed`, at error level, with the traceback) and counted (`stackd_scheduler_task_failures_total{task}`), and only that run of it is lost — never the other tasks of the tick. Tasks making outbound or long calls never run inside the tick, so they cannot delay `worker_lost` detection: the two outbox dispatchers loop on their own (a full batch is followed straight by the next, otherwise they wait a tick; 300 s budget per drain), the git staleness poll and the daily retention purge are started as tasks of their own when due (budget: their period; one still running when the next is due skips that one). Stopping the API cancels the loop, which cancels and awaits these tasks; shutdown then waits (≤ 10 s) for the in-flight saved-plan deletions (§11.3) and disposes the DB engine.
+
+**Outbox delivery (notifications, VCS post-back).** Each drain claims up to 20 **due** rows (`sent_at IS NULL`, `attempts < stackd_outbox_max_attempts`, `next_attempt_at <= now`, partial index on `(next_attempt_at, created_at) WHERE sent_at IS NULL`) with `FOR UPDATE SKIP LOCKED`, bumps `attempts` and pushes `next_attempt_at` by the backoff — base 10 s doubling per attempt, capped at 900 s, ±20 % jitter (`stackd_outbox_backoff_base_seconds`, `stackd_outbox_backoff_max_seconds`) — and commits; it then reads what the batch needs and commits again, so **no DB transaction is open during the HTTP calls**. A failure carrying `Retry-After` (seconds or HTTP date — Slack's 429, GitHub's secondary rate limit) or GitHub's primary-limit headers (`x-ratelimit-remaining: 0` + `x-ratelimit-reset`) defers the row until then when later than the backoff (capped at 1 h). 12 attempts by default (`stackd_outbox_max_attempts`) span over an hour; after the last one the row stays unsent (excluded from the claim), logged at error level (`notification.dead_lettered` / `vcs.dead_lettered`) and counted (`stackd_outbox_dead_letters_total{outbox}`). Deliveries are bounded: a notification target gets 30 s in all (DNS + every vetted address + response), at most 8 in flight, one run's rows in order; a VCS row gets 30 s, one stack's rows are posted one at a time (GitHub asks for serial requests per token), at most 4 stacks at once.
 
 | Task | Frequency | Effect |
 |---|---|---|
-| `worker_lost` detection | every tick | heartbeat > 60 s (`stackd_worker_offline_seconds`) → `offline`; run executing on an offline worker and claimed > 120 s ago (`stackd_worker_lost_seconds`) → `failed (worker_lost)` (never `unconfirmed`/`confirmed`, §3.7); a job holding apply credentials (an `applying` run or a mutating command run, §4.3) only after the apply window = budget + grace (§3.7/§4.2) |
-| Notification outbox | every tick | drain `notification_outbox` (§17 intro, CONCEPTS §14): at-least-once, ≤ 5 attempts, no DB transaction held across the HTTP POST |
-| VCS post-back outbox | every tick | drain `vcs_outbox` (§18.4) |
+| `worker_lost` detection | every tick | heartbeat > 60 s (`stackd_worker_offline_seconds`) → `offline`, the silence counted only while the API could hear it: the first run in an API process, and a run more than 2 ticks after the previous one (the ticks were failing: DB or API outage), discount the stretch before them — every worker gets a full offline period to heartbeat again, and only the last such stretch is discounted, so slow ticks never postpone reaping for good; run executing on an offline worker → `failed (worker_lost)`, run left out of 2 heartbeats in a row by its live worker → `failed (job_not_running)`, both once claimed > 120 s ago (`stackd_worker_lost_seconds`; never `unconfirmed`/`confirmed`, §3.7); a job holding apply credentials (an `applying` run or a mutating command run, §4.3) only after the apply window = budget + grace (§3.7/§4.2). Each run is failed in a transaction of its own: one that cannot be (changed underneath) is logged (`scheduler.worker_lost_skipped`) and retried next tick, never holding back the others |
+| Notification outbox | own loop, every tick when idle | drain `notification_outbox` (CONCEPTS §14): at-least-once, retried with backoff (see below), no DB transaction held across the HTTP POST. The row records the targets already delivered (`delivered_target_ids`): a retry re-sends to the failed targets only |
+| VCS post-back outbox | own loop, every tick when idle | drain `vcs_outbox` (§18.4), same retry schedule |
 | Drift detection | every tick, per-env gate | enqueue the due `-refresh-only` runs (§19.2) |
-| Git staleness polling | 15 min (`stackd_head_poll_interval`) | `git ls-remote` per (repo, branch, credentials) → update `head_sha` (§9.6); its own task, so slow git calls never delay the others |
+| Git staleness polling | 15 min (`stackd_head_poll_interval`), own task | `git ls-remote` per (repo, branch, credentials) → update `head_sha` (§9.6); its own task, so slow git calls never delay the others |
 | Cold log archiving | every tick | runs terminal for ≥ 60 s (the agent's last buffered chunks, §5.1) with `logs_archived_at IS NULL` (20 per tick) → S3 `logs/{run_id}/{phase}.log.gz` (§5.2) |
 | OIDC key retirement | every tick | `retiring` keys past the longest token TTL → `retired`, out of the JWKS (§3.11) |
 | Rollout approval expiry | every tick | a started rollout whose approval has expired is advanced under its lock → `paused (approval_expired)` (§21.4), without waiting for its next event |
-| Retention purge | daily | hot `run_logs` rows 7 d after archiving (§5.2); refresh-token families whose every token has expired (§2.5); webhook delivery ids past the 5 min anti-replay window (§13); audit events older than `audit_retention_days` (730) through the distinct `stackd_audit_purge` role (§6.1), only if `STACKD_AUDIT_PURGE_DATABASE_URL` is set |
+| Retention purge | daily, own task | hot `run_logs` rows 7 d after archiving (§5.2); refresh-token families whose every token has expired (§2.5); webhook delivery ids past the 5 min anti-replay window (§13); audit events older than `audit_retention_days` (730) through the distinct `stackd_audit_purge` role (§6.1), only if `STACKD_AUDIT_PURGE_DATABASE_URL` is set |
 
 **Single-execution guarantee**: each task takes a dedicated **PG advisory lock** (`pg_try_advisory_lock(<task_key>)`) before running; a replica that does not obtain the lock skips its tick. The lock is session-level, so it is taken and released on a **dedicated connection** held for the task's whole run, separate from the task's own DB session — the tasks commit mid-way, which returns the session's connection to the pool, and an unlock through it could land on another connection and leak the lock. No permanently elected leader (no external dependency), no double execution. The tasks are **idempotent** anyway (re-running a staleness computation or an archive breaks nothing) — the advisory lock mainly avoids redundant work and races on the `worker_lost` transitions.
 
@@ -1604,16 +1687,20 @@ terraform ──(backend "http")──▶ API Stackd ──(boto3, SSE-KMS)─�
 
 S3 for the bytes, HTTP for the interface: per-job scoped tokens (§11.2) without distributed AWS credentials, visible locking, audit, refusal of a regressive serial.
 
+The API builds one S3 client per process (KMS: one per region), and every AWS client it builds (S3, KMS, STS) has bounded timeouts and standard-mode retries: `STACKD_AWS_CONNECT_TIMEOUT_SECONDS` (5), `STACKD_AWS_READ_TIMEOUT_SECONDS` (30, per socket read, not per transfer), `STACKD_AWS_MAX_ATTEMPTS` (3, first attempt included). Only S3's `NoSuchKey` (or a missing bucket) means "no such object"; any other S3 error is "object storage unavailable" (503) — never read as a missing state, saved plan or log archive.
+
 ### 11.2 Endpoints
 
 | Method | Endpoint | Behavior |
 |---|---|---|
-| `GET` | `/state/v1/{env_id}` | any scope; 200 + latest state, 404 otherwise |
-| `POST` | `/state/v1/{env_id}?ID=<lock_id>` | **`rw` scope only**; while a lock is held, a missing `ID` or one that is not the held lock's → **423** + holder (no lock held: an ID-less write is accepted — `tofu -lock=false`), refuses regressive serial (409), **403** once the token's run is no longer active, upload S3, `state_version` linked to the run (`NULL` for an import session) |
-| `LOCK` | `/state/v1/{env_id}/lock` | `plan` or `rw` scope; the body (tofu's lock info) must carry an `ID` (400 otherwise); 200 or **423** + holder; **403** once the token's run is no longer active — and, for a `plan` token, once its run has left the plan phase |
+| `GET` | `/state/v1/{env_id}` | any scope; 200 + latest state (streamed from S3, with its `Content-Length`); **404 only when the environment has no state version** — tofu reads 404 as "no state yet" and would plan from nothing. A version whose object cannot be read is never a 404: S3 not answering (throttled, 5xx, access denied, timeout) → **503** problem+json `Object storage unavailable` (tofu's http backend retries 5xx); S3 answering `NoSuchKey` for it → **500** `State object missing` (restore it from the bucket's versions) |
+| `POST` | `/state/v1/{env_id}?ID=<lock_id>` | **`rw` scope only**; body capped at `STACKD_STATE_MAX_BYTES` (64 MiB; **413**, also while streaming), not a JSON state document (or a non-integer `serial`) → **400**; while a lock is held, a missing `ID` or one that is not the held lock's → **423** + holder (no lock held: an ID-less write is accepted — `tofu -lock=false`), refuses regressive serial (409), **403** once the token's run is no longer active, upload S3, `state_version` linked to the run (`NULL` for an import session). These checks run first; the object is then uploaded under a fresh key **with no DB connection or row lock held**, and the checks run again under the run's `FOR SHARE` lock in the transaction that inserts the `state_version` — a write refused there leaves only an orphan object, never a version without its object. S3 failing the upload → **503**, no version |
+| `LOCK` | `/state/v1/{env_id}/lock` | `plan` or `rw` scope; the body (tofu's lock info) must carry an `ID` (400 otherwise); 200 or **423** + holder; the lock records the token's `run_id` as its holder run (`NULL` for an import session); **403** once the token's run is no longer active — and, for a `plan` token, once its run has left the plan phase |
 | `UNLOCK` | `/state/v1/{env_id}/lock` | `plan` or `rw` scope (a `ro` token never locks); releases the lock only for its holder: the body's `ID` must be the held lock's — missing or different → **423** + holder, like a `LOCK` conflict (tofu always sends the lock info it locked with; `tofu force-unlock <id>` sends that id); 200 if nothing is held; still allowed after the run ended |
 
 These four are the whole Terraform-protocol surface: there is no state deletion route. Breaking a lock whose ID one does not hold is the human **force-unlock**, `DELETE /api/v1/environments/{env_id}/state/lock` (admin, audited `state.force_unlocked`, §12) — never a state token.
+
+**A run's lock ends with the run.** When a run reaches a terminal state, `transition()` (§4.2) deletes the lock whose holder run is that run, in the same transaction, and audits `state.lock_released` (actor `system`, target the environment, context `reason = run_ended`, `run_id`, `run_state`, `lock_id`). This is what frees an environment whose worker died mid-plan or mid-apply (`worker_lost`, §3.7) — tofu never got to UNLOCK — instead of failing every later run on it (drift included) with 423 until an admin force-unlocks. Only that run's lock: a lock held by another run, or by a run-less holder (an import session, or a lock recorded before holder runs were tracked), is never touched and keeps the behaviour above — its holder's UNLOCK or the admin force-unlock. It cannot release a lock still in use: a plan token never writes state, and a job holding apply credentials is reclaimed only once the apply window has passed (§3.7), when its `rw` token has expired; a lost worker's late UNLOCK then gets 200 (nothing held) or 423 (a new holder), never another holder's lock.
 
 Auth: Basic (username ignored, `env`), password = JWT `{env_id, run_id, scope, typ: "state", iat, exp}` (HS256, `STACKD_JWT_SECRET`; invalid → 401, another env's → 403), minted at the claim (§7.2) for **one job**, not for the whole run. Its `scope` is fixed at mint time from the job, so a run's plan token and its apply token are different tokens with different rights:
 
@@ -1625,7 +1712,7 @@ Auth: Basic (username ignored, `env`), password = JWT `{env_id, run_id, scope, t
 
 Only an `rw` token writes state: no plan, not even with a leaked or stale plan token, can write state, including during that same run's apply. A plan token cannot take the lock from under that apply either. `exp`: the apply window (`apply_reclaim_window_seconds`, §3.7) for an `rw` job token, 6 h for `ro`/`plan`; 30 min for an import session.
 
-A **run-scoped** token writes state (`POST`) or takes the lock (`LOCK`) only while its run is active: once the run is terminal (e.g. failed as `worker_lost` and its env handed to the next run), a partitioned worker's still-unexpired token gets **403** (defense in depth on top of the TTL). `UNLOCK` stays allowed, so a reclaimed run can still release the lock it holds. Run-less import-session tokens (§11.4) are unaffected — bounded by their own short TTL.
+A **run-scoped** token writes state (`POST`) or takes the lock (`LOCK`) only while its run is active: once the run is terminal (e.g. failed as `worker_lost` and its env handed to the next run), a partitioned worker's still-unexpired token gets **403** (defense in depth on top of the TTL). `UNLOCK` stays allowed — harmless, since the run's own lock was already released when it ended (above), and an UNLOCK never frees another holder's lock. Run-less import-session tokens (§11.4) are unaffected — bounded by their own short TTL.
 
 ### 11.3 S3 layout
 
@@ -1633,18 +1720,20 @@ A **run-scoped** token writes state (`POST`) or takes the lock (`LOCK`) only whi
 s3://stackd-<org>/
   states/{environment_id}/{version_uuid}.tfstate    # SSE-KMS, bucket versioning ON
   logs/{run_id}/{phase}.log.gz
-  artifacts/{run_id}/plan.tfplan | plan.json | outputs.json
+  artifacts/{run_id}/plan-<uuid7>.tfplan | plan.json | outputs.json
 ```
 
 The bucket is `S3_BUCKET` (default `stackd`). A bucket provisioned beforehand is used as is (set
-its versioning and encryption there). When the API creates the bucket itself (first write, bucket
-missing), it turns **versioning ON** and sets **default SSE-S3** (`AES256`) encryption on it; an S3
+its versioning and encryption there). The API checks the bucket once per process, on its first
+write (again only if a write gets `NoSuchBucket`); a check that fails otherwise than "not found"
+(throttled, 5xx, denied) fails the write and creates nothing. When the API creates the bucket itself
+(first write, bucket missing), it turns **versioning ON** and sets **default SSE-S3** (`AES256`) encryption on it; an S3
 that lacks those calls (Garage, the dev S3, implements neither) keeps the bucket without them and
 the API logs a warning (`s3.bucket_setting_unsupported`) instead of failing the write. *Status*:
 the API does not request SSE-KMS on its writes yet — encryption at rest is the bucket's default
 encryption (PLAN Phase 3).
 
-`artifacts/{run_id}/plan.tfplan` is the run's **saved plan** (§7.3): it holds the run's variable values in clear, sensitive ones included, so the API encrypts it **AES-256-GCM with the application key** before it reaches S3 (layout `nonce(12) || ciphertext || tag`, AAD = `stackd:artifact:<s3 key>` so a blob moved under another run's key does not decrypt) — on top of the bucket's SSE. Its key is recorded on the run (`runs.plan_artifact_key`). **Retention**: it lives only while the run can still be applied. On any transition to a terminal state (`finished`, `failed`, `discarded`, `canceled` — whatever the path: worker event, user, scheduler), `transition()` clears `plan_artifact_key` in the same transaction and the object is deleted once that transaction commits (best effort: a failed delete is logged; the blob stays encrypted and the API serves it to nobody, since only an `applying` run's worker can download it). `plan.json`/`outputs.json` are accepted but not archived yet.
+`artifacts/{run_id}/plan-<uuid7>.tfplan` is the run's **saved plan** (§7.3; one key per upload — runs saved before this layout keep their `plan.tfplan` key, read from `runs.plan_artifact_key` like any other): it holds the run's variable values in clear, sensitive ones included, so the API encrypts it **AES-256-GCM with the application key** before it reaches S3 (layout `nonce(12) || ciphertext || tag`, AAD = `stackd:artifact:<s3 key>` so a blob moved under another run's key does not decrypt) — on top of the bucket's SSE. Its key is recorded on the run (`runs.plan_artifact_key`). **Retention**: it lives only while the run can still be applied. On any transition to a terminal state (`finished`, `failed`, `discarded`, `canceled` — whatever the path: worker event, user, scheduler), `transition()` clears `plan_artifact_key` in the same transaction and the object is deleted once that transaction commits (best effort: a failed delete is logged; the blob stays encrypted and the API serves it to nobody, since only an `applying` run's worker can download it). `plan.json`/`outputs.json` are accepted but not archived yet.
 
 `managed_state: false` → no HTTP backend injected, the repo keeps its own `backend` block. For a **partial** backend, set either/both (per-env, applied at init in this order — later `-backend-config` wins): `environments.backend_config_file` (repo-relative `.config`/`.tfbackend` path → `-backend-config=<file>`) and `environments.backend_config` (a `{key: value}` map → one `-backend-config=key=value` each, e.g. `bucket`/`key`/`region`/`dynamodb_table`/`use_lockfile`). The inline map is the way to onboard a new tier on shared code without a per-env `.config` file: set its own `key` so it doesn't collide with another env's state. Mutually exclusive with the managed HTTP backend. The repo's per-env tfvars files are not backend settings: they are the env's `var_files` (§3.4), managed state or not — the usual "one `<env>.config` + `<env>.tfvars` pair per environment" layout sets `backend_config_file: prod.config` and `var_files: [prod.tfvars]`. Such a backend can be written outside Stackd (an operator's `tofu apply` by hand, another tool): Stackd watches its `serial`/`lineage` and flags such a change on the environment (§19.7).
 
@@ -1741,14 +1830,19 @@ POST /api/v1/environments/{id}/runs      { type?, with_downstream?, commit_sha?,
 POST /api/v1/environments/{id}/commands  { command, args, commit_sha? }     # §4.3 — 400 outside
                                          # the allowlists; force-unlock: admin, 409 on managed state
 POST /api/v1/environments/{id}/promote   { from_environment_id }           # §9.7
-GET  /api/v1/environments/{id}/runs ; GET /api/v1/runs/{id}   # the latter adds run_group (§9.2) and
-                                    # confirmed_via: user | autodeploy | rollout (§21.5); both
-                                    # carry plan_options (§3.5)
+GET  /api/v1/environments/{id}/runs ?limit=&before=&view=full|summary
+                                    # newest first (created_at, id); limit 1–500, default 200; a
+                                    # further page: header X-Next-Cursor = the page's last run id,
+                                    # passed back as before (400 if no run of this env);
+                                    # view=summary omits check_results and variable_provenance
+GET  /api/v1/runs/{id}              # adds run_group (§9.2) and confirmed_via: user | autodeploy |
+                                    # rollout (§21.5); both carry plan_options (§3.5)
 POST /api/v1/runs/{id}/confirm | /discard | /cancel   # cancel of an executing run = a stop
                                     # request to its worker (§4.1); can_apply if it holds apply creds
 POST /api/v1/runs/{id}/vcs/resync                                          # §18.5
-GET  /api/v1/runs/{id}/logs ?phase=&after_seq=          # hot or archived tier (§5.2)
-GET  /api/v1/runs/{id}/logs/download ?phase=all|<phase> # plain text attachment (§5.2)
+GET  /api/v1/runs/{id}/logs ?phase=&after_seq=&limit=  # hot or archived tier (§5.2); limit:
+                                                        # at most that many chunks, by (phase, seq)
+GET  /api/v1/runs/{id}/logs/download ?phase=all|<phase> # plain text attachment, streamed (§5.2)
 GET  /api/v1/runs/{id}/plan ; GET /api/v1/runs/{id}/checks
 WS   /api/v1/ws                     sub: run:{id}, environment:{id}, user:{own id}, rollout:{id}
 
@@ -1827,7 +1921,7 @@ Specified but **not served yet**: `GET /api/v1/run-groups/{id}` (§9.4).
 | Mocks | apply forbidden by default (`allow_mock_apply=false`), badge, audit `mock_consumed` |
 | External secrets | provider bootstrap credential AES-256-GCM write-only (`secret_sources.bootstrap_secret_encrypted` §15.1); live values fetched at claim, never persisted, masked; **fallback value (static or break-glass override) forbids apply by default** (`allow_fallback_apply=false`), badge, audit `secret.fallback_used` (§15); a break-glass override only for a `break_glass` reference (else 422), sealed on its run and wiped at the run's terminal state (§15.4) |
 | Workers | revocable tokens, no incoming port, labels (isolated prod pool); production accepts the `docker` runner only (§7.4); tool binaries verified by signature then checksum when the runner images are built, and those images run only by digest (§7.4, supply-chain). The `local` runner (dev) runs the binary on its PATH, at the stack's version |
-| State | S3 SSE-KMS via API only; per-job state tokens scoped `ro` (proposed runs, read-only commands) / `plan` (lock, never write) / `rw` (apply, mutating command, import session), refused once their run is terminal; handed to tofu only, as `TF_HTTP_*` env (§11.2); audited force-unlock |
+| State | S3 SSE-KMS via API only; per-job state tokens scoped `ro` (proposed runs, read-only commands) / `plan` (lock, never write) / `rw` (apply, mutating command, import session), refused once their run is terminal; handed to tofu only, as `TF_HTTP_*` env (§11.2); a run's lock released (audited) when the run ends; audited force-unlock |
 | Saved plans | the reviewed `plan.tfplan` is AES-256-GCM-encrypted by the API (AAD bound to its S3 key), served only to the run's apply job, applied as-is (never re-planned), deleted on any terminal state (§7.3, §11.3) |
 | Outbound notifications | https only; the host must resolve to public addresses only; the POST dials the vetted IP (Host/SNI/certificate stay on the hostname), ignores env proxies (`HTTPS_PROXY`…) by design, never follows redirects |
 | Apply permissions | tier per env × `allowed_tiers` set per user (§2.4, configurable catalog, non-linear); distinct `can_destroy`; double lock with the OIDC trust policy on the tier name |
@@ -2214,7 +2308,9 @@ clears the caller's already-read ones (unread ones are kept).
 (`'github'` — enum-by-string, gitlab/bitbucket later), `vcs_comment_id bigint?` (the posted PR
 comment, for idempotent edit), `vcs_head_sha text?` (PR head commit the status reports against).
 `vcs_outbox` (transactional outbox, same shape as the notification outbox §7.5): `id`, `run_id`,
-`to_state`, `attempts`, `created_at`, `sent_at?`, partial index `WHERE sent_at IS NULL`.
+`to_state`, `attempts`, `next_attempt_at` (retry schedule, §7.5), `created_at`, `sent_at?`, partial
+index on `(next_attempt_at, created_at) WHERE sent_at IS NULL`. (`notification_outbox` has the same
+columns plus `delivered_target_ids uuid[]`.)
 
 ### 18.2 Auth — PAT
 
@@ -2234,8 +2330,11 @@ end of the still-in-flight proposed runs for that PR (reason `pr_closed`): a `qu
 ### 18.4 Post-back (`app/vcs/` — transactional outbox)
 
 Enqueued on the run `transition()` in the SAME txn (**no network I/O there** — a rolled-back
-transition never posts); drained by the scheduler dispatcher (`dispatch_vcs`, advisory-locked,
-at-least-once with `attempts` cap). Only runs with `vcs_provider` set post back. A `proposed` run is
+transition never posts); drained by the scheduler dispatcher (`dispatch_vcs`, advisory-locked, in its own loop,
+at-least-once, retried with exponential backoff honouring GitHub's rate-limit headers up to the
+attempts cap, §7.5). A **retried** row is dropped (marked sent, nothing posted) once a newer row
+exists for its run: that one carries a later state, and posting the stale status after it would roll
+the commit status back (a `pending` landing after the `success`). Only runs with `vcs_provider` set post back. A `proposed` run is
 **plan-only and terminal at `finished`** (never `unconfirmed`). Enqueued on `planning`, `finished`,
 `failed`, `canceled`, `discarded` (intermediate states elided to avoid status churn).
 
@@ -2247,7 +2346,8 @@ at-least-once with `attempts` cap). Only runs with `vcs_provider` set post back.
   summary, a mocks-block-apply note, deep link to `/runs/{id}`. Created on first post
   (`POST .../issues/{pr}/comments`), updated on later transitions (`PATCH .../issues/comments/{id}`);
   the returned id is persisted back on the run for idempotent edits.
-- A VCS failure **never** fails the run (logged, retried up to the attempts cap).
+- A VCS failure **never** fails the run (logged, retried up to the attempts cap, then logged at
+  error level as `vcs.dead_lettered`).
 
 ### 18.5 API
 
@@ -2280,7 +2380,8 @@ Config: `STACKD_DRIFT_INTERVAL_SECONDS = 21600` (6h) — per-env minimum spacing
 ### 19.2 Scheduler task (`detect_drift`, advisory-locked like the others, §7.5)
 
 On the 10s loop, gated on `last_drift_checked_at + interval`: for each `drift_check_enabled`,
-unlocked env with **no active run**, bump `last_drift_checked_at` (so a no-op env isn't retried
+unlocked env with **no active run** and no drift run still `queued` (one no worker claims — no
+compatible worker, say — is not joined by another every interval), bump `last_drift_checked_at` (so a no-op env isn't retried
 every tick) and — if the env has an applied commit (the last full apply — never a targeted one, §3.5) — enqueue a read-only `proposed` run pinned to
 that commit (`is_drift=true`, `triggered_by=schedule`). An env with nothing applied stays `unknown`.
 
@@ -2314,8 +2415,8 @@ alone — DESIGN §7) on the env page (linking the drift run's plan) and in the 
 ### 19.6 Invariants preserved
 
 1. Drift runs are **read-only** and **never auto-applied**.
-2. One active run per env unchanged (§3.5) — a drift run is skipped when a run is already active,
-   and yields to user runs at claim time.
+2. One active run per env unchanged (§3.5) — a drift run is skipped when a run is already active
+   or a drift run is still queued, and yields to user runs at claim time.
 3. The env status change rides the run `transition()` txn — a rolled-back completion changes
    nothing; the notification is same-txn (§17.4).
 
@@ -2419,7 +2520,9 @@ Unauthenticated scrape endpoint (restrict at the network layer — it exposes on
 **never** secrets or tfvars). `prometheus-client`. Cardinality is bounded: labels are state/phase/
 result only, never a run id.
 - `stackd_runs_total{state}`, `stackd_queue_depth`, `stackd_workers_online` — gauges refreshed from
-  the DB at scrape time (cheap aggregate queries).
+  the DB at scrape time (cheap aggregate queries). The non-terminal states are counted at every scrape
+  (`ix_runs_non_terminal_state`, §3.5); the terminal ones (`finished`, `failed`, `discarded`,
+  `canceled` — most of the table) at most every 5 minutes per API process, cached in between.
 - `stackd_claim_latency_seconds` — histogram, observed in `claim_one`: how long the run waited
   claimable — now − `confirmed_at` for an apply claim (the plan and the human wait before it are not
   queue time), now − `created_at` for a plan or command claim.

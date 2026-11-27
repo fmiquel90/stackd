@@ -38,6 +38,9 @@ class Streamer:
     def emit(self, phase: str, lines: list[str], section: str | None = None) -> None:
         self.lines.extend(lines)
 
+    def flush(self, timeout: float | None = None) -> bool:
+        return True
+
 
 def _run_in_thread(
     script: str, token: cancel.CancelToken, streamer: Streamer, tmp_path: Path

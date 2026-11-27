@@ -163,6 +163,11 @@ class JobRegistry:
             token.request("shutdown")
         return len(tokens)
 
+    def running(self) -> list[str]:
+        """The ids of the jobs registered here — what the heartbeat lists (§7.1)."""
+        with self._lock:
+            return list(self._jobs)
+
     def unregister(self, job_id: str) -> None:
         with self._lock:
             self._jobs.pop(job_id, None)

@@ -1,11 +1,14 @@
 from __future__ import annotations
 
 import uuid
-from typing import Annotated
+from typing import Annotated, Any, Literal
 
-from fastapi import APIRouter, Depends, Response
-from sqlalchemy import select
+from fastapi import APIRouter, Depends, Query, Response
+from fastapi.responses import StreamingResponse
+from pydantic import TypeAdapter
+from sqlalchemy import literal, select, tuple_
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import defer
 
 from app.auth.deps import CurrentUser
 from app.db import get_session
@@ -14,13 +17,14 @@ from app.enums import Role, RunEventActor, RunState, TriggeredBy
 from app.errors import ProblemException
 from app.models.run import Run, RunEvent
 from app.models.vcs import VcsOutbox
-from app.runs.logs_archive import load_chunks, render_text, valid_phase
+from app.runs.logs_archive import iter_text, list_phases, load_chunks, valid_phase
 from app.runs.schemas import (
     CommandTriggerIn,
     LogChunkOut,
     PromoteIn,
     RunGroupOut,
     RunOut,
+    RunSummaryOut,
     TriggerRunIn,
 )
 from app.runs.service import (
@@ -95,19 +99,66 @@ async def promote(env_id: uuid.UUID, body: PromoteIn, user: CurrentUser, session
     return await promote_run(session, source, target, user)
 
 
-@router.get("/environments/{env_id}/runs", response_model=list[RunOut])
-async def list_runs(env_id: uuid.UUID, user: CurrentUser, session: DbSession) -> list[Run]:
+RUN_LIST_DEFAULT_LIMIT = 200
+RUN_LIST_MAX_LIMIT = 500
+_RUN_LIST_ADAPTERS: dict[str, TypeAdapter[Any]] = {
+    "full": TypeAdapter(list[RunOut]),
+    "summary": TypeAdapter(list[RunSummaryOut]),
+}
+
+
+@router.get(
+    "/environments/{env_id}/runs",
+    response_class=Response,
+    responses={200: {"model": list[RunOut], "content": {"application/json": {}}}},
+)
+async def list_runs(
+    env_id: uuid.UUID,
+    user: CurrentUser,
+    session: DbSession,
+    limit: Annotated[int, Query(ge=1, le=RUN_LIST_MAX_LIMIT)] = RUN_LIST_DEFAULT_LIMIT,
+    before: uuid.UUID | None = None,
+    view: Literal["full", "summary"] = "full",
+) -> Response:
+    """Newest first, `limit` per page (§3.5). More pages: `X-Next-Cursor` holds the id of the
+    page's last run, passed back as `before`. `view=summary` drops `check_results` and
+    `variable_provenance`."""
     await guard_env_id(session, user, env_id)
-    rows = (
+    stmt = select(Run).where(Run.environment_id == env_id)
+    if before is not None:
+        cursor = (
+            await session.execute(
+                select(Run.created_at).where(Run.id == before, Run.environment_id == env_id)
+            )
+        ).scalar_one_or_none()
+        if cursor is None:
+            raise ProblemException(400, "Bad cursor", "`before` is no run of this environment.")
+        stmt = stmt.where(tuple_(Run.created_at, Run.id) < tuple_(literal(cursor), literal(before)))
+    # Columns the response never carries stay in the database.
+    unread = [Run.resolved_inputs, Run.secret_overrides_encrypted]
+    if view == "summary":
+        unread += [Run.check_results, Run.variable_provenance]
+    rows = list(
         (
             await session.execute(
-                select(Run).where(Run.environment_id == env_id).order_by(Run.created_at.desc())
+                stmt.options(*(defer(c) for c in unread))
+                .order_by(Run.created_at.desc(), Run.id.desc())
+                .limit(limit + 1)
             )
         )
         .scalars()
         .all()
     )
-    return list(rows)
+    headers = {}
+    if len(rows) > limit:
+        rows = rows[:limit]
+        headers["X-Next-Cursor"] = str(rows[-1].id)
+    adapter = _RUN_LIST_ADAPTERS[view]
+    return Response(
+        adapter.dump_json(adapter.validate_python(rows)),
+        media_type="application/json",
+        headers=headers,
+    )
 
 
 @router.get("/runs/{run_id}", response_model=RunOut)
@@ -189,27 +240,32 @@ async def get_logs(
     session: DbSession,
     phase: str | None = None,
     after_seq: int | None = None,
+    limit: Annotated[int | None, Query(ge=1)] = None,
 ) -> list[LogChunkOut]:
-    """Hot or cold tier, transparently (§5.2)."""
+    """Hot or cold tier, transparently (§5.2). `limit` caps the chunks, ordered by (phase, seq):
+    page one phase with `phase` + `after_seq` = the last seq received."""
     run = await guard_run_id(session, user, run_id)
-    chunks = await load_chunks(session, run, phase=phase, after_seq=after_seq)
+    chunks = await load_chunks(session, run, phase=phase, after_seq=after_seq, limit=limit)
     return [LogChunkOut(**c) for c in chunks]
 
 
 @router.get("/runs/{run_id}/logs/download")
 async def download_logs(
     run_id: uuid.UUID, user: CurrentUser, session: DbSession, phase: str = "all"
-) -> Response:
-    """The run's logs as plain text (`phase=all` or one phase), ANSI preserved (§5.2)."""
+) -> StreamingResponse:
+    """The run's logs as plain text (`phase=all` or one phase), ANSI preserved (§5.2), streamed
+    one phase at a time."""
     run = await guard_run_id(session, user, run_id)
     if phase != "all" and not valid_phase(phase):
         raise ProblemException(400, "Bad phase", "Unknown phase name.")
-    chunks = await load_chunks(session, run, phase=None if phase == "all" else phase)
-    if not chunks:
+    phases = await list_phases(session, run)
+    if phase != "all":
+        phases = [p for p in phases if p == phase]
+    if not phases:
         raise ProblemException(404, "No logs", "This run has no logs for that phase.")
     suffix = "all" if phase == "all" else phase
-    return Response(
-        render_text(chunks),
+    return StreamingResponse(
+        iter_text(session, run, phases),
         media_type="text/plain; charset=utf-8",
         headers={"Content-Disposition": f'attachment; filename="run-{run_id}-{suffix}.log"'},
     )

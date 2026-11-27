@@ -14,6 +14,9 @@ class _FakeStreamer:
     def emit(self, phase: str, lines: list[str], section: str | None = None) -> None:
         self.lines.extend(lines)
 
+    def flush(self, timeout: float | None = None) -> bool:
+        return True
+
 
 def test_diagnostic_expands_to_detail_and_location(tmp_path: Path) -> None:
     evt = {

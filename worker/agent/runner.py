@@ -6,15 +6,22 @@ import signal
 import subprocess
 import threading
 import time
+from collections import deque
 from collections.abc import Callable
 from contextlib import AbstractContextManager, nullcontext
+from dataclasses import dataclass
 from pathlib import Path
+
+import httpx
 
 from agent.cancel import JobCanceled
 from agent.cancel import current as current_cancel
-from agent.client import ApiClient
+from agent.client import ApiClient, transient
 from agent.docker_runner import DockerRunner
+from agent.logging import get_logger
 from agent.masking import Masker
+
+log = get_logger()
 
 # Upper bound on any single subprocess so a hung tofu/hook can't pin a worker forever (the apply
 # phase is the longest legitimate one). Exit 124 mirrors coreutils `timeout`.
@@ -28,43 +35,186 @@ def _hook_timeout() -> int:
     return int(os.environ.get("STACKD_HOOK_TIMEOUT_SECONDS") or _HOOK_TIMEOUT_SECONDS)
 
 
+# The agent's log buffer (§5.1): a command's output goes out once its oldest unsent line has waited
+# this long, or once that much of it is waiting, whichever comes first.
+FLUSH_SECONDS = 1.0
+FLUSH_BYTES = 32 * 1024
+# What a job holds of its output the API has not taken yet. Past it, new lines are dropped (and
+# counted) rather than stall the reader: tofu would block on a full stdout pipe.
+BUFFER_BYTES = 8 * 1024 * 1024
+# How long a command's end (and the job's) waits for its output to reach the API.
+DRAIN_SECONDS = 30.0
+# A chunk the API did not take is sent again after this pause, for as long as the job runs; each
+# send retries on its own (the client's backoff) for SEND_RETRY_SECONDS.
+RESEND_SECONDS = 2.0
+SEND_RETRY_SECONDS = 10.0
+
+
+@dataclass
+class _Chunk:
+    phase: str
+    section: str | None
+    seq: int
+    lines: list[dict]
+    size: int
+
+
 class LogStreamer:
-    """Ships log lines per phase, masked, with a strictly increasing seq (§5.1). Thread-safe: a
-    command's batch can be flushed by its timer thread (`_LogBatch`)."""
+    """Ships a job's log lines to the API (§5.1), masked, with a strictly increasing seq per phase.
+    `emit` never touches the network and never raises: it masks the lines and queues them. One
+    sender thread ships the queue in order — so each phase's chunks in seq order — and sends a
+    chunk the API did not take again (the API is idempotent on (run, phase, seq)) for as long as the
+    job runs. A log failure never ends, kills or stalls the command. The queue is bounded
+    (BUFFER_BYTES): past it lines are dropped, and a `[stackd] N log line(s) dropped` line takes
+    their place."""
 
     def __init__(self, client: ApiClient, job_id: str, masker: Masker) -> None:
         self._client = client
         self._job_id = job_id
         self._masker = masker
         self._seq: dict[str, int] = {}
-        self._lock = threading.Lock()
+        self._cond = threading.Condition()
+        self._queue: deque[_Chunk] = deque()
+        self._size = 0
+        self._dropped: dict[tuple[str, str | None], int] = {}
+        self._closed = False
+        self._abandoned = False
+        self._sender: threading.Thread | None = None
+        self._failing = False  # the sender's own: an outage is logged once, not per chunk
 
     def emit(self, phase: str, lines: list[str], section: str | None = None) -> None:
         if not lines:
             return
-        payload = [
-            {"t": time.strftime("%H:%M:%S"), "msg": self._masker.mask(line)} for line in lines
-        ]
-        # A seq and its chunk go out together: chunks reach the API in seq order.
-        with self._lock:
-            seq = self._seq.get(phase, 0)
-            self._seq[phase] = seq + 1
-            self._client.logs(self._job_id, phase, seq, payload, section=section)
+        t = time.strftime("%H:%M:%S")
+        payload = [{"t": t, "msg": self._masker.mask(line)} for line in lines]
+        size = sum(len(m["msg"].encode()) + 1 for m in payload)
+        with self._cond:
+            if self._closed:
+                return
+            if self._size + size > BUFFER_BYTES:
+                key = (phase, section)
+                self._dropped[key] = self._dropped.get(key, 0) + len(lines)
+                return
+            self._mark_dropped()
+            self._push(phase, section, payload, size)
 
+    def _push(self, phase: str, section: str | None, payload: list[dict], size: int) -> None:
+        # Caller holds the lock. A chunk takes its seq as it is queued: the queue's order is the
+        # order the API receives each phase's chunks in.
+        seq = self._seq.get(phase, 0)
+        self._seq[phase] = seq + 1
+        self._queue.append(_Chunk(phase, section, seq, payload, size))
+        self._size += size
+        if self._sender is None:
+            self._sender = threading.Thread(target=self._run, name="log-sender", daemon=True)
+            self._sender.start()
+        self._cond.notify_all()
 
-# The agent's log buffer (§5.1): a command's output goes out once its oldest unsent line has waited
-# this long, or once that much of it is waiting, whichever comes first.
-FLUSH_SECONDS = 1.0
-FLUSH_BYTES = 32 * 1024
+    def _mark_dropped(self) -> None:
+        # Caller holds the lock. A marker is a few bytes: it goes in even over the bound.
+        for (phase, section), n in self._dropped.items():
+            msg = f"[stackd] {n} log line(s) dropped: the API did not take them in time"
+            self._push(phase, section, [{"t": time.strftime("%H:%M:%S"), "msg": msg}], len(msg))
+        self._dropped.clear()
+
+    def _ship(self, chunk: _Chunk) -> bool:
+        """True once the chunk is done with: taken, or refused for good (a 4xx — sending it again
+        would not change the answer). False: try again later."""
+        try:
+            self._client.logs(
+                self._job_id,
+                chunk.phase,
+                chunk.seq,
+                chunk.lines,
+                section=chunk.section,
+                retry_for=SEND_RETRY_SECONDS,
+            )
+        except Exception as exc:  # noqa: BLE001 — the sender never dies on a failed send
+            if isinstance(exc, httpx.HTTPStatusError) and not transient(exc):
+                log.warning(
+                    "log chunk refused",
+                    extra={
+                        "event": "agent.log_refused",
+                        "run_id": self._job_id,
+                        "phase": chunk.phase,
+                        "seq": chunk.seq,
+                        "status": exc.response.status_code,
+                    },
+                )
+                return True
+            if not self._failing:
+                self._failing = True
+                log.warning(
+                    "log shipping failing, holding the lines",
+                    extra={
+                        "event": "agent.log_retry",
+                        "run_id": self._job_id,
+                        "error": type(exc).__name__,
+                    },
+                )
+            return False
+        if self._failing:
+            self._failing = False
+            log.info(
+                "log shipping resumed", extra={"event": "agent.log_resumed", "run_id": self._job_id}
+            )
+        return True
+
+    def _run(self) -> None:
+        while True:
+            with self._cond:
+                while not self._queue and not self._closed:
+                    self._cond.wait()
+                if not self._queue or self._abandoned:
+                    return
+                chunk = self._queue[0]
+            done = self._ship(chunk)
+            with self._cond:
+                if done:
+                    self._queue.popleft()
+                    self._size -= chunk.size
+                    self._cond.notify_all()
+                elif not self._abandoned:
+                    self._cond.wait(RESEND_SECONDS)
+
+    def flush(self, timeout: float | None = None) -> bool:
+        """Wait, up to `timeout` (DRAIN_SECONDS), until every line emitted so far has reached the
+        API. False when some has not yet: it stays queued, the sender keeps trying."""
+        end = time.monotonic() + (DRAIN_SECONDS if timeout is None else timeout)
+        with self._cond:
+            self._mark_dropped()
+            while self._queue:
+                left = end - time.monotonic()
+                if left <= 0:
+                    return False
+                self._cond.wait(left)
+            return True
+
+    def close(self, timeout: float | None = None) -> None:
+        """The job is over: send what is left, for up to `timeout` (DRAIN_SECONDS), then stop. What
+        the API has still not taken by then is given up — the job's end is not held for it."""
+        delivered = self.flush(timeout)
+        with self._cond:
+            self._closed = True
+            if not delivered:
+                self._abandoned = True
+                lost = sum(len(c.lines) for c in self._queue)
+                log.warning(
+                    "log lines not delivered",
+                    extra={"event": "agent.log_lost", "run_id": self._job_id, "lines": lost},
+                )
+            self._cond.notify_all()
+            sender = self._sender
+        if sender is not None and delivered:
+            sender.join(timeout=1)
 
 
 class _LogBatch:
-    """One command's output on its way to the API (§5.1): sent when the oldest buffered line is
-    FLUSH_SECONDS old, or FLUSH_BYTES are buffered, and the rest on `close()`. A quiet command's
-    last lines still reach the viewer within a second: a timer thread, asleep on a condition (no
-    polling), sends them while the reader is blocked on the command's next line. Lines are sent in
-    order, under one lock. A send that fails on the timer thread is raised to the reader, on its
-    next `add()` or on `close()` — as a failed send on the reader itself would be."""
+    """One command's output on its way to the API (§5.1): handed to the streamer when the oldest
+    buffered line is FLUSH_SECONDS old, or FLUSH_BYTES are buffered, and the rest on `close()`. A
+    quiet command's last lines still reach the viewer within a second: a timer thread, asleep on a
+    condition (no polling), hands them over while the reader is blocked on the command's next line.
+    Handing over only queues (`LogStreamer.emit`): the reader never waits on the API."""
 
     def __init__(self, streamer: LogStreamer, phase: str, section: str | None) -> None:
         self._streamer = streamer
@@ -75,7 +225,6 @@ class _LogBatch:
         self._size = 0
         self._since: float | None = None  # when the oldest buffered line arrived
         self._closed = False
-        self._error: Exception | None = None
         self._timer = threading.Thread(target=self._run, daemon=True)
         self._timer.start()
 
@@ -84,16 +233,10 @@ class _LogBatch:
         lines, self._lines, self._size, self._since = self._lines, [], 0, None
         self._streamer.emit(self._phase, lines, section=self._section)
 
-    def _raise_failed(self) -> None:
-        if self._error is not None:
-            error, self._error = self._error, None
-            raise error
-
     def add(self, lines: list[str]) -> None:
         if not lines:
             return
         with self._cond:
-            self._raise_failed()
             if self._since is None:
                 self._since = time.monotonic()
                 self._cond.notify()  # wake the timer: a deadline now runs
@@ -112,22 +255,15 @@ class _LogBatch:
                 if left > 0:
                     self._cond.wait(left)
                     continue
-                try:
-                    self._flush()
-                except Exception as exc:  # noqa: BLE001 — handed to the reader thread
-                    self._error = exc
-                    return
+                self._flush()
 
-    def close(self, *, flush: bool = True) -> None:
-        """Stop the timer, then send what is left (unless the command's streaming failed)."""
+    def close(self) -> None:
+        """Stop the timer, then hand over what is left."""
         with self._cond:
             self._closed = True
             self._cond.notify()
         self._timer.join()
         with self._cond:
-            if not flush:
-                return
-            self._raise_failed()
             if self._lines:
                 self._flush()
 
@@ -171,6 +307,10 @@ class LocalRunner:
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
             text=True,
+            # A byte that is not UTF-8 (a binary dump, a legacy-encoded file a hook cats) is shown
+            # as U+FFFD: it must not end the job.
+            encoding="utf-8",
+            errors="replace",
             bufsize=1,
             start_new_session=True,
         )
@@ -219,7 +359,7 @@ class LocalRunner:
             ender.join()  # the command has exited, its group is killed; nothing has reaped it yet
         finally:
             if ender.is_alive():
-                _kill_group()  # streaming failed (e.g. the API is unreachable): leave nothing
+                _kill_group()  # reading the output failed: leave nothing running
                 ender.join()
             timer.cancel()
             timer.join()  # a watchdog kill under way ends before the reap below frees the pid
@@ -240,7 +380,14 @@ class LocalRunner:
     ) -> subprocess.CompletedProcess[str]:
         """Run a command to completion, capturing stdout and stderr apart (`tofu show -json`)."""
         return subprocess.run(
-            cmd, cwd=cwd, env=env, capture_output=True, text=True, timeout=timeout
+            cmd,
+            cwd=cwd,
+            env=env,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=timeout,
         )
 
 
@@ -275,10 +422,8 @@ def _stream_proc(
 
     try:
         rc, timed_out = runner.stream(cmd, cwd, env, timeout=timeout, on_line=on_line)
-    except BaseException:
-        batch.close(flush=False)  # streaming failed (e.g. the API is unreachable): don't retry it
-        raise
-    batch.close()
+    finally:
+        batch.close()
     # A command that exited 0 completed whatever the signal: the stop raced its end (it reached the
     # process as it exited). An apply that went through must not be reported as interrupted — the
     # job carries on, and a stop still in force ends it before the next command (above). Once
@@ -290,8 +435,10 @@ def _stream_proc(
         streamer.emit(
             phase, [f"[stackd] timed out after {timeout}s — process killed"], section=section
         )
-        return 124
-    return rc
+    # The command's output reaches the API before what the job reports next — bounded: an API
+    # that does not take it only delays the job, the lines stay queued.
+    streamer.flush()
+    return 124 if timed_out else rc
 
 
 def run_command(

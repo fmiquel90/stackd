@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 import json
+import uuid
 from datetime import UTC, datetime
 
 from sqlalchemy import select, text
-from sqlalchemy.exc import DBAPIError, IntegrityError
+from sqlalchemy.exc import DBAPIError, IntegrityError, InterfaceError, OperationalError
+from sqlalchemy.exc import TimeoutError as PoolTimeoutError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import get_settings
@@ -49,8 +51,15 @@ _log = get_logger("stackd.worker")
 # serialization_failure.
 _RETRYABLE = frozenset({"55P03", "40P01", "40001"})
 
-# Candidate selection (SPECS §7.2). FOR UPDATE OF e SKIP LOCKED serializes claims per environment;
-# the one_active_run_per_env unique index (caught as 23505 below) is the real correctness guard.
+# Claim backoff (§7.2): a run whose job could not be built for a transient reason waits 10 s, then
+# twice as long after each further failure, at most 5 min — the runs queued behind it keep moving.
+_BACKOFF_BASE_SECONDS = 10
+_BACKOFF_MAX_SECONDS = 300
+
+# Candidate selection (SPECS §7.2). FOR NO KEY UPDATE OF e SKIP LOCKED serializes claims per
+# environment — NO KEY so that inserting a row referencing the env (a new run: its FK check takes
+# FOR KEY SHARE) does not wait for the claim's commit; the one_active_run_per_env unique index
+# (caught as 23505 below) is the real correctness guard.
 _SELECT_CANDIDATE = text(
     f"""
     SELECT r.id AS run_id, r.state AS run_state
@@ -58,6 +67,7 @@ _SELECT_CANDIDATE = text(
     JOIN environments e ON e.id = r.environment_id
     JOIN stacks s ON s.id = e.stack_id
     WHERE r.state IN ('queued', 'confirmed')
+      AND (r.claimable_after IS NULL OR r.claimable_after <= now())
       AND e.locked = false
       -- NULLIF guards against JSONB 'null' (SQLAlchemy writes Python None as JSON null by default).
       AND COALESCE(NULLIF(e.labels, 'null'::jsonb), '{{}}'::jsonb) <@ CAST(:labels AS jsonb)
@@ -74,7 +84,7 @@ _SELECT_CANDIDATE = text(
       )
     -- Affinity first, then user runs ahead of background drift plans (§19), then FIFO.
     ORDER BY (r.state = 'confirmed' AND r.worker_id = :wid) DESC, r.is_drift, r.created_at
-    FOR UPDATE OF e SKIP LOCKED
+    FOR NO KEY UPDATE OF e SKIP LOCKED
     LIMIT 1
     """
 )
@@ -113,7 +123,12 @@ async def claim_one(session: AsyncSession, worker: Worker, affinity_seconds: int
             target,
             actor=RunEventActor.worker,
             actor_id=worker.id,
-            fields={"worker_id": worker.id, "claimed_at": datetime.now(UTC)},
+            fields={
+                "worker_id": worker.id,
+                "claimed_at": datetime.now(UTC),
+                "claimable_after": None,
+                "claim_attempts": 0,
+            },
         )
     except (ProblemException, IntegrityError):
         # Lost the race (another worker won, or one_active_run_per_env 23505) → nothing to claim.
@@ -135,6 +150,40 @@ async def claim_one(session: AsyncSession, worker: Worker, affinity_seconds: int
     waited = datetime.now(UTC) - (claimable_at or run.created_at)
     metrics.claim_latency.observe(waited.total_seconds())
     return run
+
+
+def is_transient_db_error(exc: BaseException) -> bool:
+    """A database failure a later attempt can get past: no pooled connection free, a connection
+    lost, a lock or statement timeout, a deadlock or serialization failure, the server shutting
+    down or out of resources. Anything else (a constraint, bad data, a bug) is not."""
+    if isinstance(exc, PoolTimeoutError):
+        return True
+    if not isinstance(exc, DBAPIError):
+        return False
+    if exc.connection_invalidated or isinstance(exc, (OperationalError, InterfaceError)):
+        return True
+    sqlstate = getattr(exc.orig, "sqlstate", None) or ""
+    return sqlstate in _RETRYABLE or sqlstate[:2] in ("08", "53", "57")
+
+
+async def defer_claim(session: AsyncSession, run_id: uuid.UUID) -> None:
+    """Put a run whose job could not be built for a transient reason (§7.2) out of the claim's
+    reach for its backoff, in a transaction of its own (the caller has rolled the claim back). Not
+    a state change: the run stays queued/confirmed."""
+    await session.execute(
+        text(
+            f"""
+            UPDATE runs SET
+              claimable_after = now() + make_interval(secs => least(
+                {_BACKOFF_MAX_SECONDS},
+                {_BACKOFF_BASE_SECONDS} * power(2, least(claim_attempts, 16))
+              )),
+              claim_attempts = claim_attempts + 1
+            WHERE id = :id AND state IN ('queued', 'confirmed')
+            """
+        ).bindparams(id=run_id)
+    )
+    await session.commit()
 
 
 def holds_apply_credentials(run: Run) -> bool:

@@ -37,7 +37,10 @@ flowchart LR
 ```
 
 Only the API holds the S3 and database credentials: workers reach states and saved plans through
-it.
+it. It does S3 I/O with no DB connection or row lock held (a state or plan upload goes to a fresh
+key first, then a short transaction re-checks and records it), and an S3 error is never read as a
+missing object: a state version whose object S3 cannot serve is a 503 (or a 500 if the object is
+gone), never the 404 tofu would read as "no state yet".
 
 **Run logs have two tiers.** The worker streams masked chunks to the API, which keeps them in
 Postgres (`run_logs`) and signals them over `LISTEN/NOTIFY` for the live viewer. Once a run has been
@@ -103,7 +106,12 @@ duplicate `job_failed`) is refused with 409.
 
 **Worker loss** fails only runs whose job is *executing* on the lost worker (`preparing`,
 `planning`, `checking`, `running`, `applying`) — after 120 s, or, for a job holding apply
-credentials (`applying`, a mutating command), after the apply budget + grace. `unconfirmed` and
+credentials (`applying`, a mutating command), after the apply budget + grace. A live worker's
+heartbeat lists the jobs it runs: an executing run of it left out of 2 heartbeats in a row (a lost
+claim response, terminal reports that never got through) is failed `job_not_running` under the
+same delays, and so is one whose stop request it answers `running_here: false`. Worker silence is
+only counted while the API could hear it (an API restart or a DB outage is discounted), and each
+lost run is failed in its own transaction. `unconfirmed` and
 `confirmed` runs are never reclaimed: they wait on a human or on the apply claim. Every terminal
 transition drops the run's saved plan.
 
@@ -121,7 +129,7 @@ sequenceDiagram
     participant H as Human
     W->>A: POST /worker/v1/register (pool token)
     loop every 20s
-        W->>A: heartbeat → pending commands (diagnostics, cancel_job)
+        W->>A: heartbeat (in-flight, job ids) → commands (diagnostics, cancel_job), redelivered until answered
     end
     W->>A: POST /jobs/claim?wait=25 (long-poll)
     A-->>W: plan job: vars + secrets, hooks, state token (plan scope), plan OIDC token
@@ -130,7 +138,7 @@ sequenceDiagram
     A->>A: pin the run to that commit
     Note over W: hooks · init · plan -out=plan.tfplan (tofu → /state/v1 via TF_HTTP_*)
     W->>A: PUT /jobs/{id}/artifacts/plan.tfplan (before after_plan hooks)
-    A->>S: encrypt (AES-256-GCM) → artifacts/{run_id}/plan.tfplan
+    A->>S: encrypt (AES-256-GCM) → artifacts/{run_id}/plan-<id>.tfplan (before the run's row lock)
     Note over W: after_plan hooks (checking)
     W->>A: phase_finished (summary, checks) + streamed logs
     A->>A: transition() → unconfirmed
@@ -151,7 +159,9 @@ sequenceDiagram
 mint time: `ro` (a PR or drift plan, a read-only command: read only, no lock), `plan` (a plan job:
 read and lock while planning, never write), `rw` (an apply or a mutating command: write; TTL = the
 apply budget + grace). A token whose run has ended can no longer write or lock. The worker hands it
-to tofu only, as `TF_HTTP_*` environment variables — hooks never see it.
+to tofu only, as `TF_HTTP_*` environment variables — hooks never see it. A lock records the run whose
+token took it, and `transition()` releases it when that run ends (audited `state.lock_released`): a
+worker lost mid-plan or mid-apply never strands the environment's lock.
 
 **Repo credential.** The stack's token or SSH deploy key rides in the claim (`repo_credentials`).
 The worker uses it for the clone and for `init`, which downloads the modules — private ones hosted
@@ -211,18 +221,22 @@ flowchart TD
 ## 🔔 Notifications — transactional outbox
 
 `transition()` enqueues a row in `notification_outbox` in the same transaction (no I/O in the
-request path). The scheduler drains it under an advisory lock with `FOR UPDATE SKIP LOCKED`, so a
-rolled-back transition never notifies and two API replicas never double-send. No DB transaction is
-held during the HTTP call.
+request path). A dispatcher loop of its own (never part of the scheduler tick, so slow receivers
+can't delay worker-lost detection) drains the due rows under an advisory lock with `FOR UPDATE SKIP
+LOCKED`, so a rolled-back transition never notifies and two API replicas never double-send. No DB
+transaction is held during the HTTP calls, which run a few at a time, each time-bounded. A failed
+target is retried alone (the row records the targets already delivered) with exponential backoff
+and jitter, honouring `Retry-After`, for about an hour before the row is dead-lettered and logged
+at error level.
 
 ```mermaid
 flowchart LR
     T["transition() → unconfirmed / finished / failed"] -->|"same txn"| OB[("notification_outbox")]
-    SCH["scheduler tick<br/>(advisory lock + SKIP LOCKED)"] -->|"drain unsent"| OB
-    SCH -->|"match stack/env targets on_states"| DNS["resolve host once<br/>every IP must be public"]
+    SCH["dispatcher loop<br/>(advisory lock + SKIP LOCKED)"] -->|"drain due, unsent"| OB
+    SCH -->|"match stack/env targets on_states,<br/>minus those already delivered"| DNS["resolve host once<br/>every IP must be public"]
     DNS -->|"https POST to the vetted IP<br/>(no env proxy, no redirect)"| POST["Slack / webhook"]
-    POST -->|"ok → sent_at"| OB
-    POST -->|"fail → retry (≤5)"| OB
+    POST -->|"all ok → sent_at"| OB
+    POST -->|"fail → record delivered targets,<br/>retry after backoff / Retry-After"| OB
 ```
 
 The POST dials the address the SSRF check vetted, with Host, SNI and certificate checks on the
@@ -253,8 +267,15 @@ claim time.
 ## 📈 Scaling
 
 Workers are stateless pull agents, so **scaling out = running more of them** (e.g. bumping an ECS
-service `desiredCount`). Postgres serializes claims with two guards (`FOR UPDATE … SKIP LOCKED` +
+service `desiredCount`). Postgres serializes claims with two guards (`FOR NO KEY UPDATE … SKIP LOCKED` +
 the `one_active_run_per_env` unique index). What's worth knowing:
+
+- 🔌 **Idle workers cost no database connection** — the claim long-poll ends its transaction before
+  each 2 s wait, so the API's pool is sized for requests in flight, not for workers
+  ([sizing](guide/workers-and-scaling.md#database-connections)).
+- 🧯 **One bad run never blocks the queue** — a job that cannot be built for a transient reason
+  (KMS, the database) is set aside for a backoff (`claimable_after`); any other build failure fails
+  the run closed.
 
 - 🧩 **The unit of parallelism is the environment, not the worker** — one active run per env, but
   different envs run concurrently. Throughput ≈ `min(workers, envs with queued work)`.
@@ -268,9 +289,11 @@ the `one_active_run_per_env` unique index). What's worth knowing:
 - 🔁 **Each worker runs `STACKD_MAX_CONCURRENT_JOBS` jobs at once** (default 1), always on
   different environments.
 - 🗓️ **The scheduler runs in every API replica**, each task under its own advisory lock (held on a
-  dedicated connection), so a task runs once per tick across replicas. The git head poll runs as a
-  separate task (at most 8 `ls-remote` at a time), so slow repos never delay worker-loss detection
-  or notifications.
+  dedicated connection), so a task runs once per tick across replicas. Each task runs under a
+  time budget and its own error handling: one failing or hanging task is logged and counted, never
+  skips the others. The outbound work runs outside the tick — the notification and VCS outboxes in
+  loops of their own, the git head poll (at most 8 `ls-remote` at a time) and the daily retention
+  purge as separate tasks — so slow receivers or repos never delay worker-loss detection.
 - 📊 **No built-in autoscaler**, but `/api/v1/health` and `/api/v1/queue` expose the signals an
   external one (ECS target-tracking, KEDA) can drive; `/metrics` serves Prometheus gauges. On Fargate, mind the
   runner execution model (no DinD).
