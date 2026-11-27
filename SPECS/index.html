@@ -4493,15 +4493,18 @@ safety rules:</p>
 <a id="__codelineno-17-2" name="__codelineno-17-2" href="#__codelineno-17-2"></a>                s3_key, created_by_run_id nullable, deleted_at nullable (soft delete: reads skip such
 <a id="__codelineno-17-3" name="__codelineno-17-3" href="#__codelineno-17-3"></a>                rows; no endpoint sets it yet),
 <a id="__codelineno-17-4" name="__codelineno-17-4" href="#__codelineno-17-4"></a>                created_at
-<a id="__codelineno-17-5" name="__codelineno-17-5" href="#__codelineno-17-5"></a>state_locks:    environment_id PK, lock_id, info jsonb, locked_at
-<a id="__codelineno-17-6" name="__codelineno-17-6" href="#__codelineno-17-6"></a>
-<a id="__codelineno-17-7" name="__codelineno-17-7" href="#__codelineno-17-7"></a>hooks (platform, §8): id, target_kind enum(&#39;stack&#39;,&#39;environment&#39;), target_id,
-<a id="__codelineno-17-8" name="__codelineno-17-8" href="#__codelineno-17-8"></a>       stage enum(before_init|after_init|before_plan|after_plan|before_apply|after_apply),
-<a id="__codelineno-17-9" name="__codelineno-17-9" href="#__codelineno-17-9"></a>       name text, command text, on_failure enum(&#39;fail&#39;,&#39;warn&#39;),
-<a id="__codelineno-17-10" name="__codelineno-17-10" href="#__codelineno-17-10"></a>       position int, created_at, updated_at
-<a id="__codelineno-17-11" name="__codelineno-17-11" href="#__codelineno-17-11"></a>
-<a id="__codelineno-17-12" name="__codelineno-17-12" href="#__codelineno-17-12"></a>run_logs (hot tier, §5.2): run_id FK, phase text, section text nullable,
-<a id="__codelineno-17-13" name="__codelineno-17-13" href="#__codelineno-17-13"></a>       seq int, lines jsonb, created_at — PK (run_id, phase, seq)
+<a id="__codelineno-17-5" name="__codelineno-17-5" href="#__codelineno-17-5"></a>state_locks:    environment_id PK, lock_id, info jsonb, locked_at,
+<a id="__codelineno-17-6" name="__codelineno-17-6" href="#__codelineno-17-6"></a>                run_id FK runs nullable (ON DELETE SET NULL; the run whose state token took the
+<a id="__codelineno-17-7" name="__codelineno-17-7" href="#__codelineno-17-7"></a>                lock, NULL for a run-less holder — an import session §11.4; released with that
+<a id="__codelineno-17-8" name="__codelineno-17-8" href="#__codelineno-17-8"></a>                run, §11.2)
+<a id="__codelineno-17-9" name="__codelineno-17-9" href="#__codelineno-17-9"></a>
+<a id="__codelineno-17-10" name="__codelineno-17-10" href="#__codelineno-17-10"></a>hooks (platform, §8): id, target_kind enum(&#39;stack&#39;,&#39;environment&#39;), target_id,
+<a id="__codelineno-17-11" name="__codelineno-17-11" href="#__codelineno-17-11"></a>       stage enum(before_init|after_init|before_plan|after_plan|before_apply|after_apply),
+<a id="__codelineno-17-12" name="__codelineno-17-12" href="#__codelineno-17-12"></a>       name text, command text, on_failure enum(&#39;fail&#39;,&#39;warn&#39;),
+<a id="__codelineno-17-13" name="__codelineno-17-13" href="#__codelineno-17-13"></a>       position int, created_at, updated_at
+<a id="__codelineno-17-14" name="__codelineno-17-14" href="#__codelineno-17-14"></a>
+<a id="__codelineno-17-15" name="__codelineno-17-15" href="#__codelineno-17-15"></a>run_logs (hot tier, §5.2): run_id FK, phase text, section text nullable,
+<a id="__codelineno-17-16" name="__codelineno-17-16" href="#__codelineno-17-16"></a>       seq int, lines jsonb, created_at — PK (run_id, phase, seq)
 </code></pre></div>
 <h3 id="310-cloud_integrations-oidc-workload-10">3.10 <code>cloud_integrations</code> (OIDC workload, §10)<a class="headerlink" href="#310-cloud_integrations-oidc-workload-10" title="Permanent link">&para;</a></h3>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-18-1" name="__codelineno-18-1" href="#__codelineno-18-1"></a>id uuid PK, environment_id FK unique,
@@ -4676,7 +4679,7 @@ context kid, backend, ARN, previous kid, <code>reactivated</code>, and for a rea
 </tr>
 </tbody>
 </table>
-<p>Single function <code>transition(run, to_state, actor, payload)</code> (<code>app/runs/transition.py</code>): legality (its <code>ALLOWED</code> edge table), atomic update guarded on <code>from_state</code> — the row re-read <code>FOR UPDATE</code> where <code>state = from_state</code> (409 <code>Concurrent modification</code> if it moved), a rollout member's rollout locked first (§21.3) — <code>run_event</code>, audit event when the caller passes one (human or terminal actions), the notification / VCS / in-app outboxes and the rollout's progress (§17, §18, §21), WS publication (<code>NOTIFY</code>, §5.3). A terminal state also stamps <code>finished_at</code> and drops the saved plan (§11.3). Everything in the caller's transaction: <code>transition()</code> never commits. The cascade (§9.2) is run by the caller, after the transition to <code>finished</code>.</p>
+<p>Single function <code>transition(run, to_state, actor, payload)</code> (<code>app/runs/transition.py</code>): legality (its <code>ALLOWED</code> edge table), atomic update guarded on <code>from_state</code> — the row re-read <code>FOR UPDATE</code> where <code>state = from_state</code> (409 <code>Concurrent modification</code> if it moved), a rollout member's rollout locked first (§21.3) — <code>run_event</code>, audit event when the caller passes one (human or terminal actions), the notification / VCS / in-app outboxes and the rollout's progress (§17, §18, §21), WS publication (<code>NOTIFY</code>, §5.3). A terminal state also stamps <code>finished_at</code>, drops the saved plan (§11.3) and releases the state lock the run holds, if any (audited <code>state.lock_released</code>, §11.2). Everything in the caller's transaction: <code>transition()</code> never commits. The cascade (§9.2) is run by the caller, after the transition to <code>finished</code>.</p>
 <h3 id="43-command-runs">4.3 Command runs<a class="headerlink" href="#43-command-runs" title="Permanent link">&para;</a></h3>
 <p>A <code>RunType.command</code> run executes <strong>one allowlisted tofu/terraform subcommand</strong> (<code>import</code>, <code>state list/show/rm/mv</code>, <code>taint</code>, <code>untaint</code>, <code>output</code>, <code>show</code>, <code>validate</code>, <code>providers</code>, <code>refresh</code>, <code>force-unlock</code>) instead of the plan→apply flow — for state surgery and adoption that <code>plan</code>/<code>apply</code> can't express. It is <strong>not</strong> arbitrary shell: the worker runs <code>&lt;tool&gt; &lt;command&gt; &lt;args&gt;</code> with the command taken verbatim from the allowlist.</p>
 <p><strong>Option allowlist</strong> (<code>app/runs/commands.py</code>), closed by default: an arg starting with <code>-</code> is refused (400 problem+json) unless the command's allowlist names it:</p>
@@ -4834,29 +4837,31 @@ application code. A chunk ingested after its run was archived is not re-archived
 <a id="__codelineno-23-44" name="__codelineno-23-44" href="#__codelineno-23-44"></a>run.check_warned                  # a job (plan or apply) ended — finished, failed or stopped — with warn
 <a id="__codelineno-23-45" name="__codelineno-23-45" href="#__codelineno-23-45"></a>                                  #   checks; context: checks (their names), stages (where they ran)
 <a id="__codelineno-23-46" name="__codelineno-23-46" href="#__codelineno-23-46"></a>state.force_unlocked / state.import_session_created   # §11.2, §11.4
-<a id="__codelineno-23-47" name="__codelineno-23-47" href="#__codelineno-23-47"></a>dependency.created / dependency.deleted / dependency.mock_consumed   # created: also via link-by-name,
-<a id="__codelineno-23-48" name="__codelineno-23-48" href="#__codelineno-23-48"></a>                                  #   or a clone (via = clone, upstream_kind, §21.2)
-<a id="__codelineno-23-49" name="__codelineno-23-49" href="#__codelineno-23-49"></a>dependency.updated                # policy / output references changed by a config import (§22.3)
-<a id="__codelineno-23-50" name="__codelineno-23-50" href="#__codelineno-23-50"></a>variable_set.attachment_updated   # an attachment&#39;s priority changed by a config import (§22.3)
-<a id="__codelineno-23-51" name="__codelineno-23-51" href="#__codelineno-23-51"></a>service_account.created / api_token.created / api_token.revoked   # §23 — never the token
-<a id="__codelineno-23-52" name="__codelineno-23-52" href="#__codelineno-23-52"></a>space.config_exported / space.config_imported   # §22 — every item an import writes is also
-<a id="__codelineno-23-53" name="__codelineno-23-53" href="#__codelineno-23-53"></a>                                  #   audited under its own action, context via = import
-<a id="__codelineno-23-54" name="__codelineno-23-54" href="#__codelineno-23-54"></a>cloud_integration.created / cloud_integration.updated / cloud_integration.deleted
-<a id="__codelineno-23-55" name="__codelineno-23-55" href="#__codelineno-23-55"></a>                                  # created/updated: context profiles (their names, §10.6)
-<a id="__codelineno-23-56" name="__codelineno-23-56" href="#__codelineno-23-56"></a>oidc_key.rotated / oidc_key.retired            # issuer signing key (§3.11)
-<a id="__codelineno-23-57" name="__codelineno-23-57" href="#__codelineno-23-57"></a>worker_pool.created / worker_pool.deleted
-<a id="__codelineno-23-58" name="__codelineno-23-58" href="#__codelineno-23-58"></a>worker.rejected                                # a non-docker runner refused in production (§7.4)
-<a id="__codelineno-23-59" name="__codelineno-23-59" href="#__codelineno-23-59"></a>worker.diagnostics_requested                   # read-only debug bundle (cf. §observability)
-<a id="__codelineno-23-60" name="__codelineno-23-60" href="#__codelineno-23-60"></a>user.role_changed / user.apply_tier_changed / user.destroy_permission_changed / user.disabled
-<a id="__codelineno-23-61" name="__codelineno-23-61" href="#__codelineno-23-61"></a>tier.created / tier.updated / tier.deleted     # configurable tier catalog (§2.4)
-<a id="__codelineno-23-62" name="__codelineno-23-62" href="#__codelineno-23-62"></a>secret_source.created / secret_source.updated / secret_source.token_rotated / secret_source.deleted
-<a id="__codelineno-23-63" name="__codelineno-23-63" href="#__codelineno-23-63"></a>secret.fallback_used / secret.fallback_overridden                    # §15
-<a id="__codelineno-23-64" name="__codelineno-23-64" href="#__codelineno-23-64"></a>environment.cloned                                                   # §21.2
-<a id="__codelineno-23-65" name="__codelineno-23-65" href="#__codelineno-23-65"></a>rollout.created / rollout.approved / rollout.paused / rollout.resumed    # §21.8
-<a id="__codelineno-23-66" name="__codelineno-23-66" href="#__codelineno-23-66"></a>rollout.retried / rollout.canceled / rollout.succeeded / rollout.failed  # §21.8
-<a id="__codelineno-23-67" name="__codelineno-23-67" href="#__codelineno-23-67"></a>comment.created / comment.updated / comment.resolved / comment.reopened / comment.deleted
-<a id="__codelineno-23-68" name="__codelineno-23-68" href="#__codelineno-23-68"></a>                                  # plan-review comments (§16.3) — target the comment; context
-<a id="__codelineno-23-69" name="__codelineno-23-69" href="#__codelineno-23-69"></a>                                  #   run_id (+ parent_id, anchor_kind) — NEVER the body
+<a id="__codelineno-23-47" name="__codelineno-23-47" href="#__codelineno-23-47"></a>state.lock_released               # system: the run holding the managed-state lock ended, so transition()
+<a id="__codelineno-23-48" name="__codelineno-23-48" href="#__codelineno-23-48"></a>                                  #   released it (§11.2) — context reason = run_ended, run_id, run_state, lock_id
+<a id="__codelineno-23-49" name="__codelineno-23-49" href="#__codelineno-23-49"></a>dependency.created / dependency.deleted / dependency.mock_consumed   # created: also via link-by-name,
+<a id="__codelineno-23-50" name="__codelineno-23-50" href="#__codelineno-23-50"></a>                                  #   or a clone (via = clone, upstream_kind, §21.2)
+<a id="__codelineno-23-51" name="__codelineno-23-51" href="#__codelineno-23-51"></a>dependency.updated                # policy / output references changed by a config import (§22.3)
+<a id="__codelineno-23-52" name="__codelineno-23-52" href="#__codelineno-23-52"></a>variable_set.attachment_updated   # an attachment&#39;s priority changed by a config import (§22.3)
+<a id="__codelineno-23-53" name="__codelineno-23-53" href="#__codelineno-23-53"></a>service_account.created / api_token.created / api_token.revoked   # §23 — never the token
+<a id="__codelineno-23-54" name="__codelineno-23-54" href="#__codelineno-23-54"></a>space.config_exported / space.config_imported   # §22 — every item an import writes is also
+<a id="__codelineno-23-55" name="__codelineno-23-55" href="#__codelineno-23-55"></a>                                  #   audited under its own action, context via = import
+<a id="__codelineno-23-56" name="__codelineno-23-56" href="#__codelineno-23-56"></a>cloud_integration.created / cloud_integration.updated / cloud_integration.deleted
+<a id="__codelineno-23-57" name="__codelineno-23-57" href="#__codelineno-23-57"></a>                                  # created/updated: context profiles (their names, §10.6)
+<a id="__codelineno-23-58" name="__codelineno-23-58" href="#__codelineno-23-58"></a>oidc_key.rotated / oidc_key.retired            # issuer signing key (§3.11)
+<a id="__codelineno-23-59" name="__codelineno-23-59" href="#__codelineno-23-59"></a>worker_pool.created / worker_pool.deleted
+<a id="__codelineno-23-60" name="__codelineno-23-60" href="#__codelineno-23-60"></a>worker.rejected                                # a non-docker runner refused in production (§7.4)
+<a id="__codelineno-23-61" name="__codelineno-23-61" href="#__codelineno-23-61"></a>worker.diagnostics_requested                   # read-only debug bundle (cf. §observability)
+<a id="__codelineno-23-62" name="__codelineno-23-62" href="#__codelineno-23-62"></a>user.role_changed / user.apply_tier_changed / user.destroy_permission_changed / user.disabled
+<a id="__codelineno-23-63" name="__codelineno-23-63" href="#__codelineno-23-63"></a>tier.created / tier.updated / tier.deleted     # configurable tier catalog (§2.4)
+<a id="__codelineno-23-64" name="__codelineno-23-64" href="#__codelineno-23-64"></a>secret_source.created / secret_source.updated / secret_source.token_rotated / secret_source.deleted
+<a id="__codelineno-23-65" name="__codelineno-23-65" href="#__codelineno-23-65"></a>secret.fallback_used / secret.fallback_overridden                    # §15
+<a id="__codelineno-23-66" name="__codelineno-23-66" href="#__codelineno-23-66"></a>environment.cloned                                                   # §21.2
+<a id="__codelineno-23-67" name="__codelineno-23-67" href="#__codelineno-23-67"></a>rollout.created / rollout.approved / rollout.paused / rollout.resumed    # §21.8
+<a id="__codelineno-23-68" name="__codelineno-23-68" href="#__codelineno-23-68"></a>rollout.retried / rollout.canceled / rollout.succeeded / rollout.failed  # §21.8
+<a id="__codelineno-23-69" name="__codelineno-23-69" href="#__codelineno-23-69"></a>comment.created / comment.updated / comment.resolved / comment.reopened / comment.deleted
+<a id="__codelineno-23-70" name="__codelineno-23-70" href="#__codelineno-23-70"></a>                                  # plan-review comments (§16.3) — target the comment; context
+<a id="__codelineno-23-71" name="__codelineno-23-71" href="#__codelineno-23-71"></a>                                  #   run_id (+ parent_id, anchor_kind) — NEVER the body
 </code></pre></div>
 <p>Not audited by a dedicated action: a run failed because an external secret could not resolve is
 <code>run.apply_failed</code> with <code>reason: secret</code> (§15.6); a pool token is not rotatable through the API
@@ -5671,7 +5676,7 @@ so that code runs unchanged — and the same code keeps working by hand, on the 
 <tr>
 <td><code>LOCK</code></td>
 <td><code>/state/v1/{env_id}/lock</code></td>
-<td><code>plan</code> or <code>rw</code> scope; the body (tofu's lock info) must carry an <code>ID</code> (400 otherwise); 200 or <strong>423</strong> + holder; <strong>403</strong> once the token's run is no longer active — and, for a <code>plan</code> token, once its run has left the plan phase</td>
+<td><code>plan</code> or <code>rw</code> scope; the body (tofu's lock info) must carry an <code>ID</code> (400 otherwise); 200 or <strong>423</strong> + holder; the lock records the token's <code>run_id</code> as its holder run (<code>NULL</code> for an import session); <strong>403</strong> once the token's run is no longer active — and, for a <code>plan</code> token, once its run has left the plan phase</td>
 </tr>
 <tr>
 <td><code>UNLOCK</code></td>
@@ -5681,6 +5686,7 @@ so that code runs unchanged — and the same code keeps working by hand, on the 
 </tbody>
 </table>
 <p>These four are the whole Terraform-protocol surface: there is no state deletion route. Breaking a lock whose ID one does not hold is the human <strong>force-unlock</strong>, <code>DELETE /api/v1/environments/{env_id}/state/lock</code> (admin, audited <code>state.force_unlocked</code>, §12) — never a state token.</p>
+<p><strong>A run's lock ends with the run.</strong> When a run reaches a terminal state, <code>transition()</code> (§4.2) deletes the lock whose holder run is that run, in the same transaction, and audits <code>state.lock_released</code> (actor <code>system</code>, target the environment, context <code>reason = run_ended</code>, <code>run_id</code>, <code>run_state</code>, <code>lock_id</code>). This is what frees an environment whose worker died mid-plan or mid-apply (<code>worker_lost</code>, §3.7) — tofu never got to UNLOCK — instead of failing every later run on it (drift included) with 423 until an admin force-unlocks. Only that run's lock: a lock held by another run, or by a run-less holder (an import session, or a lock recorded before holder runs were tracked), is never touched and keeps the behaviour above — its holder's UNLOCK or the admin force-unlock. It cannot release a lock still in use: a plan token never writes state, and a job holding apply credentials is reclaimed only once the apply window has passed (§3.7), when its <code>rw</code> token has expired; a lost worker's late UNLOCK then gets 200 (nothing held) or 423 (a new holder), never another holder's lock.</p>
 <p>Auth: Basic (username ignored, <code>env</code>), password = JWT <code>{env_id, run_id, scope, typ: "state", iat, exp}</code> (HS256, <code>STACKD_JWT_SECRET</code>; invalid → 401, another env's → 403), minted at the claim (§7.2) for <strong>one job</strong>, not for the whole run. Its <code>scope</code> is fixed at mint time from the job, so a run's plan token and its apply token are different tokens with different rights:</p>
 <table>
 <thead>
@@ -5709,7 +5715,7 @@ so that code runs unchanged — and the same code keeps working by hand, on the 
 </tbody>
 </table>
 <p>Only an <code>rw</code> token writes state: no plan, not even with a leaked or stale plan token, can write state, including during that same run's apply. A plan token cannot take the lock from under that apply either. <code>exp</code>: the apply window (<code>apply_reclaim_window_seconds</code>, §3.7) for an <code>rw</code> job token, 6 h for <code>ro</code>/<code>plan</code>; 30 min for an import session.</p>
-<p>A <strong>run-scoped</strong> token writes state (<code>POST</code>) or takes the lock (<code>LOCK</code>) only while its run is active: once the run is terminal (e.g. failed as <code>worker_lost</code> and its env handed to the next run), a partitioned worker's still-unexpired token gets <strong>403</strong> (defense in depth on top of the TTL). <code>UNLOCK</code> stays allowed, so a reclaimed run can still release the lock it holds. Run-less import-session tokens (§11.4) are unaffected — bounded by their own short TTL.</p>
+<p>A <strong>run-scoped</strong> token writes state (<code>POST</code>) or takes the lock (<code>LOCK</code>) only while its run is active: once the run is terminal (e.g. failed as <code>worker_lost</code> and its env handed to the next run), a partitioned worker's still-unexpired token gets <strong>403</strong> (defense in depth on top of the TTL). <code>UNLOCK</code> stays allowed — harmless, since the run's own lock was already released when it ended (above), and an UNLOCK never frees another holder's lock. Run-less import-session tokens (§11.4) are unaffected — bounded by their own short TTL.</p>
 <h3 id="113-s3-layout">11.3 S3 layout<a class="headerlink" href="#113-s3-layout" title="Permanent link">&para;</a></h3>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-41-1" name="__codelineno-41-1" href="#__codelineno-41-1"></a>s3://stackd-&lt;org&gt;/
 <a id="__codelineno-41-2" name="__codelineno-41-2" href="#__codelineno-41-2"></a>  states/{environment_id}/{version_uuid}.tfstate    # SSE-KMS, bucket versioning ON
@@ -5929,7 +5935,7 @@ second backend block fails <code>init</code>. For stacks that should keep their 
 </tr>
 <tr>
 <td>State</td>
-<td>S3 SSE-KMS via API only; per-job state tokens scoped <code>ro</code> (proposed runs, read-only commands) / <code>plan</code> (lock, never write) / <code>rw</code> (apply, mutating command, import session), refused once their run is terminal; handed to tofu only, as <code>TF_HTTP_*</code> env (§11.2); audited force-unlock</td>
+<td>S3 SSE-KMS via API only; per-job state tokens scoped <code>ro</code> (proposed runs, read-only commands) / <code>plan</code> (lock, never write) / <code>rw</code> (apply, mutating command, import session), refused once their run is terminal; handed to tofu only, as <code>TF_HTTP_*</code> env (§11.2); a run's lock released (audited) when the run ends; audited force-unlock</td>
 </tr>
 <tr>
 <td>Saved plans</td>

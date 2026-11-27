@@ -1804,8 +1804,8 @@ all. Counts in parentheses include parametrized cases and drift as tests are add
 <td><code>before_apply</code>/<code>after_apply</code> checks are recorded and audited (<code>run.check_warned</code>); an apply without checks keeps the plan's; a failing <code>after_apply</code> hook records the outputs, clears the drift and cascades nothing; a failed apply records no outputs and leaves the drift.</td>
 </tr>
 <tr>
-<td><code>test_state_backend.py</code> (15)</td>
-<td>HTTP state backend (moto S3): LOCK/POST/GET/UNLOCK and serial regression; a bucket the API creates gets versioning and default encryption (an S3 without them only warns); <code>ro</code> tokens can't write or unlock, <code>plan</code> tokens lock but can't write, proposed runs never lock; env scoping; TTL follows the credential phase; a terminal run's token can't write; UNLOCK and a locked POST need the holder's lock ID; import session (adopt, admin-only, managed state only).</td>
+<td><code>test_state_backend.py</code> (19)</td>
+<td>HTTP state backend (moto S3): LOCK/POST/GET/UNLOCK and serial regression; a bucket the API creates gets versioning and default encryption (an S3 without them only warns); <code>ro</code> tokens can't write or unlock, <code>plan</code> tokens lock but can't write, proposed runs never lock; env scoping; TTL follows the credential phase; a terminal run's token can't write; UNLOCK and a locked POST need the holder's lock ID; a run's lock is released (audited) when the run ends — a lost plan at once, a lost apply only past the apply window — never another run's or a run-less holder's; import session (adopt, admin-only, managed state only).</td>
 </tr>
 <tr>
 <td><code>test_oidc.py</code> (6)</td>

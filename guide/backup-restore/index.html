@@ -1495,8 +1495,9 @@ bucket versioning on, any combination is consistent.</p>
    - runs that were executing at backup time are failed by the scheduler (<code>worker_lost</code>) after the
      usual windows; runs waiting for a human are still there — <strong>discard</strong> them rather than
      confirming a plan made against a world that has moved on;
-   - a state lock held at backup time is still recorded: release it with <strong>Force unlock</strong> (admin,
-     environment → <em>State</em>);
+   - a state lock held at backup time is still recorded: it is released when the run that held it
+     is failed (above); one with no run behind it (an import session) needs <strong>Force unlock</strong>
+     (admin, environment → <em>State</em>);
    - compare each managed-state environment's latest state version
      (<code>GET /api/v1/environments/{id}/state/versions</code>) with what you expect: <strong>if an apply ran
      after the backup point, the restored database does not know its state version</strong> — with

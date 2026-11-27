@@ -2218,7 +2218,9 @@ out to them.</p>
 <p>Why: per-job <strong>scoped tokens</strong>, <strong>locking visible in the UI</strong> with audited force-unlock, refusal
 of a regressive serial, and every write tied to the run that produced it. The token's scope follows
 the job: <code>ro</code> (PR plans, read-only commands: read only), <code>plan</code> (a plan may lock, never write),
-<code>rw</code> (an apply or a mutating command). Once its run has ended, a token can no longer write or lock.</p>
+<code>rw</code> (an apply or a mutating command). Once its run has ended, a token can no longer write or lock,
+and the lock the run held is released with it (audited): a worker that dies mid-run does not leave
+the environment locked.</p>
 <p>The worker adds a bare <code>backend "http" {}</code> block and hands the address and the token to tofu
 <strong>only</strong>, as <code>TF_HTTP_*</code> environment variables — never <code>-backend-config</code>, which tofu would persist
 in <code>.terraform/</code> (readable by repo hooks) and in the saved plan. <strong>Zero changes to the user's

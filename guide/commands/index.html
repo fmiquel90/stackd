@@ -1315,7 +1315,9 @@ managed backend as any other run.</p>
 <p class="admonition-title">Note</p>
 <p>This is <strong>not</strong> arbitrary shell. The worker runs <code>&lt;tool&gt; &lt;command&gt; &lt;args&gt;</code> where <code>command</code> is
 taken verbatim from an allowlist, and options are limited to a short per-command allowlist.
-To remove a stuck lock on <strong>Stackd-managed state</strong>, use the dedicated force-unlock (admin only:
+A lock on <strong>Stackd-managed state</strong> is released by Stackd when the run that took it ends —
+even when its worker died (<code>worker_lost</code>). To remove one that has no run behind it (an
+interrupted <a href="../importing-existing-state/">state import</a>), use the dedicated force-unlock (admin only:
 UI <strong>State</strong> tab → <strong>Force unlock…</strong>, or <code>DELETE /api/v1/environments/{id}/state/lock</code>); the
 <code>force-unlock</code> command is for environments with their <strong>own</strong> backend (see
 <a href="#force-unlock-own-backend">below</a>).</p>
