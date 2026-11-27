@@ -230,11 +230,16 @@ async def github_webhook(
                     triggered += 1
             await session.commit()
         elif action == "closed" and pr_number is not None:
-            # Best-effort: cancel still-in-flight proposed runs for this PR (§18).
+            # Best-effort: cancel still-in-flight proposed runs for this PR (§18). A PR number is
+            # only unique within its repository: scope to the stacks this delivery authenticated.
+            stack_envs = select(Environment.id).where(
+                Environment.stack_id.in_([stack.id for stack in stacks])
+            )
             stale = (
                 (
                     await session.execute(
                         select(Run).where(
+                            Run.environment_id.in_(stack_envs),
                             Run.pr_number == pr_number,
                             Run.vcs_provider == "github",
                             Run.type == RunType.proposed,
