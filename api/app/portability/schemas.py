@@ -29,6 +29,7 @@ from app.enums import (
 )
 from app.notifications.dispatcher import check_url_syntax
 from app.notifications.schemas import ALLOWED_STATES
+from app.stacks.paths import normalize_trigger_paths
 from app.stacks.schemas import _check_tool_version
 
 FORMAT: Literal["stackd.config"] = "stackd.config"
@@ -142,6 +143,7 @@ class StackDoc(_Doc):
     has_repo_secret: bool = False
     has_webhook_secret: bool = False
     project_root: str = "."
+    trigger_paths: list[str] = []
     tool: Tool = Tool.opentofu
     tool_version: str
     labels: dict[str, Any] | None = None
@@ -155,6 +157,11 @@ class StackDoc(_Doc):
     def _tool_version(cls, v: str) -> str:
         _check_tool_version(v)
         return v
+
+    @field_validator("trigger_paths")
+    @classmethod
+    def _trigger_paths(cls, v: list[str]) -> list[str]:
+        return normalize_trigger_paths(v)
 
 
 class AttachmentDoc(_Doc):

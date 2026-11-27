@@ -76,6 +76,7 @@ export interface Stack {
   has_repo_secret: boolean;
   has_webhook_secret: boolean;
   project_root: string;
+  trigger_paths: string[]; // repo-root globs that also concern the stack (SPECS §3.1)
   tool: Tool;
   tool_version: string;
   labels: Record<string, unknown> | null;

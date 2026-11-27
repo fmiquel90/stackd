@@ -15,6 +15,7 @@ const STACK: Stack = {
   has_repo_secret: false,
   has_webhook_secret: true,
   project_root: ".",
+  trigger_paths: ["modules/**"],
   tool: "opentofu",
   tool_version: "1.12",
   labels: {},
@@ -57,5 +58,13 @@ describe("StackGeneralPanel webhook secret", () => {
   it("is hidden from a reader", () => {
     renderAs("reader");
     expect(screen.queryByText(/Webhook secret/)).toBeNull();
+  });
+});
+
+describe("StackGeneralPanel trigger paths", () => {
+  it("shows the stored globs, one per line", () => {
+    renderAs("writer");
+    const box = screen.getByLabelText(/Trigger paths/) as HTMLTextAreaElement;
+    expect(box.value).toBe("modules/**");
   });
 });

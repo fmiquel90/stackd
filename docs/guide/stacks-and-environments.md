@@ -24,7 +24,24 @@ STACK=$(curl -s -X POST localhost:8000/api/v1/stacks \
 ```
 
 !!! tip "One repo, several stacks"
-    A single repo can host many stacks by giving each a distinct `project_root` (e.g. `network`, `db`, `app`). One GitHub webhook per repo (`POST /api/v1/webhooks/github`) serves them all, but each stack holds **its own** HMAC secret (`webhook_secret`, write-only, set with `PATCH /api/v1/stacks/{id}` or in the stack's **Settings → General**): a delivery acts only on the stacks of that repo whose secret verifies its signature, so give the stacks fed by one webhook the same secret. On a push, the API then picks the environments tracking the pushed branch and triggers a run only when the push touches the stack's `project_root`. See [SPECS §3.1](../SPECS.md).
+    A single repo can host many stacks by giving each a distinct `project_root` (e.g. `network`, `db`, `app`). One GitHub webhook per repo (`POST /api/v1/webhooks/github`) serves them all, but each stack holds **its own** HMAC secret (`webhook_secret`, write-only, set with `PATCH /api/v1/stacks/{id}` or in the stack's **Settings → General**): a delivery acts only on the stacks of that repo whose secret verifies its signature, so give the stacks fed by one webhook the same secret. On a push, the API then picks the environments tracking the pushed branch and triggers a run only when the push touches the stack's `project_root` or one of its `trigger_paths` (below). See [SPECS §3.1](../SPECS.md).
+
+### Trigger paths: code shared outside the project root
+
+In a monorepo a stack usually depends on code outside its folder — local modules reached through `../../modules/x`, shared configuration files. List them in `trigger_paths` (stack **Settings → General**, one per line, or the API): glob patterns relative to the **repository root**. A push that touches one of them concerns the stack exactly like a change under its `project_root`: it triggers the stack's autodeploy runs, and it counts for staleness.
+
+```bash
+curl -s -X PATCH localhost:8000/api/v1/stacks/$STACK \
+  -H "Authorization: Bearer $TOKEN" -H 'content-type: application/json' \
+  -d '{"trigger_paths":["modules/vpc","modules/shared/**","config/*.hcl"]}'
+```
+
+- `*` matches within one folder level, `**` (as a whole segment) any number of levels: `modules/**`, `**/*.tf`.
+- A pattern that names a folder covers everything in it: `modules/vpc` is the same as `modules/vpc/**`.
+- A renamed file counts by both its old and its new path.
+- At most 32 patterns; each relative (no leading `/`, no `..`). `null` or `[]` clears the list.
+
+The worker still clones the whole repository; trigger paths only decide which changes concern the stack.
 
 !!! note "Redelivering a GitHub webhook"
     Each delivery is acted on once: the API remembers its `X-GitHub-Delivery` id for **5 minutes**. A delivery GitHub sends again within that window — including **Redeliver** in the repo's webhook settings, which reuses the id — gets a `200` with `"duplicate": true` and does nothing. Past 5 minutes a Redeliver is processed again; a delivery that failed (5xx) can be redelivered at once. A request without the `X-GitHub-Delivery` header is refused (`400`). See [SPECS §13](../SPECS.md).
@@ -80,7 +97,7 @@ curl -s -X POST localhost:8000/api/v1/environments/$ENV/refresh-head \
   -H "Authorization: Bearer $TOKEN"
 ```
 
-`GET /api/v1/environments/{id}` then exposes `head_sha`, `commits_ahead`, `affects_project_root` and `stale`. An environment with nothing applied yet is never `stale`. Changing an environment's `branch` clears its recorded head until the next poll, and a push that deletes the branch clears it too. See [SPECS §9.6](../SPECS.md).
+`GET /api/v1/environments/{id}` then exposes `head_sha`, `commits_ahead`, `affects_project_root` and `stale` (`affects_project_root`, when known, means the commits ahead touch the stack — its `project_root` or its `trigger_paths`). An environment with nothing applied yet is never `stale`. Changing an environment's `branch` clears its recorded head until the next poll, and a push that deletes the branch clears it too. See [SPECS §9.6](../SPECS.md).
 
 ## Deleting a stack or an environment
 

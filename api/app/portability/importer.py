@@ -74,6 +74,7 @@ _STACK_FIELDS = (
     "repo_url",
     "repo_auth_kind",
     "project_root",
+    "trigger_paths",
     "tool",
     "tool_version",
     "labels",

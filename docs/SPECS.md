@@ -144,6 +144,7 @@ id uuid PK, space_id FK, name text unique(space), description,
 repo_url, repo_auth_kind enum(none|token|deploy_key), repo_secret_encrypted,
 webhook_secret_encrypted bytea nullable,   -- §5/§9.6: HMAC secret of the incoming webhook
 project_root text default '.',
+trigger_paths text[] not null default '{}', -- §9.6: extra repo paths that concern the stack (globs)
 tool enum(opentofu|terraform) default opentofu, tool_version text,
 labels jsonb nullable,                     -- org/selection tags, matched by a variable set's selector (§3.4)
 created_at, updated_at
@@ -151,7 +152,14 @@ created_at, updated_at
 
 > Neither branch, nor state, nor autodeploy: everything goes down into the environment.
 
-> **Incoming webhook & shared repo**: one repo can serve several stacks (distinct `project_root`). Since the GitHub/GitLab webhook is configured **per repo** with a unique secret, `webhook_secret_encrypted` is shared across these stacks (same value). On receipt (`POST /api/v1/webhooks/github`, §12), the API resolves the stacks whose `repo_url` matches the payload, verifies the HMAC against their common secret, then filters environments by branch and `project_root` (§9.6).
+> **Incoming webhook & shared repo**: one repo can serve several stacks (distinct `project_root`). Since the GitHub/GitLab webhook is configured **per repo** with a unique secret, `webhook_secret_encrypted` is shared across these stacks (same value). On receipt (`POST /api/v1/webhooks/github`, §12), the API resolves the stacks whose `repo_url` matches the payload, verifies the HMAC against their common secret, then filters environments by branch and by the paths that concern the stack (below, §9.6).
+
+> **Paths that concern a stack** (`project_root` + `trigger_paths`): in a monorepo a stack also depends on code outside its folder — local modules (`../../modules/x`), shared configuration. `trigger_paths` lists extra **glob patterns, relative to the repository root**, that concern the stack in addition to `project_root`. A changed file concerns the stack when its path is under `project_root` (always true for `.`) **or** matches one of `trigger_paths`. That single predicate (`app/stacks/paths.py::touches_stack`) is the only answer to "does this change touch the stack": the push webhook's run filter and the staleness level 2 (`affects_project_root`, §9.6) both go through it.
+> - **Paths**: repo-root-relative POSIX paths, as the VCS reports them; matching is case-sensitive. A **rename** contributes both its old and its new path (a file moved out of the stack still concerns it); a deletion contributes its path.
+> - **Glob syntax** (Python's `glob.translate`, `recursive`, hidden files included, `/` separator): `*` matches any run of characters within one path segment, `?` one character, `[abc]` / `[!abc]` a character class (an unclosed `[` is literal); `**` as a **whole segment** matches zero or more segments (`modules/**`, `**/*.tf`, `a/**/b.hcl` also matches `a/b.hcl`), anywhere else it is a plain `*`. Dotfiles are ordinary names (`*` matches `.terraform.lock.hcl`).
+> - **Folders**: a pattern concerns a file when it matches the file's path **or one of its parent directories** — `modules/vpc` covers everything under that folder (same as `modules/vpc/**`), and `modules/*` covers every file anywhere under `modules/` (each lies under a direct child of it).
+> - **Validation** (create, `PATCH`, import — 422 otherwise): at most 32 patterns of at most 256 characters; surrounding whitespace and trailing `/` are dropped and duplicates removed (first kept); a pattern is non-empty, relative (no leading `/`), uses `/` only (no `\`, no control character), and has no empty, `.` or `..` segment. `null` in a `PATCH` clears the list, like `[]`. Changing it is audited `stack.updated` (`fields` names `trigger_paths`, §6.2).
+> - **Not a checkout filter**: the worker still clones the whole repository (a stack's code reaching `../../modules/x` needs it anyway); `trigger_paths` only decides which changes concern the stack.
 
 ### 3.2 `environments` — the executable instance
 
@@ -169,7 +177,8 @@ allow_mock_apply bool default false,  -- §9.3: allow the apply of a run having 
 head_sha text nullable,               -- §9.6: known head of the tracked branch
 head_updated_at timestamptz nullable,
 commits_ahead int nullable,           -- nb of commits between last apply and head
-affects_project_root bool nullable,   -- do the commits ahead touch this project_root?
+affects_project_root bool nullable,   -- do the commits ahead touch the stack (project_root or
+                                      --   trigger_paths, §3.1)? Name kept for API compatibility
 locked bool, labels jsonb, position int,
 created_at, updated_at
 ```
@@ -1300,7 +1309,7 @@ stale            = head_sha present AND last_applied_sha present AND head_sha �
 No applied run yet (or a last run with no pinned commit) → `stale = false`: the applied commit is unknown. Computed for every env the API returns, in one query per request.
 
 **Updating `head_sha`** (from most precise to fallback):
-1. **Push webhook** (Phase 5): immediate update of all envs tracking the branch — even if the webhook does not trigger a run (`project_root` filtering), it always updates `head_sha` — on the envs still tracking that branch when it is written (guarded update: an env re-pointed meanwhile gets neither the head nor a run). A push that **deletes** the branch (`deleted: true`, all-zero `after`) triggers no run and never records the zero SHA: it clears `head_sha`, `commits_ahead` and `affects_project_root` (so the env is not `stale`), stamping `head_updated_at` with the receipt time.
+1. **Push webhook** (Phase 5): immediate update of all envs tracking the branch — even if the webhook does not trigger a run (filtered on the paths that concern the stack, §3.1: a push whose commits list no file at all is conservatively treated as concerning it), it always updates `head_sha` — on the envs still tracking that branch when it is written (guarded update: an env re-pointed meanwhile gets neither the head nor a run). A push that **deletes** the branch (`deleted: true`, all-zero `after`) triggers no run and never records the zero SHA: it clears `head_sha`, `commits_ahead` and `affects_project_root` (so the env is not `stale`), stamping `head_updated_at` with the receipt time.
 2. **Fallback polling**: `git ls-remote` per (repo, branch) every 15 min (`stackd_head_poll_interval`; periodic task, deduplicated by repo across the stacks sharing it — and by their repo credentials, so no stack's head is read with another stack's token) — covers absent or lost webhooks. Only envs whose head was not observed within the interval (by a webhook, a manual refresh or a previous poll, on any replica) are polled; a head recorded by a webhook while the poll runs is never overwritten. No DB transaction is held across the git calls, which run concurrently (at most 8 at a time); a failing repo is logged (never its token) and retried at the next poll, without blocking the others. The poll runs as a task of its own (still under its advisory lock, §7.5), so git calls outlasting a scheduler tick never delay the other periodic tasks; a poll still running when the next one is due skips that one.
 3. **Manual**: `POST /api/v1/environments/{id}/refresh-head`. Like the poll, it holds no DB transaction across its git call, and does not record the head if the env was re-pointed to another branch meanwhile. The recorded refresh is audited `environment.head_refreshed` (branch, old and new SHA) in the same transaction.
 
@@ -1308,10 +1317,10 @@ Changing an environment's `branch` (`PATCH`) clears `head_sha`, `head_updated_at
 
 **Two levels of precision**:
 - *Level 1 — branch ahead*: SHA comparison, always available. `commits_ahead` via the Git provider's compare API if available, otherwise binary "behind" display.
-- *Level 2 — concerns you*: `affects_project_root` = at least one commit ahead modifies files under `project_root` (GitHub/GitLab compare API). If unavailable: NULL, the UI stays at level 1.
+- *Level 2 — concerns you*: `affects_project_root` = at least one commit ahead touches the stack — a file under `project_root` or matching its `trigger_paths` (§3.1, the same `touches_stack` predicate as the webhook) — from the GitHub/GitLab compare API's file list, a renamed file counting by both its new and its previous path (`previous_filename`). The field keeps its name for API compatibility; it means "touches the stack", not only its root folder. If unavailable: NULL, the UI stays at level 1. **Status: not computed yet** — no compare call is made today, so the field is NULL except where §9.6 clears it.
 
 **Effects**:
-- `↑N` chip on the env cell (DESIGN.md §5.1) and the env header; attenuated variant if `affects_project_root = false` ("the branch moved ahead, but not this folder"). Shipped: the chip (`ModifierChips`, overview matrix and env header) and the banner below (run page).
+- `↑N` chip on the env cell (DESIGN.md §5.1) and the env header; attenuated variant if `affects_project_root = false` ("the branch moved ahead, but not in this stack's paths"). Shipped: the chip (`ModifierChips`, overview matrix and env header) and the banner below (run page).
 - **Obsolete `unconfirmed` run**: if `head_sha` advances while a plan awaits confirmation, banner on the run page — "plan computed on `abc1234`, the branch advanced by N commits" — with a *Re-plan* action (discard + new run on the head). Confirmation remains **possible** (applying a specific commit is legitimate) but the obsolescence is impossible to miss.
 - No automatic action: staleness is information, never a trigger (that is the role of webhooks).
 - `GET /api/v1/environments/{id}` exposes `head_sha`, `commits_ahead`, `affects_project_root`, `stale`.
@@ -2616,7 +2625,7 @@ JSON (the API's own format; it converts to YAML losslessly). Every object is ide
 | `secret_sources` | name | `provider`, `config` (non-sensitive) | the bootstrap credential |
 | `worker_pools` | name | `labels` | the pool token (stored hashed anyway) |
 | `variable_sets` | name | `description`, `auto_attach`, `selector`, `variables`, `attachments` (to a stack, an env or a tier, by name) | — |
-| `stacks` | name | repo, `repo_auth_kind`, `project_root`, tool, `labels`, `variables`, platform `hooks`, `notification_targets`, `environments`; `has_repo_secret` / `has_webhook_secret` flags | the repo token / deploy key, the webhook secret |
+| `stacks` | name | repo, `repo_auth_kind`, `project_root`, `trigger_paths`, tool, `labels`, `variables`, platform `hooks`, `notification_targets`, `environments`; `has_repo_secret` / `has_webhook_secret` flags | the repo token / deploy key, the webhook secret |
 | `stacks[].environments` | name in the stack | the settings of §3.2 (`tier`, `branch`, `autodeploy`, `protected`, four-eyes, `managed_state`, `allow_*_apply`, unmanaged backend config, `drift_check_enabled`, `labels`, `position`), `variables`, `hooks`, `notification_targets`, `cloud_integration` | operational columns: `locked`, head/staleness (§9.6), drift status (§19) |
 | `dependencies` | (upstream, downstream) | `trigger_policy`, `references` (output → input, `mock_value`) | — |
 

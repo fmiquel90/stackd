@@ -262,7 +262,7 @@ Two forms:
 |---|---|---|---|
 | Mocked | `◆ MOCKED` | `mock` | not real; blocks apply unless `allow_mock_apply` (SPECS §9.3) |
 | Fallback | `◈ FALLBACK` | `state-decision` | a secret came from a fallback; blocks apply unless `allow_fallback_apply` (SPECS §15.5) — it demands a decision, hence amber |
-| Stale | `↑3` (or `↑` until AUDIT A6) | `text-secondary` | branch ahead of the deployed commit; attenuated (`text-secondary`, dotted underline) when `affects_project_root=false` |
+| Stale | `↑3` (or `↑` until AUDIT A6) | `text-secondary` | branch ahead of the deployed commit; attenuated (`text-secondary`, dotted underline) when `affects_project_root=false` (the commits ahead touch neither the project root nor the trigger paths, SPECS §3.1) |
 | Drift | `≈ DRIFT` / `≈? DRIFT CHECK FAILED` | `text-primary` | neutral per SPECS §19.5 — a fact to investigate, not a decision |
 | Locked | `⚿ LOCKED` | `text-primary` | |
 | PR | `PR` | `state-queued` (outlined) | the env's active run is a proposed run |

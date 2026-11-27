@@ -507,7 +507,8 @@ curl -s -X POST localhost:8000/api/v1/environments/$PROD/cloud-integration/test 
 ## 11. Webhooks & Git staleness
 
 A Git webhook (HMAC-verified, secret per stack) maps a pushed branch to the environments tracking it,
-filtered by `project_root`:
+filtered by the paths that concern the stack — its `project_root`, plus its `trigger_paths` globs
+(shared modules or configuration outside the folder, e.g. `modules/**`):
 
 - **push** → a `tracked` run per matching environment, and `head_sha` advances.
 - **pull request** → a `proposed` run: plan-only, read-only state, mocks allowed, and **no
