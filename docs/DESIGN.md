@@ -761,6 +761,7 @@ approval)" — never a plain "confirmed by alice": she approved the rollout, not
 - A state change is visible everywhere it appears (rail, badges, matrix, attention zone) without a refresh.
 - **Connection indicator** in the top bar (`● live`); on a disconnect a thin "Reconnecting…" bar under the top bar, catch-up on reconnect, never a blocking modal.
 - No toast for background events (a run that finishes is seen on its rail; the bell receives the notification). Toasts are reserved for feedback on the current user's own actions.
+- **Session upkeep** (`api/client.ts`): the access token (memory only) is renewed through `/auth/refresh` at ~80 % of its lifetime; a request that still gets a 401 triggers one refresh shared by every concurrent caller, then is replayed once. A socket closed with **4401** renews the token the same way and reconnects at once. A refused refresh loses the session: the session query goes to `null` and the login page shows. Queries never retry a 4xx (a 403/404 page shows its error at once); a 5xx or network error gets 2 more tries.
 
 ---
 

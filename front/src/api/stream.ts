@@ -1,6 +1,6 @@
 import { useEffect, useRef, useSyncExternalStore } from "react";
 import { type QueryKey, useQueryClient } from "@tanstack/react-query";
-import { getAccessToken } from "./client";
+import { getAccessToken, refreshSession } from "./client";
 
 /**
  * One multiplexed WebSocket per tab (DESIGN §6), shared by every component. Components declare the
@@ -31,6 +31,8 @@ let ws: WebSocket | null = null;
 let retry: ReturnType<typeof setTimeout> | undefined;
 let healthy: ReturnType<typeof setTimeout> | undefined;
 let attempts = 0;
+let renewing = false; // a 4401 is being answered with a token refresh
+let authRefused = false; // the last close was a 4401
 
 function setStatus(next: ConnectionStatus) {
   if (status === next) return;
@@ -50,7 +52,7 @@ function flushSubs() {
 
 function connect() {
   const token = getAccessToken(); // fresh token on every (re)connect → survives expiry
-  if (!token || ws || wanted.size === 0) return;
+  if (!token || ws || renewing || wanted.size === 0) return;
   setStatus(attempts > 0 ? "reconnecting" : "connecting");
   const proto = window.location.protocol === "https:" ? "wss" : "ws";
   // Token sent as the first message, never in the URL (it would leak to proxy logs and Referer).
@@ -73,7 +75,7 @@ function connect() {
     }
     listeners.forEach((l) => l(signal));
   };
-  sock.onclose = () => {
+  sock.onclose = (e) => {
     if (healthy) clearTimeout(healthy);
     ws = null;
     sent.clear();
@@ -84,12 +86,31 @@ function connect() {
     attempts += 1;
     setStatus("reconnecting");
     // Exponential backoff capped at 30 s; the query polls are the fallback meanwhile.
-    retry = setTimeout(
-      () => {
+    const backoff = Math.min(30_000, 1_000 * 2 ** Math.min(attempts, 5));
+    const reconnectIn = (ms: number) => {
+      renewing = false;
+      retry = setTimeout(() => {
         retry = undefined;
         connect();
+      }, ms);
+    };
+    if (e.code !== 4401) {
+      authRefused = false;
+      reconnectIn(backoff);
+      return;
+    }
+    // The token was refused (expired): renew it and reconnect at once — with the backoff if a
+    // renewed token was refused too. A refused refresh lost the session: stop.
+    const again = authRefused;
+    authRefused = true;
+    renewing = true;
+    (getAccessToken() === token ? refreshSession() : Promise.resolve()).then(
+      () => reconnectIn(again ? backoff : 0),
+      () => {
+        if (getAccessToken()) return reconnectIn(backoff);
+        renewing = false;
+        setStatus("idle");
       },
-      Math.min(30_000, 1_000 * 2 ** Math.min(attempts, 5)),
     );
   };
 }
