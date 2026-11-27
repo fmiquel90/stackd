@@ -1572,8 +1572,8 @@ update the doc.</p>
 <tbody>
 <tr>
 <td><code>task test</code></td>
-<td><code>docker compose exec -T api uv run pytest</code> then <code>cd front &amp;&amp; pnpm test</code> (<code>vitest run</code>)</td>
-<td>compose <code>api</code> up, Docker for testcontainers</td>
+<td><code>cd api &amp;&amp; uv run pytest</code> on the host, in a clean env (testcontainers needs the Docker socket, which the <code>api</code> container lacks; the Taskfile's <code>.env</code> dotenv carries the dev stack's settings), then <code>pnpm test</code> (<code>vitest run</code>) in a throwaway <code>front</code> container (<code>docker compose run --rm --no-deps</code>: <code>front/node_modules</code> holds the container's Linux binaries)</td>
+<td>Docker, <code>uv</code> on the host; no running stack</td>
 </tr>
 <tr>
 <td><code>task e2e</code></td>
