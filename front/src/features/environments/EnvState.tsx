@@ -5,6 +5,7 @@ import type { Environment } from "@/api/types";
 import { Button } from "@/ui/Button";
 import { EmptyState, RelativeTime, Skeleton, Table, Td, Th } from "@/ui/primitives";
 import { TypeNameDialog } from "@/ui/TypeNameDialog";
+import { shortId } from "@/lib/ids";
 
 // Managed state versions (SPECS §11) and the admin-only force-unlock, behind the typed env name
 // (DESIGN §5.7) — v1 offered a one-click unlock to everyone.
@@ -68,7 +69,7 @@ export function EnvState({ env, isAdmin }: { env: Environment; isAdmin: boolean 
                 <Td className="font-data text-[12px]">
                   {v.created_by_run_id ? (
                     <Link to={`/runs/${v.created_by_run_id}`} className="cell-link">
-                      run {v.created_by_run_id.slice(0, 8)}
+                      run {shortId(v.created_by_run_id)}
                     </Link>
                   ) : (
                     "—"

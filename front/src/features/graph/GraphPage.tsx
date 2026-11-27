@@ -25,6 +25,7 @@ import { Button } from "@/ui/Button";
 import { Dialog, DialogContent, DialogTrigger, SheetContent } from "@/ui/overlays";
 import { Banner, EmptyState, Field, Input, NativeSelect, Skeleton, Table, Td, Th } from "@/ui/primitives";
 import { cn } from "@/ui/cn";
+import { shortId } from "@/lib/ids";
 
 // The dependency graph (DESIGN §5.4): nodes are env summaries (§2.3), edges carry the outputs they
 // pass, dashed magenta only when the downstream's run actually consumed a mock. The list view is a
@@ -266,7 +267,7 @@ function AdjacencyList({
 }) {
   const name = (id: string) => {
     const e = entries.get(id);
-    return e ? `${e.stack.name}/${e.env.name}` : id.slice(0, 8);
+    return e ? `${e.stack.name}/${e.env.name}` : shortId(id);
   };
   if (!infos.length) return <EmptyState title="No dependency matches these filters." />;
   return (
@@ -351,7 +352,7 @@ function NodeDrawer({
   });
   const name = (id: string) => {
     const e = entries.get(id);
-    return e ? `${e.stack.name}/${e.env.name}` : id.slice(0, 8);
+    return e ? `${e.stack.name}/${e.env.name}` : shortId(id);
   };
   const inbound = infos.filter((i) => i.edge.downstream === entry.env.id);
   const outbound = infos.filter((i) => i.edge.upstream === entry.env.id);

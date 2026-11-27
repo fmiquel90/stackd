@@ -7,6 +7,7 @@ import { buildSegments } from "@/lib/phases";
 import { formatDuration } from "@/lib/time";
 import { Button } from "@/ui/Button";
 import { EmptyState, NativeSelect, RelativeTime, Sha, Table, Td, Th } from "@/ui/primitives";
+import { shortId } from "@/lib/ids";
 
 // The environment's run history (DESIGN §5.8) — v1 had none: only the latest run was reachable.
 
@@ -85,7 +86,7 @@ export function RunsHistory({
                 <tr key={r.id} className="hover:bg-raised">
                   <Td>
                     <Link to={`/runs/${r.id}`} className="cell-link font-data text-[12px]">
-                      {r.id.slice(0, 8)}
+                      {shortId(r.id)}
                     </Link>
                   </Td>
                   <Td className="font-data text-[12px] text-muted">{KIND_LABEL[kindOf(r)]}</Td>

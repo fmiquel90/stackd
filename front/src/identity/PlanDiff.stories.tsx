@@ -72,3 +72,24 @@ export const UnparsedFallback = () => (
 export const LongPlan500 = () => <Demo lines={bigPlan(500)} counts={{ add: 400, change: 50, destroy: 10 }} />;
 
 export const NoPlanOutput = () => <Demo lines={null} counts={null} />;
+
+// Module addresses wrap between segments (after `.`, before `[`), never inside a name — check at 390 px.
+const LONG_ADDRESSES = [
+  "OpenTofu will perform the following actions:",
+  "",
+  '  # module.network.module.vpc.aws_subnet.private_application_tier["eu-west-1a"] will be destroyed',
+  '  - resource "aws_subnet" "private_application_tier" {',
+  '      - cidr_block = "10.0.1.0/24" -> null',
+  "    }",
+  "",
+  "  # module.network.module.vpc.aws_route_table_association.private_application_tier[0] will be created",
+  '  + resource "aws_route_table_association" "private_application_tier" {',
+  "      + id = (known after apply)",
+  "    }",
+  "",
+  "Plan: 1 to add, 0 to change, 1 to destroy.",
+];
+
+export const LongModuleAddresses = () => (
+  <Demo lines={LONG_ADDRESSES} counts={{ add: 1, change: 0, destroy: 1 }} />
+);

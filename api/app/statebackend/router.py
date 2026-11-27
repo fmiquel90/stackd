@@ -195,7 +195,15 @@ async def lock_state(env_id: uuid.UUID, request: Request, session: DbSession) ->
     existing = await session.get(StateLock, env_id)
     if existing is not None:
         return _locked(existing)
-    session.add(StateLock(environment_id=env_id, lock_id=lock_id, info=info))
+    run_id = claims.get("run_id")
+    session.add(
+        StateLock(
+            environment_id=env_id,
+            lock_id=lock_id,
+            info=info,
+            run_id=uuid.UUID(run_id) if run_id else None,
+        )
+    )
     await session.commit()
     return Response(status_code=200)
 

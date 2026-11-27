@@ -432,7 +432,10 @@ state_versions: id, environment_id FK, serial, lineage, size_bytes,
                 s3_key, created_by_run_id nullable, deleted_at nullable (soft delete: reads skip such
                 rows; no endpoint sets it yet),
                 created_at
-state_locks:    environment_id PK, lock_id, info jsonb, locked_at
+state_locks:    environment_id PK, lock_id, info jsonb, locked_at,
+                run_id FK runs nullable (ON DELETE SET NULL; the run whose state token took the
+                lock, NULL for a run-less holder — an import session §11.4; released with that
+                run, §11.2)
 
 hooks (platform, §8): id, target_kind enum('stack','environment'), target_id,
        stage enum(before_init|after_init|before_plan|after_plan|before_apply|after_apply),
@@ -576,7 +579,7 @@ Command runs (§4.3) take a shorter path: `queued → preparing → running → 
 | `applying → finished` | worker | apply exit 0 + outputs uploaded + no failing `after_apply` check (one that fails → `failed`, the outputs still recorded, nothing cascades, §8.3) |
 | `* → failed` | worker/system | a tofu command failing (a plan fails on any exit but 0 or 2, an apply or a command on any non-zero exit), the plan JSON unavailable (§8.3), a hook `fail` at any stage (§8.3), timeouts — the worker hard-kills the process group past its budget: the apply (and a mutating command run, §4.3) past `stackd_apply_timeout_seconds` (default 15 min, sent as `apply_timeout_seconds`), a hook past the hook timeout (10 min, `STACKD_HOOK_TIMEOUT_SECONDS`, then it fails by its `on_failure`), any other subprocess past the agent's 2 h cap (separate prepare/plan budgets are not enforced yet); `worker_lost` (§3.7); `commit_mismatch` (§7.3); an unresolvable dependency, secret or workload token at claim — plan or apply claim, the claim having moved the run to `preparing`/`applying` first (§9.3, §15.2, §3.11). A worker-executed state only: `unconfirmed` and `confirmed` have no `→ failed` edge, and a `job_failed` report on a run its worker no longer executes is refused (409, §7.3) |
 
-Single function `transition(run, to_state, actor, payload)` (`app/runs/transition.py`): legality (its `ALLOWED` edge table), atomic update guarded on `from_state` — the row re-read `FOR UPDATE` where `state = from_state` (409 `Concurrent modification` if it moved), a rollout member's rollout locked first (§21.3) — `run_event`, audit event when the caller passes one (human or terminal actions), the notification / VCS / in-app outboxes and the rollout's progress (§17, §18, §21), WS publication (`NOTIFY`, §5.3). A terminal state also stamps `finished_at` and drops the saved plan (§11.3). Everything in the caller's transaction: `transition()` never commits. The cascade (§9.2) is run by the caller, after the transition to `finished`.
+Single function `transition(run, to_state, actor, payload)` (`app/runs/transition.py`): legality (its `ALLOWED` edge table), atomic update guarded on `from_state` — the row re-read `FOR UPDATE` where `state = from_state` (409 `Concurrent modification` if it moved), a rollout member's rollout locked first (§21.3) — `run_event`, audit event when the caller passes one (human or terminal actions), the notification / VCS / in-app outboxes and the rollout's progress (§17, §18, §21), WS publication (`NOTIFY`, §5.3). A terminal state also stamps `finished_at`, drops the saved plan (§11.3) and releases the state lock the run holds, if any (audited `state.lock_released`, §11.2). Everything in the caller's transaction: `transition()` never commits. The cascade (§9.2) is run by the caller, after the transition to `finished`.
 
 ### 4.3 Command runs
 
@@ -732,6 +735,8 @@ run.check_failed                  # a hook check with on_failure=fail failed the
 run.check_warned                  # a job (plan or apply) ended — finished, failed or stopped — with warn
                                   #   checks; context: checks (their names), stages (where they ran)
 state.force_unlocked / state.import_session_created   # §11.2, §11.4
+state.lock_released               # system: the run holding the managed-state lock ended, so transition()
+                                  #   released it (§11.2) — context reason = run_ended, run_id, run_state, lock_id
 dependency.created / dependency.deleted / dependency.mock_consumed   # created: also via link-by-name,
                                   #   or a clone (via = clone, upstream_kind, §21.2)
 dependency.updated                # policy / output references changed by a config import (§22.3)
@@ -1605,10 +1610,12 @@ S3 for the bytes, HTTP for the interface: per-job scoped tokens (§11.2) without
 |---|---|---|
 | `GET` | `/state/v1/{env_id}` | any scope; 200 + latest state, 404 otherwise |
 | `POST` | `/state/v1/{env_id}?ID=<lock_id>` | **`rw` scope only**; while a lock is held, a missing `ID` or one that is not the held lock's → **423** + holder (no lock held: an ID-less write is accepted — `tofu -lock=false`), refuses regressive serial (409), **403** once the token's run is no longer active, upload S3, `state_version` linked to the run (`NULL` for an import session) |
-| `LOCK` | `/state/v1/{env_id}/lock` | `plan` or `rw` scope; the body (tofu's lock info) must carry an `ID` (400 otherwise); 200 or **423** + holder; **403** once the token's run is no longer active — and, for a `plan` token, once its run has left the plan phase |
+| `LOCK` | `/state/v1/{env_id}/lock` | `plan` or `rw` scope; the body (tofu's lock info) must carry an `ID` (400 otherwise); 200 or **423** + holder; the lock records the token's `run_id` as its holder run (`NULL` for an import session); **403** once the token's run is no longer active — and, for a `plan` token, once its run has left the plan phase |
 | `UNLOCK` | `/state/v1/{env_id}/lock` | `plan` or `rw` scope (a `ro` token never locks); releases the lock only for its holder: the body's `ID` must be the held lock's — missing or different → **423** + holder, like a `LOCK` conflict (tofu always sends the lock info it locked with; `tofu force-unlock <id>` sends that id); 200 if nothing is held; still allowed after the run ended |
 
 These four are the whole Terraform-protocol surface: there is no state deletion route. Breaking a lock whose ID one does not hold is the human **force-unlock**, `DELETE /api/v1/environments/{env_id}/state/lock` (admin, audited `state.force_unlocked`, §12) — never a state token.
+
+**A run's lock ends with the run.** When a run reaches a terminal state, `transition()` (§4.2) deletes the lock whose holder run is that run, in the same transaction, and audits `state.lock_released` (actor `system`, target the environment, context `reason = run_ended`, `run_id`, `run_state`, `lock_id`). This is what frees an environment whose worker died mid-plan or mid-apply (`worker_lost`, §3.7) — tofu never got to UNLOCK — instead of failing every later run on it (drift included) with 423 until an admin force-unlocks. Only that run's lock: a lock held by another run, or by a run-less holder (an import session, or a lock recorded before holder runs were tracked), is never touched and keeps the behaviour above — its holder's UNLOCK or the admin force-unlock. It cannot release a lock still in use: a plan token never writes state, and a job holding apply credentials is reclaimed only once the apply window has passed (§3.7), when its `rw` token has expired; a lost worker's late UNLOCK then gets 200 (nothing held) or 423 (a new holder), never another holder's lock.
 
 Auth: Basic (username ignored, `env`), password = JWT `{env_id, run_id, scope, typ: "state", iat, exp}` (HS256, `STACKD_JWT_SECRET`; invalid → 401, another env's → 403), minted at the claim (§7.2) for **one job**, not for the whole run. Its `scope` is fixed at mint time from the job, so a run's plan token and its apply token are different tokens with different rights:
 
@@ -1620,7 +1627,7 @@ Auth: Basic (username ignored, `env`), password = JWT `{env_id, run_id, scope, t
 
 Only an `rw` token writes state: no plan, not even with a leaked or stale plan token, can write state, including during that same run's apply. A plan token cannot take the lock from under that apply either. `exp`: the apply window (`apply_reclaim_window_seconds`, §3.7) for an `rw` job token, 6 h for `ro`/`plan`; 30 min for an import session.
 
-A **run-scoped** token writes state (`POST`) or takes the lock (`LOCK`) only while its run is active: once the run is terminal (e.g. failed as `worker_lost` and its env handed to the next run), a partitioned worker's still-unexpired token gets **403** (defense in depth on top of the TTL). `UNLOCK` stays allowed, so a reclaimed run can still release the lock it holds. Run-less import-session tokens (§11.4) are unaffected — bounded by their own short TTL.
+A **run-scoped** token writes state (`POST`) or takes the lock (`LOCK`) only while its run is active: once the run is terminal (e.g. failed as `worker_lost` and its env handed to the next run), a partitioned worker's still-unexpired token gets **403** (defense in depth on top of the TTL). `UNLOCK` stays allowed — harmless, since the run's own lock was already released when it ended (above), and an UNLOCK never frees another holder's lock. Run-less import-session tokens (§11.4) are unaffected — bounded by their own short TTL.
 
 ### 11.3 S3 layout
 
@@ -1822,7 +1829,7 @@ Specified but **not served yet**: `GET /api/v1/run-groups/{id}` (§9.4).
 | Mocks | apply forbidden by default (`allow_mock_apply=false`), badge, audit `mock_consumed` |
 | External secrets | provider bootstrap credential AES-256-GCM write-only (`secret_sources.bootstrap_secret_encrypted` §15.1); live values fetched at claim, never persisted, masked; **fallback value (static or break-glass override) forbids apply by default** (`allow_fallback_apply=false`), badge, audit `secret.fallback_used` (§15); a break-glass override only for a `break_glass` reference (else 422), sealed on its run and wiped at the run's terminal state (§15.4) |
 | Workers | revocable tokens, no incoming port, labels (isolated prod pool); production accepts the `docker` runner only (§7.4); tool binaries verified by signature then checksum when the runner images are built, and those images run only by digest (§7.4, supply-chain). The `local` runner (dev) runs the binary on its PATH, at the stack's version |
-| State | S3 SSE-KMS via API only; per-job state tokens scoped `ro` (proposed runs, read-only commands) / `plan` (lock, never write) / `rw` (apply, mutating command, import session), refused once their run is terminal; handed to tofu only, as `TF_HTTP_*` env (§11.2); audited force-unlock |
+| State | S3 SSE-KMS via API only; per-job state tokens scoped `ro` (proposed runs, read-only commands) / `plan` (lock, never write) / `rw` (apply, mutating command, import session), refused once their run is terminal; handed to tofu only, as `TF_HTTP_*` env (§11.2); a run's lock released (audited) when the run ends; audited force-unlock |
 | Saved plans | the reviewed `plan.tfplan` is AES-256-GCM-encrypted by the API (AAD bound to its S3 key), served only to the run's apply job, applied as-is (never re-planned), deleted on any terminal state (§7.3, §11.3) |
 | Outbound notifications | https only; the host must resolve to public addresses only; the POST dials the vetted IP (Host/SNI/certificate stay on the hostname), ignores env proxies (`HTTPS_PROXY`…) by design, never follows redirects |
 | Apply permissions | tier per env × `allowed_tiers` set per user (§2.4, configurable catalog, non-linear); distinct `can_destroy`; double lock with the OIDC trust policy on the tier name |

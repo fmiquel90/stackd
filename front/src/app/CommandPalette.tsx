@@ -9,6 +9,7 @@ import { useSpaces } from "./SpaceContext";
 import { useTheme } from "./theme";
 import { NAV } from "./nav";
 import { Kbd } from "@/ui/primitives";
+import { shortId } from "@/lib/ids";
 
 // ⌘K (DESIGN §4.2): the keyboard-first primary navigation. It never performs a state-changing
 // action itself — actions on a run open the same confirmation as their button (stage 4 wires them).
@@ -77,7 +78,7 @@ export function CommandPalette({
               {UUID.test(query.trim()) && (
                 <Group heading="Run">
                   <Item value={`run ${query}`} onSelect={() => go(`/runs/${query.trim()}`)}>
-                    Open run <span className="font-data">{query.trim().slice(0, 8)}</span>
+                    Open run <span className="font-data">{shortId(query.trim())}</span>
                   </Item>
                 </Group>
               )}

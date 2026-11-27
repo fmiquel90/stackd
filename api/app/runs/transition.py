@@ -6,7 +6,7 @@ import uuid
 from datetime import UTC, datetime
 from typing import Any
 
-from sqlalchemy import select, text
+from sqlalchemy import delete, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.audit import record_audit
@@ -15,6 +15,7 @@ from app.errors import ProblemException
 from app.logging import get_logger
 from app.models.notification import NotificationOutbox
 from app.models.run import Run, RunEvent
+from app.models.state import StateLock
 from app.models.vcs import VcsOutbox
 from app.runs.artifacts import discard_saved_plan
 
@@ -140,6 +141,34 @@ async def transition(
         # Break-glass overrides (§15.4) are for this run only: no job reads them once it is
         # terminal, so the sealed values don't outlive it.
         locked.secret_overrides_encrypted = None
+        # A state lock this run's token took ends with the run (§11.2): a worker lost mid-plan or
+        # mid-apply never UNLOCKs, and its lock would block every later run on the env. Only this
+        # run's lock — never one held by another run or a run-less holder. Safe: an apply is only
+        # reclaimed once its `rw` token has expired, and a plan token never writes state.
+        released = (
+            await session.execute(
+                delete(StateLock)
+                .where(
+                    StateLock.environment_id == locked.environment_id,
+                    StateLock.run_id == locked.id,
+                )
+                .returning(StateLock.lock_id)
+            )
+        ).scalar_one_or_none()
+        if released is not None:
+            await record_audit(
+                session,
+                action="state.lock_released",
+                actor_kind=AuditActorKind.system,
+                target_kind="environment",
+                target_id=locked.environment_id,
+                context={
+                    "reason": "run_ended",
+                    "run_id": str(locked.id),
+                    "run_state": to_state.value,
+                    "lock_id": released,
+                },
+            )
 
     session.add(
         RunEvent(
