@@ -1508,7 +1508,7 @@ event. Each step logs <code>scheduler.retention</code> (with a count) or
 <h2 id="inspecting-object-storage-dev">Inspecting object storage (dev)<a class="headerlink" href="#inspecting-object-storage-dev" title="Permanent link">&para;</a></h2>
 <p>Managed states, saved plans and archived logs live in S3 (Garage in dev), reached
 only by the API. <code>task s3-ls</code> lists the dev bucket with the API's own S3 settings:
-<code>states/&lt;environment_id&gt;/…</code> for state versions, <code>artifacts/&lt;run_id&gt;/plan.tfplan</code>
+<code>states/&lt;environment_id&gt;/…</code> for state versions, <code>artifacts/&lt;run_id&gt;/plan-&lt;id&gt;.tfplan</code>
 for the saved plan of a run that can still be applied (encrypted, deleted when
 the run ends), <code>logs/&lt;run_id&gt;/…</code> for archived run logs. If a plan with changes fails while uploading its plan file, the
 API cannot reach the bucket: run <code>task s3</code>, then <code>task dev</code>. See
