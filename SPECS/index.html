@@ -4469,8 +4469,8 @@ every scrape (§20.1) have their own partial indexes (migration 0046):</p>
 </code></pre></div>
 <p>Their queries render the predicate values as SQL literals: a generic plan of a prepared statement
 cannot match a partial index to bind parameters. Every foreign key to <code>runs</code> (and
-<code>user_notifications.comment_id</code> → <code>run_comments</code>) is indexed, so the cascade of a stack or
-environment deletion never scans a table per deleted run.</p>
+<code>user_notifications.comment_id</code> → <code>run_comments</code>, and the replies' <code>run_comments.parent_id</code>, migration
+0048) is indexed, so the cascade of a stack or environment deletion never scans a table per deleted run.</p>
 <p>The claim's candidates (§7.2) — read by every poll of every idle worker — by:</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-15-1" name="__codelineno-15-1" href="#__codelineno-15-1"></a><span class="k">CREATE</span><span class="w"> </span><span class="k">INDEX</span><span class="w"> </span><span class="n">ix_runs_claimable</span><span class="w"> </span><span class="k">ON</span><span class="w"> </span><span class="n">runs</span><span class="w"> </span><span class="p">(</span><span class="n">is_drift</span><span class="p">,</span><span class="w"> </span><span class="n">created_at</span><span class="p">)</span>
 <a id="__codelineno-15-2" name="__codelineno-15-2" href="#__codelineno-15-2"></a><span class="k">WHERE</span><span class="w"> </span><span class="k">state</span><span class="w"> </span><span class="k">IN</span><span class="w"> </span><span class="p">(</span><span class="s1">&#39;queued&#39;</span><span class="p">,</span><span class="s1">&#39;confirmed&#39;</span><span class="p">);</span>
@@ -4778,7 +4778,7 @@ context kid, backend, ARN, previous kid, <code>reactivated</code>, and for a rea
 60 s (the agent's last buffered chunks, §5.1; 20 runs per tick) — one gzip'd JSONL
 object per phase, one <code>{seq, section, lines}</code> chunk per line — and stamps <code>runs.logs_archived_at</code>;
 the hot rows are purged <code>log_hot_retention_days</code> (7, env <code>LOG_HOT_RETENTION_DAYS</code>) after that, by
-the daily retention task. <code>GET …/logs</code> serves the hot rows while the run has any, and falls back
+the daily retention task, 50 runs per transaction. <code>GET …/logs</code> serves the hot rows while the run has any, and falls back
 to the archive once they are gone (same chunks, same order, <code>phase</code>/<code>after_seq</code>/<code>limit</code> honoured —
 the archive downloads and decompresses only the phases the answer needs; <code>limit</code> caps the chunks,
 ordered by (phase, seq): a client pages one phase with <code>phase</code> + <code>after_seq</code> = its last seq; a
@@ -5639,7 +5639,9 @@ unprotected environment, with no mock and no <code>warn</code> check.
 - No automatic action: staleness is information, never a trigger (that is the role of webhooks).
 - On an unmanaged-state env, "last applied" is what <em>Stackd</em> applied: a change made outside it (a
   hand-run apply) is not seen here, but by the state observation of §19.7, which flags the env.
-- <code>GET /api/v1/environments/{id}</code> exposes <code>head_sha</code>, <code>commits_ahead</code>, <code>affects_project_root</code>, <code>stale</code>.</p>
+- <code>GET /api/v1/environments/{id}</code> exposes <code>head_sha</code>, <code>commits_ahead</code>, <code>affects_project_root</code>, <code>stale</code>, and
+  <code>last_applied_sha</code> (the commit of the last finished, untargeted tracked run — what <code>stale</code> compares
+  <code>head_sha</code> with; <code>null</code> before any apply).</p>
 <h3 id="97-environment-promotion-trunk-based">9.7 Environment promotion (trunk-based)<a class="headerlink" href="#97-environment-promotion-trunk-based" title="Permanent link">&para;</a></h3>
 <p><code>POST /api/v1/environments/{target_id}/promote</code> <code>{from_environment_id}</code> re-deploys the <strong>exact commit
 currently applied</strong> on a sibling environment (same stack) to the target: it takes the <code>commit_sha</code> of
@@ -6461,7 +6463,8 @@ user. A <code>repo_secret</code> without write scope → post-back fails soft (r
 <h3 id="183-webhook-ingestion-webhooksrouterpy">18.3 Webhook ingestion (<code>webhooks/router.py</code>)<a class="headerlink" href="#183-webhook-ingestion-webhooksrouterpy" title="Permanent link">&para;</a></h3>
 <p>On <code>pull_request</code> (<code>opened</code>/<code>synchronize</code>/<code>reopened</code>): create the <code>proposed</code> run as today <strong>and</strong>
 persist <code>pr_number</code>, <code>vcs_provider='github'</code>, <code>vcs_head_sha = pr.head.sha</code>. On <code>closed</code>: best-effort
-end of the still-in-flight proposed runs for that PR (reason <code>pr_closed</code>): a <code>queued</code> one is
+end of the still-in-flight proposed runs for that PR on the stacks the delivery authenticated —
+a PR number is only unique within its repository — (reason <code>pr_closed</code>): a <code>queued</code> one is
 <code>transition()</code>ed to <code>canceled</code>; one a worker is executing gets the stop request of §4.1 (system actor,
 <code>run.cancel_requested</code>, a <code>cancel_job</code> for its worker) and ends <code>canceled</code> when the worker reports.</p>
 <h3 id="184-post-back-appvcs-transactional-outbox">18.4 Post-back (<code>app/vcs/</code> — transactional outbox)<a class="headerlink" href="#184-post-back-appvcs-transactional-outbox" title="Permanent link">&para;</a></h3>

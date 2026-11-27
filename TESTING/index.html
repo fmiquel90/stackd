@@ -1828,12 +1828,12 @@ all. Counts in parentheses include parametrized cases and drift as tests are add
 <td>Tool-version matching; a stack's <code>tool_version</code> is validated; the claim skips a run the worker can't run; the queue reports no compatible worker.</td>
 </tr>
 <tr>
-<td><code>test_read_paths.py</code> (19)</td>
-<td>Bounded read paths: the env run list pages newest first on <code>(created_at, id)</code> through <code>X-Next-Cursor</code>/<code>before</code> (ties included), default cap 200, <code>limit</code> bounds, a foreign or unknown cursor → 400, <code>view=summary</code> drops <code>check_results</code>/<code>variable_provenance</code>; the audit CSV export streams every row across server-side cursor batches; the last applied commit skips targeted, failed and proposed runs; <code>/metrics</code> counts live states every scrape and caches terminal ones; webhook repo matching in SQL equals the Python normalization; migration 0046 goes down and up.</td>
+<td><code>test_read_paths.py</code> (20)</td>
+<td>Bounded read paths: the env run list pages newest first on <code>(created_at, id)</code> through <code>X-Next-Cursor</code>/<code>before</code> (ties included), default cap 200, <code>limit</code> bounds, a foreign or unknown cursor → 400, <code>view=summary</code> drops <code>check_results</code>/<code>variable_provenance</code>; the audit CSV export streams every row across server-side cursor batches; the last applied commit skips targeted, failed and proposed runs; <code>/metrics</code> counts live states every scrape and caches terminal ones; webhook repo matching in SQL equals the Python normalization; migration 0046 goes down and up; comment replies are indexed (0048).</td>
 </tr>
 <tr>
-<td><code>test_log_retention.py</code> (11)</td>
-<td>Two-tier logs (moto S3): archived after the grace window then hot-purged and served from S3; an archived run with hot rows never reads S3; download from either tier, phases in run order even across midnight; <code>limit</code> on both tiers, the archive fetching only the phases the answer needs (a one-phase download too); a log phase that can't be an S3 key segment refused (422) at ingest; an archive failure leaves the run unarchived; refresh-token families purged once fully expired; the audit purge needs the distinct DB role, and deletes in audited batches.</td>
+<td><code>test_log_retention.py</code> (12)</td>
+<td>Two-tier logs (moto S3): archived after the grace window then hot-purged (a batch of runs per transaction) and served from S3; an archived run with hot rows never reads S3; download from either tier, phases in run order even across midnight; <code>limit</code> on both tiers, the archive fetching only the phases the answer needs (a one-phase download too); a log phase that can't be an S3 key segment refused (422) at ingest; an archive failure leaves the run unarchived; refresh-token families purged once fully expired; the audit purge needs the distinct DB role, and deletes in audited batches.</td>
 </tr>
 <tr>
 <td><code>test_scheduler.py</code> (7)</td>
@@ -1857,7 +1857,7 @@ all. Counts in parentheses include parametrized cases and drift as tests are add
 </tr>
 <tr>
 <td><code>test_staleness.py</code> (11)</td>
-<td><code>stale</code> on the env API; head polling once per (repo, branch, credentials), surviving a failing repo, respecting the interval, bounded concurrency, never blocking the other scheduler tasks; refresh-head holds no transaction across git and is audited; a branch change resets the head.</td>
+<td><code>stale</code> and <code>last_applied_sha</code> on the env API; head polling once per (repo, branch, credentials), surviving a failing repo, respecting the interval, bounded concurrency, never blocking the other scheduler tasks; refresh-head holds no transaction across git and is audited; a branch change resets the head.</td>
 </tr>
 <tr>
 <td><code>test_webhooks.py</code> (10)</td>
@@ -1868,8 +1868,8 @@ all. Counts in parentheses include parametrized cases and drift as tests are add
 <td>Stack <code>trigger_paths</code> (SPECS §3.1): the glob matcher's edge cases (<code>**</code> as a whole segment or inside one, <code>*</code>/<code>?</code> within a segment, character classes, an unclosed <code>[</code>, a folder pattern covering its content, dotfiles, case); <code>touches_stack</code> combining <code>project_root</code> and the globs, a rename's old path counting; validation and normalization (count, length, absolute, <code>..</code>/<code>.</code>/empty segment, backslash, control characters, trailing <code>/</code>, duplicates); the stack API validates, normalizes, clears on <code>null</code> and audits <code>stack.updated</code>; a push touching only a trigger path triggers the stack listing it and not its sibling (whose head still advances), an unrelated push triggers nothing, a rename out of the shared folder still triggers.</td>
 </tr>
 <tr>
-<td><code>test_vcs.py</code> (7)</td>
-<td>GitHub post-back: owner/repo parsing, PR metadata persisted, PR close cancels proposed runs, status + one comment per run, a bad secret fails only its row (retried once due, dead-lettered at error level), a rate limit defers the row past its reset and the stale retry is dropped once superseded, resync.</td>
+<td><code>test_vcs.py</code> (8)</td>
+<td>GitHub post-back: owner/repo parsing, PR metadata persisted, PR close cancels proposed runs (not the same PR number in another repo), status + one comment per run, a bad secret fails only its row (retried once due, dead-lettered at error level), a rate limit defers the row past its reset and the stale retry is dropped once superseded, resync.</td>
 </tr>
 <tr>
 <td><code>test_out_of_band_state.py</code> (7)</td>
