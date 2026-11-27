@@ -2703,6 +2703,10 @@ button unrelated to a success, never amber for telemetry or log severity.</p>
 (mono labels), 600. Fonts are <strong>self-hosted</strong> (<code>@fontsource</code>), Latin subset, only weights Sans 400/600 and
 Mono 400/500 imported (<code>main.tsx</code>), <code>font-display: swap</code>. Preloading and fallback metric overrides
 (against layout shift) are <strong>[not built yet]</strong>.</p>
+<p><strong>Short ID</strong>: an entity UUID is shown as its <strong>last eight hex characters</strong> (<code>run 9ce3880b</code>,
+<code>shortId()</code> in <code>lib/ids.ts</code>), in mono. IDs are UUIDv7: the leading characters are a timestamp and only
+change every ~65 s, so a prefix makes runs planned moments apart look identical. Commit SHAs keep their
+first seven characters (git's convention).</p>
 <h3 id="34-spacing-radius-elevation">3.4 Spacing, radius, elevation<a class="headerlink" href="#34-spacing-radius-elevation" title="Permanent link">&para;</a></h3>
 <ul>
 <li>4 px grid. Dense table cell padding 6 × 10 px (row height 32 px); comfortable rows (attention zone, run history) 8 × 12 px (36 px); forms 12 px gaps.</li>
@@ -2865,7 +2869,7 @@ is reserved to the decision. Zero counts are rendered in <code>text-secondary</c
 <ul>
 <li><strong>Side nav (208 px, labels always visible — v1 decision kept)</strong>: Overview (solid amber count badge = decisions that need <em>you</em>), Graph, Rollouts (§5.11), Queue (neutral outlined count badge = runs waiting &gt; 2 min), Workers (<code>online/total</code> in mono, red when none is online or the API is down), Audit (admin only, §5.6), Variable sets, Settings. At the bottom: the <strong>space switcher</strong> (a Radix dropdown listing the space names, the current one marked; hidden when the user sees a single space) and the user block (email, role, allowed tiers) opening a menu with the theme toggle, keyboard shortcuts, single-key shortcuts on/off and sign out. Active item: selection mark (§2.1).</li>
 <li><strong>Top bar</strong>: entity breadcrumb, connection indicator (<code>● live</code> / <code>◌ reconnecting…</code>), ⌘K button ("Search ⌘K"), notification bell.</li>
-<li><strong>Breadcrumb</strong>: built from entities, never from path segments: <code>space / stack / env / run 01a1276c</code>. Each segment but the last is a link; the run segment is the current page (its URL is copied with ⌘K "Copy the link to this page").</li>
+<li><strong>Breadcrumb</strong>: built from entities, never from path segments: <code>space / stack / env / run 9ce3880b</code>. Each segment but the last is a link; the run segment is the current page (its URL is copied with ⌘K "Copy the link to this page"). Below 768 px only the <strong>last two</strong> segments are shown (<code>prod / run 9ce3880b</code>): the page header repeats the rest, and four truncated segments say nothing.</li>
 <li><strong>Responsive</strong>: ≥ 1024 px as above. 768–1023 px: the side nav becomes a drawer (a sheet from the right) opened from a menu button in the top bar. &lt; 768 px: a <strong>bottom bar</strong> with three destinations (Overview, Queue, Menu — the Menu opens the same drawer; notifications stay in the top bar at every width) and the run page's action bar docked above it.</li>
 </ul>
 <h3 id="41-urls-v2">4.1 URLs (v2)<a class="headerlink" href="#41-urls-v2" title="Permanent link">&para;</a></h3>
@@ -2924,6 +2928,11 @@ env per stack — SPECS constraints). A renamed entity breaks old name-based lin
 stay as redirects</strong> (<code>/stacks/:uuid</code> → <code>/s/&lt;space&gt;/stacks/&lt;name&gt;</code>; <code>/stacks</code>, <code>/graph</code> and
 <code>/variable-sets</code> → the current space's page), and the run URL stays UUID-based (it is the incident link).</p>
 <p><strong>Everything that determines what is on screen is in the URL</strong>: tab (<code>?tab=plan</code>), filters (<code>?q=app&amp;state=attention&amp;tier=prod</code>), the overview's selected cell and cascade preview (<code>?sel=demo-network/prod&amp;cascade=1</code>), log position (<code>?tab=logs&amp;line=planning.87</code>), plan search (<code>?plan_q=nat</code>), graph filter, view and node (<code>?env=prod&amp;tier=prod&amp;view=list&amp;node=&lt;id&gt;</code>), env run-history filter (<code>?kind=</code>), stack settings section (<code>?tab=settings&amp;sub=hooks</code>). The active space is the URL's, never in-memory state. (No browser storage, CLAUDE §4.8.)</p>
+<p><strong>Tab title</strong> (<code>app/DocumentTitle.tsx</code>): most specific name first, brand last, so pinned tabs stay
+readable — <code>demo-network/prod · demo — StackD</code>, <code>Queue — StackD</code>. A run reads
+<code>demo-network/staging · run 9ce3880b · unconfirmed — StackD</code> (the badge's word, lowercased, updated
+live). When decisions need the viewer in the current space, their count leads: <code>(3) Overview · demo —
+StackD</code>, so a background tab says a decision is waiting without a notification.</p>
 <h3 id="42-k-command-palette">4.2 ⌘K command palette<a class="headerlink" href="#42-k-command-palette" title="Permanent link">&para;</a></h3>
 <p>Opened with ⌘K / Ctrl-K from anywhere (<code>cmdk</code> on a Radix dialog). Sections, in order <strong>[today]</strong>:
 1. <strong>Run</strong> — shown when the query is a full run UUID: open that run.
@@ -3091,7 +3100,7 @@ disabled from the user menu or Settings → Preferences (WCAG 2.1.4); the settin
 (a <code>PR plan</code> badge for proposed runs, a <code>− destroy</code> badge for destroys); commit SHA (copy) + message +
 author; branch; how it was triggered (<code>triggered by bob@…</code>, <code>via webhook</code>, <code>via dependency</code>, <code>via drift
 check</code> <strong>[today]</strong>; the upstream env / run of a cascade <code>[with A5]</code>); the rollout and level (§5.11);
-age (relative, absolute ISO on hover); total duration; the command and its arguments for a <code>command</code>
+age (relative, absolute ISO on hover); duration, labelled (<code>took 2m 33s</code> once finished, <code>elapsed 4m</code> while live); the command and its arguments for a <code>command</code>
 run. The worker is <strong>[not shown yet]</strong>.</p>
 <p><strong><code>RunActionBar</code></strong> — sticky under the top bar on desktop, docked at the bottom on &lt; 768 px:</p>
 <ol>
@@ -3173,7 +3182,7 @@ permission check (<code>can_apply</code> is still evaluated by the API).</p>
 - <strong>Stop requested</strong> (neutral): while an executing run has <code>cancel_requested_at</code> — "Stop requested — waiting for the worker." and what the worker does (interrupts the tool as a Ctrl-C would; the run ends when the worker reports it).
 - <strong>Failed during apply</strong> (<code>failed-tint</code>, red <code>✕</code>): "Failed during apply — infrastructure may be partially changed." + the run's error + "Jump to first error". A stop during apply (<code>error = canceled_during_apply</code>) reads "Stopped during apply on request — infrastructure may be partially changed." with "Review what was applied before planning again".
 - <strong>Failed</strong> (other phases): "Failed at <segment> — nothing was applied." + the run's <code>error</code>, or the failing check's name, stage and output when there is one <strong>[today]</strong>; "Jump to first error".
-- <strong>Stale plan</strong> (neutral, <code>↑</code>): when the run is <code>unconfirmed</code> and <code>env.head_sha ≠ run.commit_sha</code> — "Plan computed on <code>2af0351</code>. The branch head is now <code>125304e</code> (N commits ahead / ahead)." + <strong>Re-plan on head</strong> (= Discard + new tracked run, two audited calls). Confirming stays possible and still applies the planned commit.
+- <strong>Stale plan</strong> (neutral, <code>↑</code>): when the run is <code>unconfirmed</code> and <code>env.head_sha ≠ run.commit_sha</code> — "Plan computed on <code>2af0351</code>. The branch head is now <code>125304e</code> (N commits ahead / ahead)." + <strong>Re-plan on head</strong> (= Discard + new tracked run, two audited calls). Confirming stays possible and still applies the planned commit — said in the same paragraph ("Confirming still applies exactly <code>2af0351</code>."), so the banner takes one line on desktop.
 - <strong>Mocked</strong> (<code>mock-tint</code>, <code>◆</code>): "This plan used mock values — it is not real." The mocked inputs are listed, then "A mocked plan cannot be applied here (allow_mock_apply is off)" or that the env allows it.
 - <strong>Fallback</strong> (<code>decision</code> tone, <code>◈</code>): "A secret came from a fallback, not the real source." + whether <code>allow_fallback_apply</code> lets it through.
 - <strong>Queued</strong> (neutral): the <code>blocking_reason</code> from <code>GET /queue</code> in words ("Waiting: another run is active on this environment.") + a link to the queue.</p>
@@ -3183,7 +3192,7 @@ tracked runs, Logs (following) for live runs, Logs at the first error for failed
 <li><strong>Plan</strong> — <code>PlanDiff</code>:</li>
 <li>Summary line in big mono (<code>+4 ~0 −1</code>, zeros neutral), then groups in a fixed order: <strong>DESTROY</strong>, <strong>REPLACE</strong>, CREATE, UPDATE, READ, MOVE, OTHER (e.g. "will no longer be managed"), then "<strong>Tag-only updates · n</strong>" and "Changes to outputs" collapsed, the tool's summary line, and the plan legend as printed (collapsed).</li>
 <li><strong>DESTROY and REPLACE groups are always expanded, and cannot be collapsed, filtered out or scrolled away by search</strong> — search highlights in them, filters the others.</li>
-<li>A resource row: action glyph + label, address in mono, a one-line hint (<code>2 attributes</code>, <code>forces replacement: ami</code>). Expanded: the attribute diff in <code>bg-sunken</code>, one line per attribute (<code>+ − ~</code> with diff tokens), <code>(sensitive value)</code> as tofu prints it, never a reveal.</li>
+<li>A resource row: action glyph + label, address in mono, a one-line hint (<code>2 attributes</code>, <code>forces replacement: ami</code>). The address wraps only at its structure (after <code>.</code> and <code>/</code>, before <code>[</code>), never inside a name; below 640 px the hint takes its own line under the address. Expanded: the attribute diff in <code>bg-sunken</code>, one line per attribute (<code>+ − ~</code> with diff tokens), <code>(sensitive value)</code> as tofu prints it, never a reveal.</li>
 <li>Tag-only = an update whose changed attributes are all <code>tags</code> / <code>tags_all</code> (or nested under them).</li>
 <li>Search (<code>/</code>, URL <code>?plan_q=</code>) on address and attribute name, with a match counter.</li>
 <li><strong>[today]</strong> parsed from the <code>section="plan"</code> log block (<code>tofu show -no-color</code>): blocks start at <code># &lt;address&gt; will be created | updated in-place | destroyed | must be replaced | read during apply | has moved to</code>. Anything the parser does not recognise is shown verbatim in a "Unparsed plan output" block <strong>above</strong> the groups, so no line is ever dropped; if the block is missing (older run, failed plan) the tab says so and links to the logs. <strong>[with A1]</strong> from <code>resource_changes</code>.</li>
@@ -3197,10 +3206,17 @@ tracked runs, Logs (following) for live runs, Logs at the first error for failed
 the attention zone), keeping the tab.</p>
 <p><strong>Live updates</strong>: the badge, rail, banners and bar update in place on WS events; a polite live region
 announces state changes ("Run is now applying."); focus never moves.</p>
+<p><strong>Desktop bar layout</strong>: the actions stay on the state line, top right; the text lines wrap in their
+own column beside them, never pushing the actions to a row of their own. "Your standing" and the
+cascade preview share one wrapping row.</p>
 <p><strong>&lt; 768 px</strong>: the action bar is docked at the bottom with 44 px buttons (Confirm stretches, Discard
 and Cancel/Stop stay visible beside it; Plan again and the next-decision arrows are hidden); the
-confirm popover becomes a bottom sheet; tabs scroll horizontally. Below 1024 px the rail is the
-horizontal strip above the tabs (§2.2). A condensed two-line header is <strong>[not built yet]</strong>.</p>
+bar's text part (state, four-eyes, standing, cascade) stays in the page flow and scrolls away — only
+the docked actions are fixed, so the plan gets the screen. The confirm popover becomes a bottom
+sheet; tabs scroll horizontally, the active one kept in view (a deep link to <code>?tab=discussion</code>).
+Below 1024 px the rail is the horizontal strip above the tabs (§2.2). The header condenses to two
+lines: the title, then one line <code>sha · trigger · age · "message"</code> (message truncated; branch, author,
+duration, rollout and command are left to the desktop header).</p>
 <h3 id="53-log-viewer-logviewer">5.3 Log viewer (<code>LogViewer</code>)<a class="headerlink" href="#53-log-viewer-logviewer" title="Permanent link">&para;</a></h3>
 <ul>
 <li><code>bg-sunken</code>, JetBrains Mono 12 px on 24 px rows (§7 target size), virtualized (<code>react-virtuoso</code>), ANSI rendered with <code>anser</code> mapped onto tokens (red → <code>state-failed</code>, green → <code>state-finished</code>, yellow → <code>text-primary</code> bold — not amber, blue → <code>state-running</code>, magenta → <code>mock</code>, cyan/white → <code>text-primary</code>, black → <code>text-secondary</code>).</li>
