@@ -69,7 +69,7 @@ exhaustive list):
 | Stacks | `GET/POST /stacks`, `GET/PATCH/DELETE /stacks/{id}` (409 while a run is active), `POST /stacks/{id}/check-repo` |
 | Environments | `POST /stacks/{id}/environments`, `GET/PATCH/DELETE /environments/{id}` (settings, incl. the repo `var_files` passed as `-var-file=`, SPECS §3.4), `GET /environments/{id}/resolved-variables`, `POST /environments/{id}/refresh-head`, `POST /environments/{id}/discover-inputs`, `POST /environments/{id}/out-of-band-change/acknowledge` (a state changed outside Stackd, SPECS §19.7) |
 | Variables & sets | variables CRUD (stack/env/set), variable sets + attachments (tier/stack/env of the set's space) |
-| Runs | `POST /environments/{id}/runs` (optional `targets`/`replace`: a targeted / replace plan), `/commands` (incl. `force-unlock` on an unmanaged backend, admin), `/promote`; `GET /environments/{id}/runs`; `GET /runs/{id}`, `POST /runs/{id}/confirm`/`discard`/`cancel`, `GET /runs/{id}/logs` (+ `/logs/download`)/`plan`/`checks`, `POST /runs/{id}/vcs/resync` |
+| Runs | `POST /environments/{id}/runs` (optional `targets`/`replace`: a targeted / replace plan), `/commands` (incl. `force-unlock` on an unmanaged backend, admin), `/promote`; `GET /environments/{id}/runs` (newest first, `limit` ≤ 500 — default 200, next page via the `X-Next-Cursor` header passed back as `before`; `view=summary` drops `check_results`/`variable_provenance`); `GET /runs/{id}`, `POST /runs/{id}/confirm`/`discard`/`cancel`, `GET /runs/{id}/logs` (`phase`, `after_seq`, `limit`; + `/logs/download`)/`plan`/`checks`, `POST /runs/{id}/vcs/resync` |
 | Rollouts | `GET/POST /rollouts`, `GET /rollouts/{id}`, `POST /rollouts/{id}/approve`/`retry`/`cancel` |
 | Comments | `GET/POST /runs/{id}/comments`, `PATCH/DELETE /runs/{id}/comments/{cid}` |
 | Hooks | `GET/POST/PATCH/DELETE /stacks/{id}/hooks` and `/environments/{id}/hooks` |
@@ -79,7 +79,7 @@ exhaustive list):
 | Notifications | targets: `GET/POST/PATCH/DELETE /stacks/{id}/notifications` and `/environments/{id}/notifications`, plus `…/{tid}/test`; your in-app feed: `GET /notifications`, `POST /notifications/read`, `DELETE /notifications/{nid}`, `DELETE /notifications` |
 | Service accounts | `GET/POST /service-accounts`, `GET/POST /service-accounts/{id}/tokens`, `DELETE /service-accounts/{id}/tokens/{tid}` (instance admin) |
 | Users & tiers | `GET /users` (admin), `PATCH /users/{id}` (admin), `GET /users/mentionable`, `GET/POST /tiers`, `PATCH/DELETE /tiers/{id}` |
-| Audit | `GET /audit` (filters), `GET /audit/export` (CSV) — both admin-only |
+| Audit | `GET /audit` (filters), `GET /audit/export` (CSV, streamed) — both admin-only |
 | Webhooks | `POST /webhooks/github` |
 | OIDC issuer | outside `/api/v1`: `GET /.well-known/openid-configuration`, `GET /oidc/jwks`; signing keys (admin): `GET /oidc/keys`, `POST /oidc/keys/rotate` |
 | Workers | `GET/POST /worker-pools`, `DELETE /worker-pools/{id}` (admin), `GET /workers`, `GET /queue`, `GET/POST /workers/{id}/diagnostics` (admin) |

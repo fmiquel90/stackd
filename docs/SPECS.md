@@ -378,6 +378,23 @@ CREATE INDEX ix_runs_logs_to_archive ON runs (finished_at)
 WHERE finished_at IS NOT NULL AND logs_archived_at IS NULL;
 ```
 
+An environment's run list pages on `(created_at, id)` (`GET /environments/{id}/runs`, §12); its last
+finished tracked run (the last applied commit, §9.6) and the non-terminal runs `/metrics` counts at
+every scrape (§20.1) have their own partial indexes (migration 0046):
+
+```sql
+CREATE INDEX ix_runs_env_created_id ON runs (environment_id, created_at, id);
+CREATE INDEX ix_runs_last_finished_tracked ON runs (environment_id, finished_at DESC, id DESC)
+WHERE type = 'tracked' AND state = 'finished';
+CREATE INDEX ix_runs_non_terminal_state ON runs (state)
+WHERE state NOT IN ('finished', 'failed', 'discarded', 'canceled');
+```
+
+Their queries render the predicate values as SQL literals: a generic plan of a prepared statement
+cannot match a partial index to bind parameters. Every foreign key to `runs` (and
+`user_notifications.comment_id` → `run_comments`) is indexed, so the cascade of a stack or
+environment deletion never scans a table per deleted run.
+
 ### 3.6 `run_events`
 
 ```
@@ -621,20 +638,22 @@ POST /worker/v1/jobs/{id}/logs
 | Hot | table `run_logs` | during the run + 7 d | live + recent |
 | Cold | S3 `logs/{run_id}/{phase}.log.gz` | async archiving at end of run | history (1 year then lifecycle) |
 
-`GET /runs/{id}/logs?phase=&after_seq=` serves one or the other transparently. `GET /runs/{id}/logs/download?phase=all`.
+`GET /runs/{id}/logs?phase=&after_seq=&limit=` serves one or the other transparently. `GET /runs/{id}/logs/download?phase=all`.
 
 > **Status**: done. A periodic task (§7.5) archives each run's logs once it has been terminal for
 > 60 s (the agent's last buffered chunks, §5.1; 20 runs per tick) — one gzip'd JSONL
 > object per phase, one `{seq, section, lines}` chunk per line — and stamps `runs.logs_archived_at`;
 > the hot rows are purged `log_hot_retention_days` (7, env `LOG_HOT_RETENTION_DAYS`) after that, by
 > the daily retention task. `GET …/logs` serves the hot rows while the run has any, and falls back
-> to the archive once they are gone (same chunks, same order, `phase`/`after_seq` honoured; a
+> to the archive once they are gone (same chunks, same order, `phase`/`after_seq`/`limit` honoured —
+> the archive downloads and decompresses only the phases the answer needs; `limit` caps the chunks,
+> ordered by (phase, seq): a client pages one phase with `phase` + `after_seq` = its last seq; a
 > `phase` outside `[A-Za-z0-9_.-]{1,64}` — it ends up in an S3 key — is refused with 422 at ingest
 > (§5.1), reads nothing from the archive, and is refused with 400 by the download).
 > `GET …/logs/download?phase=all|<phase>` returns plain text (ANSI kept, phases in the order a run
 > goes through its states — planning, checking, applying, or running; any other after them, by name
 > — never by the lines' `t`, a time of day that would misorder a run crossing midnight; each phase's
-> chunks by `seq`; hooks prefixed `[hook:x]`), from either tier. If S3 is down the run stays unarchived and its
+> chunks by `seq`; hooks prefixed `[hook:x]`), from either tier, streamed one phase at a time. If S3 is down the run stays unarchived and its
 > hot rows untouched — retried next tick. The 1-year S3 expiry is a bucket lifecycle rule (ops), not
 > application code. A chunk ingested after its run was archived is not re-archived.
 
@@ -766,6 +785,9 @@ Not audited by a dedicated action: a run failed because an external secret could
 GET /api/v1/audit?actor=&action=&target_kind=&target_id=&from_=&to=&limit=   (admin; limit ≤ 1000, default 200)
 GET /api/v1/audit/export?actor=&action=&target_kind=&target_id=&from_=&to=   (admin, CSV)
 ```
+
+The export streams: rows are read through a server-side cursor (batches of 500) and written as they
+come, newest first, whatever the size of the filtered set.
 
 CSV columns: `created_at, actor_email, action, target_kind, target_id, context` — `context` is the
 event's context as JSON (what the list endpoint returns to the same admins): the "who" of a system
@@ -1729,14 +1751,19 @@ POST /api/v1/environments/{id}/runs      { type?, with_downstream?, commit_sha?,
 POST /api/v1/environments/{id}/commands  { command, args, commit_sha? }     # §4.3 — 400 outside
                                          # the allowlists; force-unlock: admin, 409 on managed state
 POST /api/v1/environments/{id}/promote   { from_environment_id }           # §9.7
-GET  /api/v1/environments/{id}/runs ; GET /api/v1/runs/{id}   # the latter adds run_group (§9.2) and
-                                    # confirmed_via: user | autodeploy | rollout (§21.5); both
-                                    # carry plan_options (§3.5)
+GET  /api/v1/environments/{id}/runs ?limit=&before=&view=full|summary
+                                    # newest first (created_at, id); limit 1–500, default 200; a
+                                    # further page: header X-Next-Cursor = the page's last run id,
+                                    # passed back as before (400 if no run of this env);
+                                    # view=summary omits check_results and variable_provenance
+GET  /api/v1/runs/{id}              # adds run_group (§9.2) and confirmed_via: user | autodeploy |
+                                    # rollout (§21.5); both carry plan_options (§3.5)
 POST /api/v1/runs/{id}/confirm | /discard | /cancel   # cancel of an executing run = a stop
                                     # request to its worker (§4.1); can_apply if it holds apply creds
 POST /api/v1/runs/{id}/vcs/resync                                          # §18.5
-GET  /api/v1/runs/{id}/logs ?phase=&after_seq=          # hot or archived tier (§5.2)
-GET  /api/v1/runs/{id}/logs/download ?phase=all|<phase> # plain text attachment (§5.2)
+GET  /api/v1/runs/{id}/logs ?phase=&after_seq=&limit=  # hot or archived tier (§5.2); limit:
+                                                        # at most that many chunks, by (phase, seq)
+GET  /api/v1/runs/{id}/logs/download ?phase=all|<phase> # plain text attachment, streamed (§5.2)
 GET  /api/v1/runs/{id}/plan ; GET /api/v1/runs/{id}/checks
 WS   /api/v1/ws                     sub: run:{id}, environment:{id}, user:{own id}, rollout:{id}
 
@@ -2407,7 +2434,9 @@ Unauthenticated scrape endpoint (restrict at the network layer — it exposes on
 **never** secrets or tfvars). `prometheus-client`. Cardinality is bounded: labels are state/phase/
 result only, never a run id.
 - `stackd_runs_total{state}`, `stackd_queue_depth`, `stackd_workers_online` — gauges refreshed from
-  the DB at scrape time (cheap aggregate queries).
+  the DB at scrape time (cheap aggregate queries). The non-terminal states are counted at every scrape
+  (`ix_runs_non_terminal_state`, §3.5); the terminal ones (`finished`, `failed`, `discarded`,
+  `canceled` — most of the table) at most every 5 minutes per API process, cached in between.
 - `stackd_claim_latency_seconds` — histogram, observed in `claim_one`: how long the run waited
   claimable — now − `confirmed_at` for an apply claim (the plan and the human wait before it are not
   queue time), now − `created_at` for a plan or command claim.

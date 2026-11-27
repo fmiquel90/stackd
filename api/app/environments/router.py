@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import Annotated
 
 from fastapi import APIRouter, Depends
-from sqlalchemy import ColumnElement, and_, delete, or_, select, update
+from sqlalchemy import ColumnElement, and_, delete, literal, or_, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -89,16 +89,24 @@ async def _envs_out(session: AsyncSession, envs: Sequence[Environment]) -> list[
     part of its commit, so the env still lags behind it."""
     last_applied: dict[uuid.UUID, str | None] = {}
     if envs:
-        rows = await session.execute(
-            select(Run.environment_id, Run.commit_sha)
+        # One probe per env of the partial index ix_runs_last_finished_tracked. Its predicate is
+        # rendered as literals: a generic plan of a prepared statement can't match it to bind
+        # parameters.
+        last_sha = (
+            select(Run.commit_sha)
             .where(
-                Run.environment_id.in_([e.id for e in envs]),
-                Run.type == RunType.tracked,
-                Run.state == RunState.finished,
+                Run.environment_id == Environment.id,
+                Run.type == literal(RunType.tracked, Run.type.type, literal_execute=True),
+                Run.state == literal(RunState.finished, Run.state.type, literal_execute=True),
                 or_(Run.plan_options.is_(None), ~Run.plan_options.has_key("targets")),
             )
-            .order_by(Run.environment_id, Run.finished_at.desc(), Run.id.desc())
-            .distinct(Run.environment_id)
+            .order_by(Run.finished_at.desc(), Run.id.desc())
+            .limit(1)
+            .correlate(Environment)
+            .scalar_subquery()
+        )
+        rows = await session.execute(
+            select(Environment.id, last_sha).where(Environment.id.in_([e.id for e in envs]))
         )
         last_applied = {env_id: sha for env_id, sha in rows.all()}
     return [EnvironmentOut.of(e, last_applied_sha=last_applied.get(e.id)) for e in envs]

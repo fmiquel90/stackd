@@ -85,7 +85,10 @@ class RunGroupOut(BaseModel):
     status: str  # running | partial_failure | succeeded
 
 
-class RunOut(BaseModel):
+class RunSummaryOut(BaseModel):
+    """A run without its heavy JSONB (`check_results`, `variable_provenance`): an item of
+    `GET /environments/{id}/runs?view=summary` (§3.5). `plan_summary` stays: a few counters."""
+
     model_config = ConfigDict(from_attributes=True)
 
     id: uuid.UUID
@@ -106,22 +109,25 @@ class RunOut(BaseModel):
     parent_run_id: uuid.UUID | None = None
     run_group_id: uuid.UUID | None = None
     rollout_id: uuid.UUID | None = None  # §21: the environment rollout the run belongs to
+    plan_summary: dict | None
+    used_mocks: bool
+    used_secret_fallback: bool
+    error: str | None
+    claimed_at: datetime | None
+    confirmed_at: datetime | None
+    finished_at: datetime | None
+    created_at: datetime
+
+
+class RunOut(RunSummaryOut):
     # Only on GET /runs/{id}: the group the run belongs to (root or member), with its status.
     run_group: RunGroupOut | None = None
     # Only on GET /runs/{id}: who confirmed it — a user on this plan, the system on the env's
     # autodeploy, or the system under a rollout's approval (§21.5: `confirmed_by_user_id` is then
     # the approver, who never saw this plan).
     confirmed_via: Literal["user", "autodeploy", "rollout"] | None = None
-    plan_summary: dict | None
     check_results: dict | None
-    used_mocks: bool
-    used_secret_fallback: bool
     variable_provenance: dict | None
-    error: str | None
-    claimed_at: datetime | None
-    confirmed_at: datetime | None
-    finished_at: datetime | None
-    created_at: datetime
 
 
 class LogChunkOut(BaseModel):
