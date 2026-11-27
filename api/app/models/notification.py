@@ -3,8 +3,8 @@ from __future__ import annotations
 import uuid
 from datetime import datetime
 
-from sqlalchemy import Boolean, Enum, ForeignKey, Integer, String
-from sqlalchemy.dialects.postgresql import JSONB
+from sqlalchemy import Boolean, DateTime, Enum, ForeignKey, Integer, String, text
+from sqlalchemy.dialects.postgresql import ARRAY, JSONB
 from sqlalchemy.dialects.postgresql import UUID as PGUUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -48,3 +48,11 @@ class NotificationOutbox(Base):
     attempts: Mapped[int] = mapped_column(Integer, default=0)
     created_at: Mapped[datetime] = created_at_col()
     sent_at: Mapped[datetime | None] = mapped_column(default=None)
+    # Retry schedule (§7.5): the row is not claimed before this; pushed back by each attempt.
+    next_attempt_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=text("now()")
+    )
+    # Targets already delivered: a retry only re-sends to the ones that failed.
+    delivered_target_ids: Mapped[list[uuid.UUID]] = mapped_column(
+        ARRAY(PGUUID(as_uuid=True)), server_default=text("'{}'::uuid[]")
+    )

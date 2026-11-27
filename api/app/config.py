@@ -109,6 +109,13 @@ class Settings(BaseSettings):
     # socket holds at most this many distinct channels (else it is closed with 1008).
     stackd_ws_auth_timeout_seconds: int = 10
     stackd_ws_max_subscriptions: int = 1000
+    # Outbound outboxes (notifications, VCS post-back — §7.5): a failed delivery is retried with
+    # exponential backoff (the base doubling up to the cap, ±20 % jitter; later if the receiver's
+    # Retry-After asks) until the attempts budget is spent. The defaults span ~1 h 20 min, past a
+    # typical GitHub or Slack incident.
+    stackd_outbox_max_attempts: int = 12
+    stackd_outbox_backoff_base_seconds: int = 10
+    stackd_outbox_backoff_max_seconds: int = 900
 
     # Background scheduler (§7.5) — disabled under tests so it can't fail runs mid-assertion.
     stackd_run_scheduler: bool = True

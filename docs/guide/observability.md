@@ -61,8 +61,10 @@ the network layer.
 | `stackd_claim_latency_seconds` | histogram | how long a run waited claimable: from its creation to a plan (or command) claim, from its confirmation to an apply claim |
 | `stackd_run_duration_seconds{phase}` | histogram | from the last claim to the terminal state; `phase="apply"` if the run was confirmed, else `"plan"` |
 | `stackd_webhook_total{result}` | counter | VCS webhooks received: `accepted`, `rejected`, `no_match` |
+| `stackd_scheduler_task_failures_total{task}` | counter | periodic task runs that raised or overran their time budget (each also logged as `scheduler.task_failed`) |
+| `stackd_outbox_dead_letters_total{outbox}` | counter | `notification` / `vcs` outbox rows abandoned after their last attempt (each also logged at error level as `notification.dead_lettered` / `vcs.dead_lettered`) — worth an alert |
 
-The gauges are database-wide; the histograms and the counter are kept per API
+The gauges are database-wide; the histograms and the counters are kept per API
 process, so sum them across replicas. Setting `STACKD_OTLP_ENDPOINT` also exports
 OpenTelemetry traces (HTTP requests and SQL queries, service `stackd-api`) over
 OTLP/HTTP; unset, tracing is off.
@@ -141,8 +143,9 @@ their rows until a later tick succeeds.
 
 The same daily task deletes expired refresh-token families and — only when
 `STACKD_AUDIT_PURGE_DATABASE_URL` names the distinct purge role — audit events
-older than `AUDIT_RETENTION_DAYS` (default 730), recording an `audit.purged`
-event. Each step logs `scheduler.retention` (with a count) or
+older than `AUDIT_RETENTION_DAYS` (default 730), in batches of 5,000 rows (one
+transaction each, so a large backlog never turns into one long delete), each
+batch recording its `audit.purged` event. Each step logs `scheduler.retention` (with a count) or
 `scheduler.retention_failed`.
 
 ## Inspecting object storage (dev)
