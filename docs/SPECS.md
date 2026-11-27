@@ -174,7 +174,7 @@ locked bool, labels jsonb, position int,
 created_at, updated_at
 ```
 
-The external-secret (`allow_fallback_apply`, §15.5), unmanaged-backend (`backend_config_file`, `backend_config`, §11.3) and drift (§19) columns are listed in their own sections.
+The external-secret (`allow_fallback_apply`, §15.5), unmanaged-backend (`backend_config_file`, `backend_config`, §11.3), drift (§19) and out-of-band state (`state_serial`, `out_of_band_*`, §19.7) columns are listed in their own sections.
 
 Why not Terraform workspaces: weak isolation (shared code/backend/credentials, state suffix), easy targeting mistakes. A Stackd environment = physically separate state, variables, protections and its own worker pool.
 
@@ -647,6 +647,10 @@ audit.purged                      # retention purge of old audit events (§6.1) 
 environment.head_refreshed        # manual head refresh (§9.6) — context: branch, old_sha, new_sha
 environment.inputs_discovered     # discover-inputs created placeholder env variables (§20.3)
 environment.drift_detected / environment.drift_cleared               # §19.4
+environment.out_of_band_change_detected   # §19.7 — actor system; context run_id, expected_serial,
+                                          #   observed_serial, lineage_changed
+environment.out_of_band_change_cleared    # §19.7 — reason applied (actor system, run_id) |
+                                          #   acknowledged (the user; expected/observed serials)
 variable.created / variable.updated / variable.deleted   # stack, env and set variables — context:
                                                           #   name, sensitive — NEVER the value
 variable_set.created / variable_set.updated / variable_set.deleted
@@ -828,6 +832,10 @@ POST /worker/v1/jobs/claim?wait=25
                                            # plan); hooks never get them; inherited TF_HTTP_* dropped
     "backend_config_file": null,           # unmanaged state only (§11.3): -backend-config=<file>
     "backend_config": null,                # unmanaged state only (§11.3): -backend-config=k=v
+    "observe_state": false,                # §19.7: read the state's serial/lineage (`state pull`)
+                                           # and report them (`state_observed`, §7.3) — unmanaged
+                                           # state, reviewed code only: a tracked/destroy/drift
+                                           # plan, an apply, a mutating command; absent → false
     "cloud_credentials": {                 # §10, if cloud_integration configured, else null
       "provider": "aws",
       "oidc_token": "<signed workload JWT>",
@@ -896,6 +904,15 @@ POST /worker/v1/jobs/{id}/events
   job_canceled carries "result": {"checks": [...]} — the job stopped on a stop request (a
       user's, or a closed PR's, §4.1/§18.3); 409 unless `runs.cancel_requested_at` is set
 
+POST /worker/v1/jobs/{id}/events
+  { "event": "state_observed", "result": {"serial": 42, "lineage": "<uuid>", "baseline": false} }
+      # §19.7: the state as the job found it (baseline=false, after init) or left it (baseline=true,
+      # after the apply / mutating command); serial and lineage both null for an empty state.
+      # Changes no run state. 409 unless the run is executing (as job_failed) and its job was handed
+      # `observe_state` (unmanaged state, reviewed code); baseline=true also needs a job holding
+      # apply credentials. 400 on a malformed pair (serial an integer ≥ 0, lineage ≤ 64 chars of
+      # [A-Za-z0-9-], both set or both null). Never anything else of the state
+
 PUT /worker/v1/jobs/{id}/artifacts/plan.tfplan | plan.json | outputs.json
 GET /worker/v1/jobs/{id}/artifacts/plan.tfplan          # the apply job's saved plan
 ```
@@ -950,11 +967,16 @@ hooks = merge_hooks(job.hooks, ws.load_stackd_yml())   # platform first, §8
 # into `checks` with "stage": name. A failing `fail` hook → report job_failed(phase=name, checks) and
 # stop, before the next tofu step. Every job_failed below carries the `checks` gathered so far.
 
+# observe(baseline): only when job.observe_state (§19.7) — `state pull` captured in memory, never on
+# disk nor in a log; only serial + lineage are reported (state_observed). Any failure: a warning,
+# the job goes on.
+
 if job.phase == "plan":
     write_backend_override(ws)               # `terraform { backend "http" {} }`, managed state only
     report(phase_started, phase="planning", commit_sha=ws.head_sha())   # the API pins the run
     stage("before_init")
     with with_files(): run(tf, "init", "-input=false")
+    observe(baseline=False)                  # the state as Stackd finds it, before the plan
     stage("after_init"); stage("before_plan")
     # plan/apply run with -json: the agent streams each event's human @message to the log (masked)
     # AND collects the structured events — the `change_summary` event gives the authoritative
@@ -988,12 +1010,16 @@ elif job.phase == "apply":                   # a fresh clone of the pinned commi
     write_backend_override(ws)
     hooks = skip_repo_apply_hooks(hooks) if not job.repo_hooks_at_apply else hooks   # warn, §8.3
     with with_files(): run(tf, "init", "-input=false")
+    observe(baseline=False)                  # a write since the plan job is caught here
     plan = download_artifact("plan.tfplan")  # missing/unreadable → fail closed, NEVER re-plan
     stage("before_apply")                    # a failing check → nothing applied
     write_plan(plan)                         # 0600; removed right after the apply
-    with with_files():                       # the tfvars too: tofu refuses changed inputs (§7.3)
-        run(tf, "apply", "-input=false", "-json", "plan.tfplan",   # stale → tofu refuses → failed
-            timeout=job.apply_timeout_seconds)
+    try:
+        with with_files():                   # the tfvars too: tofu refuses changed inputs (§7.3)
+            run(tf, "apply", "-input=false", "-json", "plan.tfplan",   # stale → tofu refuses → failed
+                timeout=job.apply_timeout_seconds)
+    finally:
+        observe(baseline=True)               # whatever the exit (a partial apply writes state)
     cancel_token.disarm()                    # applied: a stop request no longer interrupts (§4.1)
     with with_files(tfvars=False): outputs = run(tf, "output", "-json")
     upload_artifacts(outputs, "outputs.json")
@@ -1006,11 +1032,15 @@ else:                                        # command job (§4.3): no hooks, no
     write_backend_override(ws)
     report(phase_started, phase="running")
     with with_files(): run(tf, "init", "-input=false")
-    with with_files():
-        run(tf, *job.command.name.split(),
-            *(["-force"] if job.command.name == "force-unlock" else []),  # never prompts
-            *job.command.args,                       # verbatim: the API validated and ordered them
-            timeout=default_cap if job.cred_phase == "plan" else job.apply_timeout_seconds)
+    observe(baseline=False)                  # observe_state: mutating commands only
+    try:
+        with with_files():
+            run(tf, *job.command.name.split(),
+                *(["-force"] if job.command.name == "force-unlock" else []),  # never prompts
+                *job.command.args,                   # verbatim: the API validated and ordered them
+                timeout=default_cap if job.cred_phase == "plan" else job.apply_timeout_seconds)
+    finally:
+        observe(baseline=True)
     report(phase_finished, command=job.command.name)
 
 ws.cleanup()                                 # in a `finally`, whatever ended the job
@@ -1314,6 +1344,8 @@ Changing an environment's `branch` (`PATCH`) clears `head_sha`, `head_updated_at
 - `↑N` chip on the env cell (DESIGN.md §5.1) and the env header; attenuated variant if `affects_project_root = false` ("the branch moved ahead, but not this folder"). Shipped: the chip (`ModifierChips`, overview matrix and env header) and the banner below (run page).
 - **Obsolete `unconfirmed` run**: if `head_sha` advances while a plan awaits confirmation, banner on the run page — "plan computed on `abc1234`, the branch advanced by N commits" — with a *Re-plan* action (discard + new run on the head). Confirmation remains **possible** (applying a specific commit is legitimate) but the obsolescence is impossible to miss.
 - No automatic action: staleness is information, never a trigger (that is the role of webhooks).
+- On an unmanaged-state env, "last applied" is what *Stackd* applied: a change made outside it (a
+  hand-run apply) is not seen here, but by the state observation of §19.7, which flags the env.
 - `GET /api/v1/environments/{id}` exposes `head_sha`, `commits_ahead`, `affects_project_root`, `stale`.
 
 ### 9.7 Environment promotion (trunk-based)
@@ -1449,7 +1481,7 @@ encryption (PLAN Phase 3).
 
 `artifacts/{run_id}/plan.tfplan` is the run's **saved plan** (§7.3): it holds the run's variable values in clear, sensitive ones included, so the API encrypts it **AES-256-GCM with the application key** before it reaches S3 (layout `nonce(12) || ciphertext || tag`, AAD = `stackd:artifact:<s3 key>` so a blob moved under another run's key does not decrypt) — on top of the bucket's SSE. Its key is recorded on the run (`runs.plan_artifact_key`). **Retention**: it lives only while the run can still be applied. On any transition to a terminal state (`finished`, `failed`, `discarded`, `canceled` — whatever the path: worker event, user, scheduler), `transition()` clears `plan_artifact_key` in the same transaction and the object is deleted once that transaction commits (best effort: a failed delete is logged; the blob stays encrypted and the API serves it to nobody, since only an `applying` run's worker can download it). `plan.json`/`outputs.json` are accepted but not archived yet.
 
-`managed_state: false` → no HTTP backend injected, the repo keeps its own `backend` block. For a **partial** backend, set either/both (per-env, applied at init in this order — later `-backend-config` wins): `environments.backend_config_file` (repo-relative `.config`/`.tfbackend` path → `-backend-config=<file>`) and `environments.backend_config` (a `{key: value}` map → one `-backend-config=key=value` each, e.g. `bucket`/`key`/`region`/`dynamodb_table`/`use_lockfile`). The inline map is the way to onboard a new tier on shared code without a per-env `.config` file: set its own `key` so it doesn't collide with another env's state. Mutually exclusive with the managed HTTP backend.
+`managed_state: false` → no HTTP backend injected, the repo keeps its own `backend` block. For a **partial** backend, set either/both (per-env, applied at init in this order — later `-backend-config` wins): `environments.backend_config_file` (repo-relative `.config`/`.tfbackend` path → `-backend-config=<file>`) and `environments.backend_config` (a `{key: value}` map → one `-backend-config=key=value` each, e.g. `bucket`/`key`/`region`/`dynamodb_table`/`use_lockfile`). The inline map is the way to onboard a new tier on shared code without a per-env `.config` file: set its own `key` so it doesn't collide with another env's state. Mutually exclusive with the managed HTTP backend. Such a backend can be written outside Stackd (an operator's `tofu apply` by hand, another tool): Stackd watches its `serial`/`lineage` and flags such a change on the environment (§19.7).
 
 ### 11.4 Importing an existing stack
 
@@ -1505,6 +1537,7 @@ GET|POST /api/v1/stacks ; GET|PATCH|DELETE /api/v1/stacks/{id}          # DELETE
 POST /api/v1/stacks/{id}/check-repo                                    #   a run or rollout is active (§3.2)
 GET|POST /api/v1/stacks/{id}/environments ; GET|PATCH|DELETE /api/v1/environments/{id}
 POST /api/v1/environments/{id}/refresh-head        # Git staleness, §9.6
+POST /api/v1/environments/{id}/out-of-band-change/acknowledge   # can_apply; clears the flag (§19.7)
 POST /api/v1/environments/{id}/discover-inputs     # shallow clone + HCL parse → placeholder
                                                    #   env variables for required inputs (§20.3)
 GET|POST /api/v1/stacks/{id}/variables ; PATCH|DELETE /api/v1/stacks/{id}/variables/{vid}
@@ -1959,9 +1992,10 @@ env flag could make confirm require all threads resolved — deliberately deferr
 
 `user_notifications` (per user): `user_id`, `kind`, `run_id?`, `comment_id?`, `context jsonb`,
 `read_at?`, `created_at`. `kind ∈ approval_request | run_finished | run_failed | comment_reply |
-mention | drift_detected | rollout_paused | rollout_succeeded | rollout_failed |
-rollout_upstream_changed` (`drift_detected`: §19.4; the `rollout_*` ones: §21.7, context
-`{rollout_id, name, …}`, no `run_id`). Each row is created **in the same transaction** as its trigger:
+mention | drift_detected | out_of_band_change | rollout_paused | rollout_succeeded | rollout_failed |
+rollout_upstream_changed` (`drift_detected`: §19.4; `out_of_band_change`: §19.7, the detecting
+run, context `{environment_id, environment, tier, expected_serial, observed_serial}`; the
+`rollout_*` ones: §21.7, context `{rollout_id, name, …}`, no `run_id`). Each row is created **in the same transaction** as its trigger:
 
 - **`transition()`** (§4.2): `→ unconfirmed` fans out `approval_request` to every eligible approver
   — the users who pass `can_apply` on the env (§2.4), evaluated with their **effective** space
@@ -2118,6 +2152,97 @@ alone — DESIGN §7) on the env page (linking the drift run's plan) and in the 
    and yields to user runs at claim time.
 3. The env status change rides the run `transition()` txn — a rolled-back completion changes
    nothing; the notification is same-txn (§17.4).
+
+### 19.7 Out-of-band state changes (unmanaged state)
+
+> Status: **shipped**. With `managed_state=false` (§11.3) the state lives in the repo's own backend,
+> and anyone holding its credentials — an operator falling back to `tofu apply` by hand, another
+> tool — can write it between two Stackd runs. Stackd would keep presenting its last applied commit
+> (§9.6), outputs (§9.1) and cascades (§9.2) as current while the infrastructure moved. Stackd
+> cannot prevent such a write; it makes it **visible**. Never auto-remediated, never a trigger.
+
+**Signal: the state's `serial` and `lineage`.** Every state write bumps `serial`; a new state (a
+re-created or replaced one, another backend key) has another `lineage`. Stackd records per
+environment the last pair it observed — its **baseline** — and compares each observation with it.
+Nothing else of the state ever reaches the API: it holds secrets (sensitive outputs, attributes).
+
+**Model** (`environments`, add): `state_serial int?`, `state_lineage text?` (the baseline; no
+baseline while `state_lineage` is null), `state_observed_at timestamptz?` (last observation),
+`out_of_band_detected_at timestamptz?` (set = flagged), `out_of_band_run_id uuid?` (the run whose
+observation last saw a change), `out_of_band_expected_serial int?`, `out_of_band_expected_lineage
+text?` (the baseline when the change was first seen), `out_of_band_observed_serial int?`,
+`out_of_band_observed_lineage text?` (the latest differing observation).
+
+**Observation (agent).** The claim sets `observe_state` (§7.2) for the jobs of an unmanaged-state
+env that run **reviewed code** and already hold the credentials that read the state: a
+`tracked`/`destroy` plan, a drift plan (§19.3), an apply, a mutating command (§4.3). Never a pull
+request's proposed run — its unreviewed code may point the backend elsewhere (a false alarm, or a
+way to raise one) — nor a read-only command. The agent runs `<tool> state pull` with the job's
+backend settings and credentials, its output **captured in memory only** — never written to disk
+(the checkout or elsewhere), never logged nor streamed to the run's log — parses it and keeps two
+fields, sent in a `state_observed` event (§7.3):
+
+- a **check** (`baseline: false`), right after `init`: the state as the job finds it — before the
+  plan, before the apply (a write since the plan job), before a mutating command;
+- a **baseline** (`baseline: true`), in an apply or a mutating command job, right after the apply /
+  command ran, whatever its exit (a failed or stopped apply may have written part of the state):
+  the state as Stackd left it.
+
+An empty output — no state yet, a first deploy — reports `serial` and `lineage` as null. **Best
+effort**: a failed read (non-zero exit, output not a state document, past its 2 min budget) or a
+refused report is a warning — in the agent's log and as one line in the run's log, never the tool's
+output — and the job goes on. Detection never fails nor moves a run (`transition()` untouched).
+
+**Comparison (API, in the event's transaction, the env row locked).** `obs` = the reported pair,
+`base` = (`state_serial`, `state_lineage`):
+
+- **check** — no baseline: `obs` becomes it (a new env, or one adopted from hand-run Terraform;
+  an empty state records nothing). `obs = base`: nothing. Otherwise **out-of-band change** — any
+  difference, a lower serial or a state gone empty included, since Stackd wrote none of it: the
+  baseline becomes `obs`, `out_of_band_observed_*` = `obs`, `out_of_band_run_id` = the run; on the
+  edge into the flag only (not flagged yet): `out_of_band_detected_at` = now,
+  `out_of_band_expected_*` = `base`, audit `environment.out_of_band_change_detected` (actor
+  `system`) and the in-app `out_of_band_change` notification to the env's eligible approvers (the
+  drift audience, §19.4) — debounced while it stays flagged, like drift. A system observation, not a
+  human mutation: an `audit_event`, no `run_event` (those record transitions, §3.6).
+- **baseline** — `obs` becomes the baseline (`obs = base`: the job wrote nothing). It never raises
+  nor clears the flag by itself.
+
+**Clearing.** The flag clears:
+
+1. when a **full apply finishes** (`applying → finished`, or the after_apply-failure path of §8.3 —
+   a `tracked`/`destroy` apply, not targeted, §3.5), in that transaction: its plan was computed on
+   the changed state and reviewed, and tofu refuses a saved plan whose state moved since (§7.3) — the
+   environment is Stackd's again. Audit `environment.out_of_band_change_cleared`, actor `system`,
+   `reason: applied`. A targeted apply or a mutating command only moves the baseline (as drift,
+   §19.4: they reconcile part of the env at most);
+2. when a human **acknowledges** it: `POST /api/v1/environments/{id}/out-of-band-change/acknowledge`
+   — `can_apply(user, env)` (§2.4: the people who could clear it by applying), 409 when nothing is
+   flagged — clears the `out_of_band_*` fields (the baseline already is the observed state). Audit
+   `environment.out_of_band_change_cleared`, the user as actor, `reason: acknowledged`.
+
+An empty plan does **not** clear it: a plan writes no state and captures no outputs (§9.1), so the
+env's recorded outputs — what cascades propagate — may predate the change; only an apply, which
+re-captures them, or a human who checked, says the env is consistent again.
+
+**Reset.** A PATCH changing `managed_state`, `backend_config` or `backend_config_file` points the env
+at another state: the baseline and the flag are cleared (part of its `environment.updated` audit),
+and the next observation adopts the new state.
+
+**Managed state: not observed.** Every write goes through the API's state backend (§11.2) and is a
+`state_version` linked to its run; the only run-less write is an admin's import session (§11.4),
+itself audited. The claim never sets `observe_state` there.
+
+**API / front.** The env out carries `state_serial`, `state_lineage`, `state_observed_at` and
+`out_of_band_change` (`{detected_at, run_id, expected_serial, expected_lineage, observed_serial,
+observed_lineage}`, null when not flagged). Front: a neutral `⇄ CHANGED OUTSIDE` chip (glyph +
+label, never colour alone — DESIGN §3.6) in the env cell and the env header, which also says
+expected vs observed serial, links the detecting run and offers *Acknowledge* (can_apply).
+
+**Limits.** Best effort, not a guarantee: several outside writes between two observations show as
+one change; a write made while a Stackd job that writes the state runs (between its check and its
+baseline) — or right after a check that failed — is absorbed into the baseline; a commit that
+changes the backend block (another `key`) reads as a new lineage: acknowledge it.
 
 ---
 

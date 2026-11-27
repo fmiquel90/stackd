@@ -264,6 +264,7 @@ Two forms:
 | Fallback | `◈ FALLBACK` | `state-decision` | a secret came from a fallback; blocks apply unless `allow_fallback_apply` (SPECS §15.5) — it demands a decision, hence amber |
 | Stale | `↑3` (or `↑` until AUDIT A6) | `text-secondary` | branch ahead of the deployed commit; attenuated (`text-secondary`, dotted underline) when `affects_project_root=false` |
 | Drift | `≈ DRIFT` / `≈? DRIFT CHECK FAILED` | `text-primary` | neutral per SPECS §19.5 — a fact to investigate, not a decision |
+| Changed outside | `⇄ CHANGED OUTSIDE` (compact `⇄ OUTSIDE`) | `text-primary` | unmanaged state written outside Stackd since its last observation (SPECS §19.7) — neutral, like drift |
 | Locked | `⚿ LOCKED` | `text-primary` | |
 | PR | `PR` | `state-queued` (outlined) | the env's active run is a proposed run |
 
@@ -326,7 +327,7 @@ is reserved to the decision. Zero counts are rendered in `text-secondary` withou
 | Neutral, waiting for a machine | grey | `○` | QUEUED |
 | Ended without effect | grey, struck | `⊘` | DISCARDED / CANCELED |
 | Focus, selection, brand | violet | ring / bar | — |
-| Drift, stale, lock, PR | no hue | `≈ ↑ ⚿ PR` | DRIFT / ↑3 / LOCKED / PR |
+| Drift, changed outside, stale, lock, PR | no hue | `≈ ⇄ ↑ ⚿ PR` | DRIFT / CHANGED OUTSIDE / ↑3 / LOCKED / PR |
 | Diff create / destroy / replace / update | green / red / red / neutral | `+ − ± ~` | CREATE / DESTROY / REPLACE / UPDATE |
 | Telemetry (HTTP status, log level, worker online) | neutral; red **only** for errors | — | the value itself |
 
@@ -447,7 +448,7 @@ Overview · demo                                       filter [ app____ ]  state
 
 **Attention zone** (pinned above the matrix, never auto-collapsed while it holds a *needs you* item):
 
-- Groups, in order: **Needs you** (unconfirmed, the user can confirm), **Waiting on someone** (unconfirmed, the user cannot confirm — with the missing condition in words), **Blocked** (unconfirmed, and nobody can confirm: mocked or fallback with apply not allowed on the env), **Failed** (env's primary run failed, during apply or before), **Drift** (`drifted` or check error). A row appears in the first matching group only. A stale plan (unconfirmed run whose commit ≠ env head) is a `↑ stale plan` tag on its row — every unconfirmed run already falls in one of the first three groups.
+- Groups, in order: **Needs you** (unconfirmed, the user can confirm), **Waiting on someone** (unconfirmed, the user cannot confirm — with the missing condition in words), **Blocked** (unconfirmed, and nobody can confirm: mocked or fallback with apply not allowed on the env), **Failed** (env's primary run failed, during apply or before), **Drift** (`drifted`, check error, or a state changed outside Stackd — SPECS §19.7). A row appears in the first matching group only. A stale plan (unconfirmed run whose commit ≠ env head) is a `↑ stale plan` tag on its row — every unconfirmed run already falls in one of the first three groups.
 - Row: badge (compact) + `stack / env` + plan summary + who/age + the reason or next step + Enter target (the run page: Plan tab for decisions, Logs tab — opening at the first error — for failures; for drift, the drift run's Plan tab, else the env page).
 - Empty zone: one line, "Nothing needs attention in demo." — not hidden, so its absence is never ambiguous.
 
@@ -455,7 +456,7 @@ Overview · demo                                       filter [ app____ ]  state
 
 - Rows = stacks of the space, by name (sorting by "worst state" or last activity is **[not built yet]**). Columns = environment **names** present in the space, ordered by tier `position`, then env `position`, then name; a stack without that env shows `—`. A column header shows the env name, plus `four-eyes` when every env in the column is on a `requires_four_eyes` tier.
 - Sticky header row and first column. A wide matrix scrolls horizontally inside its own container, never the page.
-- **`EnvCell`** (one per env, 180 px min): line 1 = mini rail + compact state badge (wrapping under the rail when the cell is narrow); line 2 = relative age (+ plan summary when unconfirmed) + modifiers (`↑` `≈` `⚿` `◆` `◈` `PR`). Cell background stays the matrix's `bg-surface`, except `decision-tint` when the cell *needs you*.
+- **`EnvCell`** (one per env, 180 px min): line 1 = mini rail + compact state badge (wrapping under the rail when the cell is narrow); line 2 = relative age (+ plan summary when unconfirmed) + modifiers (`↑` `≈` `⇄` `⚿` `◆` `◈` `PR`). Cell background stays the matrix's `bg-surface`, except `decision-tint` when the cell *needs you*.
 - **Selection details**: clicking or focusing a cell selects it (`?sel=stack/env`) and opens a panel under the matrix: `stack / env`, tier, branch, modifiers, deployed commit, branch head, active run or last outcome with who/age, "Confirm needs …" for a pending run, and the actions the user can take (Show downstream, Open run, Open environment, Plan — writer+, when no run is active). A hover popover on the cell is **[not built yet]**.
 - **Cascade preview on demand**: `s` (or "Show downstream" in the selection panel; `?cascade=1`) outlines the selected cell's downstream cells (BFS over `GET /graph` edges) with a dashed selection mark and a `↳ will plan` / `↳ plans if outputs change` line, and the panel lists them ("demo-app/prod (if outputs change)"). `s` again or "Hide downstream" clears.
 - **Filters** in a top bar, reflected in the URL: text (stack or env name), state (All, Needs attention, Needs you, Running, Failed, Drift, Branch ahead), tier. Filtering by state hides non-matching rows, not cells.
@@ -649,7 +650,7 @@ variables, hooks, notifications, secret sources; URL `?tab=settings&sub=`).
 
 **Environment page** `/s/:space/stacks/:stack/envs/:env` (new in v2):
 
-- **Header**: `stack / env`, badges (tier, `four-eyes`, `protected`, `second pair of eyes`, `autodeploy`, `managed state`); a summary strip with the env's `EnvCell` (active run or last outcome), branch, deployed commit and head (`↑` when ahead; a Refresh button, writer+), drift (`≈ DRIFT` + "see the drift" → drift run, or "No drift detected · checked 1h ago" / "Drift detection off"), lock.
+- **Header**: `stack / env`, badges (tier, `four-eyes`, `protected`, `second pair of eyes`, `autodeploy`, `managed state`); a summary strip with the env's `EnvCell` (active run or last outcome), branch, deployed commit and head (`↑` when ahead; a Refresh button, writer+), drift (`≈ DRIFT` + "see the drift" → drift run, or "No drift detected · checked 1h ago" / "Drift detection off"), a state changed outside Stackd (`⇄ CHANGED OUTSIDE` + "serial 41 expected, 43 found · 2h ago", "seen by this run" → the run that saw it, and *Acknowledge* for a user passing `can_apply`, SPECS §19.7), lock.
 - **Primary actions** (writer+): **Plan** (primary button), and a "More" menu: Plan with downstream (`with_downstream`), Promote from a sibling… (SPECS §9.7), Run a command… (allowlist, SPECS §4.3), New environment from… (this env preselected as the model), Roll out every “<name>” environment… (SPECS §21, DESIGN §5.11) and Plan a destroy… (shown only with `can_destroy`; opens a dialog explaining the run will need typed confirmation at apply).
 - **Tabs** (URL): **Runs** (default) — history table: run short ID, kind (`tracked`, `destroy`, `PR`, `drift`, `command`), outcome badge, mini rail, commit, trigger (who/how), start, duration; filter by kind (`?kind=`); paginated client-side, 50 at a time **[today]**. **Inputs** (Resolved with provenance / Environment overrides / Discover inputs), **Outputs**, **Dependencies**, **State** (versions; force-unlock admin-only per §5.7), **Settings** (name, tier, branch, flags with the §5.7 friction, backend config, labels, hooks, notifications, cloud integration), and a **Danger zone** at the bottom of Settings (delete environment, typed name).
 
