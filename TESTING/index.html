@@ -1983,8 +1983,8 @@ The tier gate (an approver without <code>prod</code>) and staleness stay manual 
 <td>The plan job uploads the plan it showed, before the <code>after_plan</code> hooks; destroy runs plan with <code>-destroy</code>; <code>plan_options</code> become one <code>-target=</code>/<code>-replace=</code> argv element each on the plan (tracked and destroy), never on the apply; the apply job applies exactly the saved plan, fails closed without a usable one, reports a stale plan clearly; the plan file is never written through a checked-out symlink; the API's refusal reaches the job error.</td>
 </tr>
 <tr>
-<td><code>test_commit_pin.py</code> (7)</td>
-<td>An unpinned clone takes the env branch head; a pinned SHA off the default tip and a pinned ref are checked out exactly; an unknown commit fails at fetch; the plan reports its commit; an apply without a pinned commit fails closed.</td>
+<td><code>test_commit_pin.py</code> (13)</td>
+<td>An unpinned clone takes the env branch head; a pinned SHA off the default tip and a pinned ref are checked out exactly; an unknown commit fails at fetch; a pinned commit is the only one downloaded (one fetch, no clone of the default branch), with the stalled-transfer limits; a server refusing SHA wants (protocol v0) still gets it through the fallback, and a commit it lacks fails with its refusal; a SHA-256 repository, pinned by SHA or by ref; the plan reports its commit; an apply without a pinned commit fails closed.</td>
 </tr>
 <tr>
 <td><code>test_backend_env.py</code> (12)</td>
@@ -2011,12 +2011,12 @@ The tier gate (an approver without <code>prod</code>) and staleness stay manual 
 <td>A command's time budget follows <code>cred_phase</code>: apply budget when mutating, default cap when read-only, apply budget when missing (fail closed); an over-budget command fails with a clear message; <code>force-unlock</code> runs with <code>-force</code> added by the agent; args are passed in the API's order.</td>
 </tr>
 <tr>
-<td><code>test_authed_url.py</code> (45)</td>
-<td>The repo token is percent-encoded into the clone URL (git dials the real host); other URLs unchanged; a failed clone masks both token forms.</td>
+<td><code>test_authed_url.py</code> (53)</td>
+<td>The repo token is percent-encoded into the clone URL (git dials the real host); other URLs unchanged; a failed clone or pinned-commit fetch masks both token forms.</td>
 </tr>
 <tr>
 <td><code>test_repo_credentials.py</code> (7)</td>
-<td><code>GIT_SSH_COMMAND</code> with the deploy key only (<code>IdentitiesOnly</code>); the key file <code>0600</code>, outside the checkout, gone after use; a real clone and pinned fetch over a stand-in <code>ssh</code>; the token's <code>insteadOf</code> config rewrites the repo host's https / <code>git@</code> / <code>ssh://</code> URLs and nothing else (checked with <code>git ls-remote --get-url</code>); the masker covers the token's URL form.</td>
+<td><code>GIT_SSH_COMMAND</code> with the deploy key only (<code>IdentitiesOnly</code>); the key file <code>0600</code>, outside the checkout, gone after use; a real fetch of a pinned commit over a stand-in <code>ssh</code> (one connection); the token's <code>insteadOf</code> config rewrites the repo host's https / <code>git@</code> / <code>ssh://</code> URLs and nothing else (checked with <code>git ls-remote --get-url</code>); the masker covers the token's URL form.</td>
 </tr>
 <tr>
 <td><code>test_init_cmd.py</code> (6)</td>
@@ -2031,12 +2031,12 @@ The tier gate (an approver without <code>prod</code>) and staleness stay manual 
 <td>Repo-hook env stripped of cloud credentials and sensitive values; the cleartext tripwire on plan and output JSON.</td>
 </tr>
 <tr>
-<td><code>test_masking.py</code> (10)</td>
-<td>Masking (all secrets, longest first); platform hooks before repo hooks; plan summary and first error from tofu's JSON events (counters a newer tool reports kept, forgets counted from the plan JSON); the masked plan JSON hides every sensitive value and keeps the rest, and a non-JSON document is masked as text.</td>
+<td><code>test_masking.py</code> (16)</td>
+<td>Masking (all secrets in one pass, literals not patterns, longest first, overlapping secrets masked whole); platform hooks before repo hooks; plan summary and first error from tofu's JSON events (counters a newer tool reports kept, forgets counted from the plan JSON); the masked plan JSON hides every sensitive value and keeps the rest, and a non-JSON document is masked as text.</td>
 </tr>
 <tr>
-<td><code>test_workspace.py</code> (7)</td>
-<td><code>hcl</code> tfvars written verbatim; token injection into HTTPS clone URLs; the backend override never written through a repo-planted symlink.</td>
+<td><code>test_workspace.py</code> (9)</td>
+<td><code>hcl</code> tfvars written verbatim; token injection into HTTPS clone URLs; the backend override never written through a repo-planted symlink; a workspace handed to the runner user is chowned once after the clone, then each file the agent writes is created with that owner.</td>
 </tr>
 <tr>
 <td><code>test_concurrency.py</code> (3)</td>
@@ -2055,8 +2055,8 @@ The tier gate (an approver without <code>prod</code>) and staleness stay manual 
 <td>Private registry pulls (SPECS §7.4): an image reference's registry host (port, <code>localhost</code>, Docker Hub defaults) and a config key's; <code>auth</code>, <code>username</code>/<code>password</code> and <code>identitytoken</code> entries → the base64url <code>X-Registry-Auth</code> JSON, sent on the pull only, none when anonymous; credential-helper entries skipped; a broken or missing file refuses to start, never quoting its content; secrets out of <code>repr</code>, logs and pull errors (stream and HTTP); the file never reaches a job's environment.</td>
 </tr>
 <tr>
-<td><code>test_docker_runner.py</code> (10)</td>
-<td>The <code>docker</code> runner (SPECS §7.4): job containers hardened and mounting the workspace, repo-hook containers the checkout only, none of the host's env; output, env and exit code; timeout kills the container; nothing a command starts outlives it; no secret file for a repo hook; unprivileged, read-only rootfs; stdout/stderr kept apart. Real containers, skipped without a daemon.</td>
+<td><code>test_docker_runner.py</code> (14)</td>
+<td>The <code>docker</code> runner (SPECS §7.4): job containers hardened and mounting the workspace, repo-hook containers the checkout only, none of the host's env; the plugin cache writable for <code>init</code> only, read-only otherwise, absent for repo hooks (spec and real containers); a root agent chowns no tree per command; the line splitter stays linear on a multi-MB line; output, env and exit code; timeout kills the container; nothing a command starts outlives it; no secret file for a repo hook; unprivileged, read-only rootfs; stdout/stderr kept apart. Real containers, skipped without a daemon.</td>
 </tr>
 <tr>
 <td><code>test_docker_job.py</code> (1)</td>
@@ -2099,8 +2099,20 @@ The tier gate (an approver without <code>prod</code>) and staleness stay manual 
 <td>Repo hooks at the apply stages run only on a tier that allows them; elsewhere skipped with a warning (SPECS §8.3).</td>
 </tr>
 <tr>
-<td><code>test_runner_diag.py</code> (1)</td>
-<td>A tofu diagnostic is expanded to its detail and location.</td>
+<td><code>test_runner_diag.py</code> (2)</td>
+<td>A tofu diagnostic is expanded to its detail and location; only <code>change_summary</code> and error events are kept, every event still streamed.</td>
+</tr>
+<tr>
+<td><code>test_git_resilience.py</code> (5)</td>
+<td>The agent's git against a stalled host (a stand-in <code>ssh</code>): the branch clone and the pinned fetch fail at <code>STACKD_GIT_TIMEOUT_SECONDS</code>; a stop request interrupts them (<code>JobCanceled</code>); a job stopped before its clone runs no git.</td>
+</tr>
+<tr>
+<td><code>test_plugin_cache.py</code> (5)</td>
+<td><code>STACKD_PLUGIN_CACHE_DIR</code> (SPECS §7.4): <code>init</code> gets <code>TF_PLUGIN_CACHE_DIR</code>, runs under the host-wide lock and without <code>TF_PLUGIN_CACHE_MAY_BREAK_DEPENDENCY_LOCK_FILE</code>; nothing changes without the setting; a second <code>init</code> waits for the first, a stop request ends the wait; the docker runner gets the cache.</td>
+</tr>
+<tr>
+<td><code>test_plan_json.py</code> (1)</td>
+<td>The plan job parses <code>show -json</code> once; the forget count, the tripwire (reading the clear values) and the masked artifact all come from it.</td>
 </tr>
 <tr>
 <td><code>test_diagnostics.py</code> (1)</td>

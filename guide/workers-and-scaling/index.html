@@ -892,6 +892,17 @@
   
 </li>
         
+          <li class="md-nav__item">
+  <a href="#provider-plugin-cache" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Provider plugin cache
+      
+    </span>
+  </a>
+  
+</li>
+        
       </ul>
     </nav>
   
@@ -1453,6 +1464,17 @@
   
 </li>
         
+          <li class="md-nav__item">
+  <a href="#provider-plugin-cache" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Provider plugin cache
+      
+    </span>
+  </a>
+  
+</li>
+        
       </ul>
     </nav>
   
@@ -1626,6 +1648,10 @@
 <td>the hook timeout, <code>STACKD_HOOK_TIMEOUT_SECONDS</code> on the worker (default 600 s). A hook past it fails by its own <code>on_failure</code> (<a href="../hooks/#failures-warnings-and-timeouts">Hooks</a>)</td>
 </tr>
 <tr>
+<td>each git command of the clone</td>
+<td><code>STACKD_GIT_TIMEOUT_SECONDS</code> on the worker (default 600 s). Before that, a transfer slower than 1 KB/s for 60 s (https) or an SSH host silent for a minute (30 s to connect) fails it. A stop request interrupts it like any command</td>
+</tr>
+<tr>
 <td>anything else (<code>init</code>, <code>plan</code>, <code>show</code>, <code>output</code>)</td>
 <td>the agent's default cap, 2 h</td>
 </tr>
@@ -1700,6 +1726,16 @@
 <td><code>STACKD_HOOK_TIMEOUT_SECONDS</code></td>
 <td><code>600</code></td>
 <td>each hook's time budget</td>
+</tr>
+<tr>
+<td><code>STACKD_GIT_TIMEOUT_SECONDS</code></td>
+<td><code>600</code></td>
+<td>each git command's time budget (the clone of the job's commit)</td>
+</tr>
+<tr>
+<td><code>STACKD_PLUGIN_CACHE_DIR</code></td>
+<td>unset</td>
+<td>a provider plugin cache shared by the worker's jobs, see <a href="#provider-plugin-cache">Provider plugin cache</a>; unset, every job downloads its providers</td>
 </tr>
 <tr>
 <td><code>STACKD_LEAK_TRIPWIRE</code></td>
@@ -1790,6 +1826,14 @@ can't read the pool token from its environment.</p>
 <p class="admonition-title">The worker's host is privileged</p>
 <p>Access to the Docker socket is root-equivalent on that host: give the worker a dedicated VM, ideally with rootless Docker. If the agent itself runs in a container, mount <code>STACKD_WORKSPACE_ROOT</code> at the <strong>same path</strong> on the host and in the agent's container: the job containers mount it by host path.</p>
 </div>
+<h3 id="provider-plugin-cache">Provider plugin cache<a class="headerlink" href="#provider-plugin-cache" title="Permanent link">&para;</a></h3>
+<p>Without a cache, every job's <code>init</code> downloads every provider it uses (hundreds of MB for a big stack). Set <code>STACKD_PLUGIN_CACHE_DIR</code> to a directory of the worker's host to share them between its jobs (both runners):</p>
+<ul>
+<li>tofu's cache is its <code>providers/</code> subdirectory, created on first use. Keep the directory <strong>outside</strong> <code>STACKD_WORKSPACE_ROOT</code>, and, when the agent runs in a container, mount it at the <strong>same path</strong> on the host and in the agent's container (the job containers mount it by host path), e.g. <code>/var/lib/stackd/plugin-cache</code> (see <code>deploy/production/worker.compose.yml</code>).</li>
+<li>Only <code>init</code> writes it — the one command that installs providers and runs no repo code. Every other tofu command and platform hook gets it read-only; repo hooks don't see it.</li>
+<li>A cached provider is used only when the job's dependency lock file (<code>.terraform.lock.hcl</code>) records its checksum; otherwise tofu downloads it from the registry, as without a cache. Commit your lock files to benefit from the cache. <code>TF_PLUGIN_CACHE_MAY_BREAK_DEPENDENCY_LOCK_FILE</code> is never passed to <code>init</code>.</li>
+<li>Terraform's cache is not safe for concurrent installs: the jobs' <code>init</code>s take turns (a lock file next to the cache), so with <code>STACKD_MAX_CONCURRENT_JOBS</code> &gt; 1 an <code>init</code> may wait for another. Workers on one host may share the directory; workers on different hosts must not (no network filesystem).</li>
+</ul>
 <div class="admonition warning">
 <p class="admonition-title">Fargate</p>
 <p>The <code>docker</code> runner launches containers; <strong>AWS Fargate does not allow this</strong>. A worker on Fargate can only use the <code>local</code> runner, which a production API refuses.</p>
