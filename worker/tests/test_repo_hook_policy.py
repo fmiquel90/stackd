@@ -22,6 +22,9 @@ class _Streamer:
     def emit(self, phase: str, lines: list[str], section: str | None = None) -> None:
         self.lines.extend(lines)
 
+    def flush(self, timeout: float | None = None) -> bool:
+        return True
+
 
 def test_tier_without_the_flag_skips_repo_apply_hooks() -> None:
     for job in ({"repo_hooks_at_apply": False}, {}):  # absent (an older API): fail closed

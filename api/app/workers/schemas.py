@@ -4,7 +4,7 @@ import uuid
 from datetime import datetime
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from app.enums import WorkerStatus
 from app.runs.logs_archive import valid_phase
@@ -32,6 +32,9 @@ class HeartbeatIn(BaseModel):
     # the scheduler to reason about (not persisted this phase — no schema change).
     in_flight: int | None = None
     capacity: int | None = None
+    # The ids of the jobs it is running (§7.1): an executing run of this worker left out of it is
+    # failed after a grace (§3.7). None from an agent that predates it — no reaping on that basis.
+    job_ids: list[uuid.UUID] | None = Field(default=None, max_length=1024)
 
 
 class HeartbeatOut(BaseModel):

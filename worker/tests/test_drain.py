@@ -273,7 +273,9 @@ class FakeApi:
     def register(self, *a: object, **k: object) -> str:
         return "wt"
 
-    def heartbeat(self, in_flight: int = 0, capacity: int = 1) -> list[dict]:
+    def heartbeat(
+        self, in_flight: int = 0, capacity: int = 1, job_ids: list[str] | None = None
+    ) -> list[dict]:
         with self.lock:
             self.heartbeats.append(time.monotonic())
         return []

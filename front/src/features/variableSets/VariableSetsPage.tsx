@@ -24,6 +24,7 @@ import {
   TabsTrigger,
 } from "@/ui/primitives";
 import { TypeNameDialog } from "@/ui/TypeNameDialog";
+import { shortId } from "@/lib/ids";
 
 // Variable sets (DESIGN §5.10): one row per set with how it reaches environments; each set has its
 // own page with Variables / Attachments / Settings tabs (in the URL). Deleting asks for the name.
@@ -210,12 +211,12 @@ function useNames(): Names {
 
 function targetLabel(a: Pick<Attachment, "target_kind" | "target_id">, n: Names): string {
   if (a.target_kind === "stack")
-    return n.stacks.find((s) => s.id === a.target_id)?.name ?? a.target_id.slice(0, 8);
+    return n.stacks.find((s) => s.id === a.target_id)?.name ?? shortId(a.target_id);
   if (a.target_kind === "tier")
-    return n.tiers.find((t) => t.id === a.target_id)?.name ?? a.target_id.slice(0, 8);
+    return n.tiers.find((t) => t.id === a.target_id)?.name ?? shortId(a.target_id);
   const env = n.envs.find((e) => e.id === a.target_id);
   const stack = env && n.stacks.find((s) => s.id === env.stack_id);
-  return env && stack ? `${stack.name}/${env.name}` : a.target_id.slice(0, 8);
+  return env && stack ? `${stack.name}/${env.name}` : shortId(a.target_id);
 }
 
 function Attachments({ set }: { set: VariableSet }) {

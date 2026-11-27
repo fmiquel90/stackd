@@ -10,6 +10,7 @@ import { mergeChunks, planLines } from "@/lib/logModel";
 import { isTerminal } from "@/lib/runOutcome";
 import { parsePlan } from "@/lib/planParse";
 import type { CascadeItem } from "@/identity/TypeToConfirm";
+import { shortId } from "@/lib/ids";
 
 // Everything the run page shows (DESIGN §5.2). Queries are the source of truth; WS signals invalidate
 // them — except logs, which are appended incrementally with `after_seq` (DESIGN §6, SPECS §5.3).
@@ -105,7 +106,7 @@ export function useRunPage(runId: string) {
     return downstreamOf(envId, graph.data.edges).map((step) => {
       const n = nodes.get(step.envId);
       return {
-        label: n ? `${stackName.get(n.stack_id) ?? "?"}/${n.name}` : step.envId.slice(0, 8),
+        label: n ? `${stackName.get(n.stack_id) ?? "?"}/${n.name}` : shortId(step.envId),
         likelihood: step.likelihood,
         mock: step.mockDefined,
       };

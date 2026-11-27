@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 from typing import Any
 
 MASK = "***"
@@ -14,21 +15,37 @@ class Masker:
     """
 
     def __init__(self, secrets: list[str]) -> None:
-        # Longest first so overlapping secrets are fully masked.
-        self._secrets = sorted({s for s in secrets if s}, key=len, reverse=True)
+        # One pass over the text whatever the number of secrets, longest first so that of two
+        # secrets starting at the same place the longer one is masked whole.
+        ordered = sorted({s for s in secrets if s}, key=len, reverse=True)
+        self._re = re.compile("|".join(map(re.escape, ordered))) if ordered else None
 
     def mask(self, text: str) -> str:
-        for secret in self._secrets:
-            if secret in text:
-                text = text.replace(secret, "***")
-        return text
+        if self._re is None:
+            return text
+        out: list[str] = []
+        pos = 0
+        while (m := self._re.search(text, pos)) is not None:
+            start, end = m.span()
+            # A secret that starts inside this one and runs past its end ("abcd" holding "ab" and
+            # "bcd"): the run is masked to its end, so no part of either stays readable.
+            i = start + 1
+            while i < end:
+                inner = self._re.match(text, i)
+                if inner is not None:
+                    end = max(end, inner.end())
+                i += 1
+            out += [text[pos:start], MASK]
+            pos = end
+        out.append(text[pos:])
+        return "".join(out)
 
     def scan(self, text: str) -> bool:
         """Cleartext tripwire (§5.1): True if any known secret appears verbatim in `text`. Used to
         flag a run when a sensitive value leaks into a place terraform should have redacted (a
         non-sensitive output, plan.json). Narrows — does not eliminate — the leak surface: a
         transformed secret (base64/substring) still escapes value-based detection."""
-        return any(secret in text for secret in self._secrets)
+        return self._re is not None and self._re.search(text) is not None
 
 
 def _redact_marked(value: Any, marks: Any) -> Any:
@@ -95,6 +112,12 @@ def mask_plan_json(doc: str, masker: Masker) -> str:
         plan = json.loads(doc)
     except ValueError:
         return masker.mask(doc)
+    return mask_plan(plan, masker)
+
+
+def mask_plan(plan: Any, masker: Masker) -> str:
+    """`mask_plan_json` of a document already parsed. `plan` is redacted in place: the caller is
+    done with the clear values."""
     if isinstance(plan, dict):
         config = (plan.get("configuration") or {}).get("root_module") or {}
         declared = config.get("variables") or {}

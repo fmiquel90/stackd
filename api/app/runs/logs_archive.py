@@ -13,6 +13,7 @@ import json
 import re
 import uuid
 from collections import defaultdict
+from collections.abc import AsyncIterator
 from datetime import datetime, timedelta
 
 from sqlalchemy import delete, exists, select
@@ -114,51 +115,88 @@ async def purge_hot_logs(session: AsyncSession, now: datetime) -> int:
     return result.rowcount or 0  # type: ignore[attr-defined]
 
 
+async def _hot(session: AsyncSession, run: Run) -> bool:
+    """The tier is chosen on the run as a whole, not on a filtered result: a poll past the last
+    `seq`, or a phase with no lines, answers empty from the hot tier instead of reading S3."""
+    return run.logs_archived_at is None or bool(
+        await session.scalar(select(exists().where(RunLog.run_id == run.id)))
+    )
+
+
+def _phase_of(key: str) -> str:
+    return key.rsplit("/", 1)[-1].removesuffix(".log.gz")
+
+
 async def load_chunks(
     session: AsyncSession,
     run: Run,
     *,
     phase: str | None = None,
     after_seq: int | None = None,
+    limit: int | None = None,
 ) -> list[dict]:
-    """Chunks `{phase, section, seq, lines}` ordered by (phase, seq), from the hot table if the run
-    still has rows there, otherwise from the S3 archive.
-
-    The tier is chosen on the run as a whole, not on the filtered result: a poll past the last
-    `seq`, or a phase with no lines, answers empty from the hot tier instead of reading S3."""
-    hot = run.logs_archived_at is None or (
-        await session.scalar(select(exists().where(RunLog.run_id == run.id)))
-    )
-    if hot:
+    """Chunks `{phase, section, seq, lines}` ordered by (phase, seq), at most `limit`, from the hot
+    table if the run still has rows there, otherwise from the S3 archive — where only the phases
+    the answer needs are downloaded and decompressed."""
+    if await _hot(session, run):
         stmt = select(RunLog).where(RunLog.run_id == run.id)
         if phase:
             stmt = stmt.where(RunLog.phase == phase)
         if after_seq is not None:
             stmt = stmt.where(RunLog.seq > after_seq)
-        rows = (await session.execute(stmt.order_by(RunLog.phase, RunLog.seq))).scalars().all()
+        stmt = stmt.order_by(RunLog.phase, RunLog.seq)
+        if limit is not None:
+            stmt = stmt.limit(limit)
+        rows = (await session.execute(stmt)).scalars().all()
         return [
             {"phase": r.phase, "section": r.section, "seq": r.seq, "lines": r.lines} for r in rows
         ]
     # Archived and no hot row left: the hot tier was purged, read the archive.
     if phase and not valid_phase(phase):
         return []
-    keys = [archive_key(run.id, phase)] if phase else await list_keys(f"logs/{run.id}/")
+    phases = [phase] if phase else sorted(map(_phase_of, await list_keys(f"logs/{run.id}/")))
     out: list[dict] = []
-    for key in sorted(keys):
-        data = await get_object(key)
+    for name in phases:
+        if limit is not None and len(out) >= limit:
+            break
+        data = await get_object(archive_key(run.id, name))
         if data is None:
             continue
-        phase_name = key.rsplit("/", 1)[-1].removesuffix(".log.gz")
         for c in await asyncio.to_thread(_decode, data):
             if after_seq is None or c["seq"] > after_seq:
-                out.append({"phase": phase_name, **c})
-    return out
+                out.append({"phase": name, **c})
+    return out if limit is None else out[:limit]
+
+
+async def list_phases(session: AsyncSession, run: Run) -> list[str]:
+    """The run's log phases, in the order the run went through them, from whichever tier holds
+    its logs."""
+    if await _hot(session, run):
+        names = (
+            (await session.execute(select(RunLog.phase).where(RunLog.run_id == run.id).distinct()))
+            .scalars()
+            .all()
+        )
+    else:
+        names = [_phase_of(k) for k in await list_keys(f"logs/{run.id}/")]
+    return sorted(names, key=_run_order)
+
+
+async def iter_text(session: AsyncSession, run: Run, phases: list[str]) -> AsyncIterator[str]:
+    """`render_text` of the run's logs, one phase at a time: the download never holds more than
+    one phase in memory."""
+    for phase in phases:
+        yield render_text(await load_chunks(session, run, phase=phase))
 
 
 # A run's log phases are its states (§4: planning → checking → applying, or running), so they start
 # in the state machine's order. Not by the lines' `t`: a time of day without a date, it would list a
 # run's apply before its plan once the run crosses midnight.
 _PHASE_ORDER = {state.value: i for i, state in enumerate(RunState)}
+
+
+def _run_order(phase: str) -> tuple[int, str]:
+    return _PHASE_ORDER.get(phase, len(_PHASE_ORDER)), phase
 
 
 def render_text(chunks: list[dict]) -> str:
@@ -169,7 +207,7 @@ def render_text(chunks: list[dict]) -> str:
         by_phase[c["phase"]].append(c)
 
     parts: list[str] = []
-    for phase in sorted(by_phase, key=lambda p: (_PHASE_ORDER.get(p, len(_PHASE_ORDER)), p)):
+    for phase in sorted(by_phase, key=_run_order):
         parts.append(f"===== {phase} =====")
         for c in sorted(by_phase[phase], key=lambda c: c["seq"]):
             prefix = f"[{c['section']}] " if c.get("section") else ""

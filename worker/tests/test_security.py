@@ -16,6 +16,9 @@ class _FakeStreamer:
     def emit(self, phase: str, lines: list[str], section: str | None = None) -> None:
         self.lines.extend(lines)
 
+    def flush(self, timeout: float | None = None) -> bool:
+        return True
+
 
 def test_repo_environ_strips_cloud_creds(monkeypatch) -> None:
     monkeypatch.setenv("AWS_SECRET_ACCESS_KEY", "akia-secret")

@@ -23,6 +23,8 @@ services:
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
       - ${STACKD_WORKSPACE_ROOT:-/var/lib/stackd/workspaces}:${STACKD_WORKSPACE_ROOT:-/var/lib/stackd/workspaces}
+      # Provider plugin cache (STACKD_PLUGIN_CACHE_DIR in worker.env): same path, as the workspaces.
+      # - /var/lib/stackd/plugin-cache:/var/lib/stackd/plugin-cache
       # Private registry for the runner images: a Docker config.json (`auths` entries, no
       # credential helper), read-only, then STACKD_REGISTRY_AUTH_FILE=/run/secrets/registry-auth.json
       # in worker.env. Only the agent reads it; job containers never see it.

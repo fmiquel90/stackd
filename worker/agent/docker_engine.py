@@ -55,23 +55,30 @@ def demux(chunks: Iterator[bytes]) -> Iterator[tuple[int, bytes]]:
 
 
 class LineSplitter:
-    """Reassemble lines across frames, per stream (a frame can end mid-line)."""
+    """Reassemble lines across frames, per stream (a frame can end mid-line). A line's pieces are
+    kept apart until its newline arrives, then joined once: a multi-megabyte line (`show -json`
+    prints the whole plan on one) costs linear time, not a re-copy of everything so far per frame."""
 
     def __init__(self, emit: Callable[[int, str], None]) -> None:
         self._emit = emit
-        self._partial: dict[int, bytes] = {}
+        self._partial: dict[int, list[bytes]] = {}
 
     def feed(self, kind: int, data: bytes) -> None:
-        data = self._partial.pop(kind, b"") + data
-        *lines, rest = data.split(b"\n")
-        for line in lines:
+        if b"\n" not in data:
+            if data:
+                self._partial.setdefault(kind, []).append(data)
+            return
+        first, *lines, rest = data.split(b"\n")
+        pieces = self._partial.pop(kind, [])
+        pieces.append(first)
+        for line in (b"".join(pieces), *lines):
             self._emit(kind, line.decode("utf-8", errors="replace"))
         if rest:
-            self._partial[kind] = rest
+            self._partial[kind] = [rest]
 
     def flush(self) -> None:
-        for kind, rest in sorted(self._partial.items()):
-            self._emit(kind, rest.decode("utf-8", errors="replace"))
+        for kind, pieces in sorted(self._partial.items()):
+            self._emit(kind, b"".join(pieces).decode("utf-8", errors="replace"))
         self._partial.clear()
 
 

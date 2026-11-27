@@ -6,13 +6,15 @@ import uuid
 import jwt
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 
+from app.config import get_settings
 from app.db import SessionLocal
 from app.models.user import User
 from app.security import decode_access_token
-from app.ws.hub import NotifyHub, channel_for
+from app.ws.hub import RESYNC, NotifyHub, SignalQueue, channel_for
 
 router = APIRouter()
 _hub = NotifyHub()
+_QUEUE_SIZE = 256
 
 
 @router.websocket("/api/v1/ws")
@@ -21,11 +23,14 @@ async def ws_endpoint(websocket: WebSocket) -> None:
     # history, Referer), so a query-string token is ignored. Accept first, then the client sends
     # `{"type": "auth", "token": ...}` as its first message; anything else closes with 4401.
     await websocket.accept()
+    settings = get_settings()
     try:
-        first = await websocket.receive_json()
+        first = await asyncio.wait_for(
+            websocket.receive_json(), settings.stackd_ws_auth_timeout_seconds
+        )
     except WebSocketDisconnect:
         return
-    except ValueError:  # not JSON
+    except (ValueError, TimeoutError):  # not JSON, or no auth message in time
         await websocket.close(code=4401)
         return
     if not isinstance(first, dict) or first.get("type") != "auth":
@@ -43,30 +48,39 @@ async def ws_endpoint(websocket: WebSocket) -> None:
         await websocket.close(code=4401)
         return
 
-    out: asyncio.Queue[str] = asyncio.Queue()
-    subscriptions: list[tuple[str, asyncio.Queue, asyncio.Task]] = []
+    out: SignalQueue = asyncio.Queue(maxsize=_QUEUE_SIZE)
+    channels: set[str] = set()
 
-    async def forward(channel: str, queue: asyncio.Queue) -> None:
-        while True:
-            out.put_nowait(await queue.get())
-
-    async def sender() -> None:
-        while True:
-            await websocket.send_text(await out.get())
-
-    sender_task = asyncio.create_task(sender())
-    try:
+    async def receive() -> None:
         while True:
             msg = await websocket.receive_json()
             async with SessionLocal() as session:
                 channel = await channel_for(msg.get("sub", ""), user, session)
-            if channel:
-                queue = await _hub.subscribe(channel)
-                subscriptions.append((channel, queue, asyncio.create_task(forward(channel, queue))))
-    except WebSocketDisconnect:
-        pass
+            if channel is None or channel in channels:
+                continue
+            if len(channels) >= settings.stackd_ws_max_subscriptions:
+                # The front never unsubscribes: on close it reconnects with only what it wants now.
+                await websocket.close(code=1008)
+                return
+            channels.add(channel)
+            await _hub.subscribe(channel, out)
+
+    async def send() -> None:
+        while (signal := await out.get()) is not RESYNC:
+            await websocket.send_text(signal)
+        # Signals were lost while the hub was disconnected: make the client reconnect (§5.3).
+        await websocket.close(code=1012)
+
+    receiver = asyncio.create_task(receive())
+    sender = asyncio.create_task(send())
+    try:
+        await asyncio.wait((receiver, sender), return_when=asyncio.FIRST_COMPLETED)
     finally:
-        sender_task.cancel()
-        for channel, queue, task in subscriptions:
-            task.cancel()
-            await _hub.unsubscribe(channel, queue)
+        receiver.cancel()
+        sender.cancel()
+        await asyncio.gather(receiver, sender, return_exceptions=True)
+        for channel in channels:
+            await _hub.unsubscribe(channel, out)
+    exc = None if receiver.cancelled() else receiver.exception()
+    if exc is not None and not isinstance(exc, WebSocketDisconnect):
+        raise exc

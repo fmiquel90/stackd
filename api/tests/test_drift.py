@@ -94,6 +94,35 @@ async def test_detect_drift_enqueues_refresh_run(client: httpx.AsyncClient) -> N
         assert await detect_drift(s, datetime.now(UTC)) == 0
 
 
+async def test_queued_drift_run_is_not_joined_by_another(client: httpx.AsyncClient) -> None:
+    """A drift run no worker claims (it stays queued) is not joined by a new one every interval."""
+    from datetime import timedelta
+
+    from sqlalchemy import func, select
+
+    from app.config import get_settings
+    from app.db import SessionLocal
+    from app.drift.service import detect_drift
+    from app.models.run import Run
+
+    admin = await login(client, "admin")
+    stack = await make_stack(client, admin, "drift-pileup")
+    env = await make_env(client, admin, stack, "dev", "dev")
+    await _applied_commit(env)
+
+    async with SessionLocal() as s:
+        assert await detect_drift(s, datetime.now(UTC)) == 1
+    later = datetime.now(UTC) + timedelta(seconds=get_settings().stackd_drift_interval_seconds + 1)
+    async with SessionLocal() as s:
+        assert await detect_drift(s, later) == 0
+        pending = await s.scalar(
+            select(func.count())
+            .select_from(Run)
+            .where(Run.environment_id == uuid.UUID(env), Run.is_drift.is_(True))
+        )
+    assert pending == 1
+
+
 async def test_no_drift_without_applied_commit(client: httpx.AsyncClient) -> None:
     from app.db import SessionLocal
     from app.drift.service import detect_drift
