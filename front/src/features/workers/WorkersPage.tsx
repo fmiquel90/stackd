@@ -22,6 +22,7 @@ import {
 } from "@/ui/primitives";
 import { TypeNameDialog } from "@/ui/TypeNameDialog";
 import { cn } from "@/ui/cn";
+import { shortId } from "@/lib/ids";
 
 // Workers & platform health (DESIGN §5.9). Telemetry is neutral: only a failing check or an error is
 // red; "ok" is not green (green means a run succeeded, §3.6).
@@ -417,10 +418,8 @@ function PlatformLogs({ workerId, onWorker }: { workerId: string; onWorker: (v: 
             </span>
             <span className="text-muted">{e.logger} </span>
             {e.method !== undefined ? <HttpDetail e={e} /> : e.msg}
-            {e.run_id ? <span className="text-muted"> run={String(e.run_id).slice(0, 8)}</span> : null}
-            {e.worker_id ? (
-              <span className="text-muted"> worker={String(e.worker_id).slice(0, 8)}</span>
-            ) : null}
+            {e.run_id ? <span className="text-muted"> run={shortId(String(e.run_id))}</span> : null}
+            {e.worker_id ? <span className="text-muted"> worker={shortId(String(e.worker_id))}</span> : null}
           </div>
         ))}
         {data && data.items.length === 0 && <span className="text-muted">No matching log.</span>}

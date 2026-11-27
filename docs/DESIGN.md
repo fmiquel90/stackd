@@ -289,6 +289,11 @@ button unrelated to a success, never amber for telemetry or log severity.
 Mono 400/500 imported (`main.tsx`), `font-display: swap`. Preloading and fallback metric overrides
 (against layout shift) are **[not built yet]**.
 
+**Short ID**: an entity UUID is shown as its **last eight hex characters** (`run 9ce3880b`,
+`shortId()` in `lib/ids.ts`), in mono. IDs are UUIDv7: the leading characters are a timestamp and only
+change every ~65 s, so a prefix makes runs planned moments apart look identical. Commit SHAs keep their
+first seven characters (git's convention).
+
 ### 3.4 Spacing, radius, elevation
 
 - 4 px grid. Dense table cell padding 6 × 10 px (row height 32 px); comfortable rows (attention zone, run history) 8 × 12 px (36 px); forms 12 px gaps.

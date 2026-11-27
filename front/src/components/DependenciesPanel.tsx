@@ -2,6 +2,7 @@ import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { dependenciesApi, graphApi, stacks } from "@/api/resources";
 import { Button, Card, DeleteButton, Field, Select, TextInput } from "@/components/ui";
+import { shortId } from "@/lib/ids";
 
 export function DependenciesPanel({ envId }: { envId: string }) {
   const qc = useQueryClient();
@@ -14,7 +15,7 @@ export function DependenciesPanel({ envId }: { envId: string }) {
   const envOptions = (graph.data?.nodes ?? [])
     .filter((n) => n.id !== envId)
     .map((n) => ({ id: n.id, label: `${stackName(n.stack_id)}/${n.name}` }));
-  const labelFor = (id: string) => envOptions.find((o) => o.id === id)?.label ?? id.slice(0, 8);
+  const labelFor = (id: string) => envOptions.find((o) => o.id === id)?.label ?? shortId(id);
 
   const [form, setForm] = useState({
     upstream_env_id: "",

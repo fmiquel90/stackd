@@ -39,6 +39,7 @@ import {
 import { CheckList } from "./CheckList";
 import { CommentComposer, CommentThread, Discussion, commentLineKey, isRoot, lineKey } from "./comments";
 import { useRunPage } from "./useRunPage";
+import { shortId } from "@/lib/ids";
 
 // The run page (DESIGN §5.2): the decision first, then the evidence — plan, checks, logs, inputs,
 // discussion. Every piece of on-screen state that matters is in the URL (?tab, ?line, ?plan_q).
@@ -224,7 +225,7 @@ export function RunPage() {
           ) : (
             "…"
           )}
-          <span className="font-data text-[13px] font-normal text-muted">run {run.id.slice(0, 8)}</span>
+          <span className="font-data text-[13px] font-normal text-muted">run {shortId(run.id)}</span>
           {run.type !== "tracked" && (
             <Badge
               tone={run.type === "destroy" ? "failed" : "neutral"}
