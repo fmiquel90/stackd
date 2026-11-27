@@ -420,7 +420,9 @@ terraform ──backend "http"──▶ Stackd API ──(bucket encryption)─�
 Why: per-job **scoped tokens**, **locking visible in the UI** with audited force-unlock, refusal
 of a regressive serial, and every write tied to the run that produced it. The token's scope follows
 the job: `ro` (PR plans, read-only commands: read only), `plan` (a plan may lock, never write),
-`rw` (an apply or a mutating command). Once its run has ended, a token can no longer write or lock.
+`rw` (an apply or a mutating command). Once its run has ended, a token can no longer write or lock,
+and the lock the run held is released with it (audited): a worker that dies mid-run does not leave
+the environment locked.
 
 The worker adds a bare `backend "http" {}` block and hands the address and the token to tofu
 **only**, as `TF_HTTP_*` environment variables — never `-backend-config`, which tofu would persist

@@ -151,7 +151,9 @@ sequenceDiagram
 mint time: `ro` (a PR or drift plan, a read-only command: read only, no lock), `plan` (a plan job:
 read and lock while planning, never write), `rw` (an apply or a mutating command: write; TTL = the
 apply budget + grace). A token whose run has ended can no longer write or lock. The worker hands it
-to tofu only, as `TF_HTTP_*` environment variables — hooks never see it.
+to tofu only, as `TF_HTTP_*` environment variables — hooks never see it. A lock records the run whose
+token took it, and `transition()` releases it when that run ends (audited `state.lock_released`): a
+worker lost mid-plan or mid-apply never strands the environment's lock.
 
 **Repo credential.** The stack's token or SSH deploy key rides in the claim (`repo_credentials`).
 The worker uses it for the clone and for `init`, which downloads the modules — private ones hosted
