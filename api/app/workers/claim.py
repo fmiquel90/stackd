@@ -378,6 +378,9 @@ async def build_job_payload(session: AsyncSession, run: Run) -> dict:
         # `-backend-config` settings passed at init.
         "backend_config_file": None if env.managed_state else env.backend_config_file,
         "backend_config": None if env.managed_state else env.backend_config,
+        # §3.4: the repo's tfvars files, managed state or not — the agent passes them as
+        # `-var-file=` to the commands that read variables, Stackd's own files after them.
+        "var_files": list(env.var_files or []),
         "cloud_credentials": cloud_credentials,
         "resolved_inputs": {f"TF_VAR_{k}": v for k, v in dep.resolved_inputs.items()},
         "mock_inputs": {f"TF_VAR_{k}": v for k, v in dep.mock_inputs.items()},

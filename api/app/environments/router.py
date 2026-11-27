@@ -28,6 +28,7 @@ from app.enums import (
     VariableKind,
 )
 from app.environments.schemas import EnvironmentCreate, EnvironmentOut, EnvironmentUpdate
+from app.environments.var_files import require_inside_checkout
 from app.errors import ProblemException
 from app.models.environment import Environment
 from app.models.hook import Hook
@@ -305,8 +306,9 @@ async def list_environments(
 async def create_environment(
     stack_id: uuid.UUID, body: EnvironmentCreate, user: CurrentUser, session: DbSession
 ) -> EnvironmentOut:
-    await guard_stack_id(session, user, stack_id, min_role=Role.writer)
+    stack = await guard_stack_id(session, user, stack_id, min_role=Role.writer)
     await _require_tier(session, body.tier)
+    require_inside_checkout(stack.project_root, body.var_files)
     env = Environment(stack_id=stack_id, **body.model_dump())
     if env.protected:
         env.autodeploy = False  # protected forces manual confirmation (§3.2)
@@ -347,6 +349,10 @@ async def update_environment(
     changes = body.model_dump(exclude_unset=True)
     if "tier" in changes:
         await _require_tier(session, changes["tier"])
+    if "var_files" in changes:
+        stack = await session.get(Stack, env.stack_id)
+        assert stack is not None
+        require_inside_checkout(stack.project_root, changes["var_files"])
     if "branch" in changes and changes["branch"] != env.branch:
         # Staleness (§9.6): the recorded head is the old branch's, so `stale` must not compare
         # against it. No head_updated_at makes the env due at the next head poll.
@@ -366,7 +372,12 @@ async def update_environment(
         actor_email=user.email,
         target_kind="environment",
         target_id=env.id,
-        context={"fields": sorted(changes), **_env_audit_ctx(env)},
+        context={
+            "fields": sorted(changes),
+            **_env_audit_ctx(env),
+            # What reaches terraform changes with it: the new list, never a secret (§3.4).
+            **({"var_files": env.var_files} if "var_files" in changes else {}),
+        },
     )
     await session.commit()
     await session.refresh(env)
