@@ -4,12 +4,13 @@ import csv
 import io
 import json
 import uuid
+from collections.abc import AsyncIterator
 from datetime import datetime
 from typing import Annotated
 
 from fastapi import APIRouter, Depends
 from fastapi.responses import StreamingResponse
-from sqlalchemy import select
+from sqlalchemy import Select, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.deps import require_role
@@ -86,41 +87,42 @@ async def export_csv(
     from_: datetime | None = None,
     to: datetime | None = None,
 ) -> StreamingResponse:
-    rows = (
-        (
-            await session.execute(
-                _filtered(
-                    actor=actor,
-                    action=action,
-                    target_kind=target_kind,
-                    target_id=target_id,
-                    from_=from_,
-                    to=to,
-                )
-            )
-        )
-        .scalars()
-        .all()
+    stmt = _filtered(
+        actor=actor, action=action, target_kind=target_kind, target_id=target_id, from_=from_, to=to
     )
+    # The session dependency stays open until the response has been sent, so the rows can be read
+    # through a server-side cursor while the CSV streams out.
+    return StreamingResponse(
+        _csv_rows(session, stmt),
+        media_type="text/csv",
+        headers={"Content-Disposition": "attachment; filename=audit.csv"},
+    )
+
+
+_EXPORT_BATCH = 500
+
+
+async def _csv_rows(session: AsyncSession, stmt: Select[tuple[AuditEvent]]) -> AsyncIterator[str]:
     buf = io.StringIO()
     writer = csv.writer(buf)
     # `context` (JSON): what the list endpoint returns to the same admins — the "who" of a system
     # action lives there, e.g. the approver of a rollout's auto-confirmation (§21.5).
     writer.writerow(["created_at", "actor_email", "action", "target_kind", "target_id", "context"])
-    for e in rows:
-        writer.writerow(
-            [
-                e.created_at.isoformat(),
-                e.actor_email or "",
-                e.action,
-                e.target_kind or "",
-                str(e.target_id or ""),
-                json.dumps(e.context, sort_keys=True, default=str) if e.context else "",
-            ]
-        )
-    buf.seek(0)
-    return StreamingResponse(
-        iter([buf.getvalue()]),
-        media_type="text/csv",
-        headers={"Content-Disposition": "attachment; filename=audit.csv"},
-    )
+    result = await session.stream_scalars(stmt.execution_options(yield_per=_EXPORT_BATCH))
+    async for batch in result.partitions():
+        for e in batch:
+            writer.writerow(
+                [
+                    e.created_at.isoformat(),
+                    e.actor_email or "",
+                    e.action,
+                    e.target_kind or "",
+                    str(e.target_id or ""),
+                    json.dumps(e.context, sort_keys=True, default=str) if e.context else "",
+                ]
+            )
+        yield buf.getvalue()
+        buf.seek(0)
+        buf.truncate()
+    if buf.tell():
+        yield buf.getvalue()

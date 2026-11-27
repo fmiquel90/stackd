@@ -55,7 +55,7 @@ the network layer.
 
 | Metric | Type | What it counts |
 |---|---|---|
-| `stackd_runs_total{state}` | gauge | runs per state, read from the database at scrape |
+| `stackd_runs_total{state}` | gauge | runs per state, read from the database at scrape — the terminal states (`finished`, `failed`, `discarded`, `canceled`) at most every 5 minutes per API process |
 | `stackd_queue_depth` | gauge | runs waiting for a claim (`queued` + `confirmed`) |
 | `stackd_workers_online` | gauge | workers that heartbeated within the offline window (60 s) |
 | `stackd_claim_latency_seconds` | histogram | how long a run waited claimable: from its creation to a plan (or command) claim, from its confirmation to an apply claim |
