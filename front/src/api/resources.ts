@@ -506,8 +506,23 @@ export interface StateVersion {
   created_at: string;
 }
 
+/** The held state lock (SPECS §11.2) — not `Environment.locked`, the env's admin lock. */
+export interface StateLock {
+  lock_id: string;
+  /** The run whose job took it; null for a run-less holder (an import session). */
+  run_id: string | null;
+  locked_at: string;
+  /** From tofu's lock info. */
+  operation: string | null;
+  who: string | null;
+  version: string | null;
+  created: string | null;
+  info: string | null;
+}
+
 export const stateApi = {
   versions: (envId: string) => api<StateVersion[]>(`/environments/${envId}/state/versions`),
+  lock: (envId: string) => api<StateLock | null>(`/environments/${envId}/state/lock`),
   forceUnlock: (envId: string) => api<void>(`/environments/${envId}/state/lock`, { method: "DELETE" }),
 };
 

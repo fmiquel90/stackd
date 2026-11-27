@@ -57,6 +57,7 @@ async def test_non_member_blocked_on_env_scoped_reads(client: httpx.AsyncClient)
         f"/api/v1/environments/{env_id}/dependencies",
         f"/api/v1/environments/{env_id}/cloud-integration",
         f"/api/v1/environments/{env_id}/state/versions",
+        f"/api/v1/environments/{env_id}/state/lock",
         f"/api/v1/stacks/{stack_id}/notifications",
     ):
         resp = await client.get(path, headers=bob)

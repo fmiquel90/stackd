@@ -107,4 +107,9 @@ class QueueEntry(BaseModel):
     environment_id: uuid.UUID
     state: str
     worker_id: uuid.UUID | None
-    blocking_reason: str | None  # active_run|env_locked|no_compatible_worker|apply_affinity_hold
+    # active_run|env_locked|claim_backoff|apply_affinity_hold|no_compatible_worker
+    blocking_reason: str | None
+    # The claim backoff (§7.2): not claimed before `claimable_after`, after `claim_attempts`
+    # transient job-build failures. Set whatever the reason; `claim_backoff` while in the future.
+    claimable_after: datetime | None
+    claim_attempts: int
