@@ -343,3 +343,16 @@ def test_read_path_indexes_migrate_down_and_up(_database: str) -> None:
     assert not ours & after_down and "ix_runs_environment_id" in after_down
     command.upgrade(cfg, "head")
     assert ours <= asyncio.run(names())
+
+
+async def test_run_comment_replies_are_indexed_for_the_cascade(_database: str) -> None:
+    from app.db import SessionLocal
+
+    async with SessionLocal() as session:
+        found = await session.scalar(
+            text(
+                "SELECT count(*) FROM pg_indexes WHERE tablename = 'run_comments'"
+                " AND indexname = 'ix_run_comments_parent_id'"
+            )
+        )
+    assert found == 1

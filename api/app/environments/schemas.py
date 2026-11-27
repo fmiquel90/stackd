@@ -88,6 +88,7 @@ class EnvironmentOut(BaseModel):
     commits_ahead: int | None
     affects_project_root: bool | None
     stale: bool
+    last_applied_sha: str | None = None
     drift_status: str
     last_drift_checked_at: datetime | None
     drift_run_id: uuid.UUID | None
@@ -125,6 +126,7 @@ class EnvironmentOut(BaseModel):
             commits_ahead=e.commits_ahead,
             affects_project_root=e.affects_project_root,
             stale=stale,
+            last_applied_sha=last_applied_sha,
             drift_status=e.drift_status,
             last_drift_checked_at=e.last_drift_checked_at,
             drift_run_id=e.drift_run_id,

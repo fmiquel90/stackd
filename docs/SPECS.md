@@ -398,8 +398,8 @@ WHERE state NOT IN ('finished', 'failed', 'discarded', 'canceled');
 
 Their queries render the predicate values as SQL literals: a generic plan of a prepared statement
 cannot match a partial index to bind parameters. Every foreign key to `runs` (and
-`user_notifications.comment_id` → `run_comments`) is indexed, so the cascade of a stack or
-environment deletion never scans a table per deleted run.
+`user_notifications.comment_id` → `run_comments`, and the replies' `run_comments.parent_id`, migration
+0048) is indexed, so the cascade of a stack or environment deletion never scans a table per deleted run.
 
 The claim's candidates (§7.2) — read by every poll of every idle worker — by:
 
@@ -661,7 +661,7 @@ POST /worker/v1/jobs/{id}/logs
 > 60 s (the agent's last buffered chunks, §5.1; 20 runs per tick) — one gzip'd JSONL
 > object per phase, one `{seq, section, lines}` chunk per line — and stamps `runs.logs_archived_at`;
 > the hot rows are purged `log_hot_retention_days` (7, env `LOG_HOT_RETENTION_DAYS`) after that, by
-> the daily retention task. `GET …/logs` serves the hot rows while the run has any, and falls back
+> the daily retention task, 50 runs per transaction. `GET …/logs` serves the hot rows while the run has any, and falls back
 > to the archive once they are gone (same chunks, same order, `phase`/`after_seq`/`limit` honoured —
 > the archive downloads and decompresses only the phases the answer needs; `limit` caps the chunks,
 > ordered by (phase, seq): a client pages one phase with `phase` + `after_seq` = its last seq; a
@@ -1566,7 +1566,9 @@ Changing an environment's `branch` (`PATCH`) clears `head_sha`, `head_updated_at
 - No automatic action: staleness is information, never a trigger (that is the role of webhooks).
 - On an unmanaged-state env, "last applied" is what *Stackd* applied: a change made outside it (a
   hand-run apply) is not seen here, but by the state observation of §19.7, which flags the env.
-- `GET /api/v1/environments/{id}` exposes `head_sha`, `commits_ahead`, `affects_project_root`, `stale`.
+- `GET /api/v1/environments/{id}` exposes `head_sha`, `commits_ahead`, `affects_project_root`, `stale`, and
+  `last_applied_sha` (the commit of the last finished, untargeted tracked run — what `stale` compares
+  `head_sha` with; `null` before any apply).
 
 ### 9.7 Environment promotion (trunk-based)
 

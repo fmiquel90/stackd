@@ -103,16 +103,40 @@ async def archive_run_logs(session: AsyncSession, now: datetime) -> int:
     return done
 
 
+_HOT_PURGE_RUNS_PER_BATCH = 50
+
+
 async def purge_hot_logs(session: AsyncSession, now: datetime) -> int:
-    """Delete the hot rows of runs archived more than `log_hot_retention_days` ago. Returns the
-    number of rows deleted."""
+    """Delete the hot rows of runs archived more than `log_hot_retention_days` ago, a batch of runs
+    per transaction so a large backlog never becomes one long-locking delete. Returns the number
+    of rows deleted."""
     cutoff = now - timedelta(days=get_settings().log_hot_retention_days)
     archived = select(Run.id).where(
         Run.logs_archived_at.is_not(None), Run.logs_archived_at <= cutoff
     )
-    result = await session.execute(delete(RunLog).where(RunLog.run_id.in_(archived)))
+    total = 0
+    while True:
+        batch = (
+            (
+                await session.execute(
+                    select(RunLog.run_id)
+                    .where(RunLog.run_id.in_(archived))
+                    .distinct()
+                    .limit(_HOT_PURGE_RUNS_PER_BATCH)
+                )
+            )
+            .scalars()
+            .all()
+        )
+        if not batch:
+            break
+        result = await session.execute(delete(RunLog).where(RunLog.run_id.in_(batch)))
+        await session.commit()
+        total += result.rowcount or 0  # type: ignore[attr-defined]
+        if len(batch) < _HOT_PURGE_RUNS_PER_BATCH:
+            break
     await session.commit()
-    return result.rowcount or 0  # type: ignore[attr-defined]
+    return total
 
 
 async def _hot(session: AsyncSession, run: Run) -> bool:
