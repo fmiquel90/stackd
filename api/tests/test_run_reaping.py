@@ -14,16 +14,6 @@ from sqlalchemy import select, text, update
 from tests.conftest_phase2 import event, login, make_env, make_stack, register_worker
 
 
-@pytest.fixture(autouse=True)
-def _steady_api(monkeypatch: pytest.MonkeyPatch) -> None:
-    """The scheduler has been running all along: no outage to discount."""
-    from app.scheduler import tasks
-
-    clock = tasks._ApiClock()
-    monkeypatch.setattr(clock, "observe", lambda now: None)
-    monkeypatch.setattr(tasks, "_api_clock", clock)
-
-
 async def _plan(client: httpx.AsyncClient, admin: dict, wh: dict, env_id: str) -> str:
     run = (await client.post(f"/api/v1/environments/{env_id}/runs", headers=admin, json={})).json()
     assert (await client.post("/worker/v1/jobs/claim", headers=wh)).status_code == 200

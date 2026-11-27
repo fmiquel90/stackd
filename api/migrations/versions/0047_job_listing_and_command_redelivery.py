@@ -5,7 +5,7 @@ worker_commands.sent_at / attempts: a command delivered without a result is deli
 ix_runs_worker_executing: the heartbeat looks up the executing runs of one worker on every beat.
 
 Revision ID: 0047
-Revises: 0042
+Revises: 0044
 Create Date: 2026-11-27
 """
 
@@ -17,7 +17,7 @@ import sqlalchemy as sa
 from alembic import op
 
 revision: str = "0047"
-down_revision: str | None = "0042"
+down_revision: str | None = "0044"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
