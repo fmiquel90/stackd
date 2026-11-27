@@ -1496,16 +1496,20 @@ allows) — protections are never bypassed.</p>
     AppRun --&gt; R</code></pre>
 <h2 id="notifications-transactional-outbox">🔔 Notifications — transactional outbox<a class="headerlink" href="#notifications-transactional-outbox" title="Permanent link">&para;</a></h2>
 <p><code>transition()</code> enqueues a row in <code>notification_outbox</code> in the same transaction (no I/O in the
-request path). The scheduler drains it under an advisory lock with <code>FOR UPDATE SKIP LOCKED</code>, so a
-rolled-back transition never notifies and two API replicas never double-send. No DB transaction is
-held during the HTTP call.</p>
+request path). A dispatcher loop of its own (never part of the scheduler tick, so slow receivers
+can't delay worker-lost detection) drains the due rows under an advisory lock with <code>FOR UPDATE SKIP
+LOCKED</code>, so a rolled-back transition never notifies and two API replicas never double-send. No DB
+transaction is held during the HTTP calls, which run a few at a time, each time-bounded. A failed
+target is retried alone (the row records the targets already delivered) with exponential backoff
+and jitter, honouring <code>Retry-After</code>, for about an hour before the row is dead-lettered and logged
+at error level.</p>
 <pre class="mermaid"><code>flowchart LR
     T["transition() → unconfirmed / finished / failed"] --&gt;|"same txn"| OB[("notification_outbox")]
-    SCH["scheduler tick&lt;br/&gt;(advisory lock + SKIP LOCKED)"] --&gt;|"drain unsent"| OB
-    SCH --&gt;|"match stack/env targets on_states"| DNS["resolve host once&lt;br/&gt;every IP must be public"]
+    SCH["dispatcher loop&lt;br/&gt;(advisory lock + SKIP LOCKED)"] --&gt;|"drain due, unsent"| OB
+    SCH --&gt;|"match stack/env targets on_states,&lt;br/&gt;minus those already delivered"| DNS["resolve host once&lt;br/&gt;every IP must be public"]
     DNS --&gt;|"https POST to the vetted IP&lt;br/&gt;(no env proxy, no redirect)"| POST["Slack / webhook"]
-    POST --&gt;|"ok → sent_at"| OB
-    POST --&gt;|"fail → retry (≤5)"| OB</code></pre>
+    POST --&gt;|"all ok → sent_at"| OB
+    POST --&gt;|"fail → record delivered targets,&lt;br/&gt;retry after backoff / Retry-After"| OB</code></pre>
 <p>The POST dials the address the SSRF check vetted, with Host, SNI and certificate checks on the
 original hostname, so DNS rebinding can't redirect it to an internal host. It deliberately ignores
 <code>HTTPS_PROXY</code> and other env proxies (a proxy would resolve the name again): an API whose only egress
@@ -1551,9 +1555,11 @@ the <code>one_active_run_per_env</code> unique index). What's worth knowing:</p>
 <li>🔁 <strong>Each worker runs <code>STACKD_MAX_CONCURRENT_JOBS</code> jobs at once</strong> (default 1), always on
   different environments.</li>
 <li>🗓️ <strong>The scheduler runs in every API replica</strong>, each task under its own advisory lock (held on a
-  dedicated connection), so a task runs once per tick across replicas. The git head poll runs as a
-  separate task (at most 8 <code>ls-remote</code> at a time), so slow repos never delay worker-loss detection
-  or notifications.</li>
+  dedicated connection), so a task runs once per tick across replicas. Each task runs under a
+  time budget and its own error handling: one failing or hanging task is logged and counted, never
+  skips the others. The outbound work runs outside the tick — the notification and VCS outboxes in
+  loops of their own, the git head poll (at most 8 <code>ls-remote</code> at a time) and the daily retention
+  purge as separate tasks — so slow receivers or repos never delay worker-loss detection.</li>
 <li>📊 <strong>No built-in autoscaler</strong>, but <code>/api/v1/health</code> and <code>/api/v1/queue</code> expose the signals an
   external one (ECS target-tracking, KEDA) can drive; <code>/metrics</code> serves Prometheus gauges. On Fargate, mind the
   runner execution model (no DinD).</li>

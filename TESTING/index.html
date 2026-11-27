@@ -1832,16 +1832,20 @@ all. Counts in parentheses include parametrized cases and drift as tests are add
 <td>Bounded read paths: the env run list pages newest first on <code>(created_at, id)</code> through <code>X-Next-Cursor</code>/<code>before</code> (ties included), default cap 200, <code>limit</code> bounds, a foreign or unknown cursor → 400, <code>view=summary</code> drops <code>check_results</code>/<code>variable_provenance</code>; the audit CSV export streams every row across server-side cursor batches; the last applied commit skips targeted, failed and proposed runs; <code>/metrics</code> counts live states every scrape and caches terminal ones; webhook repo matching in SQL equals the Python normalization; migration 0046 goes down and up.</td>
 </tr>
 <tr>
-<td><code>test_log_retention.py</code> (10)</td>
-<td>Two-tier logs (moto S3): archived after the grace window then hot-purged and served from S3; an archived run with hot rows never reads S3; download from either tier, phases in run order even across midnight; <code>limit</code> on both tiers, the archive fetching only the phases the answer needs (a one-phase download too); a log phase that can't be an S3 key segment refused (422) at ingest; an archive failure leaves the run unarchived; refresh-token families purged once fully expired; the audit purge needs the distinct DB role.</td>
+<td><code>test_log_retention.py</code> (11)</td>
+<td>Two-tier logs (moto S3): archived after the grace window then hot-purged and served from S3; an archived run with hot rows never reads S3; download from either tier, phases in run order even across midnight; <code>limit</code> on both tiers, the archive fetching only the phases the answer needs (a one-phase download too); a log phase that can't be an S3 key segment refused (422) at ingest; an archive failure leaves the run unarchived; refresh-token families purged once fully expired; the audit purge needs the distinct DB role, and deletes in audited batches.</td>
 </tr>
 <tr>
-<td><code>test_scheduler.py</code> (4)</td>
-<td>The advisory lock survives a task's commit (dedicated connection); worker loss fails an executing run, waits the apply window for a mutating command, spares <code>unconfirmed</code>/<code>confirmed</code> runs.</td>
+<td><code>test_scheduler.py</code> (7)</td>
+<td>The advisory lock survives a task's commit (dedicated connection); worker loss fails an executing run, waits the apply window for a mutating command, spares <code>unconfirmed</code>/<code>confirmed</code> runs; a failing or over-budget task is logged and counted without skipping the others; hung outbox dispatchers never delay the tick and are cancelled with it; shutdown awaits the scheduler, then the saved-plan purges, then disposes the engine.</td>
 </tr>
 <tr>
 <td><code>test_claim_resilience.py</code> (7)</td>
 <td>The claim long-poll waits outside any transaction (no idle-in-transaction connection) and its <code>wait</code> is capped server-side; the job build holds no lock on the worker's row nor a key-share-blocking one on the env; an unexpected build error (an undecryptable sealed secret) fails the run closed (<code>reason: internal</code>) and the queue moves on; a transient one (KMS, the database) answers 503 and sets the run aside for a doubling backoff while the run behind it is claimed; the candidate query uses <code>ix_runs_claimable</code>; the API's connections carry the server-side timeouts.</td>
+</tr>
+<tr>
+<td><code>test_outbox.py</code> (9)</td>
+<td>Outbox retry schedule: <code>Retry-After</code> (seconds, HTTP date), GitHub's rate-limit reset, exponential backoff with jitter up to the cap, the default budget spans over an hour, a later <code>Retry-After</code> wins (capped).</td>
 </tr>
 <tr>
 <td><code>test_queue.py</code> (3)</td>
@@ -1860,8 +1864,8 @@ all. Counts in parentheses include parametrized cases and drift as tests are add
 <td>Stack <code>trigger_paths</code> (SPECS §3.1): the glob matcher's edge cases (<code>**</code> as a whole segment or inside one, <code>*</code>/<code>?</code> within a segment, character classes, an unclosed <code>[</code>, a folder pattern covering its content, dotfiles, case); <code>touches_stack</code> combining <code>project_root</code> and the globs, a rename's old path counting; validation and normalization (count, length, absolute, <code>..</code>/<code>.</code>/empty segment, backslash, control characters, trailing <code>/</code>, duplicates); the stack API validates, normalizes, clears on <code>null</code> and audits <code>stack.updated</code>; a push touching only a trigger path triggers the stack listing it and not its sibling (whose head still advances), an unrelated push triggers nothing, a rename out of the shared folder still triggers.</td>
 </tr>
 <tr>
-<td><code>test_vcs.py</code> (6)</td>
-<td>GitHub post-back: owner/repo parsing, PR metadata persisted, PR close cancels proposed runs, status + one comment per run, a bad secret fails only its row, resync.</td>
+<td><code>test_vcs.py</code> (7)</td>
+<td>GitHub post-back: owner/repo parsing, PR metadata persisted, PR close cancels proposed runs, status + one comment per run, a bad secret fails only its row (retried once due, dead-lettered at error level), a rate limit defers the row past its reset and the stale retry is dropped once superseded, resync.</td>
 </tr>
 <tr>
 <td><code>test_out_of_band_state.py</code> (7)</td>
@@ -1896,8 +1900,8 @@ all. Counts in parentheses include parametrized cases and drift as tests are add
 <td>Service accounts &amp; API tokens (SPECS §23): a token authenticates, is shown once and stored hashed, never in the audit; revoked, expired, unknown tokens and a disabled account get 401; the instance role is capped at writer (create and PATCH), management is instance-admin only; no space by default; with a space-admin membership it plans and exports but can't destroy, confirm an apply nor run a mutating command.</td>
 </tr>
 <tr>
-<td><code>test_notifications.py</code> (10)</td>
-<td>Target CRUD + audit, test delivery, unsupported states, outbox enqueue and dispatch; SSRF: delivery pinned to the vetted IP (DNS rebinding), private IPs refused at create and at delivery, no redirects, body validation does no DNS.</td>
+<td><code>test_notifications.py</code> (12)</td>
+<td>Target CRUD + audit, test delivery, unsupported states, outbox enqueue and dispatch; a retry re-sends to the failed targets only, not before its <code>Retry-After</code>, with no DB transaction open during a POST; a row out of attempts is logged at error level and counted; SSRF: delivery pinned to the vetted IP (DNS rebinding), private IPs refused at create and at delivery, no redirects, body validation does no DNS.</td>
 </tr>
 <tr>
 <td><code>test_inbox.py</code> (7)</td>

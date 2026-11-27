@@ -2438,15 +2438,17 @@ the run) and <code>webhook</code> (a structured JSON envelope: state, run id, st
 </code></pre></div>
 <p><strong>How it works — a transactional outbox, not a side-effect.</strong> When <code>transition()</code> moves a run to a
 notify-worthy state, it inserts a row into <code>notification_outbox</code> <strong>in the same DB transaction</strong> as
-the state change (no HTTP in the request path). A background scheduler task drains the outbox under
+the state change (no HTTP in the request path). A background dispatcher loop drains the outbox under
 a <code>pg_try_advisory_lock</code> (one replica at a time) with <code>FOR UPDATE … SKIP LOCKED</code>, resolves the
 matching targets (those on the run's environment + those on its stack, filtered by <code>on_states</code>),
 and POSTs — with no DB transaction held during the HTTP call. Consequences worth knowing:</p>
 <ul>
 <li>a <strong>rolled-back</strong> transition never notifies (the outbox row rolls back with it);</li>
 <li>two API replicas never double-send (the lock + <code>SKIP LOCKED</code>);</li>
-<li>delivery is <strong>at-least-once</strong> with retries (up to 5 attempts), then the row is dead-lettered and
-  the failure is logged — a flaky Slack never blocks or fails a run.</li>
+<li>delivery is <strong>at-least-once</strong>: a failed target is retried alone (targets already reached aren't
+  sent the event again), with exponential backoff and jitter, honouring <code>Retry-After</code>, for about an
+  hour (12 attempts), then the row is dead-lettered and logged at error level — a flaky Slack never
+  blocks or fails a run.</li>
 </ul>
 <p>Deep links use <code>STACKD_APP_URL</code> (the SPA base, e.g. <code>http://localhost:5173</code>).</p>
 <p><strong>SSRF guard.</strong> A target URL must be <code>https</code> and its host must resolve to public addresses only

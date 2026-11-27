@@ -4818,7 +4818,7 @@ application code. A chunk ingested after its run was archived is not re-archived
 <a id="__codelineno-24-5" name="__codelineno-24-5" href="#__codelineno-24-5"></a>context jsonb,                      -- stack_name, env_name, run_id, commit, plan_summary...
 <a id="__codelineno-24-6" name="__codelineno-24-6" href="#__codelineno-24-6"></a>ip, user_agent nullable, created_at
 </code></pre></div>
-<p><strong>Real immutability, not just "no API"</strong>: the absence of an update/delete endpoint does not protect against a bug or an application compromise. The application DB role only has <code>INSERT</code> and <code>SELECT</code> on <code>audit_events</code> (<code>REVOKE UPDATE, DELETE</code> — a deployment step for the operator: no migration issues it, since the migrations usually run as the tables' owner), a <code>BEFORE UPDATE OR DELETE</code> trigger raises an exception (created by migration 0001: the enforcement that holds even without the REVOKE), and retention purging goes through a distinct role, separate from the application role and itself audited. 2-year retention (<code>audit_retention_days</code> = 730, env <code>AUDIT_RETENTION_DAYS</code>): a daily task (§7.5) purges older events on a connection of the <code>stackd_audit_purge</code> role (created <code>NOLOGIN</code> by migration 0031 — an operator gives it a login and sets <code>STACKD_AUDIT_PURGE_DATABASE_URL</code>; without that URL no purge runs). The role holds <code>SELECT, INSERT, DELETE</code> only, and the append-only trigger lets exactly that role delete; when it deleted anything, it writes an <code>audit.purged</code> event (actor <code>system</code>, target_kind <code>audit</code>, context <code>deleted</code>, <code>before</code>, <code>retention_days</code>) in the same transaction as the delete. Indexes: <code>(created_at)</code>, <code>(actor_id, created_at)</code>, <code>(target_kind, target_id, created_at)</code>, <code>(action, created_at)</code>.</p>
+<p><strong>Real immutability, not just "no API"</strong>: the absence of an update/delete endpoint does not protect against a bug or an application compromise. The application DB role only has <code>INSERT</code> and <code>SELECT</code> on <code>audit_events</code> (<code>REVOKE UPDATE, DELETE</code> — a deployment step for the operator: no migration issues it, since the migrations usually run as the tables' owner), a <code>BEFORE UPDATE OR DELETE</code> trigger raises an exception (created by migration 0001: the enforcement that holds even without the REVOKE), and retention purging goes through a distinct role, separate from the application role and itself audited. 2-year retention (<code>audit_retention_days</code> = 730, env <code>AUDIT_RETENTION_DAYS</code>): a daily task (§7.5) purges older events on a connection of the <code>stackd_audit_purge</code> role (created <code>NOLOGIN</code> by migration 0031 — an operator gives it a login and sets <code>STACKD_AUDIT_PURGE_DATABASE_URL</code>; without that URL no purge runs). The role holds <code>SELECT, INSERT, DELETE</code> only, and the append-only trigger lets exactly that role delete; it deletes in batches of 5,000 rows, one transaction each (a large backlog never becomes one long, lock-heavy delete), and every batch that deleted anything writes an <code>audit.purged</code> event (actor <code>system</code>, target_kind <code>audit</code>, context <code>deleted</code> — that batch's count —, <code>before</code>, <code>retention_days</code>) in the same transaction as its delete. Indexes: <code>(created_at)</code>, <code>(actor_id, created_at)</code>, <code>(target_kind, target_id, created_at)</code>, <code>(action, created_at)</code>.</p>
 <h3 id="62-taxonomy">6.2 Taxonomy<a class="headerlink" href="#62-taxonomy" title="Permanent link">&para;</a></h3>
 <p>The exhaustive list of actions the API emits (to check it: <code>grep -rn 'action="' api/app</code>, plus the
 <code>audit_action=</code> of each <code>transition()</code> call and the per-field map in <code>users/router.py</code>):</p>
@@ -5287,7 +5287,8 @@ explicit budget are capped at 2 h by the agent's watchdog.</p>
 name and hour: the agent keeps retrying, slowly — every 5 min — after a 403, logging the refusal); a <code>/jobs/claim</code> from a worker whose recorded runner is not <code>docker</code> (registered before the API switched to production) gets the same 403. The runner is shown on the Workers page. It is <em>declared</em>: it guards against a misconfigured worker, not against a compromised one holding a pool token — the pool token's custody stays the boundary. A production API also refuses to <strong>start</strong> on dev-grade settings: a master key that does not decode to 32 bytes, a <code>STACKD_JWT_SECRET</code> under 32 characters, a non-https <code>STACKD_PUBLIC_URL</code>, a <code>local</code> OIDC signer without <code>STACKD_ALLOW_LOCAL_SIGNER=true</code> (§3.11) (next to the existing <code>STACKD_DEV_AUTH</code> guard).</p>
 <h3 id="75-periodic-tasks-internal-scheduler-multi-replica">7.5 Periodic tasks (internal scheduler, multi-replica)<a class="headerlink" href="#75-periodic-tasks-internal-scheduler-multi-replica" title="Permanent link">&para;</a></h3>
 <p>The scheduler module (PLAN §2.1) carries background tasks that must run <strong>exactly once</strong> even with several API replicas:</p>
-<p>The loop ticks every 10 s.</p>
+<p>The loop ticks every 10 s. The every-tick tasks run in turn, each with its own session, error handling and time budget (worker_lost 30 s, drift 60 s, OIDC keys 30 s, rollout expiry 60 s, log archiving 120 s): a task that raises or overruns is cancelled, logged (<code>scheduler.task_failed</code>, at error level, with the traceback) and counted (<code>stackd_scheduler_task_failures_total{task}</code>), and only that run of it is lost — never the other tasks of the tick. Tasks making outbound or long calls never run inside the tick, so they cannot delay <code>worker_lost</code> detection: the two outbox dispatchers loop on their own (a full batch is followed straight by the next, otherwise they wait a tick; 300 s budget per drain), the git staleness poll and the daily retention purge are started as tasks of their own when due (budget: their period; one still running when the next is due skips that one). Stopping the API cancels the loop, which cancels and awaits these tasks; shutdown then waits (≤ 10 s) for the in-flight saved-plan deletions (§11.3) and disposes the DB engine.</p>
+<p><strong>Outbox delivery (notifications, VCS post-back).</strong> Each drain claims up to 20 <strong>due</strong> rows (<code>sent_at IS NULL</code>, <code>attempts &lt; stackd_outbox_max_attempts</code>, <code>next_attempt_at &lt;= now</code>, partial index on <code>(next_attempt_at, created_at) WHERE sent_at IS NULL</code>) with <code>FOR UPDATE SKIP LOCKED</code>, bumps <code>attempts</code> and pushes <code>next_attempt_at</code> by the backoff — base 10 s doubling per attempt, capped at 900 s, ±20 % jitter (<code>stackd_outbox_backoff_base_seconds</code>, <code>stackd_outbox_backoff_max_seconds</code>) — and commits; it then reads what the batch needs and commits again, so <strong>no DB transaction is open during the HTTP calls</strong>. A failure carrying <code>Retry-After</code> (seconds or HTTP date — Slack's 429, GitHub's secondary rate limit) or GitHub's primary-limit headers (<code>x-ratelimit-remaining: 0</code> + <code>x-ratelimit-reset</code>) defers the row until then when later than the backoff (capped at 1 h). 12 attempts by default (<code>stackd_outbox_max_attempts</code>) span over an hour; after the last one the row stays unsent (excluded from the claim), logged at error level (<code>notification.dead_lettered</code> / <code>vcs.dead_lettered</code>) and counted (<code>stackd_outbox_dead_letters_total{outbox}</code>). Deliveries are bounded: a notification target gets 30 s in all (DNS + every vetted address + response), at most 8 in flight, one run's rows in order; a VCS row gets 30 s, one stack's rows are posted one at a time (GitHub asks for serial requests per token), at most 4 stacks at once.</p>
 <table>
 <thead>
 <tr>
@@ -5304,13 +5305,13 @@ name and hour: the agent keeps retrying, slowly — every 5 min — after a 403,
 </tr>
 <tr>
 <td>Notification outbox</td>
-<td>every tick</td>
-<td>drain <code>notification_outbox</code> (§17 intro, CONCEPTS §14): at-least-once, ≤ 5 attempts, no DB transaction held across the HTTP POST</td>
+<td>own loop, every tick when idle</td>
+<td>drain <code>notification_outbox</code> (CONCEPTS §14): at-least-once, retried with backoff (see below), no DB transaction held across the HTTP POST. The row records the targets already delivered (<code>delivered_target_ids</code>): a retry re-sends to the failed targets only</td>
 </tr>
 <tr>
 <td>VCS post-back outbox</td>
-<td>every tick</td>
-<td>drain <code>vcs_outbox</code> (§18.4)</td>
+<td>own loop, every tick when idle</td>
+<td>drain <code>vcs_outbox</code> (§18.4), same retry schedule</td>
 </tr>
 <tr>
 <td>Drift detection</td>
@@ -5319,7 +5320,7 @@ name and hour: the agent keeps retrying, slowly — every 5 min — after a 403,
 </tr>
 <tr>
 <td>Git staleness polling</td>
-<td>15 min (<code>stackd_head_poll_interval</code>)</td>
+<td>15 min (<code>stackd_head_poll_interval</code>), own task</td>
 <td><code>git ls-remote</code> per (repo, branch, credentials) → update <code>head_sha</code> (§9.6); its own task, so slow git calls never delay the others</td>
 </tr>
 <tr>
@@ -5339,7 +5340,7 @@ name and hour: the agent keeps retrying, slowly — every 5 min — after a 403,
 </tr>
 <tr>
 <td>Retention purge</td>
-<td>daily</td>
+<td>daily, own task</td>
 <td>hot <code>run_logs</code> rows 7 d after archiving (§5.2); refresh-token families whose every token has expired (§2.5); webhook delivery ids past the 5 min anti-replay window (§13); audit events older than <code>audit_retention_days</code> (730) through the distinct <code>stackd_audit_purge</code> role (§6.1), only if <code>STACKD_AUDIT_PURGE_DATABASE_URL</code> is set</td>
 </tr>
 </tbody>
@@ -6391,7 +6392,9 @@ outage leaves the run correct. GitHub App (bot identity + Checks API) is deferre
 (<code>'github'</code> — enum-by-string, gitlab/bitbucket later), <code>vcs_comment_id bigint?</code> (the posted PR
 comment, for idempotent edit), <code>vcs_head_sha text?</code> (PR head commit the status reports against).
 <code>vcs_outbox</code> (transactional outbox, same shape as the notification outbox §7.5): <code>id</code>, <code>run_id</code>,
-<code>to_state</code>, <code>attempts</code>, <code>created_at</code>, <code>sent_at?</code>, partial index <code>WHERE sent_at IS NULL</code>.</p>
+<code>to_state</code>, <code>attempts</code>, <code>next_attempt_at</code> (retry schedule, §7.5), <code>created_at</code>, <code>sent_at?</code>, partial
+index on <code>(next_attempt_at, created_at) WHERE sent_at IS NULL</code>. (<code>notification_outbox</code> has the same
+columns plus <code>delivered_target_ids uuid[]</code>.)</p>
 <h3 id="182-auth-pat">18.2 Auth — PAT<a class="headerlink" href="#182-auth-pat" title="Permanent link">&para;</a></h3>
 <p>Reuse the stack's <code>repo_secret</code> (already used to clone) — unless it is a deploy key (<code>repo_auth_kind=deploy_key</code>, §3.1): a key is never sent to the VCS API, and such a stack gets no post-back. For post-back it must additionally carry
 <strong><code>pull_requests:write</code> + commit <code>statuses:write</code></strong> (classic <code>repo</code>, or a fine-grained PAT with
@@ -6405,8 +6408,11 @@ end of the still-in-flight proposed runs for that PR (reason <code>pr_closed</co
 <code>run.cancel_requested</code>, a <code>cancel_job</code> for its worker) and ends <code>canceled</code> when the worker reports.</p>
 <h3 id="184-post-back-appvcs-transactional-outbox">18.4 Post-back (<code>app/vcs/</code> — transactional outbox)<a class="headerlink" href="#184-post-back-appvcs-transactional-outbox" title="Permanent link">&para;</a></h3>
 <p>Enqueued on the run <code>transition()</code> in the SAME txn (<strong>no network I/O there</strong> — a rolled-back
-transition never posts); drained by the scheduler dispatcher (<code>dispatch_vcs</code>, advisory-locked,
-at-least-once with <code>attempts</code> cap). Only runs with <code>vcs_provider</code> set post back. A <code>proposed</code> run is
+transition never posts); drained by the scheduler dispatcher (<code>dispatch_vcs</code>, advisory-locked, in its own loop,
+at-least-once, retried with exponential backoff honouring GitHub's rate-limit headers up to the
+attempts cap, §7.5). A <strong>retried</strong> row is dropped (marked sent, nothing posted) once a newer row
+exists for its run: that one carries a later state, and posting the stale status after it would roll
+the commit status back (a <code>pending</code> landing after the <code>success</code>). Only runs with <code>vcs_provider</code> set post back. A <code>proposed</code> run is
 <strong>plan-only and terminal at <code>finished</code></strong> (never <code>unconfirmed</code>). Enqueued on <code>planning</code>, <code>finished</code>,
 <code>failed</code>, <code>canceled</code>, <code>discarded</code> (intermediate states elided to avoid status churn).</p>
 <ul>
@@ -6418,7 +6424,8 @@ at-least-once with <code>attempts</code> cap). Only runs with <code>vcs_provider
   summary, a mocks-block-apply note, deep link to <code>/runs/{id}</code>. Created on first post
   (<code>POST .../issues/{pr}/comments</code>), updated on later transitions (<code>PATCH .../issues/comments/{id}</code>);
   the returned id is persisted back on the run for idempotent edits.</li>
-<li>A VCS failure <strong>never</strong> fails the run (logged, retried up to the attempts cap).</li>
+<li>A VCS failure <strong>never</strong> fails the run (logged, retried up to the attempts cap, then logged at
+  error level as <code>vcs.dead_lettered</code>).</li>
 </ul>
 <h3 id="185-api">18.5 API<a class="headerlink" href="#185-api" title="Permanent link">&para;</a></h3>
 <ul>

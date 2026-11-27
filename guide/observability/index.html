@@ -1434,9 +1434,19 @@ the network layer.</p>
 <td>counter</td>
 <td>VCS webhooks received: <code>accepted</code>, <code>rejected</code>, <code>no_match</code></td>
 </tr>
+<tr>
+<td><code>stackd_scheduler_task_failures_total{task}</code></td>
+<td>counter</td>
+<td>periodic task runs that raised or overran their time budget (each also logged as <code>scheduler.task_failed</code>)</td>
+</tr>
+<tr>
+<td><code>stackd_outbox_dead_letters_total{outbox}</code></td>
+<td>counter</td>
+<td><code>notification</code> / <code>vcs</code> outbox rows abandoned after their last attempt (each also logged at error level as <code>notification.dead_lettered</code> / <code>vcs.dead_lettered</code>) — worth an alert</td>
+</tr>
 </tbody>
 </table>
-<p>The gauges are database-wide; the histograms and the counter are kept per API
+<p>The gauges are database-wide; the histograms and the counters are kept per API
 process, so sum them across replicas. Setting <code>STACKD_OTLP_ENDPOINT</code> also exports
 OpenTelemetry traces (HTTP requests and SQL queries, service <code>stackd-api</code>) over
 OTLP/HTTP; unset, tracing is off.</p>
@@ -1502,8 +1512,9 @@ unreachable, runs stay unarchived (logged as <code>logs.archive_failed</code>) a
 their rows until a later tick succeeds.</p>
 <p>The same daily task deletes expired refresh-token families and — only when
 <code>STACKD_AUDIT_PURGE_DATABASE_URL</code> names the distinct purge role — audit events
-older than <code>AUDIT_RETENTION_DAYS</code> (default 730), recording an <code>audit.purged</code>
-event. Each step logs <code>scheduler.retention</code> (with a count) or
+older than <code>AUDIT_RETENTION_DAYS</code> (default 730), in batches of 5,000 rows (one
+transaction each, so a large backlog never turns into one long delete), each
+batch recording its <code>audit.purged</code> event. Each step logs <code>scheduler.retention</code> (with a count) or
 <code>scheduler.retention_failed</code>.</p>
 <h2 id="inspecting-object-storage-dev">Inspecting object storage (dev)<a class="headerlink" href="#inspecting-object-storage-dev" title="Permanent link">&para;</a></h2>
 <p>Managed states, saved plans and archived logs live in S3 (Garage in dev), reached
