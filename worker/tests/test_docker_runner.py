@@ -113,6 +113,9 @@ class _Streamer:
     def emit(self, phase: str, lines: list[str], section: str | None = None) -> None:
         self.lines.extend(lines)
 
+    def flush(self, timeout: float | None = None) -> bool:
+        return True
+
 
 def _run(runner: DockerRunner, cmd: str, cwd: Path, env: dict | None = None, timeout: int = 60):
     streamer = _Streamer()

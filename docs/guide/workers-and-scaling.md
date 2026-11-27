@@ -106,7 +106,7 @@ POOL_TOKEN=$(curl -s -X POST localhost:8000/api/v1/worker-pools \
 
 ## Run a worker
 
-A worker needs only the API URL and the pool token (or `STACKD_POOL_TOKEN_FILE`, a file it re-reads until the token appears):
+A worker needs only the API URL and the pool token (or `STACKD_POOL_TOKEN_FILE`, a file it re-reads until the token appears, and again whenever the API answers `401` — a rotated token applies without a restart):
 
 ```bash
 cd worker
