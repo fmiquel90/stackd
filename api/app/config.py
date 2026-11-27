@@ -18,6 +18,15 @@ class Settings(BaseSettings):
 
     # Database
     database_url: str = "postgresql+asyncpg://stackd:stackd@localhost:5432/stackd"
+    # Connection pool of each API process (docs/guide/workers-and-scaling.md#database-connections).
+    stackd_db_pool_size: int = 10
+    stackd_db_max_overflow: int = 10
+    stackd_db_pool_timeout_seconds: int = 30
+    # Server-side timeouts set on the API's own connections — not on Alembic's, nor the audit
+    # purge's. 0 leaves the server's (role/database) setting in place.
+    stackd_db_idle_in_transaction_timeout_seconds: int = 300
+    stackd_db_lock_timeout_seconds: int = 30
+    stackd_db_statement_timeout_seconds: int = 0
 
     # Crypto / sessions
     stackd_encryption_key: str = ""  # base64-encoded 32 bytes (AES-256-GCM master key, §1)
@@ -62,6 +71,12 @@ class Settings(BaseSettings):
     s3_access_key: str = ""
     s3_secret_key: str = ""
     aws_region: str = "garage"
+    # Every AWS client (S3, KMS, STS); the read timeout bounds each socket read, not a transfer.
+    stackd_aws_connect_timeout_seconds: float = 5
+    stackd_aws_read_timeout_seconds: float = 30
+    stackd_aws_max_attempts: int = 3
+    # Largest state document the HTTP backend accepts (413 past it, §11.2).
+    stackd_state_max_bytes: int = 64 * 1024 * 1024
 
     # Retention (§5.2, §6.1, §7.5): hot log rows are purged this long after the run's logs reach S3;
     # the audit trail is purged past `audit_retention_days` by a distinct DB role, only when its
@@ -82,11 +97,25 @@ class Settings(BaseSettings):
     stackd_apply_lost_grace_seconds: int = 5 * 60
     stackd_head_poll_interval: int = 900
     stackd_apply_affinity_seconds: int = 60
+    # Server-side cap on a claim long-poll's `?wait=` (§7.2).
+    stackd_claim_max_wait_seconds: int = 30
     # Drift detection (§19): minimum spacing between read-only drift plans per environment.
     stackd_drift_interval_seconds: int = 21600  # 6h
 
     # Environment rollouts (§21.6): how long an approval lets creates-only plans apply unattended.
     stackd_rollout_approval_ttl_seconds: int = 24 * 3600
+
+    # Live WebSocket (§5.3): the auth message must arrive within this delay (else 4401), and one
+    # socket holds at most this many distinct channels (else it is closed with 1008).
+    stackd_ws_auth_timeout_seconds: int = 10
+    stackd_ws_max_subscriptions: int = 1000
+    # Outbound outboxes (notifications, VCS post-back — §7.5): a failed delivery is retried with
+    # exponential backoff (the base doubling up to the cap, ±20 % jitter; later if the receiver's
+    # Retry-After asks) until the attempts budget is spent. The defaults span ~1 h 20 min, past a
+    # typical GitHub or Slack incident.
+    stackd_outbox_max_attempts: int = 12
+    stackd_outbox_backoff_base_seconds: int = 10
+    stackd_outbox_backoff_max_seconds: int = 900
 
     # Background scheduler (§7.5) — disabled under tests so it can't fail runs mid-assertion.
     stackd_run_scheduler: bool = True

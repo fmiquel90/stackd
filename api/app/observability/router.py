@@ -1,16 +1,17 @@
 from __future__ import annotations
 
+import time
 from datetime import UTC, datetime, timedelta
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, Response
-from sqlalchemy import func, select, text
+from sqlalchemy import bindparam, func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.deps import CurrentUser, require_role
 from app.config import get_settings
 from app.db import get_session
-from app.enums import ACTIVE_STATES, Role, RunState, WorkerStatus
+from app.enums import ACTIVE_STATES, TERMINAL_STATES, Role, RunState, WorkerStatus
 from app.logging import ring_buffer
 from app.models.run import Run
 from app.models.worker import Worker, WorkerPool
@@ -23,12 +24,45 @@ metrics_router = APIRouter(tags=["observability"])
 DbSession = Annotated[AsyncSession, Depends(get_session)]
 
 
+# Terminal runs are most of the table and only ever grow: counted at most this often per process.
+_TERMINAL_COUNTS_TTL_SECONDS = 300.0
+_terminal_counts: tuple[float, dict[str, int]] | None = None
+
+
+async def _state_counts(session: AsyncSession) -> dict[str, int]:
+    global _terminal_counts
+    # Literal values, so even a generic plan matches the partial index ix_runs_non_terminal_state.
+    terminal = bindparam(
+        "terminal",
+        [st for st in RunState if st in TERMINAL_STATES],
+        type_=Run.state.type,
+        expanding=True,
+        literal_execute=True,
+    )
+    live = (
+        await session.execute(
+            select(Run.state, func.count()).where(Run.state.notin_(terminal)).group_by(Run.state)
+        )
+    ).all()
+    counts = {state.value: int(n) for state, n in live}
+    now = time.monotonic()
+    if _terminal_counts is None or now - _terminal_counts[0] >= _TERMINAL_COUNTS_TTL_SECONDS:
+        done = (
+            await session.execute(
+                select(Run.state, func.count())
+                .where(Run.state.in_(TERMINAL_STATES))
+                .group_by(Run.state)
+            )
+        ).all()
+        _terminal_counts = (now, {state.value: int(n) for state, n in done})
+    return counts | _terminal_counts[1]
+
+
 @metrics_router.get("/metrics")
 async def prometheus_metrics(session: DbSession) -> Response:
-    # Refresh the gauges from the DB at scrape time (cheap aggregate queries); counters/histograms
-    # are kept up to date at their code points.
-    by_state = (await session.execute(select(Run.state, func.count()).group_by(Run.state))).all()
-    counts = {state.value: int(n) for state, n in by_state}
+    # Refresh the gauges from the DB at scrape time; counters/histograms are kept up to date at
+    # their code points.
+    counts = await _state_counts(session)
     for st in RunState:
         metrics.runs_total.labels(state=st.value).set(counts.get(st.value, 0))
 

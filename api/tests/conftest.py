@@ -54,3 +54,15 @@ async def client(_database: str) -> AsyncIterator[object]:
     async with app.router.lifespan_context(app):
         async with httpx.AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as c:
             yield c
+
+
+@pytest.fixture(autouse=True)
+def _steady_api(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The scheduler has been running all along: no API outage to discount (SPECS §7.5). Tests
+    that call `detect_worker_lost` directly would otherwise see their first call as the API's
+    first tick and discount the workers' silence."""
+    from app.scheduler import tasks
+
+    clock = tasks._ApiClock()
+    monkeypatch.setattr(clock, "observe", lambda now: None)
+    monkeypatch.setattr(tasks, "_api_clock", clock)

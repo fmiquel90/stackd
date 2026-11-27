@@ -69,6 +69,12 @@ def _problem_title(resp: httpx.Response) -> str | None:
     return body.get("title") if isinstance(body, dict) else None
 
 
+# The heartbeat thread's calls (the beat, a command's result): far below the API's offline
+# threshold (60 s), so a stuck API costs a beat or two, never the worker's liveness — both the
+# request and its retries.
+HEARTBEAT_TIMEOUT_SECONDS = 10.0
+
+
 class ApiClient:
     """Thin client for the worker protocol (SPECS §7). All calls are pull/outbound. Each call
     retries a transient failure (transport error, 5xx, 429 — honouring Retry-After) with
@@ -203,9 +209,18 @@ class ApiClient:
     def _send(self, method: str, url: str, **kwargs: Any) -> httpx.Response:
         return self._send_tracked(method, url, **kwargs)[0]
 
-    def heartbeat(self, in_flight: int = 0, capacity: int = 1) -> list[dict]:
+    def heartbeat(
+        self, in_flight: int = 0, capacity: int = 1, job_ids: list[str] | None = None
+    ) -> list[dict]:
+        body: dict[str, object] = {"in_flight": in_flight, "capacity": capacity}
+        if job_ids is not None:
+            body["job_ids"] = job_ids
         resp = self._send(
-            "POST", "/worker/v1/heartbeat", json={"in_flight": in_flight, "capacity": capacity}
+            "POST",
+            "/worker/v1/heartbeat",
+            json=body,
+            timeout=HEARTBEAT_TIMEOUT_SECONDS,
+            retry_for=HEARTBEAT_TIMEOUT_SECONDS,
         )
         resp.raise_for_status()
         return resp.json().get("commands", [])
@@ -215,6 +230,8 @@ class ApiClient:
             "POST",
             f"/worker/v1/commands/{command_id}/result",
             json={"status": status, "result": result},
+            timeout=HEARTBEAT_TIMEOUT_SECONDS,
+            retry_for=HEARTBEAT_TIMEOUT_SECONDS,
         ).raise_for_status()
 
     def claim(self, wait: int) -> dict | None:

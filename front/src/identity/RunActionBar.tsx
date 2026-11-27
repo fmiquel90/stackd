@@ -213,8 +213,8 @@ export function RunActionBar(props: RunActionBarProps) {
         props.className,
       )}
     >
-      <div className="flex flex-wrap items-start justify-between gap-x-6 gap-y-2">
-        <div className="flex min-w-0 flex-col gap-1">
+      <div className="flex items-start justify-between gap-x-6 gap-y-2">
+        <div className="flex min-w-0 flex-1 flex-col gap-1">
           <div className="flex flex-wrap items-center gap-2" aria-live="polite">
             <RunStateBadge
               run={run}
@@ -241,35 +241,37 @@ export function RunActionBar(props: RunActionBarProps) {
             </div>
           )}
           {pendingRun && (
-            <div className="text-[12px]">
-              You ({me.email} · {me.role} · {me.allowed_tiers.join(" ") || "no tiers"}){" "}
-              {rights.confirm.reasons.length ? "cannot confirm." : "can confirm."}
-              {props.instanceCaveat && (
-                <span className="text-muted"> Based on your instance permissions.</span>
+            <div className="flex flex-wrap gap-x-4 gap-y-1 text-[12px]">
+              <div>
+                You ({me.email} · {me.role} · {me.allowed_tiers.join(" ") || "no tiers"}){" "}
+                {rights.confirm.reasons.length ? "cannot confirm." : "can confirm."}
+                {props.instanceCaveat && (
+                  <span className="text-muted"> Based on your instance permissions.</span>
+                )}
+              </div>
+              {cascade.length > 0 && (
+                <div>
+                  <span className="eyebrow mr-1 text-muted">Can trigger</span>
+                  {cascade.map((c, i) => (
+                    <span key={c.label} className="font-data">
+                      {i > 0 && ", "}
+                      {c.label}
+                      <span className="text-muted">
+                        {c.likelihood === "will_plan"
+                          ? " (will plan)"
+                          : ` (if ${c.outputs?.join(", ") || "outputs"} change)`}
+                      </span>
+                    </span>
+                  ))}
+                </div>
               )}
-            </div>
-          )}
-          {pendingRun && cascade.length > 0 && (
-            <div className="text-[12px]">
-              <span className="eyebrow mr-1 text-muted">Can trigger</span>
-              {cascade.map((c, i) => (
-                <span key={c.label} className="font-data">
-                  {i > 0 && ", "}
-                  {c.label}
-                  <span className="text-muted">
-                    {c.likelihood === "will_plan"
-                      ? " (will plan)"
-                      : ` (if ${c.outputs?.join(", ") || "outputs"} change)`}
-                  </span>
-                </span>
-              ))}
             </div>
           )}
         </div>
 
         <div
           className={cn(
-            "flex items-center gap-2",
+            "flex shrink-0 items-center gap-2",
             mobile &&
               "fixed inset-x-0 bottom-0 z-30 border-t border-line bg-raised p-3 pb-[max(12px,env(safe-area-inset-bottom))]",
           )}
