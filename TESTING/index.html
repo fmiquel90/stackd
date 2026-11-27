@@ -2071,8 +2071,16 @@ The tier gate (an approver without <code>prod</code>) and staleness stay manual 
 <td><code>STACKD_WORKER_LABELS</code> (<code>key=value,…</code>) parsed; a malformed value or a repeated key refuses to start; the agent registers with its labels and keeps them on a re-registration.</td>
 </tr>
 <tr>
-<td><code>test_log_flush.py</code> (5)</td>
-<td>The agent's log buffer (SPECS §5.1, 1 s / 32 KB): a quiet command's line is sent on time, not with the next one; a chunk goes once the size is reached; the rest on exit; masked; a failed send on the timer thread reaches the reader.</td>
+<td><code>test_log_flush.py</code> (11)</td>
+<td>The agent's log buffer (SPECS §5.1, 1 s / 32 KB): a quiet command's line is sent on time, not with the next one; a chunk goes once the size is reached; the rest on exit; masked; an API refusing every log POST never ends or kills the command; a hung API never stalls it (far more than a pipe buffer of output); a chunk is sent again until taken, in seq order; a 4xx chunk is dropped; a full buffer drops lines and says so; the job's end gives up in time; a non-UTF-8 byte does not end the command.</td>
+</tr>
+<tr>
+<td><code>test_client_retry.py</code> (14)</td>
+<td>The worker→API retry policy (SPECS §7.3): transport errors, 5xx and 429 retried with backoff (<code>Retry-After</code> honoured) for a bounded time, a 4xx never; the claim retries only what the API never processed, and gets its <code>wait</code> on its timeout; a saved-plan 503 retried then failing closed; a repeated terminal event takes the 409 as its acknowledgement (not "Not your job", not without an ambiguous attempt); a 401 re-reads a rotated pool token file; a transient re-registration failure is retried.</td>
+</tr>
+<tr>
+<td><code>test_apply_report.py</code> (4)</td>
+<td>A successful apply's report is retried until it gets through, never turned into <code>job_failed</code> — not even past the apply window; a refused report is not retried; the same for a command that ran; a failed <code>outputs.json</code> copy does not fail the job.</td>
 </tr>
 <tr>
 <td><code>test_tools.py</code> (4)</td>
