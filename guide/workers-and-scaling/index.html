@@ -842,6 +842,17 @@
   
 </li>
         
+          <li class="md-nav__item">
+  <a href="#restarting-after-a-crash" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Restarting after a crash
+      
+    </span>
+  </a>
+  
+</li>
+        
       </ul>
     </nav>
   
@@ -1414,6 +1425,17 @@
   
 </li>
         
+          <li class="md-nav__item">
+  <a href="#restarting-after-a-crash" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Restarting after a crash
+      
+    </span>
+  </a>
+  
+</li>
+        
       </ul>
     </nav>
   
@@ -1658,6 +1680,10 @@
 </tbody>
 </table>
 <p>The worker never decides on its own whether a command is mutating: it reads <code>cred_phase</code> from the claim. A plan fails on any exit code but 0 (no changes) and 2 (changes) — a killed plan never passes for "no changes".</p>
+<p>Every budget above is also cut to the job's <strong>credentials</strong>: the state token and the OIDC token handed over at the claim expire (the apply window for an apply, 30 min for a plan's OIDC token), and each step must end 60 s before the first of them does — so tofu's last state write and its unlock still go out with a valid token. An apply (or a mutating command) is <strong>not started</strong> when less than 5 minutes (or its whole budget, if shorter) are left by then, because the clone, <code>init</code> and the <code>before_apply</code> hooks used the rest: the run fails with <code>apply not started: the job's credentials expire in …</code>, nothing applied — trigger a new plan. Otherwise a shortened apply budget is shown in the run's log. If your <code>before_apply</code> hooks are slow, raise the API's <code>STACKD_APPLY_LOST_GRACE_SECONDS</code>: it lengthens the apply window, hence the tokens.</p>
+<p>If tofu still cannot write the state back (the backend unreachable, say), it leaves an <code>errored.tfstate</code>: the worker uploads it to the API, which keeps it encrypted (<code>artifacts/&lt;run_id&gt;/errored.tfstate</code>, audited <code>run.errored_state_saved</code>), or keeps it on the worker under <code>STACKD_WORKSPACE_ROOT/.errored-state/</code> when the upload fails. The run's log says where. Push it back to the state backend before any other run of that environment.</p>
+<h3 id="restarting-after-a-crash">Restarting after a crash<a class="headerlink" href="#restarting-after-a-crash" title="Permanent link">&para;</a></h3>
+<p>A worker killed without draining (OOM, <code>kill -9</code>) can leave job containers still running tofu, and workspaces holding the checkout and the run's variables. At its next start it removes them — the containers whose workspace no running job holds, and those workspaces — and logs <code>agent.orphans_reaped</code>. Agents sharing a host and a <code>STACKD_WORKSPACE_ROOT</code> never touch each other's running jobs: a job holds a lock on its workspace while it runs.</p>
 <h2 id="create-a-pool">Create a pool<a class="headerlink" href="#create-a-pool" title="Permanent link">&para;</a></h2>
 <p>Workers register to a <strong>pool</strong>, scoped to a space (<code>space_id</code> in the request, the <code>default</code> space otherwise). The pool token is shown once at creation and stored <strong>hashed</strong>. There is no rotate endpoint: if a token leaks, delete the pool and create a new one.</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="nv">AUTH</span><span class="o">=</span><span class="s2">&quot;Authorization: Bearer </span><span class="nv">$TOKEN</span><span class="s2">&quot;</span>
@@ -1814,6 +1840,11 @@ can't read the pool token from its environment.</p>
 <td><code>STACKD_DOCKER_RUNTIME</code></td>
 <td>unset</td>
 <td>an alternative OCI runtime, e.g. <code>runsc</code> (gVisor)</td>
+</tr>
+<tr>
+<td><code>STACKD_DOCKER_PULL_TIMEOUT_SECONDS</code></td>
+<td><code>600</code></td>
+<td>a runner image pull past it fails the job</td>
 </tr>
 <tr>
 <td><code>STACKD_REGISTRY_AUTH_FILE</code></td>

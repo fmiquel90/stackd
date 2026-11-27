@@ -1458,7 +1458,12 @@ read and lock while planning, never write), <code>rw</code> (an apply or a mutat
 apply budget + grace). A token whose run has ended can no longer write or lock. The worker hands it
 to tofu only, as <code>TF_HTTP_*</code> environment variables — hooks never see it. A lock records the run whose
 token took it, and <code>transition()</code> releases it when that run ends (audited <code>state.lock_released</code>): a
-worker lost mid-plan or mid-apply never strands the environment's lock.</p>
+worker lost mid-plan or mid-apply never strands the environment's lock.
+to tofu only, as <code>TF_HTTP_*</code> environment variables — hooks never see it. The worker reads the
+lifetime of this token and of the OIDC token at the claim: every step of the job ends 60 s before
+the first expires, and an apply that would start with too little left is not started at all
+(SPECS §7.4). A state that tofu could not write back (<code>errored.tfstate</code>) is uploaded and kept
+encrypted (SPECS §7.3).</p>
 <p><strong>Repo credential.</strong> The stack's token or SSH deploy key rides in the claim (<code>repo_credentials</code>).
 The worker uses it for the clone and for <code>init</code>, which downloads the modules — private ones hosted
 next to the repo included: the deploy key as a <code>0600</code> file outside the checkout named by

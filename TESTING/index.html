@@ -1748,8 +1748,8 @@ all. Counts in parentheses include parametrized cases and drift as tests are add
 <td>An unpinned run is pinned to the commit its plan checked out and the apply gets it; staleness then works for a manual run; a pinned SHA must match (<code>commit_mismatch</code> fails the run); a ref is re-pinned to its SHA; a malformed SHA → 400.</td>
 </tr>
 <tr>
-<td><code>test_saved_plan.py</code> (10)</td>
-<td>The plan is stored encrypted and served only to the run's apply job; it can't be replaced after the plan phase; a blob moved to another run's key doesn't decrypt; no saved plan → nothing served; proposed runs save none; destroy runs plan with <code>-destroy</code>; 64 MiB cap; deleted once the run is terminal, kept if that transition rolls back.</td>
+<td><code>test_saved_plan.py</code> (12)</td>
+<td>The plan is stored encrypted and served only to the run's apply job; it can't be replaced after the plan phase; a blob moved to another run's key doesn't decrypt; no saved plan → nothing served; proposed runs save none; destroy runs plan with <code>-destroy</code>; 64 MiB cap; deleted once the run is terminal, kept if that transition rolls back. An apply's <code>errored.tfstate</code> is stored encrypted, audited and kept once the run is terminal, accepted only from the run's worker while its apply executes.</td>
 </tr>
 <tr>
 <td><code>test_commands.py</code> (13)</td>
@@ -2113,6 +2113,22 @@ The tier gate (an approver without <code>prod</code>) and staleness stay manual 
 <tr>
 <td><code>test_plan_json.py</code> (1)</td>
 <td>The plan job parses <code>show -json</code> once; the forget count, the tripwire (reading the clear values) and the masked artifact all come from it.</td>
+</tr>
+<tr>
+<td><code>test_credential_deadline.py</code> (13)</td>
+<td>The job's credential deadline (SPECS §7.4): <code>exp - iat</code> of the state and OIDC tokens, anchored at the claim, the first to expire wins, an unreadable token falls back to the documented window; every step's timeout cut to it less 60 s (hooks included); an apply or a mutating command not started with too little left (through <code>_run_job</code> too), else its budget cut and logged; a plan cut to its 30 min OIDC token; no deadline without short-lived credentials.</td>
+</tr>
+<tr>
+<td><code>test_errored_state.py</code> (6)</td>
+<td><code>errored.tfstate</code> (SPECS §7.3): uploaded byte for byte before the failure is reported and the workspace removed, never logged; kept <code>0600</code> on the worker when the API refuses it; none after a successful apply; one the command did not write, a symlink or a FIFO never read; a mutating command's too.</td>
+</tr>
+<tr>
+<td><code>test_orphans.py</code> (9)</td>
+<td>Startup cleanup (SPECS §7.4): stale workspaces removed, a running job's (locked) kept, nothing but job-id directories touched; a SIGKILLed holder's workspace reaped; a job waits for its workspace's lock; orphan containers removed only when their workspace is free and under this root; job containers labelled with their workspace; a real orphan container killed and removed (skipped without a daemon); a failing cleanup never stops the agent.</td>
+</tr>
+<tr>
+<td><code>test_backoff.py</code> (6)</td>
+<td>Capped exponential backoff with jitter, reset on success, for failed claims and registrations (SPECS §7.1); a runner image pull fails past <code>STACKD_DOCKER_PULL_TIMEOUT_SECONDS</code>, cut to the job's deadline.</td>
 </tr>
 <tr>
 <td><code>test_diagnostics.py</code> (1)</td>
