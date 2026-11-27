@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import base64
 import json
 import uuid
@@ -7,22 +8,27 @@ from typing import Annotated, Any
 
 import jwt
 from fastapi import APIRouter, Depends, Request, Response
+from fastapi.responses import StreamingResponse
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.audit import record_audit
 from app.auth.deps import CurrentUser, require_role
+from app.bodies import read_capped
 from app.config import get_settings
 from app.db import get_session
 from app.enums import ACTIVE_STATES, AuditActorKind, Role, RunState
 from app.errors import ProblemException
 from app.ids import uuid7
+from app.logging import get_logger
 from app.models.environment import Environment
 from app.models.run import Run
 from app.models.state import StateLock, StateVersion
 from app.spaces import guard_env_id
-from app.statebackend.store import get_object, put_object, state_key
+from app.statebackend.store import open_object, put_object, state_key
 from app.statebackend.tokens import decode_state_token, mint_state_token
+
+_log = get_logger("stackd.statebackend")
 
 # Terraform HTTP backend protocol (SPECS §11.2). Auth: HTTP Basic, password = scoped state JWT.
 tf_router = APIRouter(prefix="/state/v1", tags=["state-backend"])
@@ -110,12 +116,63 @@ async def _latest(session: AsyncSession, env_id: uuid.UUID) -> StateVersion | No
 async def get_state(env_id: uuid.UUID, request: Request, session: DbSession) -> Response:
     _require_env(_token_claims(request), env_id)
     latest = await _latest(session, env_id)
+    # 404 tells tofu "no state yet": it then plans from nothing. Only the absence of any version
+    # may answer that — a version whose object cannot be read is a 5xx, never a 404.
     if latest is None:
         return Response(status_code=404)
-    data = await get_object(latest.s3_key)
-    if data is None:
-        return Response(status_code=404)
-    return Response(content=data, media_type="application/json")
+    s3_key = latest.s3_key
+    await session.commit()  # hold no DB connection while the object streams out
+    opened = await open_object(s3_key)
+    if opened is None:
+        _log.error(
+            "state object missing",
+            extra={"event": "state.object_missing", "env_id": str(env_id), "key": s3_key},
+        )
+        raise ProblemException(
+            500,
+            "State object missing",
+            "The latest state version's object is missing from S3; restore it from the bucket's "
+            "versions.",
+        )
+    chunks, size = opened
+    return StreamingResponse(
+        chunks, media_type="application/json", headers={"Content-Length": str(size)}
+    )
+
+
+async def _check_write(
+    session: AsyncSession,
+    claims: dict[str, Any],
+    env_id: uuid.UUID,
+    lock_id: str | None,
+    serial: int,
+) -> Response | None:
+    """The write's guards, in the caller's transaction: the run's phase (§11.2), the lock holder,
+    a regressive serial. A Response (423) to answer instead, or None to go on."""
+    await _require_run_phase(session, claims)
+    # While the state is locked only its holder writes, naming the lock in `?ID=` as tofu does when
+    # it holds one: no ID or another one gets the holder, like a LOCK conflict. Unlocked state takes
+    # an ID-less write (`tofu -lock=false`).
+    lock = await session.get(StateLock, env_id)
+    if lock is not None and lock_id != lock.lock_id:
+        return _locked(lock)
+    latest = await _latest(session, env_id)
+    # Only a *regressive* serial is refused — Terraform legitimately re-POSTs the same serial, so
+    # there is intentionally NO unique (environment_id, serial) constraint. The state lock (one
+    # holder per env) is what serializes writers.
+    if latest is not None and serial < latest.serial:
+        raise ProblemException(409, "Serial conflict", "Refusing a regressive state serial.")
+    return None
+
+
+def _parse_state(body: bytes) -> tuple[int, str | None]:
+    try:
+        doc = json.loads(body)
+        serial = int(doc.get("serial", 0))
+        lineage = doc.get("lineage")
+    except (ValueError, TypeError, AttributeError) as exc:
+        raise ProblemException(400, "Invalid state", "The body is not a state document.") from exc
+    return serial, lineage if isinstance(lineage, str) else None
 
 
 @tf_router.post("/{env_id}")
@@ -125,42 +182,38 @@ async def post_state(
     claims = _token_claims(request)
     _require_env(claims, env_id)
     _require_rw(claims)
-    await _require_run_phase(session, claims)
 
-    # While the state is locked only its holder writes, naming the lock in `?ID=` as tofu does when
-    # it holds one: no ID or another one gets the holder, like a LOCK conflict. Unlocked state takes
-    # an ID-less write (`tofu -lock=false`).
-    lock = await session.get(StateLock, env_id)
-    if lock is not None and ID != lock.lock_id:
-        return _locked(lock)
+    body = await read_capped(request, get_settings().stackd_state_max_bytes, "State too large")
+    serial, lineage = await asyncio.to_thread(_parse_state, body)
 
-    body = await request.body()
-    doc = json.loads(body)
-    new_serial = int(doc.get("serial", 0))
-    latest = await _latest(session, env_id)
-    # Only a *regressive* serial is refused — Terraform legitimately re-POSTs the same serial, so
-    # there is intentionally NO unique (environment_id, serial) constraint. The state lock (one
-    # holder per env) is what serializes writers.
-    if latest is not None and new_serial < latest.serial:
-        raise ProblemException(409, "Serial conflict", "Refusing a regressive state serial.")
+    # Refuse early what would be refused anyway, without touching S3…
+    refused = await _check_write(session, claims, env_id, ID, serial)
+    if refused is not None:
+        return refused
+    await session.commit()
 
+    # …upload with no DB connection or row lock held (a fresh key: an object no version points to
+    # yet, left orphaned if the write is refused below)…
     version_id = uuid7()
     key = state_key(str(env_id), str(version_id))
-    # Insert the DB row first (flush, not commit), then upload: if S3 fails the row rolls back, so
-    # we never leave a state_version pointing at a missing object.
+    await put_object(key, body)
+
+    # …then check again under the run's lock and record the version: never a state_version row
+    # pointing at an object that was not stored.
+    refused = await _check_write(session, claims, env_id, ID, serial)
+    if refused is not None:
+        return refused
     session.add(
         StateVersion(
             id=version_id,
             environment_id=env_id,
-            serial=new_serial,
-            lineage=doc.get("lineage"),
+            serial=serial,
+            lineage=lineage,
             size_bytes=len(body),
             s3_key=key,
             created_by_run_id=uuid.UUID(claims["run_id"]) if claims.get("run_id") else None,
         )
     )
-    await session.flush()
-    await put_object(key, body)
     await session.commit()
     return Response(status_code=200)
 

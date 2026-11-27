@@ -149,7 +149,7 @@ event. Each step logs `scheduler.retention` (with a count) or
 
 Managed states, saved plans and archived logs live in S3 (Garage in dev), reached
 only by the API. `task s3-ls` lists the dev bucket with the API's own S3 settings:
-`states/<environment_id>/…` for state versions, `artifacts/<run_id>/plan.tfplan`
+`states/<environment_id>/…` for state versions, `artifacts/<run_id>/plan-<id>.tfplan`
 for the saved plan of a run that can still be applied (encrypted, deleted when
 the run ends), `logs/<run_id>/…` for archived run logs. If a plan with changes fails while uploading its plan file, the
 API cannot reach the bucket: run `task s3`, then `task dev`. See

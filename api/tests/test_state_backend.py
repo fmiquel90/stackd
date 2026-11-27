@@ -536,7 +536,12 @@ def test_s3_client_credentials(monkeypatch) -> None:  # type: ignore[no-untyped-
     from app.statebackend import store
 
     seen: list[dict] = []
-    monkeypatch.setattr(store.boto3, "client", lambda *a, **kw: seen.append(kw))
+
+    class _Session:
+        def client(self, *_a: object, **kw: object) -> None:
+            seen.append(kw)
+
+    monkeypatch.setattr(store.boto3.session, "Session", _Session)
 
     def settings(**kw):  # type: ignore[no-untyped-def]
         base = {
@@ -549,15 +554,15 @@ def test_s3_client_credentials(monkeypatch) -> None:  # type: ignore[no-untyped-
         return SimpleNamespace(**{**base, **kw})
 
     monkeypatch.setattr(store, "get_settings", lambda: settings(is_production=True))
-    store._client()
+    store._build_client()
     assert "aws_access_key_id" not in seen[-1]
     monkeypatch.setattr(
         store,
         "get_settings",
         lambda: settings(is_production=True, s3_access_key="AK", s3_secret_key="SK"),
     )
-    store._client()
+    store._build_client()
     assert seen[-1]["aws_access_key_id"] == "AK"
     monkeypatch.setattr(store, "get_settings", lambda: settings())
-    store._client()
+    store._build_client()
     assert seen[-1]["aws_access_key_id"] == "test"
