@@ -44,6 +44,24 @@ async def test_refresh_requires_csrf(client: httpx.AsyncClient) -> None:
     cookie = f"stackd_refresh={ck['stackd_refresh']}; stackd_csrf={ck['stackd_csrf']}"
     no_csrf = await client.post("/api/v1/auth/refresh", headers={"Cookie": cookie})
     assert no_csrf.status_code == 403
+    # Mismatched CSRF header → 403 too.
+    bad = await client.post(
+        "/api/v1/auth/refresh", headers={"Cookie": cookie, "X-CSRF-Token": "nope"}
+    )
+    assert bad.status_code == 403
+
+
+async def test_refresh_without_session_is_401(client: httpx.AsyncClient) -> None:
+    # Fresh visit: no cookies at all → 401 "not authenticated", not a CSRF 403.
+    r = await client.post("/api/v1/auth/refresh")
+    assert r.status_code == 401
+    assert r.headers["content-type"].startswith("application/problem+json")
+    # A CSRF pair without a refresh cookie is still just "not authenticated".
+    r2 = await client.post(
+        "/api/v1/auth/refresh",
+        headers={"Cookie": "stackd_csrf=abc", "X-CSRF-Token": "abc"},
+    )
+    assert r2.status_code == 401
 
 
 async def test_refresh_rotation_and_reuse_detection(client: httpx.AsyncClient) -> None:
