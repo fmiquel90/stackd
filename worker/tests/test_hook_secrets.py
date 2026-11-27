@@ -561,10 +561,10 @@ def test_deploy_key_reaches_the_clone_and_init_only(
     both = {"repo_credentials": creds, "hooks": platform}
     client = _plan_and_apply(tmp_path, url, sha, tofu, both)
 
-    # git used the key, 0600, for the plan's clone, then the apply's clone and pinned fetch…
+    # git used the key, 0600, for the plan's clone, then the apply's fetch of the pinned commit…
     key = tmp_path / "ws" / "run-1" / "repo_ssh_key"
     used = f"host=git@git.example.com key={key} mode=600 first={DEPLOY_KEY.splitlines()[0]}"
-    assert fake_ssh.read_text().splitlines() == [used] * 3
+    assert fake_ssh.read_text().splitlines() == [used] * 2
     # …tofu had it for `init` only (module downloads)…
     assert (tofu / "creds").read_text().splitlines() == [
         "init ssh=set cfg=0 key=yes",

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import fcntl
 import json
 import logging
 
@@ -23,9 +24,9 @@ from agent.client import ApiClient
 from agent.config import Settings
 from agent.drain import APPLY_HOLD_MARGIN_SECONDS, EXIT_CODES, Drain, supervise
 from agent.logging import get_logger, setup as setup_logging
-from agent.masking import Masker, mask_plan_json
+from agent.masking import Masker, mask_plan
 from agent.docker_engine import DockerEngine
-from agent.docker_runner import DockerRunner
+from agent.docker_runner import RUNNER_UID, DockerRunner
 from agent.registry_auth import credential_for, registry_host
 from agent.tools import pick
 from agent.runner import (
@@ -92,6 +93,49 @@ def _docker_environ() -> dict[str, str]:
     }
 
 
+def _plugin_cache(runner: str) -> Path | None:
+    """The worker's provider plugin cache (`STACKD_PLUGIN_CACHE_DIR`, §7.4), opt-in: tofu's
+    TF_PLUGIN_CACHE_DIR is its `providers/`, created on first use (and, under a root agent's
+    `docker` runner, given to the runner images' user, who writes it). None when unset."""
+    root = os.environ.get("STACKD_PLUGIN_CACHE_DIR")
+    if not root:
+        return None
+    cache = Path(root).resolve() / "providers"
+    cache.mkdir(parents=True, exist_ok=True)
+    if runner == "docker" and os.getuid() == 0:
+        os.chown(cache, RUNNER_UID, RUNNER_UID)
+    return cache
+
+
+# How often a job waiting for the plugin cache looks at its cancel token.
+_CACHE_LOCK_POLL_SECONDS = 0.5
+
+
+@contextmanager
+def _plugin_cache_lock(cache: Path | None) -> Iterator[None]:
+    """Held around each `init` that writes the plugin cache: Terraform documents its cache as not
+    safe for concurrent installs, so the `init`s of this worker's jobs — and of any agent on the
+    host sharing the directory (`flock`, next to the cache) — take turns. A stop request (§4.1)
+    ends the wait."""
+    if cache is None:
+        yield
+        return
+    token = cancel.current()
+    with open(cache.parent / "init.lock", "a") as lock:
+        while True:
+            try:
+                fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                break
+            except BlockingIOError:
+                if token is not None and token.should_stop:
+                    raise cancel.JobCanceled from None
+                time.sleep(_CACHE_LOCK_POLL_SECONDS)
+        try:
+            yield
+        finally:
+            fcntl.flock(lock, fcntl.LOCK_UN)
+
+
 def _job_environ(runner: str = "local") -> dict[str, str]:
     """Base process env for tofu and platform hooks. `local`: the worker's, minus the agent's own
     settings (§7.4, §8.3) — the rest stays (PATH and locale, proxies and CA, TF_* plugin cache,
@@ -133,17 +177,30 @@ def _make_runner(settings: Settings, job: dict[str, Any], ws: Workspace) -> Runn
             },
         )
         engine.pull(image, credential)
-    return DockerRunner(engine, image, ws.path, job["job_id"], settings.docker_limits)
+    if os.getuid() == 0:
+        # A root agent's files must not reach a container as root: the workspace goes to the
+        # images' unprivileged user, the checkout once cloned, each file the agent writes after.
+        ws.hand_over(RUNNER_UID, RUNNER_UID)
+    return DockerRunner(
+        engine,
+        image,
+        ws.path,
+        job["job_id"],
+        settings.docker_limits,
+        plugin_cache=_plugin_cache("docker"),
+    )
 
 
-def _secret_leak_in_outputs(doc: str, masker: Masker) -> str | None:
+def _secret_leak_in_outputs(doc: str | dict[str, Any], masker: Masker) -> str | None:
     """Cleartext tripwire (§5.1): a value Stackd treats as sensitive appearing verbatim in a
     *non-sensitive* output. terraform only redacts outputs the repo marked `sensitive = true`, so a
-    sensitive Stackd variable echoed by an unmarked output leaks. Scans `tofu show -json` (plan) or
-    `tofu output -json` (apply). Returns a masked description, or None."""
+    sensitive Stackd variable echoed by an unmarked output leaks. Scans `tofu show -json` (plan,
+    parsed) or `tofu output -json` (apply). Returns a masked description, or None."""
     try:
-        data = json.loads(doc)
-    except (json.JSONDecodeError, ValueError):
+        data = doc if isinstance(doc, dict) else json.loads(doc)
+    except ValueError:
+        return None
+    if not isinstance(data, dict):
         return None
     # plan json nests outputs under planned_values.outputs; `output -json` is a flat name→obj map.
     outputs = (
@@ -253,14 +310,10 @@ def _summary_from_events(events: list[dict]) -> dict:
     return out
 
 
-def _forgets_in_plan(plan_doc: str) -> int:
+def _forgets_in_plan(plan: dict[str, Any]) -> int:
     """Resources the plan forgets (a `removed` block with `destroy = false`), counted from the plan
     JSON: Terraform's `change_summary` has no `forget` counter, OpenTofu's does."""
-    try:
-        doc = json.loads(plan_doc)
-    except ValueError:
-        return 0
-    changes = doc.get("resource_changes") or [] if isinstance(doc, dict) else []
+    changes = plan.get("resource_changes") or []
     return sum(
         1
         for rc in changes
@@ -308,18 +361,20 @@ def _apply_error(events: list[dict]) -> str | None:
     return f"{error}: {detail} The reviewed plan was not applied; trigger a new plan."
 
 
-def _plan_json_unusable(show: subprocess.CompletedProcess[str]) -> str | None:
-    """Why `tofu show -json`'s result is no plan document (a failed run, or anything but a JSON
-    object), or None when it is one."""
+def _plan_json(
+    show: subprocess.CompletedProcess[str],
+) -> tuple[dict[str, Any], None] | tuple[None, str]:
+    """`tofu show -json`'s plan document, parsed once for every reader, or why its result is none
+    (a failed run, or anything but a JSON object)."""
     if show.returncode != 0:
         stderr = (show.stderr or "").splitlines()
         detail = next((line.strip() for line in stderr if line.strip()), "")
-        return f"exited {show.returncode}" + (f": {detail}" if detail else "")
+        return None, f"exited {show.returncode}" + (f": {detail}" if detail else "")
     try:
         doc = json.loads(show.stdout)
     except ValueError:
-        return "printed no JSON"
-    return None if isinstance(doc, dict) else "printed no plan object"
+        return None, "printed no JSON"
+    return (doc, None) if isinstance(doc, dict) else (None, "printed no plan object")
 
 
 # `state pull` reads the whole state: a short budget of its own, so a hung backend can't hold a job.
@@ -605,20 +660,29 @@ def _init(
     runner: Runner,
 ) -> int:
     """`init`, the one tofu command that holds the stack's repo credential (§8.3): it downloads the
-    modules, private ones hosted next to the repo included. On disk / in the env for it only."""
+    modules, private ones hosted next to the repo included. On disk / in the env for it only. It
+    is also the one that installs providers: into the worker's plugin cache, when there is one."""
     backend = job.get("backend")
     creds = ws.repo_credentials(
         job["environment"]["repo_url"], token=_repo_token(job), ssh_key=_repo_ssh_key(job)
     )
-    with _tofu_files(ws, cwd, job), creds as git_env:
+    cache = _plugin_cache(runner.name)
+    env = dict(tf_env)
+    if cache is not None:
+        env["TF_PLUGIN_CACHE_DIR"] = str(cache)
+        # The cache is shared by the worker's jobs: without this flag tofu uses a cached package
+        # only when the job's own lock file records its checksum (else it installs from the
+        # registry, verified) — a package another job put there is never taken on trust (§7.4).
+        env.pop("TF_PLUGIN_CACHE_MAY_BREAK_DEPENDENCY_LOCK_FILE", None)
+    with _plugin_cache_lock(cache), _tofu_files(ws, cwd, job), creds as git_env:
         return run_command(
             _init_cmd(tool, backend, job.get("backend_config_file"), job.get("backend_config")),
             cwd,
-            {**tf_env, **git_env},
+            {**env, **git_env},
             phase=phase,
             section=None,
             streamer=streamer,
-            runner=runner,
+            runner=runner.for_init(),
         )
 
 
@@ -788,23 +852,25 @@ def handle_plan(
             show = runner.capture([tool, "show", "-json", "-no-color", str(plan_file)], cwd, tf_env)
         # The after_plan checks and the reviewers read this document: without it, fail closed — a
         # stand-in `{}` would let every policy pass on an empty plan.
-        unusable = _plan_json_unusable(show)
-        if unusable:
+        plan, unusable = _plan_json(show)
+        if plan is None:
             error = f"plan JSON unavailable, not checked: `{tool} show -json` {unusable}"
             return _job_failed(client, job_id, "plan", checks, error=masker.mask(error))
         plan_doc = show.stdout
-        summary["forget"] = max(summary.get("forget", 0), _forgets_in_plan(plan_doc))
+        summary["forget"] = max(summary.get("forget", 0), _forgets_in_plan(plan))
+        # Cleartext tripwire (§5.1): a sensitive value surfacing in a non-sensitive output means
+        # the repo didn't mark it `sensitive` — flag (or fail) the run, below. Read before the
+        # masking, which redacts the parsed document in place.
+        leak = _secret_leak_in_outputs(plan, masker)
         # It lists the run's variable values in clear (§8.3): the artifact, and what repo hooks
         # read, is a copy with every sensitive value masked.
-        masked_doc = mask_plan_json(plan_doc, masker)
+        masked_doc = mask_plan(plan, masker)
+        del plan
         client.upload_artifact(job_id, "plan.json", masked_doc.encode())
         # The saved plan, read once now (what was shown above) and removed before any hook runs.
         saved_plan = plan_file.read_bytes() if has_changes and job.get("save_plan") else b""
         plan_file.unlink(missing_ok=True)
 
-        # Cleartext tripwire (§5.1): the artifact is masked, but a sensitive value surfacing in a
-        # non-sensitive output means the repo didn't mark it `sensitive` — flag (or fail) the run.
-        leak = _secret_leak_in_outputs(plan_doc, masker)
         if leak:
             if settings.leak_action == "fail":
                 return _job_failed(

@@ -7,6 +7,7 @@ daemon."""
 from __future__ import annotations
 
 import os
+import time
 from pathlib import Path
 
 import httpx
@@ -66,6 +67,81 @@ def test_repo_hook_container_mounts_the_checkout_only(tmp_path: Path) -> None:
     assert spec["HostConfig"]["Binds"] == [f"{checkout}:{checkout}:rw"]
     with pytest.raises(RuntimeError, match="outside the mounted"):
         repo.spec(["sh"], ws, {}, "1:1")  # the workspace itself (token file, saved plan): refused
+
+
+def test_plugin_cache_is_writable_for_init_only_and_hidden_from_repo_hooks(tmp_path: Path) -> None:
+    ws = _ws(tmp_path)
+    cache = tmp_path / "cache" / "providers"
+    runner = DockerRunner(DockerEngine(), IMAGE, ws, "job-1", DockerLimits(), plugin_cache=cache)
+    cwd = ws / "repo" / "infra"
+    c = cache.resolve()
+
+    def binds(r: DockerRunner) -> list[str]:
+        return r.spec(["tofu"], cwd, {}, "1:1")["HostConfig"]["Binds"]
+
+    assert binds(runner)[1:] == [f"{c}:{c}:ro"]  # plan, apply, show… and platform hooks
+    assert binds(runner.for_init())[1:] == [f"{c}:{c}:rw"]
+    assert binds(runner.for_repo()) == [f"{(ws / 'repo').resolve()}:{(ws / 'repo').resolve()}:rw"]
+    assert binds(_runner(ws).for_init())[1:] == []  # no cache configured: nothing more mounted
+
+
+class _FakeEngine:
+    def __init__(self) -> None:
+        self.specs: list[dict] = []
+
+    def create(self, name: str, spec: dict) -> str:
+        self.specs.append(spec)
+        return name
+
+    def start(self, cid: str) -> None:
+        pass
+
+    def logs(self, cid: str):
+        yield 1, b"ok\n"
+
+    def wait(self, cid: str) -> int:
+        return 0
+
+    def kill(self, cid: str, signal: str | None = None) -> bool:
+        return False
+
+    def remove(self, cid: str) -> None:
+        pass
+
+
+def test_a_root_agent_chowns_no_tree_per_command(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The workspace is handed over once (`Workspace.hand_over`): running a command walks nothing."""
+    ws = _ws(tmp_path)
+    for i in range(50):
+        (ws / "repo" / f"f{i}").write_text("")
+    chowned: list[str] = []
+    monkeypatch.setattr(os, "getuid", lambda: 0)
+    monkeypatch.setattr(os, "chown", lambda path, *a, **kw: chowned.append(str(path)))
+    engine = _FakeEngine()
+    runner = _runner(ws, engine)  # type: ignore[arg-type]
+    for _ in range(3):
+        assert runner.stream(["true"], ws / "repo", {}, timeout=60, on_line=lambda _: None) == (
+            0,
+            False,
+        )
+    assert chowned == []
+    assert [spec["User"] for spec in engine.specs] == ["10001:10001"] * 3
+
+
+def test_line_splitter_is_linear_on_a_huge_single_line() -> None:
+    """`show -json` prints the whole plan on one line, which arrives in many small frames."""
+    line = b"x" * (8 * 1024 * 1024)
+    got: list[tuple[int, str]] = []
+    lines = LineSplitter(lambda k, text: got.append((k, len(text))))
+    started = time.monotonic()
+    for i in range(0, len(line), 2048):
+        lines.feed(1, line[i : i + 2048])
+    lines.feed(1, b"\nnext")
+    lines.flush()
+    assert got == [(1, len(line)), (1, 4)]
+    assert time.monotonic() - started < 2  # re-joining the partial line per frame: ~7 s
 
 
 def test_docker_containers_get_none_of_the_hosts_env(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -191,6 +267,21 @@ def test_container_is_unprivileged_and_read_only(tmp_path: Path) -> None:
     assert rc == 0 and lines[0] != "0" and lines[1] == "ro"
     rc, _ = _run(runner, "touch new-file", ws / "repo")  # the workspace is writable
     assert rc == 0 and (ws / "repo" / "new-file").exists()
+
+
+@pytest.mark.docker
+def test_only_init_can_write_the_plugin_cache(tmp_path: Path) -> None:
+    engine = _engine()
+    ws = _ws(tmp_path)
+    cache = (tmp_path / "cache").resolve()
+    cache.mkdir()
+    runner = DockerRunner(engine, IMAGE, ws, "job-1", DockerLimits(), plugin_cache=cache)
+    rc, _ = _run(runner.for_init(), f"touch {cache}/provider", ws / "repo")
+    assert rc == 0 and (cache / "provider").exists()
+    rc, _ = _run(runner, f"cat {cache}/provider && touch {cache}/x", ws / "repo")
+    assert rc != 0 and not (cache / "x").exists()  # read, not written
+    rc, _ = _run(runner.for_repo(), f"test -e {cache}/provider", ws / "repo")
+    assert rc != 0  # not even there
 
 
 @pytest.mark.docker

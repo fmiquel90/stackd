@@ -142,6 +142,9 @@ class LocalRunner:
         """The runner for an untrusted repo hook — the same one: only the env differs (§8.3)."""
         return self
 
+    def for_init(self) -> LocalRunner:
+        return self
+
     def stream(
         self,
         cmd: list[str],
@@ -328,10 +331,11 @@ def stream_json_command(
     runner: Runner = LOCAL,
 ) -> tuple[int, list[dict]]:
     """Run a `-json` tofu/terraform command (plan/apply): stream the human-readable `@message` of
-    each event (masked) while collecting the structured events (`change_summary`, `diagnostic`, …)
-    for the caller. Diagnostics (errors/warnings) are expanded to their full detail + location —
-    the bare `@message` is just the headline ("Error: Invalid value for input variable"). Non-JSON
-    lines are streamed verbatim. Returns (exit_code, events)."""
+    each event (masked) while collecting the structured events the caller reads — `change_summary`
+    and the error-level ones (diagnostics) — and no other: a large plan's thousands of
+    per-resource events are streamed, not kept. Diagnostics (errors/warnings) are expanded to their
+    full detail + location — the bare `@message` is just the headline ("Error: Invalid value for
+    input variable"). Non-JSON lines are streamed verbatim. Returns (exit_code, events)."""
     events: list[dict] = []
 
     def _tx(line: str) -> str | list[str] | None:
@@ -343,7 +347,8 @@ def stream_json_command(
             return line  # not a JSON event (e.g. a stray stderr line) — stream as-is
         if not isinstance(evt, dict) or "@message" not in evt:
             return line
-        events.append(evt)
+        if evt.get("type") == "change_summary" or evt.get("@level") == "error":
+            events.append(evt)
         diag = evt.get("diagnostic")
         if not isinstance(diag, dict):
             return str(evt["@message"])

@@ -81,6 +81,7 @@ Each job's subprocesses run in their own process group: whatever a hook or a tof
 | `apply` of the saved plan | the apply budget, `apply_timeout_seconds` in the claim (`STACKD_APPLY_TIMEOUT_SECONDS` on the API, default 900 s) |
 | a command run's subcommand | the apply budget when the claim's `cred_phase` is `apply` (a mutating command); the default cap when it is `plan` (a read-only command). A missing or unknown `cred_phase` (an older API) gets the apply budget: it fails closed |
 | each hook | the hook timeout, `STACKD_HOOK_TIMEOUT_SECONDS` on the worker (default 600 s). A hook past it fails by its own `on_failure` ([Hooks](hooks.md#failures-warnings-and-timeouts)) |
+| each git command of the clone | `STACKD_GIT_TIMEOUT_SECONDS` on the worker (default 600 s). Before that, a transfer slower than 1 KB/s for 60 s (https) or an SSH host silent for a minute (30 s to connect) fails it. A stop request interrupts it like any command |
 | anything else (`init`, `plan`, `show`, `output`) | the agent's default cap, 2 h |
 
 The worker never decides on its own whether a command is mutating: it reads `cred_phase` from the claim. A plan fails on any exit code but 0 (no changes) and 2 (changes) — a killed plan never passes for "no changes".
@@ -120,6 +121,8 @@ STACKD_POOL_TOKEN=$POOL_TOKEN \
 | `STACKD_CANCEL_GRACE_SECONDS` | `120` | after a stop request interrupts the tool (SIGINT), how long it gets to stop by itself before it is killed |
 | `STACKD_DRAIN_TIMEOUT_SECONDS` | `1200` | when the worker is stopped, how long its running jobs get to finish before they are stopped, see [Stopping a worker](#stopping-a-worker) |
 | `STACKD_HOOK_TIMEOUT_SECONDS` | `600` | each hook's time budget |
+| `STACKD_GIT_TIMEOUT_SECONDS` | `600` | each git command's time budget (the clone of the job's commit) |
+| `STACKD_PLUGIN_CACHE_DIR` | unset | a provider plugin cache shared by the worker's jobs, see [Provider plugin cache](#provider-plugin-cache); unset, every job downloads its providers |
 | `STACKD_LEAK_TRIPWIRE` | `warn` | `fail` fails a plan whose non-sensitive output shows a secret |
 | `STACKD_WORKSPACE_ROOT` | `/tmp/stackd-ws` | where each job's workspace is created, then removed |
 | `STACKD_HEARTBEAT_INTERVAL`, `STACKD_POLL_WAIT` | `20`, `25` (s) | heartbeat period, claim long-poll |
@@ -151,6 +154,15 @@ Every job runs in its own workspace, removed when the job ends. `STACKD_RUNNER` 
 
 !!! warning "The worker's host is privileged"
     Access to the Docker socket is root-equivalent on that host: give the worker a dedicated VM, ideally with rootless Docker. If the agent itself runs in a container, mount `STACKD_WORKSPACE_ROOT` at the **same path** on the host and in the agent's container: the job containers mount it by host path.
+
+### Provider plugin cache
+
+Without a cache, every job's `init` downloads every provider it uses (hundreds of MB for a big stack). Set `STACKD_PLUGIN_CACHE_DIR` to a directory of the worker's host to share them between its jobs (both runners):
+
+- tofu's cache is its `providers/` subdirectory, created on first use. Keep the directory **outside** `STACKD_WORKSPACE_ROOT`, and, when the agent runs in a container, mount it at the **same path** on the host and in the agent's container (the job containers mount it by host path), e.g. `/var/lib/stackd/plugin-cache` (see `deploy/production/worker.compose.yml`).
+- Only `init` writes it — the one command that installs providers and runs no repo code. Every other tofu command and platform hook gets it read-only; repo hooks don't see it.
+- A cached provider is used only when the job's dependency lock file (`.terraform.lock.hcl`) records its checksum; otherwise tofu downloads it from the registry, as without a cache. Commit your lock files to benefit from the cache. `TF_PLUGIN_CACHE_MAY_BREAK_DEPENDENCY_LOCK_FILE` is never passed to `init`.
+- Terraform's cache is not safe for concurrent installs: the jobs' `init`s take turns (a lock file next to the cache), so with `STACKD_MAX_CONCURRENT_JOBS` > 1 an `init` may wait for another. Workers on one host may share the directory; workers on different hosts must not (no network filesystem).
 
 !!! warning "Fargate"
     The `docker` runner launches containers; **AWS Fargate does not allow this**. A worker on Fargate can only use the `local` runner, which a production API refuses.
