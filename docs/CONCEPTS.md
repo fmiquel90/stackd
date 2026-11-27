@@ -613,15 +613,17 @@ curl -s -X POST localhost:8000/api/v1/environments/$ENV_ID/notifications -H "$AU
 
 **How it works — a transactional outbox, not a side-effect.** When `transition()` moves a run to a
 notify-worthy state, it inserts a row into `notification_outbox` **in the same DB transaction** as
-the state change (no HTTP in the request path). A background scheduler task drains the outbox under
+the state change (no HTTP in the request path). A background dispatcher loop drains the outbox under
 a `pg_try_advisory_lock` (one replica at a time) with `FOR UPDATE … SKIP LOCKED`, resolves the
 matching targets (those on the run's environment + those on its stack, filtered by `on_states`),
 and POSTs — with no DB transaction held during the HTTP call. Consequences worth knowing:
 
 - a **rolled-back** transition never notifies (the outbox row rolls back with it);
 - two API replicas never double-send (the lock + `SKIP LOCKED`);
-- delivery is **at-least-once** with retries (up to 5 attempts), then the row is dead-lettered and
-  the failure is logged — a flaky Slack never blocks or fails a run.
+- delivery is **at-least-once**: a failed target is retried alone (targets already reached aren't
+  sent the event again), with exponential backoff and jitter, honouring `Retry-After`, for about an
+  hour (12 attempts), then the row is dead-lettered and logged at error level — a flaky Slack never
+  blocks or fails a run.
 
 Deep links use `STACKD_APP_URL` (the SPA base, e.g. `http://localhost:5173`).
 

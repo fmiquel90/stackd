@@ -179,6 +179,131 @@ async def test_dispatcher_delivers_to_matching_targets(
     assert len(captured) == 1
 
 
+def _throttled(retry_after: str) -> httpx.HTTPStatusError:
+    request = httpx.Request("POST", "https://e/flaky")
+    response = httpx.Response(429, headers={"Retry-After": retry_after}, request=request)
+    return httpx.HTTPStatusError("429 Too Many Requests", request=request, response=response)
+
+
+async def _outbox_row(run_id: str):  # type: ignore[no-untyped-def]
+    import uuid
+
+    from sqlalchemy import select
+
+    from app.db import SessionLocal
+    from app.models.notification import NotificationOutbox
+
+    async with SessionLocal() as s:
+        q = select(NotificationOutbox).where(NotificationOutbox.run_id == uuid.UUID(run_id))
+        return (await s.execute(q)).scalar_one()
+
+
+async def test_dispatcher_retries_only_failed_targets_after_backoff(
+    client: httpx.AsyncClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A failing target is retried once due — not before its Retry-After — and alone: the targets
+    already delivered don't get the message again. No DB transaction is open during a POST."""
+    from datetime import timedelta
+
+    from app.db import SessionLocal
+    from app.notifications import dispatcher
+
+    admin = await login(client, "admin")
+    wh = await register_worker(client, admin, "notif-pool-retry")
+    stack = await make_stack(client, admin, "notif-retry")
+    env = await make_env(client, admin, stack, "dev", "dev")
+    for name in ("steady", "flaky"):
+        r = await client.post(
+            f"/api/v1/environments/{env}/notifications",
+            headers=admin,
+            json={"name": name, "kind": "webhook", "url": f"https://e/{name}"},
+        )
+        assert r.status_code == 201
+
+    posted: list[str] = []
+    txn_open: list[bool] = []
+    flaky_failures = [_throttled("120")]
+
+    async def fake_deliver(target, body):  # type: ignore[no-untyped-def]
+        txn_open.append(s.in_transaction())
+        if target.url == "https://e/flaky" and flaky_failures:
+            raise flaky_failures.pop()
+        posted.append(target.url)
+        return True
+
+    monkeypatch.setattr(dispatcher, "deliver", fake_deliver)
+    run_id = await _drive_to_unconfirmed(client, wh, env, admin)
+
+    now = datetime.now(UTC)
+    async with SessionLocal() as s:
+        assert await dispatcher.dispatch_pending(s, now) == 1
+    assert posted == ["https://e/steady"]
+    row = await _outbox_row(run_id)
+    assert row.sent_at is None and row.attempts == 1
+    assert len(row.delivered_target_ids) == 1
+    assert row.next_attempt_at >= now + timedelta(seconds=120)  # the receiver's Retry-After
+
+    for later in (now, now + timedelta(seconds=60)):  # not due yet
+        async with SessionLocal() as s:
+            assert await dispatcher.dispatch_pending(s, later) == 0
+
+    async with SessionLocal() as s:
+        assert await dispatcher.dispatch_pending(s, now + timedelta(seconds=180)) == 1
+    assert posted == ["https://e/steady", "https://e/flaky"]  # steady was not re-sent
+    row = await _outbox_row(run_id)
+    assert row.sent_at is not None and row.attempts == 2
+    assert txn_open and not any(txn_open)
+
+
+async def test_dispatcher_reports_a_row_out_of_attempts(
+    client: httpx.AsyncClient, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    from datetime import timedelta
+
+    from prometheus_client import REGISTRY
+
+    from app.config import get_settings
+    from app.db import SessionLocal
+    from app.notifications import dispatcher
+
+    admin = await login(client, "admin")
+    wh = await register_worker(client, admin, "notif-pool-dead")
+    stack = await make_stack(client, admin, "notif-dead")
+    env = await make_env(client, admin, stack, "dev", "dev")
+    tid = (
+        await client.post(
+            f"/api/v1/environments/{env}/notifications",
+            headers=admin,
+            json={"name": "down", "kind": "webhook", "url": "https://e/down"},
+        )
+    ).json()["id"]
+
+    async def failing_deliver(target, body):  # type: ignore[no-untyped-def]
+        raise httpx.ConnectError("connection refused")
+
+    monkeypatch.setattr(dispatcher, "deliver", failing_deliver)
+    run_id = await _drive_to_unconfirmed(client, wh, env, admin)
+
+    max_attempts = get_settings().stackd_outbox_max_attempts
+    labels = {"outbox": "notification"}
+    dead_before = REGISTRY.get_sample_value("stackd_outbox_dead_letters_total", labels) or 0.0
+    later = datetime.now(UTC)
+    for _ in range(max_attempts):
+        async with SessionLocal() as s:
+            assert await dispatcher.dispatch_pending(s, later) == 1
+        later += timedelta(hours=2)
+    async with SessionLocal() as s:
+        assert await dispatcher.dispatch_pending(s, later) == 0
+    row = await _outbox_row(run_id)
+    assert row.sent_at is None and row.attempts == max_attempts
+
+    dead = [r for r in caplog.records if getattr(r, "event", None) == "notification.dead_lettered"]
+    assert [(r.levelname, r.run_id, r.failed_target_ids) for r in dead] == [
+        ("ERROR", run_id, [tid])
+    ]
+    assert REGISTRY.get_sample_value("stackd_outbox_dead_letters_total", labels) == dead_before + 1
+
+
 # --- SSRF guard: DNS is resolved once, off the event loop, and the POST is pinned to that answer ---
 
 _PUBLIC_IP = "93.184.216.34"

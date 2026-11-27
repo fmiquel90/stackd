@@ -205,18 +205,22 @@ flowchart TD
 ## 🔔 Notifications — transactional outbox
 
 `transition()` enqueues a row in `notification_outbox` in the same transaction (no I/O in the
-request path). The scheduler drains it under an advisory lock with `FOR UPDATE SKIP LOCKED`, so a
-rolled-back transition never notifies and two API replicas never double-send. No DB transaction is
-held during the HTTP call.
+request path). A dispatcher loop of its own (never part of the scheduler tick, so slow receivers
+can't delay worker-lost detection) drains the due rows under an advisory lock with `FOR UPDATE SKIP
+LOCKED`, so a rolled-back transition never notifies and two API replicas never double-send. No DB
+transaction is held during the HTTP calls, which run a few at a time, each time-bounded. A failed
+target is retried alone (the row records the targets already delivered) with exponential backoff
+and jitter, honouring `Retry-After`, for about an hour before the row is dead-lettered and logged
+at error level.
 
 ```mermaid
 flowchart LR
     T["transition() → unconfirmed / finished / failed"] -->|"same txn"| OB[("notification_outbox")]
-    SCH["scheduler tick<br/>(advisory lock + SKIP LOCKED)"] -->|"drain unsent"| OB
-    SCH -->|"match stack/env targets on_states"| DNS["resolve host once<br/>every IP must be public"]
+    SCH["dispatcher loop<br/>(advisory lock + SKIP LOCKED)"] -->|"drain due, unsent"| OB
+    SCH -->|"match stack/env targets on_states,<br/>minus those already delivered"| DNS["resolve host once<br/>every IP must be public"]
     DNS -->|"https POST to the vetted IP<br/>(no env proxy, no redirect)"| POST["Slack / webhook"]
-    POST -->|"ok → sent_at"| OB
-    POST -->|"fail → retry (≤5)"| OB
+    POST -->|"all ok → sent_at"| OB
+    POST -->|"fail → record delivered targets,<br/>retry after backoff / Retry-After"| OB
 ```
 
 The POST dials the address the SSRF check vetted, with Host, SNI and certificate checks on the
@@ -262,9 +266,11 @@ the `one_active_run_per_env` unique index). What's worth knowing:
 - 🔁 **Each worker runs `STACKD_MAX_CONCURRENT_JOBS` jobs at once** (default 1), always on
   different environments.
 - 🗓️ **The scheduler runs in every API replica**, each task under its own advisory lock (held on a
-  dedicated connection), so a task runs once per tick across replicas. The git head poll runs as a
-  separate task (at most 8 `ls-remote` at a time), so slow repos never delay worker-loss detection
-  or notifications.
+  dedicated connection), so a task runs once per tick across replicas. Each task runs under a
+  time budget and its own error handling: one failing or hanging task is logged and counted, never
+  skips the others. The outbound work runs outside the tick — the notification and VCS outboxes in
+  loops of their own, the git head poll (at most 8 `ls-remote` at a time) and the daily retention
+  purge as separate tasks — so slow receivers or repos never delay worker-loss detection.
 - 📊 **No built-in autoscaler**, but `/api/v1/health` and `/api/v1/queue` expose the signals an
   external one (ECS target-tracking, KEDA) can drive; `/metrics` serves Prometheus gauges. On Fargate, mind the
   runner execution model (no DinD).

@@ -88,6 +88,14 @@ class Settings(BaseSettings):
     # Environment rollouts (§21.6): how long an approval lets creates-only plans apply unattended.
     stackd_rollout_approval_ttl_seconds: int = 24 * 3600
 
+    # Outbound outboxes (notifications, VCS post-back — §7.5): a failed delivery is retried with
+    # exponential backoff (the base doubling up to the cap, ±20 % jitter; later if the receiver's
+    # Retry-After asks) until the attempts budget is spent. The defaults span ~1 h 20 min, past a
+    # typical GitHub or Slack incident.
+    stackd_outbox_max_attempts: int = 12
+    stackd_outbox_backoff_base_seconds: int = 10
+    stackd_outbox_backoff_max_seconds: int = 900
+
     # Background scheduler (§7.5) — disabled under tests so it can't fail runs mid-assertion.
     stackd_run_scheduler: bool = True
 

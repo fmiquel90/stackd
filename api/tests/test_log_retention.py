@@ -350,3 +350,57 @@ async def test_audit_purge_needs_the_distinct_role(client: httpx.AsyncClient, mo
     assert "test.old" not in actions
     assert "test.recent" in actions
     assert "audit.purged" in actions  # the purge is itself audited, in the same transaction
+
+
+async def test_audit_purge_deletes_in_audited_batches(
+    client: httpx.AsyncClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A large backlog is purged in bounded batches, one transaction each — and each batch is
+    audited in its own transaction (§6.1)."""
+    from sqlalchemy.engine import make_url
+
+    from app.config import get_settings
+    from app.db import SessionLocal
+    from app.scheduler import tasks
+
+    now = datetime.now(UTC)
+    async with SessionLocal() as session:
+        await session.execute(
+            text(
+                "INSERT INTO audit_events (actor_kind, action, created_at)"
+                " SELECT 'system', 'test.batch_old', CAST(:t AS timestamptz) FROM generate_series(1, 5)"
+            ).bindparams(t=now - timedelta(days=800))
+        )
+        await session.execute(text("ALTER ROLE stackd_audit_purge LOGIN PASSWORD 'purge'"))
+        await session.commit()
+
+    purge_url = make_url(get_settings().database_url).set(
+        username="stackd_audit_purge", password="purge"
+    )
+    monkeypatch.setenv(
+        "STACKD_AUDIT_PURGE_DATABASE_URL", purge_url.render_as_string(hide_password=False)
+    )
+    monkeypatch.setattr(tasks, "_AUDIT_PURGE_BATCH", 2)
+    get_settings.cache_clear()
+    try:
+        assert await tasks.purge_audit_events(now) == 5
+    finally:
+        monkeypatch.delenv("STACKD_AUDIT_PURGE_DATABASE_URL")
+        get_settings.cache_clear()
+
+    async with SessionLocal() as session:
+        left = (
+            await session.execute(
+                text("SELECT count(*) FROM audit_events WHERE action = 'test.batch_old'")
+            )
+        ).scalar_one()
+        batches = (
+            await session.execute(
+                text(
+                    "SELECT (context->>'deleted')::int FROM audit_events"
+                    " WHERE action = 'audit.purged' AND context->>'before' = :c"
+                ).bindparams(c=(now - timedelta(days=730)).isoformat())
+            )
+        ).scalars()
+        assert left == 0
+        assert sorted(batches) == [1, 2, 2]
