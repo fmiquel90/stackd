@@ -4,7 +4,7 @@ import uuid
 from datetime import datetime
 
 from sqlalchemy import Boolean, ForeignKey, Integer, String, UniqueConstraint
-from sqlalchemy.dialects.postgresql import JSONB
+from sqlalchemy.dialects.postgresql import ARRAY, JSONB
 from sqlalchemy.dialects.postgresql import UUID as PGUUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -40,6 +40,9 @@ class Environment(Base):
     # managed_state=false only: inline `-backend-config=key=value` settings (bucket/key/region/
     # dynamodb_table/use_lockfile…) for when there's no .config file. Applied after the file.
     backend_config: Mapped[dict | None] = mapped_column(JSONB(none_as_null=True), default=None)
+    # The repo's own tfvars files (§3.4), relative to the stack's project_root, passed in order as
+    # `-var-file=` to the tofu commands that read variables. Stackd's resolved values still win.
+    var_files: Mapped[list[str]] = mapped_column(ARRAY(String), default=list)
 
     # Git staleness (§9.6) — populated from Phase 5; columns exist now.
     head_sha: Mapped[str | None] = mapped_column(String, default=None)

@@ -111,6 +111,9 @@ class _FakeWorkspace:
         self.clones.append((commit_sha, kw.get("branch")))
         return self.root
 
+    def repo_credentials(self, *args: Any, **kw: Any) -> AbstractContextManager[dict]:
+        return nullcontext({})
+
     def head_sha(self) -> str:
         return "c" * 40
 

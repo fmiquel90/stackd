@@ -4,7 +4,7 @@ import hashlib
 import hmac
 import json
 from datetime import UTC, datetime
-from typing import Annotated
+from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, Header, Request
 from sqlalchemy import select, update
@@ -22,6 +22,7 @@ from app.observability import metrics
 from app.ratelimit import rate_limit
 from app.runs.service import trigger_run
 from app.runs.transition import transition
+from app.stacks.paths import touches_stack
 from app.webhooks.replay import MAX_DELIVERY_ID_LENGTH, record_delivery
 
 router = APIRouter(prefix="/api/v1/webhooks", tags=["webhooks"])
@@ -60,17 +61,20 @@ def _is_zero_sha(sha: str) -> bool:
     return bool(sha) and not sha.strip("0")
 
 
-def _touches_root(payload: dict, project_root: str) -> bool:
-    if project_root in (".", ""):
-        return True
+def _changed_paths(payload: dict[str, Any]) -> list[str]:
+    """Every path a push touched. A rename is listed as its old path removed and its new path added,
+    so both count: a file moved out of the stack still concerns it."""
     changed: list[str] = []
     for commit in payload.get("commits", []):
         for key in ("added", "modified", "removed"):
             changed.extend(commit.get(key, []))
+    return changed
+
+
+def _push_concerns(changed: list[str], stack: Stack) -> bool:
     if not changed:
         return True  # no file info → be conservative and run
-    root = project_root.rstrip("/") + "/"
-    return any(path.startswith(root) for path in changed)
+    return touches_stack(changed, stack.project_root, stack.trigger_paths)
 
 
 @router.post("/github", dependencies=[Depends(rate_limit("webhook", per_minute=120, burst=40))])
@@ -139,6 +143,7 @@ async def github_webhook(
             else {"head_sha": after}
         )
         now = datetime.now(UTC)
+        changed = _changed_paths(payload)
         for stack in stacks:
             # Guarded on the pushed branch when written, so an env re-pointed meanwhile gets
             # neither this head nor a run; the row lock it takes keeps them on it until commit.
@@ -155,7 +160,7 @@ async def github_webhook(
                 .scalars()
                 .all()
             )
-            if deleted or not env_ids or not _touches_root(payload, stack.project_root):
+            if deleted or not env_ids or not _push_concerns(changed, stack):
                 continue
             envs = (
                 (await session.execute(select(Environment).where(Environment.id.in_(env_ids))))

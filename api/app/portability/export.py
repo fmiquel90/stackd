@@ -23,6 +23,7 @@ from app.models.tier import Tier
 from app.models.variable import Variable
 from app.models.variable_set import VariableSet, VariableSetAttachment
 from app.models.worker import WorkerPool
+from app.oidc.profiles import CloudProfile
 from app.portability.schemas import (
     AttachmentDoc,
     CloudIntegrationDoc,
@@ -229,6 +230,7 @@ async def export_space(session: AsyncSession, space: Space) -> ConfigDocument:
                     drift_check_enabled=env.drift_check_enabled,
                     backend_config_file=env.backend_config_file,
                     backend_config=env.backend_config,
+                    var_files=list(env.var_files or []),
                     labels=env.labels,
                     position=env.position,
                     variables=[_variable(v, source_names) for v in env_vars],
@@ -244,6 +246,10 @@ async def export_space(session: AsyncSession, space: Space) -> ConfigDocument:
                             apply_role_arn=ci.apply_role_arn,
                             region=ci.region,
                             session_duration=ci.session_duration,
+                            profiles={
+                                name: CloudProfile(**p)
+                                for name, p in sorted((ci.profiles or {}).items())
+                            },
                         )
                         if ci is not None
                         else None
@@ -267,6 +273,7 @@ async def export_space(session: AsyncSession, space: Space) -> ConfigDocument:
                 has_repo_secret=stack.repo_secret_encrypted is not None,
                 has_webhook_secret=stack.webhook_secret_encrypted is not None,
                 project_root=stack.project_root,
+                trigger_paths=list(stack.trigger_paths or []),
                 tool=stack.tool,
                 tool_version=stack.tool_version,
                 labels=stack.labels,

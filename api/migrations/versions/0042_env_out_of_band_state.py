@@ -1,7 +1,7 @@
 """out-of-band state changes: env state baseline + out-of-band flag (SPECS §19.7)
 
-Revision ID: 0041
-Revises: 0036
+Revision ID: 0042
+Revises: 0041
 Create Date: 2026-11-27
 """
 
@@ -13,8 +13,8 @@ import sqlalchemy as sa
 from alembic import op
 from sqlalchemy.dialects import postgresql
 
-revision: str = "0041"
-down_revision: str | None = "0036"
+revision: str = "0042"
+down_revision: str | None = "0041"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 

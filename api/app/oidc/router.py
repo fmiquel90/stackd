@@ -29,6 +29,8 @@ from app.oidc.issuer import (
     sign_workload_token,
 )
 from app.oidc.precedence import SHADOWED_WARNING, split_shadowed
+from app.oidc.profiles import CloudProfiles
+from app.oidc.profiles import stored as stored_profiles
 from app.spaces import guard_env_id
 from app.variables.resolution import resolve_variables
 
@@ -55,6 +57,7 @@ class CloudIntegrationIn(BaseModel):
     apply_role_arn: str
     region: str | None = None
     session_duration: int = 3600
+    profiles: CloudProfiles = {}
 
 
 async def _warnings(session: AsyncSession, env_id: uuid.UUID) -> list[dict]:
@@ -86,6 +89,7 @@ def _out(ci: CloudIntegration, warnings: list[dict] | None = None) -> dict:
         "apply_role_arn": ci.apply_role_arn,
         "region": ci.region,
         "session_duration": ci.session_duration,
+        "profiles": dict(sorted((ci.profiles or {}).items())),
     }
 
 
@@ -122,6 +126,7 @@ async def put_integration(
     ci.apply_role_arn = body.apply_role_arn
     ci.region = body.region
     ci.session_duration = body.session_duration
+    ci.profiles = stored_profiles(body.profiles)
     await record_audit(
         session,
         action=action,
@@ -130,6 +135,7 @@ async def put_integration(
         actor_email=user.email,
         target_kind="environment",
         target_id=env_id,
+        context={"profiles": sorted(body.profiles)},
     )
     await session.commit()
     await session.refresh(ci)

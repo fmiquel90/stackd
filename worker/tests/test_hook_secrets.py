@@ -25,7 +25,7 @@ import pytest
 import agent.main as main
 from agent.client import ApiClient
 from agent.config import Settings
-from agent.workspace import Workspace
+from agent.workspace import Workspace, module_git_config
 
 SECRET = "hunter2-<&>-s3cr3t"
 HCL_SECRET = "hcl-s3cr3t"  # in an hcl-typed variable, written to its own .auto.tfvars (§3.4)
@@ -38,6 +38,8 @@ CLOUD = {
     "oidc_token": OIDC_TOKEN,
     "role_arn": "arn:aws:iam::123456789012:role/stackd-plan",
     "region": "eu-west-1",
+    # A named profile (§10.6): written in the AWS config file, beside the token file.
+    "profiles": {"tfstates": {"role_arn": "arn:aws:iam::210987654321:role/tfstates-plan"}},
 }
 # What `tofu show -json` prints for the plan: the variable values in clear, sensitive ones included.
 RAW_PLAN_JSON = {
@@ -65,6 +67,8 @@ _FAKE_TOFU = """#!/bin/sh
 tfvars=no; [ -f stackd.auto.tfvars.json ] && [ -f zzz_stackd.auto.tfvars ] && tfvars=yes
 token=no; [ -n "$AWS_WEB_IDENTITY_TOKEN_FILE" ] && [ -f "$AWS_WEB_IDENTITY_TOKEN_FILE" ] && token=yes
 echo "$1 tfvars=$tfvars token=$token" >> "$FAKE_TOFU/calls"
+cfg=no; [ -n "$AWS_CONFIG_FILE" ] && grep -qs '^\\[profile tfstates\\]$' "$AWS_CONFIG_FILE" && cfg=yes
+echo "$1 cfg=$cfg" >> "$FAKE_TOFU/configs"
 case "$1" in
 plan)
   for a; do case "$a" in -out=*) out="${a#-out=}";; esac; done
@@ -274,10 +278,14 @@ def test_repo_hooks_find_no_secret_in_the_workspace(
     tmp_path: Path, tofu: Path, git_http: str
 ) -> None:
     needles = ["RAW-PLAN", SECRET, HCL_SECRET, *TOKEN_FORMS, OIDC_TOKEN]
-    scan = _scan_hook(tmp_path, needles, ["plan.tfplan", *TFVARS_FILES, "oidc_token"])
+    names = ["plan.tfplan", *TFVARS_FILES, "oidc_token", "aws_config"]
+    scan = _scan_hook(tmp_path, needles, names)
     _, sha = _repo(tmp_path, {stage: [f"{scan} {stage}"] for stage in STAGES})
-    # A platform hook at every stage reads the OIDC token file, like tofu (§10.4).
-    has_token = '[ -f "$AWS_WEB_IDENTITY_TOKEN_FILE" ] && echo "PLATFORM {0} token=yes"'
+    # A platform hook at every stage reads the OIDC token and AWS config files, like tofu (§10.4).
+    has_token = (
+        '[ -f "$AWS_WEB_IDENTITY_TOKEN_FILE" ] && [ -f "$AWS_CONFIG_FILE" ]'
+        ' && echo "PLATFORM {0} token=yes"'
+    )
     platform = {
         stage: [{"name": f"p-{stage}", "command": has_token.format(stage), "source": "platform"}]
         for stage in STAGES
@@ -306,6 +314,9 @@ def test_repo_hooks_find_no_secret_in_the_workspace(
         "apply tfvars=yes token=yes",
         "output tfvars=no token=yes",
     ]
+    # Every tofu command reads the AWS config file of named profiles (§10.6).
+    configs = (tofu / "configs").read_text().splitlines()
+    assert len(configs) == 7 and all(c.endswith(" cfg=yes") for c in configs), configs
     # The saved plan still reaches the apply, exactly as tofu made it.
     assert client.uploads["plan.tfplan"].startswith(b"RAW-PLAN\n")
     assert (tofu / "applied").read_bytes() == client.uploads["plan.tfplan"]
@@ -348,6 +359,7 @@ def test_files_a_repo_plants_never_receive_a_secret(tmp_path: Path, tofu: Path) 
             ("b", "plan.json"),
             ("c", "../plan.tfplan"),
             ("d", "../oidc_token"),
+            ("e", "../aws_config"),
         )
     )
     url, sha = _repo(tmp_path, {"before_plan": [plant], "after_plan": ["true"]}, links)
@@ -450,6 +462,140 @@ def test_clone_keeps_no_token_in_the_checkout(tmp_path: Path, git_http: str) -> 
     )
     assert hits.stdout == "", hits.stdout  # nowhere: not in .git/config, FETCH_HEAD, reflogs, …
     assert _git(ws.path / "repo", "remote", "get-url", "origin") == url
+
+
+def _grep(needles: list[str], where: Path) -> str:
+    hits = subprocess.run(
+        ["grep", "-rlaF", *(f"-e{n}" for n in needles), str(where)], capture_output=True, text=True
+    )
+    return hits.stdout
+
+
+def test_module_download_carries_the_token_and_writes_none(tmp_path: Path, git_http: str) -> None:
+    """What `init` gets in token mode (§8.3): git config that sends the token to the repo's host.
+    A module fetched through it (go-getter runs `git clone`) authenticates — the server refuses
+    anyone else — and its checkout records the URL as written, without the token."""
+    _repo(tmp_path, {})
+    module = f"{git_http}/src"  # a private module repository on the stack repo's host
+    env = {
+        **os.environ,
+        "HOME": str(tmp_path),  # no user git config in the way
+        **module_git_config(f"{git_http}/infra", TOKEN),
+        "GIT_TERMINAL_PROMPT": "0",
+    }
+    dest = tmp_path / "modules" / "net"
+    subprocess.run(["git", "clone", "-q", module, str(dest)], env=env, check=True)
+    assert _git(dest, "remote", "get-url", "origin") == module
+    assert _grep(TOKEN_FORMS, dest) == ""
+    without = {**env, "GIT_CONFIG_COUNT": "0"}
+    refused = subprocess.run(["git", "clone", "-q", module, str(tmp_path / "x")], env=without)
+    assert refused.returncode != 0
+
+
+# Logs, for every tofu call, whether it holds the repo credential: GIT_SSH_COMMAND, the token's
+# git config, the deploy key file; for `init` with MODULE_URL, what git would contact for it.
+_CRED_PROBE = """
+echo "$1 ssh=${GIT_SSH_COMMAND:+set} cfg=${GIT_CONFIG_COUNT:-0} key=$([ -f "$REPO_KEY_FILE" ] \\
+  && echo yes || echo no)" >> "$FAKE_TOFU/creds"
+[ "$1" = init ] && [ -n "$MODULE_URL" ] && git ls-remote --get-url "$MODULE_URL"
+"""
+
+
+def _credential_probes(
+    tmp_path: Path, tofu: Path, monkeypatch: pytest.MonkeyPatch, needles: list[str]
+) -> tuple[dict, dict]:
+    """tofu logs its credentials (`_CRED_PROBE`); a repo and a platform hook at every stage print
+    theirs and a repo hook scans the workspace for `needles` and the key file. Returns (repo hooks,
+    platform hooks)."""
+    for var in ("GIT_SSH_COMMAND", "GIT_CONFIG_COUNT"):
+        monkeypatch.delenv(var, raising=False)
+    key_file = tmp_path / "ws" / "run-1" / "repo_ssh_key"
+    monkeypatch.setenv("REPO_KEY_FILE", str(key_file))
+    script = (tofu / "tofu").read_text().replace("#!/bin/sh\n", "#!/bin/sh\n" + _CRED_PROBE, 1)
+    (tofu / "tofu").write_text(script)
+    probe = (
+        'echo "{who} {stage} ssh=${{GIT_SSH_COMMAND:+set}} cfg=${{GIT_CONFIG_COUNT:-0}} '
+        f'key=$([ -f {key_file} ] && echo yes || echo no)"'
+    )
+    scan = _scan_hook(tmp_path, needles, ["repo_ssh_key"])
+    repo = {s: [probe.format(who="REPO", stage=s), f"{scan} {s}"] for s in STAGES}
+    platform = {
+        s: [
+            {
+                "name": f"p-{s}",
+                "command": probe.format(who="PLATFORM", stage=s),
+                "source": "platform",
+            }
+        ]
+        for s in STAGES
+    }
+    return repo, platform
+
+
+def _hooks_held_nothing(client: _Client) -> None:
+    for who in ("REPO", "PLATFORM"):
+        seen = [line for line in client.lines if line.startswith(f"{who} ")]
+        assert seen == [f"{who} {s} ssh= cfg=0 key=no" for s in STAGES], client.lines
+    scans = [line for line in client.lines if line.startswith("SCAN ")]
+    assert scans == [f"SCAN {s} hits=[] files=[]" for s in STAGES], client.lines
+
+
+# Built from parts: the repo's detect-private-key hook refuses a literal key header.
+_PEM = "OPENSSH PRIVATE" + " KEY-----"
+DEPLOY_KEY = (
+    f"-----BEGIN {_PEM}\n"
+    "b3BlbnNzaC1rZXktdjEAAAAABG5vbmUAAAAEbm9uZQAAAAAAAAABAAAAMwAAAAtzc2gtZW\n"
+    "QyNTUxOQAAACBkZXBsb3kta2V5LWJvZHktbm90LWEtcmVhbC1rZXktYXQtYWxsAAAAA==\n"
+    f"-----END {_PEM}\n"
+)
+DEPLOY_KEY_LINES = DEPLOY_KEY.splitlines()[1:3]
+
+
+def test_deploy_key_reaches_the_clone_and_init_only(
+    tmp_path: Path, tofu: Path, fake_ssh: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    repo, platform = _credential_probes(tmp_path, tofu, monkeypatch, DEPLOY_KEY_LINES)
+    _, sha = _repo(tmp_path, repo)
+    url = f"git@git.example.com:{tmp_path / 'src'}"  # over (the stand-in) ssh
+    creds = {"kind": "deploy_key", "ssh_private_key": DEPLOY_KEY}
+    both = {"repo_credentials": creds, "hooks": platform}
+    client = _plan_and_apply(tmp_path, url, sha, tofu, both)
+
+    # git used the key, 0600, for the plan's clone, then the apply's clone and pinned fetch…
+    key = tmp_path / "ws" / "run-1" / "repo_ssh_key"
+    used = f"host=git@git.example.com key={key} mode=600 first={DEPLOY_KEY.splitlines()[0]}"
+    assert fake_ssh.read_text().splitlines() == [used] * 3
+    # …tofu had it for `init` only (module downloads)…
+    assert (tofu / "creds").read_text().splitlines() == [
+        "init ssh=set cfg=0 key=yes",
+        "plan ssh= cfg=0 key=no",
+        "show ssh= cfg=0 key=no",
+        "show ssh= cfg=0 key=no",
+        "init ssh=set cfg=0 key=yes",
+        "apply ssh= cfg=0 key=no",
+        "output ssh= cfg=0 key=no",
+    ]
+    # …and no hook, repo or platform, at any stage, found it in its env or on disk.
+    _hooks_held_nothing(client)
+
+
+def test_token_reaches_init_module_downloads_only(
+    tmp_path: Path, tofu: Path, git_http: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    repo, platform = _credential_probes(tmp_path, tofu, monkeypatch, TOKEN_FORMS)
+    monkeypatch.setenv("MODULE_URL", f"{git_http}/org/modules.git")
+    _, sha = _repo(tmp_path, repo)
+    both = {"repo_credentials": {"kind": "token", "token": TOKEN}, "hooks": platform}
+    client = _plan_and_apply(tmp_path, f"{git_http}/src", sha, tofu, both)
+
+    calls = (tofu / "creds").read_text().splitlines()
+    assert calls[0] == calls[4] == "init ssh= cfg=1 key=no"  # the token's git config, for init
+    assert all(c.endswith("cfg=0 key=no") for i, c in enumerate(calls) if i not in (0, 4)), calls
+    # git sends the token for the module URL; echoed to the log, it is masked in either form.
+    rewritten = [line for line in client.lines if "x-access-token" in line]
+    assert rewritten == [f"http://x-access-token:***@{git_http[7:]}/org/modules.git"] * 2
+    assert not any(form in line for form in TOKEN_FORMS for line in client.lines)
+    _hooks_held_nothing(client)
 
 
 # All a repo hook may get of the worker's own environment (§8.3), and what `sh` sets itself.

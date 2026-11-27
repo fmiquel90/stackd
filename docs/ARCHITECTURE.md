@@ -153,6 +153,13 @@ read and lock while planning, never write), `rw` (an apply or a mutating command
 apply budget + grace). A token whose run has ended can no longer write or lock. The worker hands it
 to tofu only, as `TF_HTTP_*` environment variables — hooks never see it.
 
+**Repo credential.** The stack's token or SSH deploy key rides in the claim (`repo_credentials`).
+The worker uses it for the clone and for `init`, which downloads the modules — private ones hosted
+next to the repo included: the deploy key as a `0600` file outside the checkout named by
+`GIT_SSH_COMMAND`, present only while git or `init` runs; the token as `url.<authed>.insteadOf` git
+config in `init`'s environment, scoped to the repo's host and written nowhere. No hook, platform or
+repo, gets either (SPECS §8.3).
+
 **State observed on unmanaged backends.** On a `managed_state: false` environment, a job of
 reviewed code (tracked/destroy/drift plan, apply, mutating command) is handed `observe_state`: after
 `init` the worker runs `state pull` into memory and reports the state's `serial` and `lineage` only
@@ -161,7 +168,7 @@ environment when a check differs from the last pair it saw — a write made outs
 §19.7). Best effort: never fails nor moves the run.
 
 **Hooks and checks.** Platform hooks run first, then the repo's `.stackd.yml` hooks; a repo hook gets
-no secret (an allowlisted env, a masked `plan.json`, no tfvars or token file on disk). Every check
+no secret (an allowlisted env, a masked `plan.json`, no tfvars, token file or AWS config file on disk). Every check
 result, with the stage it ran at, is kept on the run (`check_results`). A failing `fail` check stops
 the job at its stage; a failing `after_apply` check fails the run after the infrastructure changed:
 its outputs are recorded, nothing cascades. At the apply stages, repo hooks run only on a tier with

@@ -19,7 +19,9 @@ curl -s -X POST localhost:8000/api/v1/stacks/$STACK_ID/environments -H "$AUTH" \
 
 If your backend block is partial, give the missing settings per environment: `backend_config_file`
 (a repo-relative `.config`/`.tfbackend` file) and/or `backend_config` (a `{key: value}` map, e.g. a
-`key` of its own per environment); the worker passes each as `-backend-config` at `init`.
+`key` of its own per environment); the worker passes each as `-backend-config` at `init`. If the
+repo also keeps a tfvars file per environment (`prod.config` + `prod.tfvars`), list the latter in
+the environment's `var_files` — see [Variables](variables.md#the-repos-own-tfvars-files).
 
 The first `plan` reads your real state — a **no-op diff confirms** the import is correct before you
 apply anything. Once the environment has a finished run, drift detection (`drift_check_enabled`, on

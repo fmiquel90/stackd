@@ -67,7 +67,7 @@ exhaustive list):
 | Auth | `GET /auth/google/start` + `/callback`, `POST /auth/refresh`, `POST /auth/logout`, `GET /auth/me`, `POST /auth/me/onboarded`; dev only: `GET /auth/dev/personas`, `POST /auth/dev/login` |
 | Spaces | `GET/POST /spaces`, `GET/PUT /spaces/{id}/members`, `DELETE /spaces/{id}/members/{user_id}`, secret sources under `/spaces/{id}/secret-sources`, `POST /spaces/{id}/environment-clones`, configuration `GET /spaces/{id}/export` / `POST /spaces/{id}/import[?dry_run=true]` (space admin, [Backup & restore](guide/backup-restore.md)) |
 | Stacks | `GET/POST /stacks`, `GET/PATCH/DELETE /stacks/{id}` (409 while a run is active), `POST /stacks/{id}/check-repo` |
-| Environments | `POST /stacks/{id}/environments`, `GET /environments/{id}/resolved-variables`, `POST /environments/{id}/refresh-head`, `POST /environments/{id}/discover-inputs`, `POST /environments/{id}/out-of-band-change/acknowledge` (a state changed outside Stackd, SPECS §19.7) |
+| Environments | `POST /stacks/{id}/environments`, `GET/PATCH/DELETE /environments/{id}` (settings, incl. the repo `var_files` passed as `-var-file=`, SPECS §3.4), `GET /environments/{id}/resolved-variables`, `POST /environments/{id}/refresh-head`, `POST /environments/{id}/discover-inputs`, `POST /environments/{id}/out-of-band-change/acknowledge` (a state changed outside Stackd, SPECS §19.7) |
 | Variables & sets | variables CRUD (stack/env/set), variable sets + attachments (tier/stack/env of the set's space) |
 | Runs | `POST /environments/{id}/runs` (optional `targets`/`replace`: a targeted / replace plan), `/commands` (incl. `force-unlock` on an unmanaged backend, admin), `/promote`; `GET /environments/{id}/runs`; `GET /runs/{id}`, `POST /runs/{id}/confirm`/`discard`/`cancel`, `GET /runs/{id}/logs` (+ `/logs/download`)/`plan`/`checks`, `POST /runs/{id}/vcs/resync` |
 | Rollouts | `GET/POST /rollouts`, `GET /rollouts/{id}`, `POST /rollouts/{id}/approve`/`retry`/`cancel` |
@@ -75,7 +75,7 @@ exhaustive list):
 | Hooks | `GET/POST/PATCH/DELETE /stacks/{id}/hooks` and `/environments/{id}/hooks` |
 | Dependencies | `GET/POST /environments/{id}/dependencies`, `DELETE /dependencies/{id}`, `POST /stacks/{id}/dependencies/link-by-name`, `GET /environments/{id}/outputs`, `GET /graph` |
 | State | `GET /environments/{id}/state/versions`, `POST …/state/import-session`, `DELETE …/state/lock` (force-unlock) |
-| Cloud | `GET/PUT/DELETE /environments/{id}/cloud-integration` + `POST …/cloud-integration/test` (AssumeRole test) |
+| Cloud | `GET/PUT/DELETE /environments/{id}/cloud-integration` (default plan/apply roles, region, `profiles`: named AWS profiles → roles, §10.6) + `POST …/cloud-integration/test` (AssumeRole test) |
 | Notifications | targets: `GET/POST/PATCH/DELETE /stacks/{id}/notifications` and `/environments/{id}/notifications`, plus `…/{tid}/test`; your in-app feed: `GET /notifications`, `POST /notifications/read`, `DELETE /notifications/{nid}`, `DELETE /notifications` |
 | Service accounts | `GET/POST /service-accounts`, `GET/POST /service-accounts/{id}/tokens`, `DELETE /service-accounts/{id}/tokens/{tid}` (instance admin) |
 | Users & tiers | `GET /users` (admin), `PATCH /users/{id}` (admin), `GET /users/mentionable`, `GET/POST /tiers`, `PATCH/DELETE /tiers/{id}` |

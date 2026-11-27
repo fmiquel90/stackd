@@ -3,8 +3,9 @@ from __future__ import annotations
 import uuid
 from datetime import datetime
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, field_validator
 
+from app.environments.var_files import check_var_files
 from app.models.environment import Environment
 
 
@@ -21,8 +22,14 @@ class EnvironmentCreate(BaseModel):
     drift_check_enabled: bool = True
     backend_config_file: str | None = None
     backend_config: dict | None = None
+    var_files: list[str] = []  # §3.4: repo tfvars files, relative to the project root, in order
     labels: dict | None = None
     position: int = 0
+
+    @field_validator("var_files")
+    @classmethod
+    def _var_files(cls, v: list[str]) -> list[str]:
+        return check_var_files(v)
 
 
 class EnvironmentUpdate(BaseModel):
@@ -38,8 +45,14 @@ class EnvironmentUpdate(BaseModel):
     drift_check_enabled: bool | None = None
     backend_config_file: str | None = None
     backend_config: dict | None = None
+    var_files: list[str] | None = None  # null clears it, like []
     labels: dict | None = None
     position: int | None = None
+
+    @field_validator("var_files")
+    @classmethod
+    def _var_files(cls, v: list[str] | None) -> list[str]:
+        return check_var_files(v)
 
 
 class OutOfBandChangeOut(BaseModel):
@@ -70,6 +83,7 @@ class EnvironmentOut(BaseModel):
     allow_fallback_apply: bool
     backend_config_file: str | None
     backend_config: dict | None
+    var_files: list[str]
     head_sha: str | None
     commits_ahead: int | None
     affects_project_root: bool | None
@@ -106,6 +120,7 @@ class EnvironmentOut(BaseModel):
             allow_fallback_apply=e.allow_fallback_apply,
             backend_config_file=e.backend_config_file,
             backend_config=e.backend_config,
+            var_files=list(e.var_files or []),
             head_sha=e.head_sha,
             commits_ahead=e.commits_ahead,
             affects_project_root=e.affects_project_root,

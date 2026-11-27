@@ -5,6 +5,7 @@ import logging
 
 import httpx
 import os
+import re
 import signal
 import subprocess
 import sys
@@ -12,9 +13,10 @@ import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
 from collections.abc import Callable, Iterator
-from contextlib import AbstractContextManager, ExitStack, contextmanager, nullcontext
+from contextlib import ExitStack, contextmanager
 from pathlib import Path
 from typing import Any
+from urllib.parse import quote
 
 from agent import cancel
 from agent.client import ApiClient
@@ -35,7 +37,7 @@ from agent.runner import (
     run_hooks,
     stream_json_command,
 )
-from agent.workspace import Workspace
+from agent.workspace import HCL_TFVARS, TFVARS_JSON, Workspace
 
 log = get_logger()
 
@@ -164,6 +166,31 @@ def _secret_leak_in_outputs(doc: str, masker: Masker) -> str | None:
 def _repo_token(job: dict) -> str | None:
     """The HTTPS clone token (repo_auth_kind=token); None for `none`/`deploy_key`."""
     return (job.get("repo_credentials") or {}).get("token")
+
+
+def _repo_ssh_key(job: dict) -> str | None:
+    """The deploy key (repo_auth_kind=deploy_key); None for `none`/`token`."""
+    return (job.get("repo_credentials") or {}).get("ssh_private_key")
+
+
+def _masker(job: dict) -> Masker:
+    """The job's log masker (§5.1): the API's `mask_values`, plus the repo token percent-encoded —
+    the form it takes inside a URL, which git can echo in a clone or module-download error."""
+    token = _repo_token(job)
+    extra = [quote(token, safe="")] if token else []
+    return Masker([*job.get("mask_values", []), *extra])
+
+
+def _clone(ws: Workspace, job: dict, commit_sha: str | None) -> Path:
+    env_info = job["environment"]
+    return ws.git_clone(
+        env_info["repo_url"],
+        commit_sha,
+        env_info["project_root"],
+        token=_repo_token(job),
+        branch=env_info.get("branch"),
+        ssh_key=_repo_ssh_key(job),
+    )
 
 
 def _merge_hooks(platform: dict, repo: dict) -> dict[str, list[dict]]:
@@ -381,6 +408,9 @@ def _tool_bin(tool: str) -> str:
 
 
 _OIDC_TOKEN_FILE = "oidc_token"
+_AWS_CONFIG_FILE = "aws_config"
+# The API's rule for a named profile (§10.6), checked again: the name becomes an INI section header.
+_AWS_PROFILE_NAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
 
 
 # What the AWS SDK's credential chain reads before the web identity token (§10.5): static keys, a
@@ -408,27 +438,32 @@ def _run_env(ws: Workspace, job: dict[str, Any], runner: str = "local") -> dict[
     credentials, the worker host's own AWS credentials (a mounted ~/.aws on the trusted-dev `local`
     runner) are dropped: the role the integration names is the job's only identity (§10.5). The
     API drops the run's static AWS credentials at claim for the same reason."""
-    base = _job_environ(runner)
-    if job.get("cloud_credentials"):
-        base = {k: v for k, v in base.items() if k not in _STATIC_AWS_CREDENTIAL_VARS}
-    return {
-        **base,
+    env = {
+        **_job_environ(runner),
         **job.get("env", {}),
         **job.get("sensitive_env", {}),
-        **_cloud_env(ws, job),
     }
+    if job.get("cloud_credentials"):
+        # The run's own layers too, in depth: the API already dropped them at claim.
+        env = {k: v for k, v in env.items() if k not in _STATIC_AWS_CREDENTIAL_VARS}
+    return {**env, **_cloud_env(ws, job)}
 
 
 def _cloud_env(ws: Workspace, job: dict) -> dict[str, str]:
     """OIDC workload env for terraform and platform hooks only (§10.4 / §8.3 — never for repo
-    hooks). The token file it names is on disk only while one of them runs (`_cloud_token`)."""
+    hooks). The token and config files it names are on disk only while one of them runs
+    (`_cloud_files`). No AWS_PROFILE: a named profile is used where the code names one (§10.6);
+    the worker host's credentials file is masked, so it can't define a profile's credentials."""
     creds = job.get("cloud_credentials")
     if not creds:
         return {}
+    _aws_config(ws, job)  # a payload the file can't be written from fails the job up front
     env = {
         "AWS_WEB_IDENTITY_TOKEN_FILE": str(ws.secret_path(_OIDC_TOKEN_FILE)),
         "AWS_ROLE_ARN": creds["role_arn"],
         "AWS_ROLE_SESSION_NAME": f"stackd-{job['job_id']}",
+        "AWS_CONFIG_FILE": str(ws.secret_path(_AWS_CONFIG_FILE)),
+        "AWS_SHARED_CREDENTIALS_FILE": os.devnull,
     }
     if creds.get("region"):
         env["AWS_REGION"] = creds["region"]
@@ -462,11 +497,47 @@ def _tofu_env(base: dict[str, str], backend: dict | None) -> dict[str, str]:
     return env
 
 
-def _cloud_token(ws: Workspace, job: dict[str, Any]) -> AbstractContextManager[object]:
-    """The OIDC token file `_cloud_env` points at, written for one tofu command or platform hook
-    and removed right after: never on disk while a repo hook runs (§8.3)."""
-    token = (job.get("cloud_credentials") or {}).get("oidc_token")
-    return ws.secret_file(_OIDC_TOKEN_FILE, token) if token else nullcontext()
+def _aws_config(ws: Workspace, job: dict[str, Any]) -> str:
+    """The AWS config file of a job holding OIDC credentials (§10.6): `[default]` mirrors the
+    default role, then one `[profile <name>]` per named profile with the role of the job's
+    credential phase, every one assumed with the job's token. Built from the payload only; a value
+    that could break out of its line or section fails the job instead of being written."""
+    creds = job["cloud_credentials"]
+    common = {
+        "web_identity_token_file": str(ws.secret_path(_OIDC_TOKEN_FILE)),
+        "role_session_name": f"stackd-{job['job_id']}",
+    }
+    default = {"role_arn": creds["role_arn"], **common, "region": creds.get("region")}
+    sections = [("default", default)]
+    for name, profile in sorted((creds.get("profiles") or {}).items()):
+        if name == "default" or not _AWS_PROFILE_NAME.match(name):
+            raise RuntimeError(f"invalid AWS profile name: {name!r}")
+        values = {"role_arn": profile["role_arn"], **common, "region": profile.get("region")}
+        sections.append((f"profile {name}", values))
+    lines = []
+    for header, values in sections:
+        lines.append(f"[{header}]")
+        for key, value in values.items():
+            if value is None:
+                continue
+            if not isinstance(value, str) or any(c in value for c in "\r\n"):
+                raise RuntimeError(f"invalid AWS config value for {key} in [{header}]")
+            lines.append(f"{key} = {value}")
+        lines.append("")
+    return "\n".join(lines)
+
+
+@contextmanager
+def _cloud_files(ws: Workspace, job: dict[str, Any]) -> Iterator[None]:
+    """The OIDC token file and the AWS config file `_cloud_env` points at, written for one tofu
+    command or platform hook and removed right after: never on disk while a repo hook runs
+    (§8.3)."""
+    creds = job.get("cloud_credentials") or {}
+    with ExitStack() as files:
+        if creds.get("oidc_token"):
+            files.enter_context(ws.secret_file(_OIDC_TOKEN_FILE, creds["oidc_token"]))
+            files.enter_context(ws.secret_file(_AWS_CONFIG_FILE, _aws_config(ws, job)))
+        yield
 
 
 @contextmanager
@@ -474,9 +545,10 @@ def _tofu_files(
     ws: Workspace, cwd: Path, job: dict[str, Any], *, tfvars: bool = True
 ) -> Iterator[None]:
     """What one tofu command reads from disk that no repo hook may find (§8.3), present only while
-    it runs: the OIDC token file, and the run's variable files unless the command reads none."""
+    it runs: the OIDC token and AWS config files, and the run's variable files unless the command
+    reads none."""
     with ExitStack() as files:
-        files.enter_context(_cloud_token(ws, job))
+        files.enter_context(_cloud_files(ws, job))
         if tfvars:
             files.enter_context(
                 ws.tfvars(cwd, job.get("tfvars_json", {}), job.get("hcl_tfvars", {}))
@@ -499,6 +571,55 @@ def _init_cmd(
     for k, v in (backend_config or {}).items():
         cmd.append(f"-backend-config={k}={v}")
     return cmd
+
+
+def _var_file_flags(ws: Workspace, cwd: Path, job: dict[str, Any]) -> list[str]:
+    """`-var-file=` flags for a command that reads variables (§3.4): the env's repo var files in
+    their order, then — only when there are some — Stackd's own two files again, explicitly: a
+    `-var-file` beats any auto-loaded file, so without them a repo file would override the run's
+    resolved variables (dependency inputs and mocks included). Each repo file must be in the
+    checkout: a missing one fails the job here, naming it, rather than in tofu's own words."""
+    files = [f for f in job.get("var_files") or [] if isinstance(f, str)]
+    if not files:
+        return []
+    problem = ws.var_file_problem(cwd, files)
+    if problem:
+        env_info = job["environment"]
+        raise RuntimeError(
+            f"{problem} (environment {env_info.get('name')!r}, relative to the project root "
+            f"{env_info.get('project_root')!r})"
+        )
+    own = [TFVARS_JSON, *([HCL_TFVARS] if job.get("hcl_tfvars") else [])]
+    return [f"-var-file={f}" for f in (*files, *own)]
+
+
+def _init(
+    ws: Workspace,
+    cwd: Path,
+    job: dict[str, Any],
+    tool: str,
+    tf_env: dict[str, str],
+    *,
+    phase: str,
+    streamer: LogStreamer,
+    runner: Runner,
+) -> int:
+    """`init`, the one tofu command that holds the stack's repo credential (§8.3): it downloads the
+    modules, private ones hosted next to the repo included. On disk / in the env for it only."""
+    backend = job.get("backend")
+    creds = ws.repo_credentials(
+        job["environment"]["repo_url"], token=_repo_token(job), ssh_key=_repo_ssh_key(job)
+    )
+    with _tofu_files(ws, cwd, job), creds as git_env:
+        return run_command(
+            _init_cmd(tool, backend, job.get("backend_config_file"), job.get("backend_config")),
+            cwd,
+            {**tf_env, **git_env},
+            phase=phase,
+            section=None,
+            streamer=streamer,
+            runner=runner,
+        )
 
 
 def _job_failed(
@@ -533,20 +654,16 @@ def handle_plan(
     checks = [] if checks is None else checks
     job_id = job["job_id"]
     env_info = job["environment"]
-    masker = Masker(job.get("mask_values", []))
+    masker = _masker(job)
     streamer = LogStreamer(client, job_id, masker)
     ws = Workspace(settings.workspace_root, job_id)
     tool = _tool_bin(env_info["tool"])
 
     try:
         runner = _make_runner(settings, job, ws)
-        cwd = ws.git_clone(
-            env_info["repo_url"],
-            env_info.get("commit_sha"),
-            env_info["project_root"],
-            token=_repo_token(job),
-            branch=env_info.get("branch"),
-        )
+        cwd = _clone(ws, job, env_info.get("commit_sha"))
+        # The env's repo var files are the commit's: checked now, before any hook or tofu step.
+        _var_file_flags(ws, cwd, job)
         backend = job.get("backend")
         if backend:
             ws.write_backend_override(cwd)
@@ -590,7 +707,7 @@ def handle_plan(
                 repo_env=repo_env,
                 phase="planning",
                 streamer=streamer,
-                platform_files=lambda: _cloud_token(ws, job),
+                platform_files=lambda: _cloud_files(ws, job),
                 runner=runner,
             )
             checks.extend({**r, "stage": name} for r in results)
@@ -598,16 +715,9 @@ def handle_plan(
 
         if stage("before_init"):
             return _job_failed(client, job_id, "before_init", checks)
-        with _tofu_files(ws, cwd, job):
-            init_rc = run_command(
-                _init_cmd(tool, backend, job.get("backend_config_file"), job.get("backend_config")),
-                cwd,
-                tf_env,
-                phase="planning",
-                section=None,
-                streamer=streamer,
-                runner=runner,
-            )
+        init_rc = _init(
+            ws, cwd, job, tool, tf_env, phase="planning", streamer=streamer, runner=runner
+        )
         if init_rc != 0:
             return _job_failed(client, job_id, "init", checks, error="init failed")
         # The state as this job finds it, before the plan (§19.7): a write made outside Stackd since
@@ -636,8 +746,12 @@ def handle_plan(
         if job.get("destroy"):
             plan_cmd.insert(2, "-destroy")
         # A targeted / replace plan (§3.5): the API validated the addresses; they reach the plan
-        # only — the saved plan carries them to the apply, which never re-plans.
-        plan_cmd[2:2] = _plan_option_flags(job.get("plan_options"))
+        # only — the saved plan carries them to the apply, which never re-plans. Same for the
+        # env's var files (§3.4), re-checked now that the hooks have run.
+        plan_cmd[2:2] = [
+            *_var_file_flags(ws, cwd, job),
+            *_plan_option_flags(job.get("plan_options")),
+        ]
         with _tofu_files(ws, cwd, job):
             code, events = stream_json_command(
                 plan_cmd,
@@ -726,7 +840,7 @@ def handle_plan(
                 repo_env=repo_env,
                 phase="checking",
                 streamer=streamer,
-                platform_files=lambda: _cloud_token(ws, job),
+                platform_files=lambda: _cloud_files(ws, job),
                 runner=runner,
             )
             checks.extend({**r, "stage": "after_plan"} for r in results)
@@ -753,7 +867,7 @@ def handle_apply(
     checks = [] if checks is None else checks
     job_id = job["job_id"]
     env_info = job["environment"]
-    masker = Masker(job.get("mask_values", []))
+    masker = _masker(job)
     streamer = LogStreamer(client, job_id, masker)
     ws = Workspace(settings.workspace_root, job_id)
     tool = _tool_bin(env_info["tool"])
@@ -766,13 +880,7 @@ def handle_apply(
         if not commit_sha:
             error = "apply refused: the run has no pinned commit; trigger a new plan"
             return _job_failed(client, job_id, "apply", checks, error=error)
-        cwd = ws.git_clone(
-            env_info["repo_url"],
-            commit_sha,
-            env_info["project_root"],
-            token=_repo_token(job),
-            branch=env_info.get("branch"),
-        )
+        cwd = _clone(ws, job, commit_sha)
         backend = job.get("backend")
         if backend:
             ws.write_backend_override(cwd)
@@ -807,22 +915,15 @@ def handle_apply(
                 repo_env=repo_env,
                 phase="applying",
                 streamer=streamer,
-                platform_files=lambda: _cloud_token(ws, job),
+                platform_files=lambda: _cloud_files(ws, job),
                 runner=runner,
             )
             checks.extend({**r, "stage": name} for r in results)
             return aborted
 
-        with _tofu_files(ws, cwd, job):
-            init_rc = run_command(
-                _init_cmd(tool, backend, job.get("backend_config_file"), job.get("backend_config")),
-                cwd,
-                tf_env,
-                phase="applying",
-                section=None,
-                streamer=streamer,
-                runner=runner,
-            )
+        init_rc = _init(
+            ws, cwd, job, tool, tf_env, phase="applying", streamer=streamer, runner=runner
+        )
         if init_rc != 0:
             return _job_failed(client, job_id, "init", checks, error="init failed")
         # A write made outside Stackd since the plan job shows here (§19.7) — tofu would then
@@ -925,9 +1026,20 @@ def _command_timeout(job: dict) -> int:
 _NON_INTERACTIVE: dict[str, list[str]] = {"force-unlock": ["-force"]}
 
 
-def _command_argv(tool: str, cmd: dict) -> list[str]:
+# The allowlisted subcommands (§4.3) that read the configuration's variables and take
+# `-var-file`: they get the env's repo var files (§3.4), as the plan does.
+_READS_VARIABLES = frozenset({"import", "refresh"})
+
+
+def _command_argv(tool: str, cmd: dict, var_flags: list[str] | None = None) -> list[str]:
     name = str(cmd.get("name", ""))
-    return [tool, *name.split(), *_NON_INTERACTIVE.get(name, []), *(cmd.get("args") or [])]
+    return [
+        tool,
+        *name.split(),
+        *_NON_INTERACTIVE.get(name, []),
+        *(var_flags or []),
+        *(cmd.get("args") or []),
+    ]
 
 
 def handle_command_run(client: ApiClient, job: dict, settings: Settings) -> None:
@@ -936,36 +1048,24 @@ def handle_command_run(client: ApiClient, job: dict, settings: Settings) -> None
     job_id = job["job_id"]
     env_info = job["environment"]
     cmd = job.get("command") or {}
-    masker = Masker(job.get("mask_values", []))
+    masker = _masker(job)
     streamer = LogStreamer(client, job_id, masker)
     ws = Workspace(settings.workspace_root, job_id)
     tool = _tool_bin(env_info["tool"])
 
     try:
         runner = _make_runner(settings, job, ws)
-        cwd = ws.git_clone(
-            env_info["repo_url"],
-            env_info.get("commit_sha"),
-            env_info["project_root"],
-            token=_repo_token(job),
-            branch=env_info.get("branch"),
-        )
+        cwd = _clone(ws, job, env_info.get("commit_sha"))
+        var_flags = _var_file_flags(ws, cwd, job) if cmd.get("name") in _READS_VARIABLES else []
         backend = job.get("backend")
         if backend:
             ws.write_backend_override(cwd)
         tf_env = _tofu_env(_run_env(ws, job, runner.name), backend)  # + state backend, tofu only
 
         client.event(job_id, "phase_started", phase="running")
-        with _tofu_files(ws, cwd, job):
-            init_rc = run_command(
-                _init_cmd(tool, backend, job.get("backend_config_file"), job.get("backend_config")),
-                cwd,
-                tf_env,
-                phase="running",
-                section=None,
-                streamer=streamer,
-                runner=runner,
-            )
+        init_rc = _init(
+            ws, cwd, job, tool, tf_env, phase="running", streamer=streamer, runner=runner
+        )
         if init_rc != 0:
             return client.event(job_id, "job_failed", phase="init", result={"error": "init failed"})
 
@@ -986,7 +1086,7 @@ def handle_command_run(client: ApiClient, job: dict, settings: Settings) -> None
             )
 
         observe(baseline=False)
-        argv = _command_argv(tool, cmd)
+        argv = _command_argv(tool, cmd, var_flags)
         timeout = _command_timeout(job)
         try:
             with _tofu_files(ws, cwd, job):
@@ -1150,7 +1250,7 @@ def _run_job(client: ApiClient, job: dict, settings: Settings) -> None:
         jid, jphase = job.get("job_id"), job.get("phase")
         # The exception message can carry secrets (e.g. a clone URL with the repo token, a tofu
         # error echoing a sensitive value). Mask before logging or reporting it to the API (§5.1).
-        detail = Masker(job.get("mask_values", [])).mask(str(exc))
+        detail = _masker(job).mask(str(exc))
         log.error("job failed", extra={"event": "agent.failed", "run_id": jid, "error": detail})
         if jid:
             try:

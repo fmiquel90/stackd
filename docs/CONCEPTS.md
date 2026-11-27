@@ -186,6 +186,11 @@ or "overridden here". The provenance is also frozen onto the run (`variable_prov
   `TF_VAR_<name>`).
 - `environment` → injected as a process environment variable for the run.
 
+A repo that already keeps one tfvars file per environment keeps it: the environment lists it in
+`var_files` (e.g. `["envs/prod.tfvars"]`, relative to the project root, in order) and the worker
+passes it as `-var-file=`. Stackd's own variables still win over it — the worker passes its
+generated files after the repo's (SPECS §3.4).
+
 ### Sensitive variables are write-only
 
 Mark a variable `sensitive: true` and it is **AES-256-GCM encrypted at rest** and **never returned
@@ -346,8 +351,9 @@ hooks:
 **Repo hooks get nothing secret**: of the worker's environment only an allowlist (`PATH`, `HOME`,
 locale, proxies…), the run's non-sensitive environment variables, no cloud credentials, and a
 `plan.json` with every sensitive value masked. While a repo hook runs, neither the saved plan, the
-run's tfvars, the cloud token file nor the repo token is on disk. Platform hooks are trusted: they
-get the run's secrets, the cloud credentials and the raw `plan.json`. Neither tofu nor any hook sees
+run's tfvars, the cloud token file nor the repo credential is on disk. Platform hooks are trusted: they
+get the run's secrets, the cloud credentials and the raw `plan.json` — but not the repo credential
+(token or deploy key), which only the clone and `init` (module downloads) get. Neither tofu nor any hook sees
 the agent's own `STACKD_*` settings. See [Hooks](guide/hooks.md#what-hooks-can-see).
 
 ---
@@ -494,11 +500,19 @@ runs. The
 `AWS_ROLE_SESSION_NAME = stackd-<run_id>` ties every CloudTrail action back to the run — and thus to
 the human who confirmed it.
 
+**Named profiles.** Code written for humans often says `profile = "tfstates"` (provider, backend
+config, remote state). The integration maps such names to their own plan/apply roles; the worker
+writes them into a generated AWS config file (`[profile tfstates]` with `role_arn` and the job's
+token file), so that code runs unchanged — each profile's role is assumed with the same token, so
+its trust policy pins tier and phase like the default roles' (SPECS §10.6).
+
 ```bash
 curl -s -X PUT localhost:8000/api/v1/environments/$PROD/cloud-integration -H "$AUTH" \
   -H 'content-type: application/json' -d '{
   "plan_role_arn":"arn:aws:iam::123:role/stackd-prod-plan",
-  "apply_role_arn":"arn:aws:iam::123:role/stackd-prod-apply","region":"eu-west-1"}'
+  "apply_role_arn":"arn:aws:iam::123:role/stackd-prod-apply","region":"eu-west-1",
+  "profiles":{"tfstates":{"plan_role_arn":"arn:aws:iam::456789012345:role/tfstates-plan",
+                          "apply_role_arn":"arn:aws:iam::456789012345:role/tfstates-apply"}}}'
 curl -s -X POST localhost:8000/api/v1/environments/$PROD/cloud-integration/test -H "$AUTH"  # verify AssumeRole
 ```
 
@@ -507,7 +521,8 @@ curl -s -X POST localhost:8000/api/v1/environments/$PROD/cloud-integration/test 
 ## 11. Webhooks & Git staleness
 
 A Git webhook (HMAC-verified, secret per stack) maps a pushed branch to the environments tracking it,
-filtered by `project_root`:
+filtered by the paths that concern the stack — its `project_root`, plus its `trigger_paths` globs
+(shared modules or configuration outside the folder, e.g. `modules/**`):
 
 - **push** → a `tracked` run per matching environment, and `head_sha` advances.
 - **pull request** → a `proposed` run: plan-only, read-only state, mocks allowed, and **no
