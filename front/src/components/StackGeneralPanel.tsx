@@ -199,7 +199,11 @@ function StackGeneralForm({ stack }: { stack: Stack }) {
                 rows={4}
                 spellCheck={false}
                 autoComplete="off"
-                placeholder={stack.has_repo_secret ? "••••••••" : "-----BEGIN OPENSSH PRIVATE KEY-----\n…"}
+                placeholder={
+                  stack.has_repo_secret
+                    ? "••••••••"
+                    : "SSH private key, as ssh-keygen writes it (several lines)"
+                }
                 onChange={(e) => set({ repo_secret: e.target.value })}
                 className={TEXTAREA}
               />

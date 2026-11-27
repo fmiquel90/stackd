@@ -29,7 +29,6 @@ from app.enums import (
 )
 from app.notifications.dispatcher import check_url_syntax
 from app.notifications.schemas import ALLOWED_STATES
-from app.stacks.credentials import is_ssh_url
 from app.stacks.schemas import _check_tool_version
 
 FORMAT: Literal["stackd.config"] = "stackd.config"
@@ -156,12 +155,6 @@ class StackDoc(_Doc):
     def _tool_version(cls, v: str) -> str:
         _check_tool_version(v)
         return v
-
-    @model_validator(mode="after")
-    def _deploy_key_over_ssh(self) -> StackDoc:
-        if self.repo_auth_kind == RepoAuthKind.deploy_key and not is_ssh_url(self.repo_url):
-            raise ValueError("a deploy_key stack needs an ssh:// or git@host:path repo_url")
-        return self
 
 
 class AttachmentDoc(_Doc):

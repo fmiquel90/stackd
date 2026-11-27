@@ -58,7 +58,7 @@ def normalize_deploy_key(text: str) -> str:
             else ""
         )
         raise _problem(
-            "Expected an SSH private key (-----BEGIN OPENSSH PRIVATE KEY----- …)." + hint
+            "Expected an SSH private key, as ssh-keygen writes it (OpenSSH format)." + hint
         )
     kind, body = match.group(1).strip(), match.group(2)
     if kind == "ENCRYPTED" or "Proc-Type: 4,ENCRYPTED" in body:

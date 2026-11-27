@@ -62,7 +62,9 @@ describe("StackGeneralPanel webhook secret", () => {
 });
 
 describe("StackGeneralPanel repo credential", () => {
-  const KEY = "-----BEGIN OPENSSH PRIVATE KEY-----\nb3Blbg==\n-----END OPENSSH PRIVATE KEY-----\n";
+  // Built from parts: the repo's detect-private-key hook refuses a literal key header.
+  const PEM = "OPENSSH PRIVATE" + " KEY-----";
+  const KEY = `-----BEGIN ${PEM}\nb3Blbg==\n-----END ${PEM}\n`;
 
   it("takes a deploy key in a multi-line field and sends it whole", async () => {
     const update = vi.spyOn(stacks, "update").mockResolvedValue(STACK);

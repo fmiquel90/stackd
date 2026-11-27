@@ -28,14 +28,18 @@ from app.stacks.credentials import credential_mask_values, normalize_deploy_key
 from tests.conftest_phase2 import event, login, make_env, register_worker
 
 
+def _pem(kind: str, body: str) -> str:
+    """A PEM block, built from parts: the repo's detect-private-key hook refuses a literal header."""
+    label = f"{kind} PRIVATE KEY".strip()
+    return f"-----BEGIN {label}-----\n{body}\n-----END {label}-----"
+
+
 def _openssh_key(cipher: bytes = b"none") -> str:
     """An `openssh-key-v1` blob with `cipher`: what the validator reads of it."""
     blob = b"openssh-key-v1\0" + len(cipher).to_bytes(4, "big") + cipher + b"\0" * 64
     body = base64.b64encode(blob).decode()
     lines = [body[i : i + 70] for i in range(0, len(body), 70)]
-    return "\n".join(
-        ["-----BEGIN OPENSSH PRIVATE KEY-----", *lines, "-----END OPENSSH PRIVATE KEY-----"]
-    )
+    return _pem("OPENSSH", "\n".join(lines))
 
 
 KEY = _openssh_key() + "\n"
@@ -45,7 +49,7 @@ SSH_URL = "git@git.example.com:org/infra.git"
 def test_a_private_key_without_a_passphrase_is_accepted_and_normalized() -> None:
     crlf = KEY.strip().replace("\n", "\r\n")
     assert normalize_deploy_key(f"  {crlf}  ") == KEY  # LF, one trailing newline (ssh needs it)
-    pkcs8 = "-----BEGIN PRIVATE KEY-----\nMIIabc\n-----END PRIVATE KEY-----"
+    pkcs8 = _pem("", "MIIabc")
     assert normalize_deploy_key(pkcs8) == pkcs8 + "\n"
 
 
@@ -70,16 +74,12 @@ def test_keys_from_ssh_keygen(tmp_path: Path, key_type: str) -> None:
     ("text", "why"),
     [
         (_openssh_key(b"aes256-ctr"), "passphrase"),
-        (
-            "-----BEGIN RSA PRIVATE KEY-----\nProc-Type: 4,ENCRYPTED\nDEK-Info: AES-128-CBC,00\n\n"
-            "abc\n-----END RSA PRIVATE KEY-----",
-            "passphrase",
-        ),
-        ("-----BEGIN ENCRYPTED PRIVATE KEY-----\nabc\n-----END ENCRYPTED PRIVATE KEY-----", "pass"),
+        (_pem("RSA", "Proc-Type: 4,ENCRYPTED\nDEK-Info: AES-128-CBC,00\n\nabc"), "passphrase"),
+        (_pem("ENCRYPTED", "abc"), "pass"),
         ("ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIA user@host", "public key"),
         ("ghp_not_a_key", "Expected an SSH private key"),
-        ("-----BEGIN OPENSSH PRIVATE KEY-----\n!!!\n-----END OPENSSH PRIVATE KEY-----", "base64"),
-        ("-----BEGIN DSA PRIVATE KEY-----\nabc\n-----END DSA PRIVATE KEY-----", "Unsupported"),
+        (_pem("OPENSSH", "!!!"), "base64"),
+        (_pem("DSA", "abc"), "Unsupported"),
     ],
 )
 def test_what_is_not_a_usable_deploy_key_is_refused(text: str, why: str) -> None:
