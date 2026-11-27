@@ -51,7 +51,13 @@ from app.runs.artifacts import (
 from app.runs.transition import ALLOWED, transition
 from app.secret_sources.providers import SecretUnavailable
 from app.workers.auth import CurrentWorker, mint_worker_token, pool_from_token
-from app.workers.claim import build_job_payload, claim_one, holds_apply_credentials
+from app.workers.claim import (
+    build_job_payload,
+    claim_one,
+    defer_claim,
+    holds_apply_credentials,
+    is_transient_db_error,
+)
 from app.workers.schemas import (
     CommandResultIn,
     EventIn,
@@ -225,67 +231,118 @@ async def claim(worker: CurrentWorker, session: DbSession, wait: int = 0) -> dic
     if settings.is_production and worker.runner != PRODUCTION_RUNNER:
         raise _runner_refused(worker.runner)
     affinity = settings.stackd_apply_affinity_seconds
-    deadline = wait
+    worker_id = worker.id
+    deadline = max(0, min(wait, settings.stackd_claim_max_wait_seconds))
     while True:
         run = await claim_one(session, worker, affinity)
         if run is not None:
-            worker.status = WorkerStatus.busy
-            try:
-                # In a savepoint: what the payload build stages on the run (used_mocks, inputs,
-                # provenance, used_secret_fallback) and its audit events
-                # (`dependency.mock_consumed`, `secret.fallback_used`) only stand for a job
-                # actually handed out.
-                async with session.begin_nested():
-                    payload = await build_job_payload(session, run)
-            except WorkloadSigningUnavailable as exc:
-                # Transient (KMS throttled/unreachable, no DB connection, §3.11): undo the claim —
-                # the run stays queued/confirmed, an approved apply keeps its approval — and tell
-                # the worker to come back.
-                await session.rollback()
-                raise ProblemException(
-                    503,
-                    "Signing unavailable",
-                    "The workload token cannot be signed right now; retry later.",
-                    code=exc.code,
-                    retryable=True,
-                ) from exc
-            except (DependencyError, SecretUnavailable, WorkloadSigningError) as exc:
-                # Unresolvable dependency (§9.3), external secret (§15.2) or workload token (§10)
-                # → fail the run closed, hand the worker nothing.
-                await session.refresh(run)  # the savepoint's rollback expired the staged fields
-                reason = (
-                    "secret"
-                    if isinstance(exc, SecretUnavailable)
-                    else "oidc"
-                    if isinstance(exc, WorkloadSigningError)
-                    else "dependency"
-                )
-                await transition(
-                    session,
-                    run,
-                    RunState.failed,
-                    actor=RunEventActor.system,
-                    fields={"error": str(exc)},
-                    audit_action="run.apply_failed",
-                    audit_context={"reason": reason, "detail": str(exc)},
-                )
-                await session.commit()
-                return Response(status_code=204)
-            await session.commit()
-            _log.info(
-                "job claimed",
-                extra={
-                    "event": "worker.claim",
-                    "worker_id": str(worker.id),
-                    "run_id": payload["job_id"],
-                    "phase": payload["phase"],
-                },
-            )
-            return payload
+            return await _hand_out(session, worker, run)
         if deadline <= 0:
             return Response(status_code=204)
+        # End the transaction before waiting: a long-poll must not sit idle in transaction on a
+        # pooled connection — a pool's worth of idle workers would starve every other request.
+        await session.rollback()
         await asyncio.sleep(min(2, deadline))
         deadline -= 2
+        # The rollback expired the worker (labels, tools): reload it for the next attempt.
+        reloaded = await session.get(Worker, worker_id, populate_existing=True)
+        if reloaded is None:
+            raise ProblemException(401, "Not authenticated", "Worker unregistered.")
+        worker = reloaded
+
+
+async def _hand_out(session: AsyncSession, worker: Worker, run: Run) -> dict[str, Any] | Response:
+    """Build the claimed run's job and hand it out, or undo / fail the claim (§7.2, §3.11). The
+    worker's row is written at the commit only: the payload build (secret fetches, KMS) must not
+    hold its lock, which the worker's own heartbeat and the scheduler's worker-lost sweep take."""
+    run_id = run.id
+    try:
+        # In a savepoint: what the payload build stages on the run (used_mocks, inputs,
+        # provenance, used_secret_fallback) and its audit events (`dependency.mock_consumed`,
+        # `secret.fallback_used`) only stand for a job actually handed out.
+        async with session.begin_nested():
+            payload = await build_job_payload(session, run)
+    except Exception as exc:
+        if isinstance(exc, WorkloadSigningUnavailable) or is_transient_db_error(exc):
+            # Transient (KMS throttled/unreachable, the database, §3.11): undo the claim — the run
+            # stays queued/confirmed, an approved apply keeps its approval —, keep the run out of
+            # the claim for its backoff so the runs behind it are claimed meanwhile, and tell the
+            # worker to come back.
+            code = exc.code if isinstance(exc, WorkloadSigningUnavailable) else "db_unavailable"
+            await session.rollback()
+            try:
+                await defer_claim(session, run_id)
+            except Exception as defer_exc:
+                await session.rollback()
+                _log.warning(
+                    "claim backoff not recorded",
+                    extra={
+                        "event": "worker.claim_defer_failed",
+                        "run_id": str(run_id),
+                        "error_type": type(defer_exc).__name__,
+                    },
+                )
+            _log.warning(
+                "job deferred",
+                extra={
+                    "event": "worker.claim_deferred",
+                    "run_id": str(run_id),
+                    "code": code,
+                    "error_type": type(exc).__name__,
+                },
+            )
+            raise ProblemException(
+                503,
+                "Job unavailable",
+                "The job cannot be built right now; retry later.",
+                code=code,
+                retryable=True,
+            ) from exc
+        # Anything else fails the run closed, the worker getting nothing: an unresolvable
+        # dependency (§9.3), external secret (§15.2) or workload token (§10) — or an unexpected
+        # error (an undecryptable stored secret, a bug), which would otherwise fail every poll on
+        # the same run at the head of the queue.
+        if isinstance(exc, (DependencyError, SecretUnavailable, WorkloadSigningError)):
+            error = str(exc)
+            reason = (
+                "secret"
+                if isinstance(exc, SecretUnavailable)
+                else "oidc"
+                if isinstance(exc, WorkloadSigningError)
+                else "dependency"
+            )
+        else:
+            # The exception's type only, on the run and in the audit: its message may carry a
+            # value. The stack goes to the server log.
+            error, reason = f"job_build_failed:{type(exc).__name__}", "internal"
+            _log.exception(
+                "job build failed",
+                extra={"event": "worker.claim_build_failed", "run_id": str(run_id)},
+            )
+        await session.refresh(run)  # the savepoint's rollback expired the staged fields
+        await transition(
+            session,
+            run,
+            RunState.failed,
+            actor=RunEventActor.system,
+            fields={"error": error},
+            audit_action="run.apply_failed",
+            audit_context={"reason": reason, "detail": error},
+        )
+        await session.commit()
+        return Response(status_code=204)
+    worker.status = WorkerStatus.busy
+    await session.commit()
+    _log.info(
+        "job claimed",
+        extra={
+            "event": "worker.claim",
+            "worker_id": str(worker.id),
+            "run_id": payload["job_id"],
+            "phase": payload["phase"],
+        },
+    )
+    return payload
 
 
 async def _load_owned_run(session: AsyncSession, worker: Worker, job_id: uuid.UUID) -> Run:

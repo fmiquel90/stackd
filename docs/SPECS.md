@@ -330,6 +330,10 @@ plan_artifact_key text nullable,     -- S3 key of the encrypted saved plan (§7.
                                      -- applies; set by the plan job's upload, cleared by transition()
                                      -- on any terminal state (migration 0024)
 claimed_at, confirmed_at, finished_at,
+claimable_after timestamptz nullable,      -- §7.2: claim backoff — a run whose job could not be built
+                                     --   for a transient reason is not offered before it (migration 0043)
+claim_attempts int default 0,        -- §7.2: transient build failures since the last claim (grows the
+                                     --   backoff); reset by a claim
 cancel_requested_at timestamptz nullable,  -- §4.1: a user asked the worker to stop the executing run
                                      --   (migration 0032); the state itself only changes on `job_canceled`
 logs_archived_at timestamptz nullable,     -- §5.2: the run's logs are in S3 (migration 0031)
@@ -376,6 +380,13 @@ Terminal runs whose logs still wait for the cold tier (§5.2) are found by:
 ```sql
 CREATE INDEX ix_runs_logs_to_archive ON runs (finished_at)
 WHERE finished_at IS NOT NULL AND logs_archived_at IS NULL;
+```
+
+The claim's candidates (§7.2) — read by every poll of every idle worker — by:
+
+```sql
+CREATE INDEX ix_runs_claimable ON runs (is_drift, created_at)
+WHERE state IN ('queued','confirmed');
 ```
 
 ### 3.6 `run_events`
@@ -496,7 +507,8 @@ claims and `GET /oidc/jwks` never fail on it.
   API's own credentials mid-refresh, no database connection for the provisioning session (pool
   exhausted — it needs a second connection while the claim holds one — or a connection lost): the
   claim is rolled back, the run keeps its state (`queued`, or `confirmed` — an approved apply keeps
-  its approval), and the worker gets **503** `code=<marker>`, `retryable: true`; it polls again;
+  its approval) and is not offered again before its claim backoff (§7.2), and the worker gets
+  **503** `code=<marker>`, `retryable: true`; it polls again;
 - **permanent** — access denied, key disabled / pending deletion / not found, an unusable key (not
   RSA ≥ 2048 `SIGN_VERIFY` RS256), an invalid ARN, no AWS credentials, anything unrecognized: the
   job's run fails closed at claim, `run.apply_failed` with `reason: oidc`, the worker getting nothing
@@ -574,7 +586,7 @@ Command runs (§4.3) take a shorter path: `queued → preparing → running → 
 | `unconfirmed → confirmed` | user (or system: a rollout re-approval, §21.6) | `can_apply(user, env)` = role∈{approver,admin} AND `env.tier ∈ allowed_tiers` (§2.4); ≠ triggerer if the tier requires four-eyes, the env is `protected` or sets `require_second_pair_of_eyes`; for a `destroy` run: `can_destroy` required; **blocked if `used_mocks` and `allow_mock_apply=false`** (likewise `used_secret_fallback` and `allow_fallback_apply=false`, §15.5) |
 | `confirmed → applying` | worker (claim) | the plan's worker within the affinity window, then any compatible worker (§7.2); re-checks `allow_mock_apply` and the secret-fallback gate against the apply-time resolution (§9.3/§15.5). The apply job clones the pinned commit and applies the run's **saved plan** (§7.3); a missing or unreadable plan fails the run — it never re-plans |
 | `applying → finished` | worker | apply exit 0 + outputs uploaded + no failing `after_apply` check (one that fails → `failed`, the outputs still recorded, nothing cascades, §8.3) |
-| `* → failed` | worker/system | a tofu command failing (a plan fails on any exit but 0 or 2, an apply or a command on any non-zero exit), the plan JSON unavailable (§8.3), a hook `fail` at any stage (§8.3), timeouts — the worker hard-kills the process group past its budget: the apply (and a mutating command run, §4.3) past `stackd_apply_timeout_seconds` (default 15 min, sent as `apply_timeout_seconds`), a hook past the hook timeout (10 min, `STACKD_HOOK_TIMEOUT_SECONDS`, then it fails by its `on_failure`), any other subprocess past the agent's 2 h cap (separate prepare/plan budgets are not enforced yet); `worker_lost` (§3.7); `commit_mismatch` (§7.3); an unresolvable dependency, secret or workload token at claim — plan or apply claim, the claim having moved the run to `preparing`/`applying` first (§9.3, §15.2, §3.11). A worker-executed state only: `unconfirmed` and `confirmed` have no `→ failed` edge, and a `job_failed` report on a run its worker no longer executes is refused (409, §7.3) |
+| `* → failed` | worker/system | a tofu command failing (a plan fails on any exit but 0 or 2, an apply or a command on any non-zero exit), the plan JSON unavailable (§8.3), a hook `fail` at any stage (§8.3), timeouts — the worker hard-kills the process group past its budget: the apply (and a mutating command run, §4.3) past `stackd_apply_timeout_seconds` (default 15 min, sent as `apply_timeout_seconds`), a hook past the hook timeout (10 min, `STACKD_HOOK_TIMEOUT_SECONDS`, then it fails by its `on_failure`), any other subprocess past the agent's 2 h cap (separate prepare/plan budgets are not enforced yet); `worker_lost` (§3.7); `commit_mismatch` (§7.3); an unresolvable dependency, secret or workload token at claim, or any other non-transient error building the job (`job_build_failed:<type>`, §7.2) — plan or apply claim, the claim having moved the run to `preparing`/`applying` first (§9.3, §15.2, §3.11). A worker-executed state only: `unconfirmed` and `confirmed` have no `→ failed` edge, and a `job_failed` report on a run its worker no longer executes is refused (409, §7.3) |
 
 Single function `transition(run, to_state, actor, payload)` (`app/runs/transition.py`): legality (its `ALLOWED` edge table), atomic update guarded on `from_state` — the row re-read `FOR UPDATE` where `state = from_state` (409 `Concurrent modification` if it moved), a rollout member's rollout locked first (§21.3) — `run_event`, audit event when the caller passes one (human or terminal actions), the notification / VCS / in-app outboxes and the rollout's progress (§17, §18, §21), WS publication (`NOTIFY`, §5.3). A terminal state also stamps `finished_at` and drops the saved plan (§11.3). Everything in the caller's transaction: `transition()` never commits. The cascade (§9.2) is run by the caller, after the transition to `finished`.
 
@@ -718,7 +730,8 @@ run.plan_finished                 # plan-only terminal: empty diff, or a propose
 run.applied ⭐ / run.command_executed
 run.apply_failed                  # any failed run, whatever its phase, unless a check failed it —
                                   #   context phase, or reason: cancel_requested (a stopped apply, §4.1) |
-                                  #   worker_lost | commit_mismatch | dependency | secret | oidc
+                                  #   worker_lost | commit_mismatch | dependency | secret | oidc |
+                                  #   internal (an unexpected error building the job at claim)
                                   #   (§7.2/§7.3, §3.11)
 run.check_failed                  # a hook check with on_failure=fail failed the run, at any stage
                                   #   (§8.3) — context phase = the failing stage
@@ -808,10 +821,11 @@ Heartbeat = downstream command channel. No incoming connection. It carries `diag
 ### 7.2 Claim (long-poll)
 
 ```
-POST /worker/v1/jobs/claim?wait=25
-→ 204 if nothing (or the claimed run just failed closed at claim: §9.3, §10, §15.2)
+POST /worker/v1/jobs/claim?wait=25        # wait capped at stackd_claim_max_wait_seconds (30)
+→ 204 if nothing (or the claimed run just failed closed at claim: §9.3, §10, §15.2, below)
 → 503 problem+json, retryable: true — a transient failure to build the job (workload token not
-       signable right now, §3.11): the claim is undone, the run keeps its state; poll again
+       signable right now, §3.11; the database: code=db_unavailable): the claim is undone, the run
+       keeps its state and gets a claim backoff (below); poll again
 → 200 {
     "job_id": "...",                       # = the run id
     "phase": "plan" | "apply" | "command", # JOB type (what the agent executes) — do not confuse
@@ -912,6 +926,7 @@ WITH next AS (
   SELECT r.id FROM runs r
   JOIN environments e ON e.id = r.environment_id
   WHERE r.state IN ('queued','confirmed')
+    AND (r.claimable_after IS NULL OR r.claimable_after <= now())   -- claim backoff, below
     AND NOT e.locked
     AND e.labels <@ :worker_labels
     AND ...                         -- the worker has the stack's tool version (§7.4)
@@ -920,17 +935,43 @@ WITH next AS (
   ORDER BY (r.state = 'confirmed' AND r.worker_id = :wid) DESC,   -- affinity: the apply
            r.is_drift,                                             -- prefers the worker of
            r.created_at                                            -- the plan; drift last (§19)
-  FOR UPDATE OF e SKIP LOCKED LIMIT 1
+  FOR NO KEY UPDATE OF e SKIP LOCKED LIMIT 1
 )
 -- then transition(run, preparing | applying) with worker_id=:wid, claimed_at=now() (§4.2)
 ```
 
 **The real concurrency guard is the unique index `one_active_run_per_env` (§3.5), not `SKIP LOCKED`.** Two workers claiming two **distinct** `queued` runs of the same env select different rows: `SKIP LOCKED` does not serialize them against each other, and the `NOT EXISTS (active run)` is true for both (none active yet). Both `UPDATE → preparing` go ahead; the second violates the partial unique index. Two protections, **both** to be applied:
 
-1. **Serialize per env**: the `SELECT ... FOR UPDATE` also locks the corresponding `environments` row (`JOIN environments e ... FOR UPDATE OF e SKIP LOCKED`), so that only one claim per env progresses at a time; the others skip the locked env and take another run.
+1. **Serialize per env**: the `SELECT ... FOR NO KEY UPDATE` also locks the corresponding `environments` row (`JOIN environments e ... FOR NO KEY UPDATE OF e SKIP LOCKED`), so that only one claim per env progresses at a time; the others skip the locked env and take another run. `NO KEY`: a row inserted meanwhile that references the env (a new run — its foreign-key check takes `FOR KEY SHARE`) does not wait for the claim to commit; an env deletion (`FOR UPDATE`) still does.
 2. **Safety net**: the violation of `one_active_run_per_env` is **caught** (SQLSTATE `23505`) and treated as "nothing to claim" → `204`, the worker re-polls. This is the correctness guarantee; the lock above is only an optimization to avoid discarded work. A lock not available (`55P03`, e.g. a rollout member whose rollout row is busy — taken `NOWAIT`, §21.3), a deadlock (`40P01`) or a serialization failure (`40001`) gives way the same way.
 
 Apply affinity: a `confirmed` run is reserved for its originating worker for **60 s** (`stackd_apply_affinity_seconds`; `AND (r.worker_id = :wid OR r.confirmed_at < now() - interval '60 seconds')` on confirmed runs). Past that delay (dead or saturated worker), any compatible worker takes it: the apply needs nothing from the plan worker's workspace — it downloads the run's **saved plan** from the API (§7.3) and applies exactly it. There is **no re-plan** on the apply path: no saved plan → the apply fails.
+
+**Long-poll.** `wait` (seconds, capped server-side at `stackd_claim_max_wait_seconds`, default 30 —
+below the agent's HTTP timeout) is spent re-trying the candidate selection every 2 s. Between two
+attempts the claim's transaction is **ended**: a waiting poll holds no database connection, so idle
+workers never starve the API's pool (sizing: [workers & scaling](guide/workers-and-scaling.md#database-connections)).
+
+**Building the job.** Once the run is moved to `preparing`/`applying`, the claim builds its payload
+(variables, external secrets §15, dependency inputs §9.3, the workload token §10) in a savepoint
+(§3.11) and commits the claim and what the build staged together — a job is never handed out without
+its audit events, and a failed build leaves nothing of them. The worker's own row (`status = busy`) is
+written at that commit only, so the build's external calls (secret fetches, KMS) never hold the lock
+the worker's heartbeat and worker-lost detection (§7.5) take. A failed build is one of:
+
+- **transient** — a workload token not signable right now (§3.11), or the database (no pooled
+  connection, a connection lost, a lock or statement timeout, a deadlock, the server shutting down):
+  the claim is undone — the run keeps its state, an approved apply its approval — and gets a **claim
+  backoff**: `claimable_after = now() + min(300 s, 10 s × 2^claim_attempts)`, `claim_attempts + 1`.
+  The candidate selection skips it until then, so the runs queued behind it keep being claimed; a
+  later successful claim resets both. The worker gets **503** `retryable: true`. Not a state change
+  (no `transition()`, no audit; logged `worker.claim_deferred`);
+- **anything else** fails the run closed (`→ failed`, `run.apply_failed`), the worker getting **204**:
+  an unresolvable dependency (§9.3, `reason: dependency`), external secret (§15.2, `secret`) or
+  workload token (§3.11, `oidc`), or an **unexpected error** — e.g. a stored secret that no longer
+  decrypts, a bug — `reason: internal`, `run.error = job_build_failed:<exception type>` (the type
+  only: a message may carry a value; the stack goes to the server log, `worker.claim_build_failed`).
+  A run whose job cannot be built never stays at the head of the queue failing every poll.
 
 ### 7.3 Events and artifacts
 
@@ -2268,7 +2309,8 @@ Config: `STACKD_DRIFT_INTERVAL_SECONDS = 21600` (6h) — per-env minimum spacing
 ### 19.2 Scheduler task (`detect_drift`, advisory-locked like the others, §7.5)
 
 On the 10s loop, gated on `last_drift_checked_at + interval`: for each `drift_check_enabled`,
-unlocked env with **no active run**, bump `last_drift_checked_at` (so a no-op env isn't retried
+unlocked env with **no active run** and no drift run still `queued` (one no worker claims — no
+compatible worker, say — is not joined by another every interval), bump `last_drift_checked_at` (so a no-op env isn't retried
 every tick) and — if the env has an applied commit (the last full apply — never a targeted one, §3.5) — enqueue a read-only `proposed` run pinned to
 that commit (`is_drift=true`, `triggered_by=schedule`). An env with nothing applied stays `unknown`.
 
@@ -2302,8 +2344,8 @@ alone — DESIGN §7) on the env page (linking the drift run's plan) and in the 
 ### 19.6 Invariants preserved
 
 1. Drift runs are **read-only** and **never auto-applied**.
-2. One active run per env unchanged (§3.5) — a drift run is skipped when a run is already active,
-   and yields to user runs at claim time.
+2. One active run per env unchanged (§3.5) — a drift run is skipped when a run is already active
+   or a drift run is still queued, and yields to user runs at claim time.
 3. The env status change rides the run `transition()` txn — a rolled-back completion changes
    nothing; the notification is same-txn (§17.4).
 

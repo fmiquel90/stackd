@@ -119,9 +119,9 @@ async def lock_envs_for_deletion(
 ) -> list[uuid.UUID]:
     """Lock the envs about to be deleted (a stack's, or one) and refuse with 409 while any has an
     active run (§3.5): the DB cascade would delete that run outside `transition()` (§4.2), leaving
-    a worker executing a run that no longer exists. A claim locks its env row too (FOR UPDATE OF e
-    SKIP LOCKED, §7.2), so no run starts on these envs until the deletion commits. Returns their
-    ids. Queued runs aren't executing anywhere: they go with their env."""
+    a worker executing a run that no longer exists. A claim locks its env row too (FOR NO KEY
+    UPDATE OF e SKIP LOCKED, §7.2), so no run starts on these envs until the deletion commits.
+    Returns their ids. Queued runs aren't executing anywhere: they go with their env."""
     env_ids = list(
         (await session.execute(select(Environment.id).where(*criteria).with_for_update()))
         .scalars()
