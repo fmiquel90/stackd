@@ -650,6 +650,13 @@ Single multiplexed WebSocket `/api/v1/ws` (the access token goes in the first me
 - The `NOTIFY` payload carries only a **lightweight signal** — `{kind, run_id, phase, max_seq}` for a log chunk, `{kind, run_id, to_state}` for a transition — never the content (8 KB `NOTIFY` cap, and log lines can be large).
 - On receipt, each replica forwards the signal as is to its locally subscribed WS clients, which re-read the source over REST (`run_logs` after `after_seq`, or the run). The front sees the same sequence as on REST reconnection — a single read path, idempotent by `seq`.
 
+**Resilience and bounds** (`app/ws/`):
+
+- Each replica holds **one** `LISTEN` connection, supervised: a termination listener catches a clean loss, a `SELECT 1` every 30 s (10 s deadline, the same deadline bounding every `LISTEN`/`UNLISTEN`) catches a half-open one. A lost connection is reopened with a capped exponential backoff (0.5 s → 30 s) and re-`LISTEN`s on every channel that still has a subscriber. Signals sent while it was down are gone, so when the loss is detected the replica **closes its clients' sockets with code 1012** (service restart): they reconnect, and meanwhile the front's query polls cover the gap (DESIGN §6). Reconnecting while the hub is still down fails the socket the same way; the client backs off.
+- Queues are bounded (256 signals per socket): when a client stops reading, the **oldest** pending signal is dropped — they are re-read hints, the newest one carries the most.
+- A socket's subscriptions are deduplicated (a repeated `sub` is a no-op) and capped at `STACKD_WS_MAX_SUBSCRIPTIONS` distinct channels (default 1000); one more closes the socket with **1008**. The front never unsubscribes on a live socket, so the reconnect re-subscribes only to what it still wants.
+- The auth message must arrive within `STACKD_WS_AUTH_TIMEOUT_SECONDS` (default 10) of the accept, else **4401**.
+
 In the single-replica MVP, `LISTEN/NOTIFY` remains the mechanism (no "in-process" branch to maintain); it scales as-is up to several replicas before requiring a real bus (abstract `EventBus` interface, like `JobQueue`).
 
 ### 5.4 Viewer (front)
