@@ -76,6 +76,7 @@ export interface Stack {
   has_repo_secret: boolean;
   has_webhook_secret: boolean;
   project_root: string;
+  trigger_paths: string[]; // repo-root globs that also concern the stack (SPECS §3.1)
   tool: Tool;
   tool_version: string;
   labels: Record<string, unknown> | null;
@@ -97,6 +98,8 @@ export interface Environment {
   allow_fallback_apply: boolean;
   backend_config_file: string | null;
   backend_config: Record<string, unknown> | null;
+  /** The repo's tfvars files (SPECS §3.4), relative to the project root, in `-var-file` order. */
+  var_files: string[];
   head_sha: string | null;
   commits_ahead: number | null;
   affects_project_root: boolean | null;
@@ -105,9 +108,24 @@ export interface Environment {
   last_drift_checked_at: string | null;
   drift_run_id: string | null;
   drift_check_enabled: boolean;
+  /** Unmanaged state (SPECS §19.7): the last state serial/lineage Stackd observed. */
+  state_serial: number | null;
+  state_lineage: string | null;
+  state_observed_at: string | null;
+  /** The state was written outside Stackd since its last observation; null when not flagged. */
+  out_of_band_change: OutOfBandChange | null;
   locked: boolean;
   labels: Record<string, unknown> | null;
   position: number;
+}
+
+export interface OutOfBandChange {
+  detected_at: string;
+  run_id: string | null;
+  expected_serial: number | null;
+  expected_lineage: string | null;
+  observed_serial: number | null;
+  observed_lineage: string | null;
 }
 
 export interface ResolvedVariable {
@@ -229,6 +247,8 @@ export type NotificationKindInbox =
   | "run_failed"
   | "comment_reply"
   | "mention"
+  | "drift_detected"
+  | "out_of_band_change"
   | "rollout_paused"
   | "rollout_succeeded"
   | "rollout_failed"
@@ -381,6 +401,9 @@ export interface QueueEntry {
   state: string;
   worker_id: string | null;
   blocking_reason: string | null;
+  /** Claim backoff (SPECS §7.2): not claimed before this, after `claim_attempts` transient failures. */
+  claimable_after: string | null;
+  claim_attempts: number;
 }
 
 export interface HealthWorker {

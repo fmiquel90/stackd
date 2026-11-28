@@ -9,6 +9,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 
+from app import __version__
 from app.audit.router import router as audit_router
 from app.auth.router import router as auth_router
 from app.comments.router import router as comments_router
@@ -46,6 +47,9 @@ from app.ws.router import router as ws_router
 # app startup — migrations run after the API is already accepting connections in dev (DEV §2).
 
 _http_log = get_logger("stackd.http")
+_log = get_logger("stackd.app")
+# How long shutdown waits on the in-flight saved-plan deletions (§11.3) before leaving them.
+_SHUTDOWN_PURGE_TIMEOUT = 10.0
 
 # High-frequency endpoints (polling, heartbeats, log ingestion): their successful calls carry no
 # signal and would drown the buffer — they're only logged when they error (4xx/5xx).
@@ -83,8 +87,21 @@ async def lifespan(_: FastAPI) -> AsyncIterator[None]:
     try:
         yield
     finally:
+        from app.db import get_engine
+        from app.runs import artifacts
+
         if task is not None:
             task.cancel()
+            await asyncio.gather(task, return_exceptions=True)  # its children are cancelled too
+        try:
+            async with asyncio.timeout(_SHUTDOWN_PURGE_TIMEOUT):
+                await artifacts.wait_for_purges()
+        except TimeoutError:
+            _log.warning(
+                "saved plan purges still running at shutdown",
+                extra={"event": "shutdown.purges_pending"},
+            )
+        await get_engine().dispose()
 
 
 def create_app() -> FastAPI:
@@ -93,7 +110,7 @@ def create_app() -> FastAPI:
     app = FastAPI(
         lifespan=lifespan,
         title="Stackd API",
-        version="0.1.0",
+        version=__version__,
         docs_url=None if settings.is_production else "/docs",
         redoc_url=None,
     )

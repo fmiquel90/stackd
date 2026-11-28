@@ -7,6 +7,7 @@ from pydantic import BaseModel, ConfigDict, field_validator
 
 from app.enums import RepoAuthKind, Tool
 from app.models.stack import Stack
+from app.stacks.paths import normalize_trigger_paths
 from app.workers.tools import valid_tool_version
 
 
@@ -18,6 +19,7 @@ class StackCreate(BaseModel):
     repo_auth_kind: RepoAuthKind = RepoAuthKind.none
     repo_secret: str | None = None  # write-only: token / deploy key (encrypted at rest)
     project_root: str = "."
+    trigger_paths: list[str] = []
     tool: Tool = Tool.opentofu
     tool_version: str
     labels: dict | None = None
@@ -26,6 +28,11 @@ class StackCreate(BaseModel):
     @classmethod
     def _tool_version(cls, v: str | None) -> str | None:
         return _check_tool_version(v)
+
+    @field_validator("trigger_paths")
+    @classmethod
+    def _trigger_paths(cls, v: list[str] | None) -> list[str]:
+        return normalize_trigger_paths(v)
 
 
 def _check_tool_version(value: str | None) -> str | None:
@@ -43,6 +50,7 @@ class StackUpdate(BaseModel):
     repo_secret: str | None = None
     webhook_secret: str | None = None  # write-only HMAC secret (§3.1, §5)
     project_root: str | None = None
+    trigger_paths: list[str] | None = None  # null clears, like []
     tool: Tool | None = None
     tool_version: str | None = None
     labels: dict | None = None
@@ -51,6 +59,11 @@ class StackUpdate(BaseModel):
     @classmethod
     def _tool_version(cls, v: str | None) -> str | None:
         return _check_tool_version(v)
+
+    @field_validator("trigger_paths")
+    @classmethod
+    def _trigger_paths(cls, v: list[str] | None) -> list[str]:
+        return normalize_trigger_paths(v)
 
 
 class StackOut(BaseModel):
@@ -65,6 +78,7 @@ class StackOut(BaseModel):
     has_repo_secret: bool
     has_webhook_secret: bool
     project_root: str
+    trigger_paths: list[str]
     tool: Tool
     tool_version: str
     labels: dict | None
@@ -83,6 +97,7 @@ class StackOut(BaseModel):
             has_repo_secret=s.repo_secret_encrypted is not None,
             has_webhook_secret=s.webhook_secret_encrypted is not None,
             project_root=s.project_root,
+            trigger_paths=list(s.trigger_paths or []),
             tool=s.tool,
             tool_version=s.tool_version,
             labels=s.labels,

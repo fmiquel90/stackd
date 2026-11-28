@@ -4,10 +4,10 @@ import hashlib
 import hmac
 import json
 from datetime import UTC, datetime
-from typing import Annotated
+from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, Header, Request
-from sqlalchemy import select, update
+from sqlalchemy import ColumnElement, SQLColumnExpression, case, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.crypto import decrypt
@@ -22,6 +22,7 @@ from app.observability import metrics
 from app.ratelimit import rate_limit
 from app.runs.service import trigger_run
 from app.runs.transition import transition
+from app.stacks.paths import touches_stack
 from app.webhooks.replay import MAX_DELIVERY_ID_LENGTH, record_delivery
 
 router = APIRouter(prefix="/api/v1/webhooks", tags=["webhooks"])
@@ -31,6 +32,12 @@ _log = get_logger("stackd.webhooks")
 
 def _normalize(url: str) -> str:
     return url.removesuffix(".git").rstrip("/")
+
+
+def _normalized_sql(url: SQLColumnExpression[str]) -> ColumnElement[str]:
+    """`_normalize`, in SQL."""
+    stripped = case((func.right(url, 4) == ".git", func.left(url, -4)), else_=url)
+    return func.rtrim(stripped, "/")
 
 
 async def _candidate_stacks(session: AsyncSession, payload: dict) -> list[Stack]:
@@ -45,8 +52,20 @@ async def _candidate_stacks(session: AsyncSession, payload: dict) -> list[Stack]
         )
         if u
     }
-    all_stacks = (await session.execute(select(Stack))).scalars().all()
-    return [s for s in all_stacks if _normalize(s.repo_url) in urls and s.webhook_secret_encrypted]
+    if not urls:
+        return []
+    return list(
+        (
+            await session.execute(
+                select(Stack).where(
+                    _normalized_sql(Stack.repo_url).in_(urls),
+                    Stack.webhook_secret_encrypted.is_not(None),
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
 
 
 def _verify(secret: str, body: bytes, signature: str | None) -> bool:
@@ -60,17 +79,20 @@ def _is_zero_sha(sha: str) -> bool:
     return bool(sha) and not sha.strip("0")
 
 
-def _touches_root(payload: dict, project_root: str) -> bool:
-    if project_root in (".", ""):
-        return True
+def _changed_paths(payload: dict[str, Any]) -> list[str]:
+    """Every path a push touched. A rename is listed as its old path removed and its new path added,
+    so both count: a file moved out of the stack still concerns it."""
     changed: list[str] = []
     for commit in payload.get("commits", []):
         for key in ("added", "modified", "removed"):
             changed.extend(commit.get(key, []))
+    return changed
+
+
+def _push_concerns(changed: list[str], stack: Stack) -> bool:
     if not changed:
         return True  # no file info → be conservative and run
-    root = project_root.rstrip("/") + "/"
-    return any(path.startswith(root) for path in changed)
+    return touches_stack(changed, stack.project_root, stack.trigger_paths)
 
 
 @router.post("/github", dependencies=[Depends(rate_limit("webhook", per_minute=120, burst=40))])
@@ -139,6 +161,7 @@ async def github_webhook(
             else {"head_sha": after}
         )
         now = datetime.now(UTC)
+        changed = _changed_paths(payload)
         for stack in stacks:
             # Guarded on the pushed branch when written, so an env re-pointed meanwhile gets
             # neither this head nor a run; the row lock it takes keeps them on it until commit.
@@ -155,7 +178,7 @@ async def github_webhook(
                 .scalars()
                 .all()
             )
-            if deleted or not env_ids or not _touches_root(payload, stack.project_root):
+            if deleted or not env_ids or not _push_concerns(changed, stack):
                 continue
             envs = (
                 (await session.execute(select(Environment).where(Environment.id.in_(env_ids))))
@@ -207,11 +230,16 @@ async def github_webhook(
                     triggered += 1
             await session.commit()
         elif action == "closed" and pr_number is not None:
-            # Best-effort: cancel still-in-flight proposed runs for this PR (§18).
+            # Best-effort: cancel still-in-flight proposed runs for this PR (§18). A PR number is
+            # only unique within its repository: scope to the stacks this delivery authenticated.
+            stack_envs = select(Environment.id).where(
+                Environment.stack_id.in_([stack.id for stack in stacks])
+            )
             stale = (
                 (
                     await session.execute(
                         select(Run).where(
+                            Run.environment_id.in_(stack_envs),
                             Run.pr_number == pr_number,
                             Run.vcs_provider == "github",
                             Run.type == RunType.proposed,

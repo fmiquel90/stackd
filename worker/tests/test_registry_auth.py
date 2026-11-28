@@ -256,7 +256,7 @@ def test_runner_pulls_with_the_matching_credential_and_logs_none(
         def image_exists(self, ref: str) -> bool:
             return False
 
-        def pull(self, ref: str, credential: RegistryCredential | None = None) -> None:
+        def pull(self, ref: str, credential: RegistryCredential | None = None, **_kw: Any) -> None:
             pulls.append((ref, credential))
 
     monkeypatch.setenv("STACKD_RUNNER", "docker")

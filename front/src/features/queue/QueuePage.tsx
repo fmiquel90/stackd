@@ -6,6 +6,7 @@ import { RunStateBadge, StateBadge } from "@/identity/StateBadge";
 import { age, formatDuration } from "@/lib/time";
 import { Banner, EmptyState, Input, Skeleton, Table, Td, Th } from "@/ui/primitives";
 import { blockerOf, matches, STUCK_AFTER_S, useQueueRows, waitedSeconds, type QueueRow } from "./queueModel";
+import { shortId } from "@/lib/ids";
 
 // The execution queue (DESIGN §5.5) — "why isn't my run starting?". Two machine groups and a single
 // line for the runs that wait on a human (they are not in the machine queue).
@@ -13,7 +14,7 @@ import { blockerOf, matches, STUCK_AFTER_S, useQueueRows, waitedSeconds, type Qu
 function EnvName({ row }: { row: QueueRow }) {
   const { list } = useSpaces();
   if (!row.stack || !row.env)
-    return <span className="text-muted">environment {row.entry.environment_id.slice(0, 8)}</span>;
+    return <span className="text-muted">environment {shortId(row.entry.environment_id)}</span>;
   const space = list.find((s) => s.id === row.stack!.space_id);
   const label = (
     <>
@@ -35,7 +36,7 @@ function RunCell({ row }: { row: QueueRow }) {
   return (
     <span className="inline-flex items-baseline gap-2 md:flex md:flex-col md:gap-0">
       <Link to={`/runs/${row.entry.run_id}`} className="cell-link font-data text-[12px]">
-        {row.entry.run_id.slice(0, 8)}
+        {shortId(row.entry.run_id)}
       </Link>
       {row.run && <span className="font-data text-[11px] text-muted">{row.run.type}</span>}
     </span>
@@ -123,7 +124,9 @@ export function QueuePage() {
             {r.worker.name}
           </Link>
         ) : (
-          <span className="font-data text-[12px] text-muted">{r.entry.worker_id?.slice(0, 8) ?? "—"}</span>
+          <span className="font-data text-[12px] text-muted">
+            {r.entry.worker_id ? shortId(r.entry.worker_id) : "—"}
+          </span>
         ),
     },
     {
@@ -160,9 +163,17 @@ export function QueuePage() {
     {
       header: "Why it has not started",
       cell: (r) => {
-        const b = blockerOf(r, rows, onlineWorkers);
+        const b = blockerOf(r, rows, onlineWorkers, now);
         return (
           <span className="text-[13px]">
+            {b.icon && (
+              <b.icon
+                size={13}
+                strokeWidth={1.5}
+                aria-hidden
+                className="mr-1 inline align-[-2px] text-muted"
+              />
+            )}
             {b.text}
             {b.link && (
               <>

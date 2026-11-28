@@ -160,7 +160,7 @@ export function ModifierChips({
         key="stale"
         title={
           attenuated
-            ? "The branch moved ahead, but not this folder"
+            ? "The branch moved ahead, but not in this stack's paths"
             : n
               ? `The branch is ${n} commit${n > 1 ? "s" : ""} ahead of the deployed commit`
               : "The branch is ahead of the deployed commit"
@@ -187,6 +187,12 @@ export function ModifierChips({
         }
       >
         {modifiers.drift === "error" ? "DRIFT CHECK FAILED" : "DRIFT"}
+      </Badge>,
+    );
+  if (modifiers.outOfBand)
+    chips.push(
+      <Badge key="oob" glyph="⇄" title="The state was changed outside Stackd since its last observation">
+        {compact ? "OUTSIDE" : "CHANGED OUTSIDE"}
       </Badge>,
     );
   if (modifiers.locked)

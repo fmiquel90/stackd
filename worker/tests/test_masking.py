@@ -100,8 +100,8 @@ def test_forgets_are_counted_from_the_plan_json() -> None:
             {"address": "a.z", "change": {"actions": ["create"]}},
         ]
     }
-    assert _forgets_in_plan(json.dumps(doc)) == 2
-    assert _forgets_in_plan("not json") == 0
+    assert _forgets_in_plan(doc) == 2
+    assert _forgets_in_plan({}) == 0
 
 
 def test_first_error_picks_the_diagnostic_summary() -> None:
@@ -228,3 +228,37 @@ def test_mask_plan_json_hides_sensitive_values_and_keeps_the_rest() -> None:
 
 def test_mask_plan_json_masks_a_non_json_document_as_text() -> None:
     assert mask_plan_json("Error: pw-new is wrong", Masker(["pw-new"])) == "Error: *** is wrong"
+
+
+def test_masker_masks_each_occurrence_and_keeps_the_rest() -> None:
+    m = Masker(["secret"])
+    assert m.mask("secretsecret and secret.") == "****** and ***."
+    assert m.mask("nothing here") == "nothing here"
+
+
+def test_masker_secrets_are_literals_not_patterns() -> None:
+    m = Masker(["a.b", "(x|y)", "\\d+"])
+    assert m.mask("axb a.b x (x|y) 42 \\d+") == "axb *** x *** 42 ***"
+
+
+def test_masker_masks_overlapping_secrets_whole() -> None:
+    # Two secrets sharing characters: neither stays partly readable, whichever comes first.
+    assert Masker(["bcd", "ab"]).mask("[abcd]") == "[***]"
+    assert Masker(["ab", "bcd"]).mask("[abcde]") == "[***e]"
+    assert Masker(["aa"]).mask("aaa") == "***"
+
+
+def test_masker_without_secrets_changes_nothing() -> None:
+    m = Masker(["", ""])
+    assert m.mask("text") == "text" and not m.scan("text")
+
+
+def test_masker_scan_finds_any_secret() -> None:
+    m = Masker(["s3cr3t", "tok_ABC"])
+    assert m.scan("x tok_ABC y") and not m.scan("tok_AB s3cr3")
+
+
+def test_masker_with_many_secrets() -> None:
+    secrets = [f"secret-{i:04d}-value" for i in range(500)]
+    line = "x" * 10_000 + secrets[123] + "y" * 10_000
+    assert Masker(secrets).mask(line) == "x" * 10_000 + "***" + "y" * 10_000

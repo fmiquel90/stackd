@@ -13,6 +13,7 @@ from typing import Any
 import pytest
 
 import agent.main as main
+from agent import workspace
 from agent.workspace import Workspace
 
 
@@ -81,6 +82,97 @@ def test_unknown_pinned_commit_fails_at_fetch(tmp_path: Path, repo: dict) -> Non
         _clone(tmp_path, repo, "0" * 40, branch="main")
 
 
+# --- one download, whatever the server -----------------------------------------------------------
+
+
+def _record_git(monkeypatch: pytest.MonkeyPatch) -> list[list[str]]:
+    """Every git command the workspace runs, still run for real."""
+    calls: list[list[str]] = []
+    real = workspace._run_git
+
+    def spy(args: list[str], cwd: Path, env: dict[str, str]) -> tuple[int, str]:
+        calls.append(args)
+        return real(args, cwd, env)
+
+    monkeypatch.setattr(workspace, "_run_git", spy)
+    return calls
+
+
+def _has_object(ws: Workspace, sha: str) -> bool:
+    found = subprocess.run(["git", "cat-file", "-e", sha], cwd=ws.path / "repo")
+    return found.returncode == 0
+
+
+def test_a_pinned_commit_is_the_only_one_downloaded(
+    tmp_path: Path, repo: dict, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # Not a shallow clone of the default branch first, then the pinned commit: that one only.
+    calls = _record_git(monkeypatch)
+    ws = _clone(tmp_path, repo, repo["c1"], branch="main")
+    assert ws.head_sha() == repo["c1"]
+    assert not _has_object(ws, repo["c3"])  # the default branch's tip never came down
+    network = [c for c in calls if {"clone", "fetch"} & set(c)]
+    assert len(network) == 1 and "fetch" in network[0] and network[0][-1] == repo["c1"]
+    # A stalled transfer is abandoned (http(s)), as for the branch clone.
+    assert "http.lowSpeedLimit=1000" in network[0] and "http.lowSpeedTime=60" in network[0]
+
+
+def test_unpinned_clone_abandons_a_stalled_transfer(
+    tmp_path: Path, repo: dict, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    calls = _record_git(monkeypatch)
+    _clone(tmp_path, repo, None, branch="main")
+    [clone] = [c for c in calls if "clone" in c]
+    assert "http.lowSpeedLimit=1000" in clone and "http.lowSpeedTime=60" in clone
+
+
+@pytest.fixture
+def no_sha_wants(repo: dict, monkeypatch: pytest.MonkeyPatch) -> None:
+    """A server that serves no unadvertised commit by its SHA: protocol v0 without
+    uploadpack.allowReachableSHA1InWant (protocol v2 always serves a reachable one)."""
+    src = Path(repo["url"].removeprefix("file://"))
+    _git(src, "config", "uploadpack.allowReachableSHA1InWant", "false")
+    _git(src, "config", "uploadpack.allowAnySHA1InWant", "false")
+    monkeypatch.setenv("GIT_CONFIG_PARAMETERS", "'protocol.version=0'")
+
+
+@pytest.mark.usefixtures("no_sha_wants")
+def test_a_server_refusing_sha_wants_still_gets_the_pinned_commit(
+    tmp_path: Path, repo: dict
+) -> None:
+    ws = _clone(tmp_path, repo, repo["c1"], branch="main")
+    assert ws.head_sha() == repo["c1"]
+
+
+@pytest.mark.usefixtures("no_sha_wants")
+def test_a_commit_the_server_does_not_have_fails_with_its_refusal(
+    tmp_path: Path, repo: dict
+) -> None:
+    with pytest.raises(RuntimeError, match=r"^git fetch 0{40} failed: .*unadvertised object"):
+        _clone(tmp_path, repo, "0" * 40, branch="main")
+
+
+@pytest.fixture
+def sha256_repo(tmp_path: Path) -> dict[str, str]:
+    src = tmp_path / "src256"
+    if subprocess.run(["git", "init", "-q", "--object-format=sha256", str(src)]).returncode:
+        pytest.skip("this git has no SHA-256 repositories")
+    (src / "main.tf").write_text("# c1\n")
+    _git(src, "add", "-A")
+    _git(src, "commit", "-q", "-m", "c1")
+    return {"url": f"file://{src}", "sha": _git(src, "rev-parse", "HEAD")}
+
+
+@pytest.mark.parametrize("pin", ["sha", "ref"])
+def test_a_sha256_repository_is_fetched_in_its_own_object_format(
+    tmp_path: Path, sha256_repo: dict, pin: str
+) -> None:
+    commit = sha256_repo["sha"] if pin == "sha" else "HEAD"
+    ws = Workspace(str(tmp_path / "ws"), f"job-{pin}")
+    ws.git_clone(sha256_repo["url"], commit, ".")
+    assert ws.head_sha() == sha256_repo["sha"]
+
+
 # --- handlers ----------------------------------------------------------------------------------
 
 
@@ -110,6 +202,9 @@ class _FakeWorkspace:
     def git_clone(self, repo_url: str, commit_sha: str | None, *args: Any, **kw: Any) -> Path:
         self.clones.append((commit_sha, kw.get("branch")))
         return self.root
+
+    def repo_credentials(self, *args: Any, **kw: Any) -> AbstractContextManager[dict]:
+        return nullcontext({})
 
     def head_sha(self) -> str:
         return "c" * 40

@@ -1,4 +1,4 @@
-import { useMemo, type ReactNode } from "react";
+import { Fragment, useMemo, type ReactNode } from "react";
 import { ChevronRight } from "lucide-react";
 import { groupByAction, parsePlan, type PlanAction, type PlanResource } from "@/lib/planParse";
 import type { PlanCounts } from "@/lib/runOutcome";
@@ -48,17 +48,33 @@ function lineClass(line: string): string {
   return "text-primary";
 }
 
-function Highlight({ text, query }: { text: string; query: string }) {
-  if (!query) return <>{text}</>;
+/**
+ * A resource address with line-break opportunities only at its structure (after `.` and `/`, before
+ * `[`), so `module.vpc.aws_subnet.private["a"]` wraps between segments, never inside a name.
+ */
+export function addressBreaks(text: string): ReactNode {
+  const parts = text.split(/(?<=[./])|(?=\[)/);
+  if (parts.length < 2) return text;
+  return parts.map((p, i) => (
+    <Fragment key={i}>
+      {i > 0 && <wbr />}
+      {p}
+    </Fragment>
+  ));
+}
+
+function Highlight({ text, query, address }: { text: string; query: string; address?: boolean }) {
+  const show = address ? addressBreaks : (t: string) => t;
+  if (!query) return <>{show(text)}</>;
   const i = text.toLowerCase().indexOf(query.toLowerCase());
-  if (i < 0) return <>{text}</>;
+  if (i < 0) return <>{show(text)}</>;
   return (
     <>
-      {text.slice(0, i)}
+      {show(text.slice(0, i))}
       <mark className="rounded-[1px] bg-raised text-primary outline outline-1 outline-ring">
-        {text.slice(i, i + query.length)}
+        {show(text.slice(i, i + query.length))}
       </mark>
-      {text.slice(i + query.length)}
+      {show(text.slice(i + query.length))}
     </>
   );
 }
@@ -102,15 +118,20 @@ function ResourceRow({
 }) {
   const a = ACTION[r.action];
   const header = (
-    <span className="flex min-w-0 items-baseline gap-2">
-      <span aria-hidden className={cn("w-4 shrink-0 font-data", a.text)}>
-        {a.glyph}
+    <span className="flex min-w-0 flex-col">
+      <span className="flex min-w-0 items-baseline gap-2">
+        <span aria-hidden className={cn("w-4 shrink-0 font-data", a.text)}>
+          {a.glyph}
+        </span>
+        {/* Breaks at the address structure; overflow-wrap only for a single segment wider than the row. */}
+        <span className="min-w-0 font-data [overflow-wrap:anywhere]">
+          <Highlight text={r.address} query={query} address />
+        </span>
+        <span className="min-w-0 truncate text-[12px] text-muted max-sm:hidden">{hint(r)}</span>
+        <span className="sr-only">{a.label.toLowerCase()}</span>
       </span>
-      <span className="min-w-0 font-data break-all">
-        <Highlight text={r.address} query={query} />
-      </span>
-      <span className="truncate text-[12px] text-muted">{hint(r)}</span>
-      <span className="sr-only">{a.label.toLowerCase()}</span>
+      {/* < 640 px the hint takes its own line under the address instead of squeezing it. */}
+      <span className="truncate pl-6 text-[12px] text-muted sm:hidden">{hint(r)}</span>
     </span>
   );
   if (open) {

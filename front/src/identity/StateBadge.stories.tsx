@@ -39,6 +39,8 @@ export const Modifiers = () => (
     <ModifierChips modifiers={{ stale: { commitsAhead: 2, affectsProjectRoot: false } }} />
     <ModifierChips modifiers={{ drift: "drifted" }} />
     <ModifierChips modifiers={{ drift: "error" }} />
+    <ModifierChips modifiers={{ outOfBand: true }} />
+    <ModifierChips modifiers={{ outOfBand: true }} compact />
     <ModifierChips modifiers={{ locked: true }} />
     <ModifierChips modifiers={{ pr: true }} />
     <div className="flex items-center gap-2">
@@ -49,6 +51,7 @@ export const Modifiers = () => (
           fallback: true,
           stale: { commitsAhead: 1, affectsProjectRoot: true },
           drift: "drifted",
+          outOfBand: true,
           locked: true,
         }}
       />

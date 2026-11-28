@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import struct
+import time
 from collections.abc import Callable, Iterator
 from typing import Any
 
@@ -17,6 +18,7 @@ import httpx
 from agent.registry_auth import RegistryCredential
 
 DEFAULT_SOCKET = "/var/run/docker.sock"
+DEFAULT_PULL_TIMEOUT_SECONDS = 600
 
 
 class DockerError(RuntimeError):
@@ -53,23 +55,30 @@ def demux(chunks: Iterator[bytes]) -> Iterator[tuple[int, bytes]]:
 
 
 class LineSplitter:
-    """Reassemble lines across frames, per stream (a frame can end mid-line)."""
+    """Reassemble lines across frames, per stream (a frame can end mid-line). A line's pieces are
+    kept apart until its newline arrives, then joined once: a multi-megabyte line (`show -json`
+    prints the whole plan on one) costs linear time, not a re-copy of everything so far per frame."""
 
     def __init__(self, emit: Callable[[int, str], None]) -> None:
         self._emit = emit
-        self._partial: dict[int, bytes] = {}
+        self._partial: dict[int, list[bytes]] = {}
 
     def feed(self, kind: int, data: bytes) -> None:
-        data = self._partial.pop(kind, b"") + data
-        *lines, rest = data.split(b"\n")
-        for line in lines:
+        if b"\n" not in data:
+            if data:
+                self._partial.setdefault(kind, []).append(data)
+            return
+        first, *lines, rest = data.split(b"\n")
+        pieces = self._partial.pop(kind, [])
+        pieces.append(first)
+        for line in (b"".join(pieces), *lines):
             self._emit(kind, line.decode("utf-8", errors="replace"))
         if rest:
-            self._partial[kind] = rest
+            self._partial[kind] = [rest]
 
     def flush(self) -> None:
-        for kind, rest in sorted(self._partial.items()):
-            self._emit(kind, rest.decode("utf-8", errors="replace"))
+        for kind, pieces in sorted(self._partial.items()):
+            self._emit(kind, b"".join(pieces).decode("utf-8", errors="replace"))
         self._partial.clear()
 
 
@@ -94,25 +103,36 @@ class DockerEngine:
     def image_exists(self, ref: str) -> bool:
         return self._http.get(f"/images/{ref}/json").status_code == 200
 
-    def pull(self, ref: str, credential: RegistryCredential | None = None) -> None:
+    def pull(
+        self,
+        ref: str,
+        credential: RegistryCredential | None = None,
+        *,
+        timeout: float = DEFAULT_PULL_TIMEOUT_SECONDS,
+    ) -> None:
         """Pull `ref` (`repo@sha256:…`): the daemon verifies the content against the digest. With
         a `credential`, it authenticates to the registry through `X-Registry-Auth` — sent to the
-        local daemon only, and masked out of any error raised here."""
+        local daemon only, and masked out of any error raised here. Past `timeout` seconds the
+        pull fails: a stalled registry must not hold the job (and its credentials) forever."""
         repo, _, digest = ref.partition("@")
         headers = {"X-Registry-Auth": credential.header()} if credential else None
         error: str | None = None
+        give_up = time.monotonic() + timeout
         try:
             with self._http.stream(
                 "POST",
                 "/images/create",
                 params={"fromImage": repo, "tag": digest},
                 headers=headers,
-                timeout=None,
+                # A silent daemon trips the read timeout; a slow, chatty one the check per line.
+                timeout=httpx.Timeout(timeout, connect=min(timeout, 30.0)),
             ) as resp:
                 self._check(resp, f"pull {ref}")
                 # Progress messages, one JSON object per line; the pull ends with the stream. A
                 # failure after the 200 (access denied, unknown manifest) arrives as `{"error"}`.
                 for line in resp.iter_lines():
+                    if time.monotonic() > give_up:
+                        raise httpx.ReadTimeout("pull too slow")
                     try:
                         msg = json.loads(line)
                     except ValueError:
@@ -121,12 +141,21 @@ class DockerEngine:
                         error = str(msg["error"])
             if error is None and not self.image_exists(ref):
                 error = "the pull did not produce the image"
+        except httpx.TimeoutException:
+            error = f"timed out after {timeout:.0f}s"
         except (DockerError, httpx.HTTPError) as exc:
             error = str(exc)
         if error is not None:
             if credential is not None:
                 error = credential.mask(error)
             raise DockerError(f"docker pull {ref} failed: {error}")
+
+    def containers(self, label: str) -> list[dict[str, Any]]:
+        """Every container, running or not, carrying the label `label`."""
+        resp = self._http.get(
+            "/containers/json", params={"all": "1", "filters": json.dumps({"label": [label]})}
+        )
+        return list(self._check(resp, "list containers").json())
 
     def create(self, name: str, spec: dict[str, Any]) -> str:
         resp = self._http.post("/containers/create", params={"name": name}, json=spec)

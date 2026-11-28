@@ -55,12 +55,25 @@ export function fourEyesOf(
   const because: string[] = [];
   if (!tier) because.push(`tier ${env.tier} is missing from the catalog (four-eyes enforced)`);
   else if (tier.requires_four_eyes) because.push(`tier ${env.tier}`);
-  if (env.protected) because.push("protected environment");
-  if (env.require_second_pair_of_eyes) because.push("environment requires a second pair of eyes");
+  if (env.protected) because.push("protected");
+  if (env.require_second_pair_of_eyes) because.push("second pair of eyes");
   // A human triggerer: a manual run's, or a rollout member's — the rollout's creator, whom the API
   // also holds to four-eyes (api/app/runs/service.py `confirm_run`, SPECS §2.4).
   const human = run.triggered_by === "manual" || run.triggered_by === "rollout" ? run.trigger_user_id : null;
   return { required: because.length > 0, because, triggererId: human };
+}
+
+/** Why the viewer fails `can_apply` on the env (role, then tier), from instance permissions. */
+export function applyReasonsOn(env: Environment, me: User): string[] {
+  const reasons: string[] = [];
+  if (me.disabled) reasons.push("your account is disabled");
+  if (!APPROVERS.includes(me.role)) reasons.push("approver role required");
+  else if (me.allowed_tiers.length === 0) reasons.push("no allowed tiers — you cannot confirm applies");
+  else if (!me.allowed_tiers.includes(env.tier))
+    reasons.push(
+      `tier ${env.tier} is not in your allowed tiers (${[...me.allowed_tiers].sort().join(", ")})`,
+    );
+  return reasons;
 }
 
 export function runRights(run: Run, env: Environment, tier: TierDef | undefined, me: User): RunRights {
@@ -73,15 +86,7 @@ export function runRights(run: Run, env: Environment, tier: TierDef | undefined,
   if (run.used_secret_fallback && !env.allow_fallback_apply)
     blockedForAll.push("a secret came from a fallback — apply is disabled (allow_fallback_apply is off)");
 
-  const confirmReasons: string[] = [];
-  if (me.disabled) confirmReasons.push("your account is disabled");
-  if (!APPROVERS.includes(me.role)) confirmReasons.push("approver role required");
-  else if (me.allowed_tiers.length === 0)
-    confirmReasons.push("no allowed tiers — you cannot confirm applies");
-  else if (!me.allowed_tiers.includes(env.tier))
-    confirmReasons.push(
-      `tier ${env.tier} is not in your allowed tiers (${[...me.allowed_tiers].sort().join(", ")})`,
-    );
+  const confirmReasons = applyReasonsOn(env, me);
   if (run.type === "destroy" && !me.can_destroy) confirmReasons.push("destroy permission required");
   confirmReasons.push(...blockedForAll);
   if (fourEyes.required && fourEyes.triggererId === me.id)

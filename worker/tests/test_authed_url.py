@@ -4,9 +4,7 @@ it in any form (invariant 3). Mirrors the API cases in api/tests/test_repo_safet
 from __future__ import annotations
 
 import socket
-import subprocess
 from pathlib import Path
-from typing import Any
 from urllib.parse import quote, unquote, urlsplit
 
 import pytest
@@ -59,32 +57,35 @@ def test_authed_url_leaves_other_urls_unchanged(repo_url: str, token: str | None
     assert _authed_url(repo_url, token) == repo_url
 
 
+@pytest.mark.parametrize("commit", [None, "a" * 40])
 @pytest.mark.parametrize("token", _SPECIAL_TOKENS)
 def test_clone_error_masks_both_token_forms(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, token: str
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, token: str, commit: str | None
 ) -> None:
     """git fails and echoes the token in both forms it holds: inside the authed URL it was given
-    (percent-encoded) and decoded from it (raw)."""
+    (percent-encoded) and decoded from it (raw). The branch clone and the pinned-commit fetch."""
     urls: list[str] = []
 
-    def fake_run(argv: list[str], **_: Any) -> subprocess.CompletedProcess[str]:
-        url = next(a for a in argv if "://" in a)
+    def fake_git(args: list[str], cwd: Path, env: dict[str, str]) -> tuple[int, str]:
+        url = next((a for a in args if "x-access-token" in a), None)
+        if url is None:  # init, remote add (the token-free URL)
+            return 0, ""
         urls.append(url)
         raw = unquote(urlsplit(url).password or "")
-        err = f"fatal: unable to access '{url}/': 403 for {raw}"
-        return subprocess.CompletedProcess(argv, 128, "", err)
+        return 128, f"fatal: unable to access '{url}/': 403 for {raw}"
 
-    monkeypatch.setattr(workspace.subprocess, "run", fake_run)
+    monkeypatch.setattr(workspace, "_run_git", fake_git)
 
     with pytest.raises(RuntimeError) as exc:
         Workspace(str(tmp_path), "job").git_clone(
-            "https://git.example.com/org/repo.git", None, ".", token=token
+            "https://git.example.com/org/repo.git", commit, ".", token=token
         )
     [url] = urls
     assert unquote(urlsplit(url).password or "") == token  # git really got the token
     # Exact match: no form of the token survives, not even the tail of a partially masked one.
+    what = f"fetch {commit}" if commit else "clone"
     assert str(exc.value) == (
-        "git clone failed: fatal: unable to access "
+        f"git {what} failed: fatal: unable to access "
         "'https://x-access-token:•••@git.example.com/org/repo.git/': 403 for •••"
     )
 

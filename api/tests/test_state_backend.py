@@ -484,6 +484,247 @@ async def test_post_requires_the_holders_lock_id_while_locked(client: httpx.Asyn
         assert await _serials() == [2, 1]
 
 
+async def _lock_row(env_id: str) -> tuple[str, str | None] | None:
+    """The env's state lock as (lock_id, holder run id), or None."""
+    from app.db import SessionLocal
+    from app.models.state import StateLock
+
+    async with SessionLocal() as s:
+        lock = await s.get(StateLock, uuid.UUID(env_id))
+        return None if lock is None else (lock.lock_id, str(lock.run_id) if lock.run_id else None)
+
+
+async def _lock_releases(env_id: str) -> list[dict]:
+    from sqlalchemy import select
+
+    from app.db import SessionLocal
+    from app.models.audit import AuditEvent
+
+    async with SessionLocal() as s:
+        rows = await s.execute(
+            select(AuditEvent).where(
+                AuditEvent.action == "state.lock_released",
+                AuditEvent.target_id == uuid.UUID(env_id),
+            )
+        )
+        return [{"actor_kind": e.actor_kind.value, **(e.context or {})} for e in rows.scalars()]
+
+
+async def _lose_worker(run_id: str, *, claimed_ago_seconds: int) -> int:
+    """Mark the run's worker long offline, backdate its claim, run the worker-lost detector."""
+    from datetime import UTC, datetime, timedelta
+
+    from sqlalchemy import select, update
+
+    from app.db import SessionLocal
+    from app.models.run import Run
+    from app.models.worker import Worker
+    from app.scheduler.tasks import detect_worker_lost
+
+    now = datetime.now(UTC)
+    run = uuid.UUID(run_id)
+    async with SessionLocal() as s:
+        worker = select(Run.worker_id).where(Run.id == run).scalar_subquery()
+        await s.execute(
+            update(Worker)
+            .where(Worker.id == worker)
+            .values(last_heartbeat_at=now - timedelta(hours=1))
+        )
+        await s.execute(
+            update(Run)
+            .where(Run.id == run)
+            .values(claimed_at=now - timedelta(seconds=claimed_ago_seconds))
+        )
+        await s.commit()
+    async with SessionLocal() as s:
+        return await detect_worker_lost(s, datetime.now(UTC))
+
+
+async def test_lost_plan_releases_its_state_lock(client: httpx.AsyncClient) -> None:
+    """A worker lost mid-plan never UNLOCKs: the lock its run took is released when worker_lost
+    fails the run (same transaction, audited), so the env's next run can lock again instead of
+    failing with 423 until an admin force-unlocks (§11.2)."""
+    from app.config import get_settings
+    from app.statebackend.tokens import mint_state_token
+
+    admin = await login(client, "admin")
+    wh = await register_worker(client, admin, "state-lost-plan-pool")
+    stack = await make_stack(client, admin, "state-lost-plan")
+    env_id = await make_env(client, admin, stack, "dev", "dev")
+    run = (await client.post(f"/api/v1/environments/{env_id}/runs", headers=admin, json={})).json()
+    plan = (await client.post("/worker/v1/jobs/claim", headers=wh)).json()
+    token = plan["backend"]["password"]
+    await event(client, wh, run["id"], "phase_started", phase="planning")
+    url = f"/state/v1/{env_id}/lock"
+    held = json.dumps({"ID": "lost-plan-lock", "Operation": "OperationTypePlan"})
+
+    locked = await client.request("LOCK", url, headers=_basic(token), content=held)
+    assert locked.status_code == 200
+    assert await _lock_row(env_id) == ("lost-plan-lock", run["id"])
+
+    lost = await _lose_worker(
+        run["id"], claimed_ago_seconds=get_settings().stackd_worker_lost_seconds + 60
+    )
+    assert lost == 1
+    detail = (await client.get(f"/api/v1/runs/{run['id']}", headers=admin)).json()
+    assert (detail["state"], detail["error"]) == ("failed", "worker_lost")
+    assert await _lock_row(env_id) is None
+    assert await _lock_releases(env_id) == [
+        {
+            "actor_kind": "system",
+            "reason": "run_ended",
+            "run_id": run["id"],
+            "run_state": "failed",
+            "lock_id": "lost-plan-lock",
+        }
+    ]
+
+    # The env is free again; the lost holder's late UNLOCK can't free the new holder's lock.
+    other = mint_state_token(environment_id=uuid.UUID(env_id), scope="rw", ttl_seconds=3600)
+    nxt = json.dumps({"ID": "next-lock"})
+    assert (
+        await client.request("LOCK", url, headers=_basic(other), content=nxt)
+    ).status_code == 200
+    late = await client.request("UNLOCK", url, headers=_basic(token), content=held)
+    assert late.status_code == 423
+    assert await _lock_row(env_id) == ("next-lock", None)
+
+
+async def test_lost_apply_releases_its_lock_only_after_the_apply_window(
+    client: httpx.AsyncClient,
+) -> None:
+    """An apply's lock is released only when its run is reclaimed — after the apply window, when
+    its `rw` token has expired — never while a healthy long apply may still be writing state."""
+    from app.config import get_settings
+
+    settings = get_settings()
+    admin = await login(client, "admin")
+    wh = await register_worker(client, admin, "state-lost-apply-pool")
+    stack = await make_stack(client, admin, "state-lost-apply")
+    env_id = await make_env(client, admin, stack, "dev", "dev")
+    run_id, apply = await _claim_apply(client, admin, wh, env_id)
+    token = apply["backend"]["password"]
+    await event(client, wh, run_id, "phase_started", phase="applying")
+    held = json.dumps({"ID": "apply-lock", "Operation": "OperationTypeApply"})
+    locked = await client.request(
+        "LOCK", f"/state/v1/{env_id}/lock", headers=_basic(token), content=held
+    )
+    assert locked.status_code == 200
+
+    inside = await _lose_worker(
+        run_id, claimed_ago_seconds=settings.stackd_worker_lost_seconds + 60
+    )
+    assert inside == 0
+    assert await _lock_row(env_id) == ("apply-lock", run_id)
+    assert await _lock_releases(env_id) == []
+
+    past = await _lose_worker(
+        run_id, claimed_ago_seconds=settings.apply_reclaim_window_seconds + 60
+    )
+    assert past == 1
+    assert await _lock_row(env_id) is None
+    [released] = await _lock_releases(env_id)
+    assert (released["run_id"], released["lock_id"]) == (run_id, "apply-lock")
+
+
+async def test_run_end_keeps_a_lock_it_does_not_hold(client: httpx.AsyncClient) -> None:
+    """A run ending releases only its own lock: one taken by a run-less token (import session) or
+    recorded for another run stays, for its holder or the admin force-unlock."""
+    from app.db import SessionLocal
+    from app.models.state import StateLock
+    from app.statebackend.tokens import mint_state_token
+
+    admin = await login(client, "admin")
+    wh = await register_worker(client, admin, "state-keep-lock-pool")
+    stack = await make_stack(client, admin, "state-keep-lock")
+    env_id = await make_env(client, admin, stack, "dev", "dev")
+    url = f"/state/v1/{env_id}/lock"
+
+    async def _failed_run() -> str:
+        run = (
+            await client.post(f"/api/v1/environments/{env_id}/runs", headers=admin, json={})
+        ).json()
+        assert (await client.post("/worker/v1/jobs/claim", headers=wh)).status_code == 200
+        await event(client, wh, run["id"], "phase_started", phase="planning")
+        await event(client, wh, run["id"], "job_failed", phase="plan")
+        detail = (await client.get(f"/api/v1/runs/{run['id']}", headers=admin)).json()
+        assert detail["state"] == "failed"
+        return str(run["id"])
+
+    runless = mint_state_token(environment_id=uuid.UUID(env_id), scope="rw", ttl_seconds=3600)
+    held = json.dumps({"ID": "import-lock", "Operation": "OperationTypeMigrate"})
+    assert (
+        await client.request("LOCK", url, headers=_basic(runless), content=held)
+    ).status_code == 200
+    await _failed_run()
+    assert await _lock_row(env_id) == ("import-lock", None)
+    unlocked = await client.request("UNLOCK", url, headers=_basic(runless), content=held)
+    assert unlocked.status_code == 200
+
+    earlier = await _failed_run()
+    async with SessionLocal() as s:
+        s.add(
+            StateLock(
+                environment_id=uuid.UUID(env_id), lock_id="earlier", run_id=uuid.UUID(earlier)
+            )
+        )
+        await s.commit()
+    await _failed_run()
+    assert await _lock_row(env_id) == ("earlier", earlier)
+    assert await _lock_releases(env_id) == []
+
+
+async def test_state_lock_is_readable_with_its_holder_run(client: httpx.AsyncClient) -> None:
+    """`GET …/state/lock` shows the held lock (§11.2): its holder run and tofu's lock info, so an
+    admin sees who holds it before a force-unlock; null once nothing is held."""
+    admin = await login(client, "admin")
+    bob = await login(client, "bob")
+    wh = await register_worker(client, admin, "state-lock-read-pool")
+    stack = await make_stack(client, admin, "state-lock-read")
+    env_id = await make_env(client, admin, stack, "dev", "dev")
+    url = f"/api/v1/environments/{env_id}/state/lock"
+    assert (await client.get(url, headers=admin)).json() is None
+
+    run = (await client.post(f"/api/v1/environments/{env_id}/runs", headers=admin, json={})).json()
+    plan = (await client.post("/worker/v1/jobs/claim", headers=wh)).json()
+    await event(client, wh, run["id"], "phase_started", phase="planning")
+    info = {
+        "ID": "read-lock",
+        "Operation": "OperationTypePlan",
+        "Info": "",
+        "Who": "runner@worker-1",
+        "Version": "1.12.0",
+        "Created": "2026-11-27T10:00:00.000000Z",
+        "Path": "",
+    }
+    locked = await client.request(
+        "LOCK",
+        f"/state/v1/{env_id}/lock",
+        headers=_basic(plan["backend"]["password"]),
+        content=json.dumps(info),
+    )
+    assert locked.status_code == 200
+
+    for headers in (admin, bob):  # any member reads it; the force-unlock stays admin-only
+        got = await client.get(url, headers=headers)
+        assert got.status_code == 200, got.text
+        body = got.json()
+        assert body.pop("locked_at")
+        assert body == {
+            "lock_id": "read-lock",
+            "run_id": run["id"],
+            "operation": "OperationTypePlan",
+            "who": "runner@worker-1",
+            "version": "1.12.0",
+            "created": "2026-11-27T10:00:00.000000Z",
+            "info": None,
+        }
+
+    assert (await client.delete(url, headers=bob)).status_code == 403
+    assert (await client.delete(url, headers=admin)).status_code == 204
+    assert (await client.get(url, headers=admin)).json() is None
+
+
 def test_created_bucket_gets_versioning_and_encryption() -> None:
     """§11.3: a bucket the API creates has versioning ON and default encryption."""
     from app.statebackend.store import _client, _ensure_bucket
@@ -536,7 +777,12 @@ def test_s3_client_credentials(monkeypatch) -> None:  # type: ignore[no-untyped-
     from app.statebackend import store
 
     seen: list[dict] = []
-    monkeypatch.setattr(store.boto3, "client", lambda *a, **kw: seen.append(kw))
+
+    class _Session:
+        def client(self, *_a: object, **kw: object) -> None:
+            seen.append(kw)
+
+    monkeypatch.setattr(store.boto3.session, "Session", _Session)
 
     def settings(**kw):  # type: ignore[no-untyped-def]
         base = {
@@ -549,15 +795,15 @@ def test_s3_client_credentials(monkeypatch) -> None:  # type: ignore[no-untyped-
         return SimpleNamespace(**{**base, **kw})
 
     monkeypatch.setattr(store, "get_settings", lambda: settings(is_production=True))
-    store._client()
+    store._build_client()
     assert "aws_access_key_id" not in seen[-1]
     monkeypatch.setattr(
         store,
         "get_settings",
         lambda: settings(is_production=True, s3_access_key="AK", s3_secret_key="SK"),
     )
-    store._client()
+    store._build_client()
     assert seen[-1]["aws_access_key_id"] == "AK"
     monkeypatch.setattr(store, "get_settings", lambda: settings())
-    store._client()
+    store._build_client()
     assert seen[-1]["aws_access_key_id"] == "test"

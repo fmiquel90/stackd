@@ -7,7 +7,9 @@ What each container sees:
 
 - tofu and **platform** hooks: the job's workspace (the checkout, plus the OIDC token file and the
   plan job's saved plan while a command that needs them runs);
-- **repo** hooks (untrusted, §8.3): the checkout only.
+- **repo** hooks (untrusted, §8.3): the checkout only;
+- the worker's provider plugin cache (`STACKD_PLUGIN_CACHE_DIR`), when set: writable for `init`,
+  read-only for the other tofu commands and platform hooks, absent for repo hooks.
 
 The workspace is mounted at the same path it has on the agent's side, so every path the agent hands
 a command (the token file, `-out=`, the cwd) is valid as is. Nothing of the agent's own environment
@@ -27,6 +29,7 @@ from typing import Any
 
 from agent.cancel import current as current_cancel
 from agent.docker_engine import DockerEngine, LineSplitter
+from agent.orphans import JOB_LABEL, WORKSPACE_LABEL
 
 # The runner images' user (deploy/images): a root agent hands the workspace to it.
 RUNNER_UID = 10001
@@ -44,15 +47,6 @@ class DockerLimits:
     tmp_size: str = "1g"  # the /tmp tmpfs (HOME): the rest of the root filesystem is read-only
 
 
-def _chown_tree(root: Path, uid: int, gid: int) -> None:
-    """Hand the workspace to the runner image's user. Never follows a symlink: a link a command
-    planted in the checkout can't redirect the chown out of the workspace."""
-    os.chown(root, uid, gid, follow_symlinks=False)
-    for dirpath, dirnames, filenames in os.walk(root, followlinks=False):
-        for name in dirnames + filenames:
-            os.chown(os.path.join(dirpath, name), uid, gid, follow_symlinks=False)
-
-
 class DockerRunner:
     name = "docker"
 
@@ -65,6 +59,8 @@ class DockerRunner:
         limits: DockerLimits,
         *,
         repo_only: bool = False,
+        plugin_cache: Path | None = None,
+        cache_writable: bool = False,
     ) -> None:
         self._engine = engine
         self._image = image
@@ -72,6 +68,8 @@ class DockerRunner:
         self._job_id = job_id
         self._limits = limits
         self._repo_only = repo_only
+        self._plugin_cache = plugin_cache.resolve() if plugin_cache is not None else None
+        self._cache_writable = cache_writable
 
     def for_repo(self) -> DockerRunner:
         """The runner for an untrusted repo hook: a container that mounts the checkout only."""
@@ -84,15 +82,30 @@ class DockerRunner:
             repo_only=True,
         )
 
+    def for_init(self) -> DockerRunner:
+        """The runner for `init`, the one command that installs providers: the worker's plugin
+        cache, if any, mounted writable. Every other tofu command and platform hook gets it
+        read-only (what `.terraform/providers` links into), repo hooks not at all: no command that
+        runs repo code (a provisioner, `data "external"`) can alter a provider other jobs run."""
+        return DockerRunner(
+            self._engine,
+            self._image,
+            self._workspace,
+            self._job_id,
+            self._limits,
+            plugin_cache=self._plugin_cache,
+            cache_writable=True,
+        )
+
     @property
     def mount(self) -> Path:
         return self._workspace / "repo" if self._repo_only else self._workspace
 
     def _user(self) -> str:
         if os.getuid() == 0:
-            # A root agent's files must not reach a container as root: the workspace goes to the
-            # image's unprivileged user, which the agent (root) can still read and clean up.
-            _chown_tree(self._workspace, RUNNER_UID, RUNNER_UID)
+            # A root agent's files must not reach a container as root: the workspace was handed to
+            # the image's unprivileged user (`Workspace.hand_over`), which the agent (root) can
+            # still read and clean up.
             return f"{RUNNER_UID}:{RUNNER_UID}"
         return f"{os.getuid()}:{os.getgid()}"
 
@@ -103,8 +116,12 @@ class DockerRunner:
             raise RuntimeError(f"command cwd {cwd} is outside the mounted {self.mount}")
         envs = {"HOME": "/tmp", **env}
         lim = self._limits
+        binds = [f"{self.mount}:{self.mount}:rw"]
+        if self._plugin_cache is not None and not self._repo_only:
+            mode = "rw" if self._cache_writable else "ro"
+            binds.append(f"{self._plugin_cache}:{self._plugin_cache}:{mode}")
         host: dict[str, Any] = {
-            "Binds": [f"{self.mount}:{self.mount}:rw"],
+            "Binds": binds,
             "ReadonlyRootfs": True,
             "Tmpfs": {"/tmp": f"rw,nosuid,nodev,size={lim.tmp_size}"},
             "CapDrop": ["ALL"],
@@ -130,7 +147,12 @@ class DockerRunner:
             "User": user,
             "Tty": False,
             "OpenStdin": False,
-            "Labels": {"io.stackd.job": self._job_id, "io.stackd.repo-only": str(self._repo_only)},
+            "Labels": {
+                JOB_LABEL: self._job_id,
+                # What the startup reaper tells an orphan by (agent.orphans): its workspace's lock.
+                WORKSPACE_LABEL: str(self._workspace),
+                "io.stackd.repo-only": str(self._repo_only),
+            },
             "HostConfig": host,
         }
 
@@ -185,11 +207,11 @@ class DockerRunner:
         return self._run(cmd, cwd, env, timeout, lambda _kind, line: on_line(line))
 
     def capture(
-        self, cmd: list[str], cwd: Path, env: dict[str, str]
+        self, cmd: list[str], cwd: Path, env: dict[str, str], *, timeout: int = 2 * 60 * 60
     ) -> subprocess.CompletedProcess[str]:
         out: dict[int, list[str]] = {1: [], 2: []}
         rc, _ = self._run(
-            cmd, cwd, env, 2 * 60 * 60, lambda kind, line: out.setdefault(kind, []).append(line)
+            cmd, cwd, env, timeout, lambda kind, line: out.setdefault(kind, []).append(line)
         )
         return subprocess.CompletedProcess(
             cmd, rc, "\n".join(out[1]) + ("\n" if out[1] else ""), "\n".join(out[2])

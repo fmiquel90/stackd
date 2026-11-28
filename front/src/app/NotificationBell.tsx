@@ -20,6 +20,8 @@ const WHAT: Record<UserNotification["kind"], string> = {
   run_failed: "Run failed",
   comment_reply: "Reply to your thread",
   mention: "You were mentioned",
+  drift_detected: "Drift detected",
+  out_of_band_change: "State changed outside Stackd",
   rollout_paused: "Rollout waiting for someone",
   rollout_succeeded: "Rollout done",
   rollout_failed: "Rollout failed",

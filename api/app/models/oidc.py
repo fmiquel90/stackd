@@ -3,7 +3,7 @@ from __future__ import annotations
 import uuid
 from datetime import datetime
 
-from sqlalchemy import Enum, ForeignKey, Integer, LargeBinary, String
+from sqlalchemy import Enum, ForeignKey, Integer, LargeBinary, String, text
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.dialects.postgresql import UUID as PGUUID
 from sqlalchemy.orm import Mapped, mapped_column
@@ -49,5 +49,10 @@ class CloudIntegration(Base):
     apply_role_arn: Mapped[str] = mapped_column(String)
     region: Mapped[str | None] = mapped_column(String, default=None)
     session_duration: Mapped[int] = mapped_column(Integer, default=3600)
+    # Named AWS profiles (§10.6): {name: {plan_role_arn, apply_role_arn, region}}, validated by
+    # app.oidc.profiles.CloudProfile — replaced whole, never queried per entry.
+    profiles: Mapped[dict[str, dict[str, str | None]]] = mapped_column(
+        JSONB, default=dict, server_default=text("'{}'::jsonb")
+    )
     created_at: Mapped[datetime] = created_at_col()
     updated_at: Mapped[datetime] = updated_at_col()

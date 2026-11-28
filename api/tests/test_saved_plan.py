@@ -4,6 +4,8 @@ terminal. The apply applies exactly it — never a fresh plan."""
 
 from __future__ import annotations
 
+import re
+
 import httpx
 from moto import mock_aws
 
@@ -59,10 +61,18 @@ async def _confirm_and_claim_apply(client, admin, wh, run_id: str) -> dict:
     return job
 
 
+async def _objects(run_id: str) -> list[str]:
+    from app.statebackend.store import list_keys
+
+    return await list_keys(f"artifacts/{run_id}/")
+
+
 async def _stored(run_id: str) -> bytes | None:
     from app.statebackend.store import get_object
 
-    return await get_object(f"artifacts/{run_id}/plan.tfplan")
+    keys = await _objects(run_id)
+    assert len(keys) <= 1, keys
+    return await get_object(keys[0]) if keys else None
 
 
 async def _plan_key(run_id: str) -> str | None:
@@ -85,9 +95,10 @@ async def test_plan_is_saved_encrypted_and_served_to_the_apply_job(
         run_id, plan_job = await _plan(client, admin, wh, env_id)
         assert (plan_job["save_plan"], plan_job["destroy"]) == (True, False)
 
-        key = f"artifacts/{run_id}/plan.tfplan"  # §11.3 layout
-        blob = await _stored(run_id)
-        assert blob is not None and await _plan_key(run_id) == key
+        key = await _plan_key(run_id)
+        assert key is not None and re.fullmatch(rf"artifacts/{run_id}/plan-[0-9a-f-]+\.tfplan", key)
+        blob = await _stored(run_id)  # §11.3 layout
+        assert blob is not None and await _objects(run_id) == [key]
         assert b"SUPER-SECRET-VALUE" not in blob  # encrypted at rest (AES-256-GCM)…
         assert decrypt_bytes(blob, aad=f"stackd:artifact:{key}".encode()) == PLAN  # …app key
 
@@ -148,11 +159,10 @@ async def test_a_plan_moved_to_another_run_does_not_decrypt(client: httpx.AsyncC
         # Run b's object overwritten with a blob encrypted for another key (here: a's plan).
         from app.crypto import encrypt_bytes
 
-        key_a = f"artifacts/{a}/plan.tfplan"
-        await put_object(
-            f"artifacts/{b}/plan.tfplan",
-            encrypt_bytes(b"PK evil", aad=f"stackd:artifact:{key_a}".encode()),
-        )
+        key_a = f"artifacts/{a}/plan-0.tfplan"
+        key_b = await _plan_key(b)
+        assert key_b is not None
+        await put_object(key_b, encrypt_bytes(b"PK evil", aad=f"stackd:artifact:{key_a}".encode()))
         await _confirm_and_claim_apply(client, admin, wh, b)
         got = await client.get(_url(b), headers=wh)
         assert got.status_code == 500, got.text
@@ -236,6 +246,7 @@ async def test_a_rolled_back_terminal_transition_keeps_the_plan(client: httpx.As
     admin, wh, env_id = await _setup(client, "sp-rollback")
     with mock_aws():
         run_id, _ = await _plan(client, admin, wh, env_id)
+        key = await _plan_key(run_id)
         async with SessionLocal() as s:
             run = await s.get(Run, run_id)
             assert run is not None
@@ -246,4 +257,68 @@ async def test_a_rolled_back_terminal_transition_keeps_the_plan(client: httpx.As
             await s.commit()
         await wait_for_purges()
         assert await _stored(run_id) is not None
-        assert await _plan_key(run_id) == f"artifacts/{run_id}/plan.tfplan"
+        assert key is not None and await _plan_key(run_id) == key
+
+
+# --- errored state (§7.3): what an apply could not write back is kept, encrypted --------------
+
+ERRORED = b'{"version": 4, "serial": 7, "resources": [{"db_password": "SUPER-SECRET-VALUE"}]}'
+
+
+def _errored_url(run_id: str) -> str:
+    return f"/worker/v1/jobs/{run_id}/artifacts/errored.tfstate"
+
+
+async def test_errored_state_is_stored_encrypted_audited_and_kept(
+    client: httpx.AsyncClient,
+) -> None:
+    from sqlalchemy import select
+
+    from app.crypto import decrypt_bytes
+    from app.db import SessionLocal
+    from app.models.audit import AuditEvent
+    from app.runs.artifacts import wait_for_purges
+    from app.statebackend.store import get_object
+
+    admin, wh, env_id = await _setup(client, "sp-errored")
+    with mock_aws():
+        run_id, _ = await _plan(client, admin, wh, env_id)
+        # The plan job holds no write credential: it never sends one.
+        early = await client.put(_errored_url(run_id), headers=wh, content=ERRORED)
+        assert early.status_code == 409, early.text
+
+        await _confirm_and_claim_apply(client, admin, wh, run_id)
+        put = await client.put(_errored_url(run_id), headers=wh, content=ERRORED)
+        assert put.status_code == 204, put.text
+        await event(client, wh, run_id, "job_failed", phase="apply", result={"error": "401"})
+        await wait_for_purges()
+
+        key = f"artifacts/{run_id}/errored.tfstate"
+        blob = await get_object(key)
+        assert blob is not None, "kept once the run is terminal, unlike the saved plan"
+        assert b"SUPER-SECRET-VALUE" not in blob
+        assert decrypt_bytes(blob, aad=f"stackd:artifact:{key}".encode()) == ERRORED
+        async with SessionLocal() as s:
+            audits = (
+                await s.execute(
+                    select(AuditEvent).where(AuditEvent.action == "run.errored_state_saved")
+                )
+            ).scalars()
+            audit = next(a for a in audits if str(a.target_id) == run_id)
+        assert audit.context == {"environment_id": env_id, "key": key, "size_bytes": len(ERRORED)}
+
+        # Terminal now: a late upload is refused (the agent then keeps the file on the worker).
+        late = await client.put(_errored_url(run_id), headers=wh, content=ERRORED)
+        assert late.status_code == 409, late.text
+
+
+async def test_errored_state_only_from_the_runs_worker(client: httpx.AsyncClient) -> None:
+    admin, wh, env_id = await _setup(client, "sp-errored-owner")
+    other = await register_worker(client, admin, "pool-sp-errored-owner-2", "w2")
+    with mock_aws():
+        run_id, _ = await _plan(client, admin, wh, env_id)
+        await _confirm_and_claim_apply(client, admin, wh, run_id)
+        stolen = await client.put(_errored_url(run_id), headers=other, content=ERRORED)
+        assert stolen.status_code == 409, stolen.text
+        empty = await client.put(_errored_url(run_id), headers=wh, content=b"")
+        assert empty.status_code == 400, empty.text

@@ -141,10 +141,13 @@ async def refresh(
     response: Response,
     session: Annotated[AsyncSession, Depends(get_session)],
 ) -> SessionOut:
-    _require_csrf(request)
+    # No refresh cookie = no session to rotate, so nothing for CSRF to protect: answer 401 (the
+    # SPA's boot probe on a fresh visit) before the double-submit check, which still guards any
+    # request that does carry a refresh cookie (SPECS §2.1).
     presented = request.cookies.get(REFRESH_COOKIE)
     if not presented:
         raise ProblemException(401, "Not authenticated", "No refresh token.")
+    _require_csrf(request)
     access_token = await rotate_session(session, presented, response, request)
     await session.commit()
     claims = jwt.decode(access_token, get_settings().stackd_jwt_secret, algorithms=["HS256"])

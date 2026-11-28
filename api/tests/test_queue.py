@@ -105,3 +105,47 @@ async def test_apply_claim_latency_counts_from_confirmation(
     claim = await client.post("/worker/v1/jobs/claim", headers=wh)
     assert claim.status_code == 200 and claim.json()["phase"] == "apply", claim.text
     assert len(observed) == 1 and 10 <= observed[0] < 60
+
+
+async def test_queue_reports_claim_backoff(client: httpx.AsyncClient) -> None:
+    """A run set aside by a transient job-build failure (§7.2) says so, with its retry time and
+    attempt count, instead of reading as claimable."""
+    from app.workers.claim import defer_claim
+
+    admin = await login(client, "admin")
+    await register_worker(client, admin, "pool-queue-backoff")
+    env_id = await make_env(client, admin, await make_stack(client, admin, "q-back"), "dev", "dev")
+    run_id = (
+        await client.post(f"/api/v1/environments/{env_id}/runs", headers=admin, json={})
+    ).json()["id"]
+
+    async def _entry() -> dict:
+        queue = (await client.get("/api/v1/queue", headers=admin)).json()
+        return next(q for q in queue if q["run_id"] == run_id)
+
+    before = await _entry()
+    assert (before["blocking_reason"], before["claimable_after"], before["claim_attempts"]) == (
+        None,
+        None,
+        0,
+    )
+
+    async with SessionLocal() as session:
+        await defer_claim(session, uuid.UUID(run_id))
+        await defer_claim(session, uuid.UUID(run_id))
+    backed_off = await _entry()
+    assert backed_off["blocking_reason"] == "claim_backoff"
+    assert backed_off["claim_attempts"] == 2
+    until = datetime.fromisoformat(backed_off["claimable_after"])
+    assert timedelta(seconds=5) < until - datetime.now(UTC) <= timedelta(seconds=20)
+
+    # Once the backoff has passed the run is claimable again: no reason, the attempts kept.
+    async with SessionLocal() as session:
+        await session.execute(
+            update(Run)
+            .where(Run.id == uuid.UUID(run_id))
+            .values(claimable_after=datetime.now(UTC) - timedelta(seconds=1))
+        )
+        await session.commit()
+    after = await _entry()
+    assert (after["blocking_reason"], after["claim_attempts"]) == (None, 2)

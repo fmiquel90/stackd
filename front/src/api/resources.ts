@@ -75,6 +75,7 @@ export interface StackPatch {
   repo_secret?: string; // write-only; "" clears it, omit to keep
   webhook_secret?: string; // write-only HMAC secret; "" clears it, omit to keep
   project_root?: string;
+  trigger_paths?: string[];
   tool?: Tool;
   tool_version?: string;
   labels?: Record<string, string> | null;
@@ -177,6 +178,7 @@ export interface EnvironmentPatch {
   drift_check_enabled?: boolean;
   backend_config_file?: string | null;
   backend_config?: Record<string, string> | null;
+  var_files?: string[];
   labels?: Record<string, string> | null;
 }
 
@@ -188,6 +190,9 @@ export const environments = {
   remove: (id: string) => api<void>(`/environments/${id}`, { method: "DELETE" }),
   // Force-refresh the tracked branch HEAD from the remote (returns the updated environment).
   refreshHead: (id: string) => api<Environment>(`/environments/${id}/refresh-head`, { method: "POST" }),
+  // SPECS §19.7: accept a state change made outside Stackd (can_apply).
+  acknowledgeOutOfBand: (id: string) =>
+    api<Environment>(`/environments/${id}/out-of-band-change/acknowledge`, { method: "POST" }),
   outputs: (id: string) => api<EnvOutput[]>(`/environments/${id}/outputs`),
   // Introspect the repo and create the required root-module inputs as env vars with placeholders.
   discoverInputs: (id: string) =>
@@ -501,8 +506,23 @@ export interface StateVersion {
   created_at: string;
 }
 
+/** The held state lock (SPECS §11.2) — not `Environment.locked`, the env's admin lock. */
+export interface StateLock {
+  lock_id: string;
+  /** The run whose job took it; null for a run-less holder (an import session). */
+  run_id: string | null;
+  locked_at: string;
+  /** From tofu's lock info. */
+  operation: string | null;
+  who: string | null;
+  version: string | null;
+  created: string | null;
+  info: string | null;
+}
+
 export const stateApi = {
   versions: (envId: string) => api<StateVersion[]>(`/environments/${envId}/state/versions`),
+  lock: (envId: string) => api<StateLock | null>(`/environments/${envId}/state/lock`),
   forceUnlock: (envId: string) => api<void>(`/environments/${envId}/state/lock`, { method: "DELETE" }),
 };
 
@@ -513,14 +533,29 @@ export interface CloudIntegration {
   apply_role_arn: string;
   region: string | null;
   session_duration: number;
+  /** Named AWS profiles (SPECS §10.6): the profile name the Terraform code uses → its roles. */
+  profiles: Record<string, CloudProfile>;
   /** Configuration warnings (SPECS §10.5) — e.g. static AWS credentials the roles replace. */
   warnings: { code: string; variables: string[]; detail: string }[];
 }
 
+export interface CloudProfile {
+  plan_role_arn: string;
+  apply_role_arn: string;
+  region: string | null;
+}
+
 export const cloudApi = {
   get: (envId: string) => api<CloudIntegration>(`/environments/${envId}/cloud-integration`),
-  put: (envId: string, body: { plan_role_arn: string; apply_role_arn: string; region?: string | null }) =>
-    api<CloudIntegration>(`/environments/${envId}/cloud-integration`, { method: "PUT", body }),
+  put: (
+    envId: string,
+    body: {
+      plan_role_arn: string;
+      apply_role_arn: string;
+      region?: string | null;
+      profiles?: Record<string, CloudProfile>;
+    },
+  ) => api<CloudIntegration>(`/environments/${envId}/cloud-integration`, { method: "PUT", body }),
   remove: (envId: string) => api<void>(`/environments/${envId}/cloud-integration`, { method: "DELETE" }),
   test: (envId: string) =>
     api<{ assumed_role: string }>(`/environments/${envId}/cloud-integration/test`, { method: "POST" }),

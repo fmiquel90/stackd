@@ -1,14 +1,17 @@
 from __future__ import annotations
 
 import json
+import uuid
 from datetime import UTC, datetime
 
 from sqlalchemy import select, text
-from sqlalchemy.exc import DBAPIError, IntegrityError
+from sqlalchemy.exc import DBAPIError, IntegrityError, InterfaceError, OperationalError
+from sqlalchemy.exc import TimeoutError as PoolTimeoutError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import get_settings
 from app.crypto import decrypt
+from app.drift.out_of_band import observes_state
 from app.enums import (
     ACTIVE_STATES,
     AuditActorKind,
@@ -29,9 +32,11 @@ from app.models.stack import Stack
 from app.models.tier import Tier
 from app.models.worker import Worker
 from app.oidc.precedence import split_shadowed
+from app.oidc.profiles import for_phase as profiles_for_phase
 from app.runs.artifacts import SAVED_PLAN_TYPES
 from app.runs.commands import is_mutating
 from app.runs.transition import transition
+from app.stacks.credentials import credential_mask_values
 from app.statebackend.tokens import StateScope, mint_state_token
 from app.variables.resolution import ResolvedVariable, provenance_snapshot, resolve_variables
 from app.workers.hooks import platform_hooks
@@ -46,8 +51,15 @@ _log = get_logger("stackd.worker")
 # serialization_failure.
 _RETRYABLE = frozenset({"55P03", "40P01", "40001"})
 
-# Candidate selection (SPECS §7.2). FOR UPDATE OF e SKIP LOCKED serializes claims per environment;
-# the one_active_run_per_env unique index (caught as 23505 below) is the real correctness guard.
+# Claim backoff (§7.2): a run whose job could not be built for a transient reason waits 10 s, then
+# twice as long after each further failure, at most 5 min — the runs queued behind it keep moving.
+_BACKOFF_BASE_SECONDS = 10
+_BACKOFF_MAX_SECONDS = 300
+
+# Candidate selection (SPECS §7.2). FOR NO KEY UPDATE OF e SKIP LOCKED serializes claims per
+# environment — NO KEY so that inserting a row referencing the env (a new run: its FK check takes
+# FOR KEY SHARE) does not wait for the claim's commit; the one_active_run_per_env unique index
+# (caught as 23505 below) is the real correctness guard.
 _SELECT_CANDIDATE = text(
     f"""
     SELECT r.id AS run_id, r.state AS run_state
@@ -55,6 +67,7 @@ _SELECT_CANDIDATE = text(
     JOIN environments e ON e.id = r.environment_id
     JOIN stacks s ON s.id = e.stack_id
     WHERE r.state IN ('queued', 'confirmed')
+      AND (r.claimable_after IS NULL OR r.claimable_after <= now())
       AND e.locked = false
       -- NULLIF guards against JSONB 'null' (SQLAlchemy writes Python None as JSON null by default).
       AND COALESCE(NULLIF(e.labels, 'null'::jsonb), '{{}}'::jsonb) <@ CAST(:labels AS jsonb)
@@ -71,7 +84,7 @@ _SELECT_CANDIDATE = text(
       )
     -- Affinity first, then user runs ahead of background drift plans (§19), then FIFO.
     ORDER BY (r.state = 'confirmed' AND r.worker_id = :wid) DESC, r.is_drift, r.created_at
-    FOR UPDATE OF e SKIP LOCKED
+    FOR NO KEY UPDATE OF e SKIP LOCKED
     LIMIT 1
     """
 )
@@ -110,7 +123,12 @@ async def claim_one(session: AsyncSession, worker: Worker, affinity_seconds: int
             target,
             actor=RunEventActor.worker,
             actor_id=worker.id,
-            fields={"worker_id": worker.id, "claimed_at": datetime.now(UTC)},
+            fields={
+                "worker_id": worker.id,
+                "claimed_at": datetime.now(UTC),
+                "claimable_after": None,
+                "claim_attempts": 0,
+            },
         )
     except (ProblemException, IntegrityError):
         # Lost the race (another worker won, or one_active_run_per_env 23505) → nothing to claim.
@@ -132,6 +150,40 @@ async def claim_one(session: AsyncSession, worker: Worker, affinity_seconds: int
     waited = datetime.now(UTC) - (claimable_at or run.created_at)
     metrics.claim_latency.observe(waited.total_seconds())
     return run
+
+
+def is_transient_db_error(exc: BaseException) -> bool:
+    """A database failure a later attempt can get past: no pooled connection free, a connection
+    lost, a lock or statement timeout, a deadlock or serialization failure, the server shutting
+    down or out of resources. Anything else (a constraint, bad data, a bug) is not."""
+    if isinstance(exc, PoolTimeoutError):
+        return True
+    if not isinstance(exc, DBAPIError):
+        return False
+    if exc.connection_invalidated or isinstance(exc, (OperationalError, InterfaceError)):
+        return True
+    sqlstate = getattr(exc.orig, "sqlstate", None) or ""
+    return sqlstate in _RETRYABLE or sqlstate[:2] in ("08", "53", "57")
+
+
+async def defer_claim(session: AsyncSession, run_id: uuid.UUID) -> None:
+    """Put a run whose job could not be built for a transient reason (§7.2) out of the claim's
+    reach for its backoff, in a transaction of its own (the caller has rolled the claim back). Not
+    a state change: the run stays queued/confirmed."""
+    await session.execute(
+        text(
+            f"""
+            UPDATE runs SET
+              claimable_after = now() + make_interval(secs => least(
+                {_BACKOFF_MAX_SECONDS},
+                {_BACKOFF_BASE_SECONDS} * power(2, least(claim_attempts, 16))
+              )),
+              claim_attempts = claim_attempts + 1
+            WHERE id = :id AND state IN ('queued', 'confirmed')
+            """
+        ).bindparams(id=run_id)
+    )
+    await session.commit()
 
 
 def holds_apply_credentials(run: Run) -> bool:
@@ -275,11 +327,14 @@ async def build_job_payload(session: AsyncSession, run: Run) -> dict:
     provenance.update({rv.injected_name: f"shadowed:{rv.provenance}" for rv in shadowed})
     run.variable_provenance = provenance
 
-    # The repo token stays with a proposed run: it clones the pull request's commit, and reaches
-    # neither tofu nor a hook (§8.3 — it is in no environment and nowhere under the checkout).
+    # The repo credential stays with a proposed run: it clones the pull request's commit and lets
+    # `init` fetch the modules hosted next to it; no hook ever gets it (§8.3).
     repo_credentials: dict[str, str | None] = {"kind": stack.repo_auth_kind.value}
+    repo_secret = None
     if stack.repo_auth_kind != RepoAuthKind.none and stack.repo_secret_encrypted is not None:
-        repo_credentials["token"] = decrypt(stack.repo_secret_encrypted)
+        repo_secret = decrypt(stack.repo_secret_encrypted)
+        field = "ssh_private_key" if stack.repo_auth_kind == RepoAuthKind.deploy_key else "token"
+        repo_credentials[field] = repo_secret
 
     # An apply or a mutating subcommand gets the apply role; a plan or a read-only subcommand the
     # (read-only) plan role. A plan/apply job's type is its credential phase.
@@ -319,15 +374,15 @@ async def build_job_payload(session: AsyncSession, run: Run) -> dict:
     cloud_credentials = await _cloud_credentials(session, integration, env, stack, run, cred_phase)
 
     # Literal secret values the agent masks in ALL log output (§5.1) — sensitive variables, the
-    # short-lived state-backend and OIDC tokens, and the repo auth token (it rides inside the clone
-    # URL, so a failed `git clone` could otherwise echo it to logs).
+    # short-lived state-backend and OIDC tokens, and the repo credential (a token rides inside
+    # URLs, so a failed `git clone` or module download could otherwise echo it to logs).
     mask_values = [rv.value for rv in resolved if _is_secret(rv) and rv.value]
     if backend:
         mask_values.append(backend["password"])
     if cloud_credentials and cloud_credentials.get("oidc_token"):
         mask_values.append(cloud_credentials["oidc_token"])
-    if repo_credentials.get("token"):
-        mask_values.append(repo_credentials["token"])
+    if repo_secret:
+        mask_values.extend(credential_mask_values(stack.repo_auth_kind, repo_secret))
 
     return {
         "job_id": str(run.id),
@@ -378,6 +433,12 @@ async def build_job_payload(session: AsyncSession, run: Run) -> dict:
         # `-backend-config` settings passed at init.
         "backend_config_file": None if env.managed_state else env.backend_config_file,
         "backend_config": None if env.managed_state else env.backend_config,
+        # §19.7: read the state's serial/lineage and report them (state_observed) — unmanaged
+        # state, reviewed code only.
+        "observe_state": observes_state(run, env),
+        # §3.4: the repo's tfvars files, managed state or not — the agent passes them as
+        # `-var-file=` to the commands that read variables, Stackd's own files after them.
+        "var_files": list(env.var_files or []),
         "cloud_credentials": cloud_credentials,
         "resolved_inputs": {f"TF_VAR_{k}": v for k, v in dep.resolved_inputs.items()},
         "mock_inputs": {f"TF_VAR_{k}": v for k, v in dep.mock_inputs.items()},
@@ -441,4 +502,5 @@ async def _cloud_credentials(  # type: ignore[no-untyped-def]
         "oidc_token": token,
         "role_arn": role_arn,
         "region": ci.region,
+        "profiles": profiles_for_phase(ci.profiles or {}, phase),
     }

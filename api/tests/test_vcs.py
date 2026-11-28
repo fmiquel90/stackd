@@ -5,7 +5,7 @@ import hmac
 import itertools
 import json
 import uuid
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 import httpx
 import pytest
@@ -101,6 +101,26 @@ async def test_pr_closed_cancels_proposed_run(client: httpx.AsyncClient) -> None
     assert runs[0]["state"] == "canceled"
 
 
+async def test_pr_closed_leaves_the_same_pr_number_in_another_repo(
+    client: httpx.AsyncClient,
+) -> None:
+    """PR numbers are per repository: closing #12 in one repo must not cancel #12's run in
+    another."""
+    admin = await login(client, "admin")
+    _sa, env_a, repo_a = await _stack(client, admin, "vcs-close-scope-a")
+    _sb, env_b, repo_b = await _stack(client, admin, "vcs-close-scope-b")
+    assert (await _pr(client, repo_a, sha="prsha-scope-a", number=12)).status_code == 200
+    assert (await _pr(client, repo_b, sha="prsha-scope-b", number=12)).status_code == 200
+
+    closed = await _pr(client, repo_a, sha="prsha-scope-a", number=12, action="closed")
+    assert closed.status_code == 200
+
+    runs_a = (await client.get(f"/api/v1/environments/{env_a}/runs", headers=admin)).json()
+    runs_b = (await client.get(f"/api/v1/environments/{env_b}/runs", headers=admin)).json()
+    assert runs_a[0]["state"] == "canceled"
+    assert runs_b[0]["state"] == "queued"
+
+
 async def test_dispatch_posts_status_and_comment(
     client: httpx.AsyncClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -164,10 +184,12 @@ async def test_dispatch_posts_status_and_comment(
 
 
 async def test_dispatch_bad_secret_fails_only_its_row(
-    client: httpx.AsyncClient, monkeypatch: pytest.MonkeyPatch
+    client: httpx.AsyncClient, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
 ) -> None:
+    from prometheus_client import REGISTRY
     from sqlalchemy import select, update
 
+    from app.config import get_settings
     from app.db import SessionLocal
     from app.models.run import Run
     from app.models.stack import Stack
@@ -226,15 +248,105 @@ async def test_dispatch_bad_secret_fails_only_its_row(
     async with SessionLocal() as s:
         assert (await s.get(Run, uuid.UUID(good_run["id"]))).vcs_comment_id == 777
 
-    # The bad row alone is retried until dead-lettered; the good rows are never re-posted.
-    for _ in range(4):
-        async with SessionLocal() as s:
-            assert await dispatcher.dispatch_vcs(s, datetime.now(UTC)) == 1
-    [bad_row] = await outbox(bad_run["id"])
-    assert bad_row.sent_at is None and bad_row.attempts == 5
+    # Backing off: the failed row is not due again right away.
     async with SessionLocal() as s:
         assert await dispatcher.dispatch_vcs(s, datetime.now(UTC)) == 0
+
+    # The bad row alone is retried, each time it is due, until its attempts are spent; the good
+    # rows are never re-posted. The last failure is reported at error level and counted.
+    max_attempts = get_settings().stackd_outbox_max_attempts
+    dead_before = (
+        REGISTRY.get_sample_value("stackd_outbox_dead_letters_total", {"outbox": "vcs"}) or 0.0
+    )
+    later = datetime.now(UTC)
+    caplog.clear()
+    for _ in range(max_attempts - 1):
+        later += timedelta(hours=2)
+        async with SessionLocal() as s:
+            assert await dispatcher.dispatch_vcs(s, later) == 1
+    [bad_row] = await outbox(bad_run["id"])
+    assert bad_row.sent_at is None and bad_row.attempts == max_attempts
+    async with SessionLocal() as s:
+        assert await dispatcher.dispatch_vcs(s, later + timedelta(days=1)) == 0
     assert statuses == ["prsha-good", "prsha-good"]
+    dead = [r for r in caplog.records if getattr(r, "event", None) == "vcs.dead_lettered"]
+    assert [(r.levelname, r.run_id, r.attempts) for r in dead] == [
+        ("ERROR", bad_run["id"], max_attempts)
+    ]
+    assert (
+        REGISTRY.get_sample_value("stackd_outbox_dead_letters_total", {"outbox": "vcs"})
+        == dead_before + 1
+    )
+
+
+async def test_dispatch_honours_rate_limit_and_drops_superseded_retry(
+    client: httpx.AsyncClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A GitHub rate limit defers the row until the limit resets; by then a newer row of the same
+    run has posted the later status, so the stale retry is dropped instead of rolling it back."""
+    from sqlalchemy import select
+
+    from app.db import SessionLocal
+    from app.models.vcs import VcsOutbox
+    from app.vcs import dispatcher, github
+
+    admin = await login(client, "admin")
+    _sid, env_id, repo = await _stack(client, admin, "vcs-ratelimit")
+    assert (await _pr(client, repo, sha="prsha-rl", number=21)).status_code == 200
+    run_id = (await client.get(f"/api/v1/environments/{env_id}/runs", headers=admin)).json()[0][
+        "id"
+    ]
+    assert (
+        await client.post(f"/api/v1/runs/{run_id}/vcs/resync", headers=admin)
+    ).status_code == 202
+
+    now = datetime.now(UTC)
+    reset = int(now.timestamp()) + 600
+    statuses: list[str] = []
+
+    async def limited(token, owner, repo, sha, *, state, target_url, context, description, http):  # type: ignore[no-untyped-def]
+        request = httpx.Request("POST", "https://api.github.com/x")
+        headers = {"x-ratelimit-remaining": "0", "x-ratelimit-reset": str(reset)}
+        response = httpx.Response(403, headers=headers, request=request)
+        raise httpx.HTTPStatusError("403 rate limited", request=request, response=response)
+
+    async def fake_upsert(token, owner, repo, pr_number, body, comment_id, *, http):  # type: ignore[no-untyped-def]
+        return comment_id or 901
+
+    monkeypatch.setattr(github, "set_status", limited)
+    monkeypatch.setattr(github, "upsert_comment", fake_upsert)
+    async with SessionLocal() as s:
+        assert await dispatcher.dispatch_vcs(s, now) == 1
+
+    async def rows() -> list[VcsOutbox]:
+        async with SessionLocal() as s:
+            q = (
+                select(VcsOutbox)
+                .where(VcsOutbox.run_id == uuid.UUID(run_id))
+                .order_by(VcsOutbox.created_at)
+            )
+            return list((await s.execute(q)).scalars().all())
+
+    [stale] = await rows()
+    assert stale.sent_at is None
+    assert stale.next_attempt_at >= datetime.fromtimestamp(reset, UTC) - timedelta(seconds=1)
+
+    async def fake_set_status(
+        token, owner, repo, sha, *, state, target_url, context, description, http
+    ):  # type: ignore[no-untyped-def]
+        statuses.append(description)
+
+    monkeypatch.setattr(github, "set_status", fake_set_status)
+    assert (
+        await client.post(f"/api/v1/runs/{run_id}/vcs/resync", headers=admin)
+    ).status_code == 202
+    async with SessionLocal() as s:  # only the new row is due
+        assert await dispatcher.dispatch_vcs(s, now + timedelta(seconds=60)) == 1
+    assert len(statuses) == 1
+    async with SessionLocal() as s:  # the limit reset: the stale row is due, and superseded
+        assert await dispatcher.dispatch_vcs(s, now + timedelta(seconds=700)) == 1
+    assert len(statuses) == 1
+    assert all(r.sent_at is not None for r in await rows())
 
 
 async def test_resync_requeues(client: httpx.AsyncClient) -> None:

@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import Annotated
 
 from fastapi import APIRouter, Depends
-from sqlalchemy import ColumnElement, and_, delete, or_, select, update
+from sqlalchemy import ColumnElement, and_, delete, literal, or_, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -18,6 +18,7 @@ from app.auth.deps import CurrentUser
 from app.config import get_settings
 from app.crypto import decrypt
 from app.db import get_session
+from app.drift.out_of_band import BACKEND_FIELDS, acknowledge, reset_baseline
 from app.enums import (
     ACTIVE_STATES,
     AttachmentTarget,
@@ -28,6 +29,7 @@ from app.enums import (
     VariableKind,
 )
 from app.environments.schemas import EnvironmentCreate, EnvironmentOut, EnvironmentUpdate
+from app.environments.var_files import require_inside_checkout
 from app.errors import ProblemException
 from app.models.environment import Environment
 from app.models.hook import Hook
@@ -37,8 +39,9 @@ from app.models.stack import Stack
 from app.models.tier import Tier
 from app.models.user import User
 from app.models.variable_set import VariableSetAttachment
+from app.permissions import can_apply
 from app.ratelimit import rate_limit
-from app.spaces import guard_env_id, guard_stack_id
+from app.spaces import get_membership, guard_env_id, guard_stack_id
 from app.stacks.git import clone_shallow, enforce_clone_budget, ls_remote_sha
 from app.variables.crud import create_variable, get_variable, update_variable, variables_for
 from app.variables.discovery import DiscoveredInput, parse_inputs, placeholder, tf_files
@@ -86,16 +89,24 @@ async def _envs_out(session: AsyncSession, envs: Sequence[Environment]) -> list[
     part of its commit, so the env still lags behind it."""
     last_applied: dict[uuid.UUID, str | None] = {}
     if envs:
-        rows = await session.execute(
-            select(Run.environment_id, Run.commit_sha)
+        # One probe per env of the partial index ix_runs_last_finished_tracked. Its predicate is
+        # rendered as literals: a generic plan of a prepared statement can't match it to bind
+        # parameters.
+        last_sha = (
+            select(Run.commit_sha)
             .where(
-                Run.environment_id.in_([e.id for e in envs]),
-                Run.type == RunType.tracked,
-                Run.state == RunState.finished,
+                Run.environment_id == Environment.id,
+                Run.type == literal(RunType.tracked, Run.type.type, literal_execute=True),
+                Run.state == literal(RunState.finished, Run.state.type, literal_execute=True),
                 or_(Run.plan_options.is_(None), ~Run.plan_options.has_key("targets")),
             )
-            .order_by(Run.environment_id, Run.finished_at.desc(), Run.id.desc())
-            .distinct(Run.environment_id)
+            .order_by(Run.finished_at.desc(), Run.id.desc())
+            .limit(1)
+            .correlate(Environment)
+            .scalar_subquery()
+        )
+        rows = await session.execute(
+            select(Environment.id, last_sha).where(Environment.id.in_([e.id for e in envs]))
         )
         last_applied = {env_id: sha for env_id, sha in rows.all()}
     return [EnvironmentOut.of(e, last_applied_sha=last_applied.get(e.id)) for e in envs]
@@ -116,9 +127,9 @@ async def lock_envs_for_deletion(
 ) -> list[uuid.UUID]:
     """Lock the envs about to be deleted (a stack's, or one) and refuse with 409 while any has an
     active run (§3.5): the DB cascade would delete that run outside `transition()` (§4.2), leaving
-    a worker executing a run that no longer exists. A claim locks its env row too (FOR UPDATE OF e
-    SKIP LOCKED, §7.2), so no run starts on these envs until the deletion commits. Returns their
-    ids. Queued runs aren't executing anywhere: they go with their env."""
+    a worker executing a run that no longer exists. A claim locks its env row too (FOR NO KEY
+    UPDATE OF e SKIP LOCKED, §7.2), so no run starts on these envs until the deletion commits.
+    Returns their ids. Queued runs aren't executing anywhere: they go with their env."""
     env_ids = list(
         (await session.execute(select(Environment.id).where(*criteria).with_for_update()))
         .scalars()
@@ -305,8 +316,9 @@ async def list_environments(
 async def create_environment(
     stack_id: uuid.UUID, body: EnvironmentCreate, user: CurrentUser, session: DbSession
 ) -> EnvironmentOut:
-    await guard_stack_id(session, user, stack_id, min_role=Role.writer)
+    stack = await guard_stack_id(session, user, stack_id, min_role=Role.writer)
     await _require_tier(session, body.tier)
+    require_inside_checkout(stack.project_root, body.var_files)
     env = Environment(stack_id=stack_id, **body.model_dump())
     if env.protected:
         env.autodeploy = False  # protected forces manual confirmation (§3.2)
@@ -347,6 +359,10 @@ async def update_environment(
     changes = body.model_dump(exclude_unset=True)
     if "tier" in changes:
         await _require_tier(session, changes["tier"])
+    if "var_files" in changes:
+        stack = await session.get(Stack, env.stack_id)
+        assert stack is not None
+        require_inside_checkout(stack.project_root, changes["var_files"])
     if "branch" in changes and changes["branch"] != env.branch:
         # Staleness (§9.6): the recorded head is the old branch's, so `stale` must not compare
         # against it. No head_updated_at makes the env due at the next head poll.
@@ -354,6 +370,9 @@ async def update_environment(
         env.head_updated_at = None
         env.commits_ahead = None
         env.affects_project_root = None
+    if any(changes[f] != getattr(env, f) for f in BACKEND_FIELDS & changes.keys()):
+        # Another state now (§19.7): the baseline and any out-of-band flag were the old state's.
+        reset_baseline(env)
     for field, value in changes.items():
         setattr(env, field, value)
     if env.protected:
@@ -366,7 +385,12 @@ async def update_environment(
         actor_email=user.email,
         target_kind="environment",
         target_id=env.id,
-        context={"fields": sorted(changes), **_env_audit_ctx(env)},
+        context={
+            "fields": sorted(changes),
+            **_env_audit_ctx(env),
+            # What reaches terraform changes with it: the new list, never a secret (§3.4).
+            **({"var_files": env.var_files} if "var_files" in changes else {}),
+        },
     )
     await session.commit()
     await session.refresh(env)
@@ -439,6 +463,32 @@ async def refresh_head(env_id: uuid.UUID, user: CurrentUser, session: DbSession)
     await session.commit()
     await session.refresh(env)
     return await _env_out(session, env)
+
+
+@router.post("/environments/{env_id}/out-of-band-change/acknowledge", response_model=EnvironmentOut)
+async def acknowledge_out_of_band_change(
+    env_id: uuid.UUID, user: CurrentUser, session: DbSession
+) -> EnvironmentOut:
+    """Accept a state change made outside Stackd (§19.7): the people who could clear it by
+    applying — can_apply on the env — may clear it by hand."""
+    env = await guard_env_id(session, user, env_id, min_role=Role.writer)
+    stack = await session.get(Stack, env.stack_id)
+    assert stack is not None
+    decision = can_apply(user, env, await get_membership(session, user.id, stack.space_id))
+    if not decision.allowed:
+        raise ProblemException(403, "Forbidden", decision.reason)
+    locked = (
+        await session.execute(
+            select(Environment)
+            .where(Environment.id == env.id)
+            .with_for_update()
+            .execution_options(populate_existing=True)
+        )
+    ).scalar_one()
+    await acknowledge(session, locked, user)
+    await session.commit()
+    await session.refresh(locked)
+    return await _env_out(session, locked)
 
 
 # --- environment variables (override slot: stack_id + environment_id both set) ---

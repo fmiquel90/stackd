@@ -22,9 +22,11 @@ import { EnvOutputs } from "@/features/environments/EnvInputs";
 import { cellLabel } from "@/features/overview/Matrix";
 import { EnvCell } from "@/identity/EnvCell";
 import { Button } from "@/ui/Button";
+import { ErrorBoundary } from "@/ui/ErrorBoundary";
 import { Dialog, DialogContent, DialogTrigger, SheetContent } from "@/ui/overlays";
 import { Banner, EmptyState, Field, Input, NativeSelect, Skeleton, Table, Td, Th } from "@/ui/primitives";
 import { cn } from "@/ui/cn";
+import { shortId } from "@/lib/ids";
 
 // The dependency graph (DESIGN §5.4): nodes are env summaries (§2.3), edges carry the outputs they
 // pass, dashed magenta only when the downstream's run actually consumed a mock. The list view is a
@@ -214,40 +216,44 @@ export function GraphPage() {
         current run used a mock value; ◇ = a mock is defined but unused.
       </p>
 
-      {data.entries.length === 0 ? (
-        <EmptyState title="No environment in this space yet." />
-      ) : view === "graph" ? (
-        <div className="graph-canvas h-[calc(100vh-240px)] min-h-[420px] rounded-base border border-line bg-base">
-          <ReactFlow
-            nodes={nodes}
-            edges={edges}
-            nodeTypes={nodeTypes}
-            fitView
-            minZoom={0.2}
-            nodesDraggable={false}
-            nodesConnectable={false}
-            proOptions={{ hideAttribution: true }}
-            onNodeClick={(_, n) => set({ node: n.id })}
-          >
-            <Background gap={24} />
-            <Controls showInteractive={false} />
-          </ReactFlow>
-        </div>
-      ) : (
-        <AdjacencyList infos={infos} entries={entries} onNode={(id) => set({ node: id })} />
-      )}
+      <ErrorBoundary what={view === "graph" ? "The graph" : "The dependency list"} resetKey={view}>
+        {data.entries.length === 0 ? (
+          <EmptyState title="No environment in this space yet." />
+        ) : view === "graph" ? (
+          <div className="graph-canvas h-[calc(100vh-240px)] min-h-[420px] rounded-base border border-line bg-base">
+            <ReactFlow
+              nodes={nodes}
+              edges={edges}
+              nodeTypes={nodeTypes}
+              fitView
+              minZoom={0.2}
+              nodesDraggable={false}
+              nodesConnectable={false}
+              proOptions={{ hideAttribution: true }}
+              onNodeClick={(_, n) => set({ node: n.id })}
+            >
+              <Background gap={24} />
+              <Controls showInteractive={false} />
+            </ReactFlow>
+          </div>
+        ) : (
+          <AdjacencyList infos={infos} entries={entries} onNode={(id) => set({ node: id })} />
+        )}
+      </ErrorBoundary>
 
       <Dialog open={!!selected} onOpenChange={(v) => !v && set({ node: null })}>
         {selected && (
           <SheetContent title={`${selected.stack.name} / ${selected.env.name}`}>
-            <NodeDrawer
-              entry={selected}
-              infos={inSpace.length ? edgeInfos(inSpace, deps, entries) : []}
-              entries={entries}
-              envHref={`/s/${encodeURIComponent(space.name)}/stacks/${encodeURIComponent(selected.stack.name)}/envs/${encodeURIComponent(selected.env.name)}`}
-              canWrite={canWrite}
-              onPlanned={(id) => navigate(`/runs/${id}`)}
-            />
+            <ErrorBoundary what="This environment's details" resetKey={selected.env.id}>
+              <NodeDrawer
+                entry={selected}
+                infos={inSpace.length ? edgeInfos(inSpace, deps, entries) : []}
+                entries={entries}
+                envHref={`/s/${encodeURIComponent(space.name)}/stacks/${encodeURIComponent(selected.stack.name)}/envs/${encodeURIComponent(selected.env.name)}`}
+                canWrite={canWrite}
+                onPlanned={(id) => navigate(`/runs/${id}`)}
+              />
+            </ErrorBoundary>
           </SheetContent>
         )}
       </Dialog>
@@ -266,7 +272,7 @@ function AdjacencyList({
 }) {
   const name = (id: string) => {
     const e = entries.get(id);
-    return e ? `${e.stack.name}/${e.env.name}` : id.slice(0, 8);
+    return e ? `${e.stack.name}/${e.env.name}` : shortId(id);
   };
   if (!infos.length) return <EmptyState title="No dependency matches these filters." />;
   return (
@@ -351,7 +357,7 @@ function NodeDrawer({
   });
   const name = (id: string) => {
     const e = entries.get(id);
-    return e ? `${e.stack.name}/${e.env.name}` : id.slice(0, 8);
+    return e ? `${e.stack.name}/${e.env.name}` : shortId(id);
   };
   const inbound = infos.filter((i) => i.edge.downstream === entry.env.id);
   const outbound = infos.filter((i) => i.edge.upstream === entry.env.id);

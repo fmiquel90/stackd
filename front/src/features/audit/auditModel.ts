@@ -1,4 +1,5 @@
 import type { AuditEvent, Environment, HealthWorker, Space, Stack, User } from "@/api/types";
+import { shortId } from "@/lib/ids";
 
 // The audit journal's pure logic (DESIGN §5.6): action catalogue, row emphasis, target resolution
 // and context summary. Context values are shown as recorded, except keys that could carry a secret.
@@ -22,6 +23,7 @@ export const KNOWN_ACTIONS = [
   "run.canceled",
   "run.applied",
   "run.apply_failed",
+  "run.errored_state_saved",
   "run.promoted",
   "dependency.created",
   "dependency.deleted",
@@ -41,7 +43,10 @@ export const KNOWN_ACTIONS = [
   "environment.inputs_discovered",
   "environment.drift_detected",
   "environment.drift_cleared",
+  "environment.out_of_band_change_detected",
+  "environment.out_of_band_change_cleared",
   "state.force_unlocked",
+  "state.lock_released",
   "state.import_session_created",
   "variable.created",
   "variable.updated",
@@ -114,7 +119,7 @@ export interface Target {
   gone?: boolean;
 }
 
-const short = (id: string) => id.slice(0, 8);
+const short = shortId;
 const str = (v: unknown): string | undefined => (typeof v === "string" && v ? v : undefined);
 
 export function envPath(env: Environment, l: Lookup): { label: string; to?: string } {

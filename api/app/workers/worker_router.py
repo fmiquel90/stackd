@@ -7,14 +7,21 @@ from datetime import UTC, datetime, timedelta
 from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, Request, Response
-from sqlalchemy import select, text
+from sqlalchemy import and_, or_, select, text, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.audit import record_audit
+from app.bodies import read_capped
 from app.config import get_settings
 from app.db import get_session
 from app.dependencies.service import DependencyError, capture_outputs, cascade
+from app.drift.out_of_band import (
+    clear_on_apply,
+    observes_state,
+    parse_observation,
+    record_observation,
+)
 from app.drift.service import clear_drift, record_drift_result
 from app.enums import (
     WORKER_EXECUTING_STATES,
@@ -35,17 +42,29 @@ from app.models.worker import Worker
 from app.models.worker_command import WorkerCommand
 from app.oidc.issuer import WorkloadSigningError, WorkloadSigningUnavailable
 from app.runs.artifacts import (
+    ERRORED_STATE_FILE,
+    MAX_ERRORED_STATE_BYTES,
     MAX_PLAN_BYTES,
     PLAN_FILE,
     SAVED_PLAN_TYPES,
     SavedPlanUnreadable,
+    drop_unrecorded_plan,
     load_plan,
+    record_saved_plan,
+    save_errored_state,
     save_plan,
 )
 from app.runs.transition import ALLOWED, transition
 from app.secret_sources.providers import SecretUnavailable
 from app.workers.auth import CurrentWorker, mint_worker_token, pool_from_token
-from app.workers.claim import build_job_payload, claim_one, holds_apply_credentials
+from app.workers.claim import (
+    build_job_payload,
+    claim_one,
+    defer_claim,
+    holds_apply_credentials,
+    is_transient_db_error,
+)
+from app.workers.reaping import fail_lost_job, reclaimable
 from app.workers.schemas import (
     CommandResultIn,
     EventIn,
@@ -161,11 +180,43 @@ async def register(body: RegisterIn, request: Request, session: DbSession) -> Re
     return RegisterOut(worker_id=worker.id, worker_token=mint_worker_token(worker.id, pool.id))
 
 
+# A command delivered without a result (lost response, worker restarted, failed result post) is
+# delivered again after this long, up to `_COMMAND_MAX_DELIVERIES` times, then failed. The worker
+# handles every command idempotently (§7.1).
+_COMMAND_REDELIVERY = timedelta(seconds=90)
+_COMMAND_MAX_DELIVERIES = 3
+
+
+async def _count_unlisted_jobs(
+    session: AsyncSession, worker: Worker, job_ids: list[uuid.UUID], now: datetime
+) -> None:
+    """The heartbeat lists the jobs the worker is running (§7.1). Each executing run of this
+    worker it leaves out counts one more unlisted heartbeat — only once its claim is past
+    `stackd_worker_lost_seconds`, so a claim response still in flight or a beat sent before the
+    claim never counts; a listed run starts over. The scheduler fails the run once it has been left
+    out `UNLISTED_HEARTBEATS_TO_REAP` times in a row (§3.7)."""
+    mine = (Run.worker_id == worker.id) & Run.state.in_(WORKER_EXECUTING_STATES)
+    claim_grace = now - timedelta(seconds=get_settings().stackd_worker_lost_seconds)
+    await session.execute(
+        update(Run)
+        .where(mine, Run.id.in_(job_ids), Run.unlisted_heartbeats > 0)
+        .values(unlisted_heartbeats=0)
+        .execution_options(synchronize_session=False)
+    )
+    await session.execute(
+        update(Run)
+        .where(mine, Run.id.not_in(job_ids), Run.claimed_at < claim_grace)
+        .values(unlisted_heartbeats=Run.unlisted_heartbeats + 1)
+        .execution_options(synchronize_session=False)
+    )
+
+
 @router.post("/heartbeat", response_model=HeartbeatOut)
 async def heartbeat(
     worker: CurrentWorker, session: DbSession, body: HeartbeatIn | None = None
 ) -> HeartbeatOut:
-    worker.last_heartbeat_at = datetime.now(UTC)
+    now = datetime.now(UTC)
+    worker.last_heartbeat_at = now
     # The worker is authoritative for busy/idle via its reported in-flight count (§7, Phase E): a
     # multi-job worker stays busy while ≥1 job runs and flips to idle when all finish. A heartbeat
     # without a body (or count) just means online.
@@ -173,22 +224,44 @@ async def heartbeat(
         worker.status = WorkerStatus.busy if body.in_flight > 0 else WorkerStatus.idle
     elif worker.status == WorkerStatus.offline:
         worker.status = WorkerStatus.idle
+    # An agent that predates the job listing sends none: its runs are reaped once it is offline.
+    if body is not None and body.job_ids is not None:
+        await _count_unlisted_jobs(session, worker, body.job_ids, now)
 
-    # Deliver pending downward commands (diagnostics, cancel_job) and mark them sent.
-    pending = (
+    # Deliver pending downward commands (diagnostics, cancel_job), and again those delivered a
+    # while ago that never got a result.
+    due = (
         (
             await session.execute(
-                select(WorkerCommand).where(
-                    WorkerCommand.worker_id == worker.id, WorkerCommand.status == "pending"
+                select(WorkerCommand)
+                .where(
+                    WorkerCommand.worker_id == worker.id,
+                    or_(
+                        WorkerCommand.status == "pending",
+                        and_(
+                            WorkerCommand.status == "sent",
+                            WorkerCommand.sent_at < now - _COMMAND_REDELIVERY,
+                        ),
+                    ),
                 )
+                .order_by(WorkerCommand.created_at)
+                .with_for_update(skip_locked=True)
             )
         )
         .scalars()
         .all()
     )
-    commands = [{"id": str(c.id), "type": c.type, "payload": c.payload} for c in pending]
-    for c in pending:
+    commands = []
+    for c in due:
+        if c.attempts >= _COMMAND_MAX_DELIVERIES:
+            c.status = "failed"
+            c.result = {"error": f"no result from the worker after {c.attempts} deliveries"}
+            c.completed_at = now
+            continue
         c.status = "sent"
+        c.sent_at = now
+        c.attempts += 1
+        commands.append({"id": str(c.id), "type": c.type, "payload": c.payload})
     await session.commit()
     return HeartbeatOut(commands=commands)
 
@@ -208,7 +281,36 @@ async def command_result(
         "command result",
         extra={"event": "worker.command_result", "worker_id": str(worker.id), "type": cmd.type},
     )
+    if (
+        cmd.type == "cancel_job"
+        and body.status == "done"
+        and (body.result or {}).get("running_here") is False
+    ):
+        await _end_job_not_running(session, worker, (cmd.payload or {}).get("job_id"))
     return {"ok": True}
+
+
+async def _end_job_not_running(session: AsyncSession, worker: Worker, job_id: object) -> None:
+    """The worker the run is assigned to answered a stop request with `running_here: false`: the
+    job runs nowhere and the run would otherwise never end (§4.1). It is failed `job_not_running`
+    under the reaper's guards (`reclaimable`): the claim must be old enough that its response can
+    no longer be in flight, and a job holding apply credentials waits for the apply window."""
+    try:
+        run = await session.get(Run, uuid.UUID(str(job_id)))
+    except ValueError:
+        return
+    if (
+        run is None
+        or run.worker_id != worker.id
+        or run.state not in WORKER_EXECUTING_STATES
+        or not reclaimable(run, datetime.now(UTC))
+    ):
+        return
+    try:
+        await fail_lost_job(session, run, "job_not_running")
+        await session.commit()
+    except ProblemException:  # the run moved on underneath (its job reported after all)
+        await session.rollback()
 
 
 @router.post("/jobs/claim", response_model=None)
@@ -219,67 +321,118 @@ async def claim(worker: CurrentWorker, session: DbSession, wait: int = 0) -> dic
     if settings.is_production and worker.runner != PRODUCTION_RUNNER:
         raise _runner_refused(worker.runner)
     affinity = settings.stackd_apply_affinity_seconds
-    deadline = wait
+    worker_id = worker.id
+    deadline = max(0, min(wait, settings.stackd_claim_max_wait_seconds))
     while True:
         run = await claim_one(session, worker, affinity)
         if run is not None:
-            worker.status = WorkerStatus.busy
-            try:
-                # In a savepoint: what the payload build stages on the run (used_mocks, inputs,
-                # provenance, used_secret_fallback) and its audit events
-                # (`dependency.mock_consumed`, `secret.fallback_used`) only stand for a job
-                # actually handed out.
-                async with session.begin_nested():
-                    payload = await build_job_payload(session, run)
-            except WorkloadSigningUnavailable as exc:
-                # Transient (KMS throttled/unreachable, no DB connection, §3.11): undo the claim —
-                # the run stays queued/confirmed, an approved apply keeps its approval — and tell
-                # the worker to come back.
-                await session.rollback()
-                raise ProblemException(
-                    503,
-                    "Signing unavailable",
-                    "The workload token cannot be signed right now; retry later.",
-                    code=exc.code,
-                    retryable=True,
-                ) from exc
-            except (DependencyError, SecretUnavailable, WorkloadSigningError) as exc:
-                # Unresolvable dependency (§9.3), external secret (§15.2) or workload token (§10)
-                # → fail the run closed, hand the worker nothing.
-                await session.refresh(run)  # the savepoint's rollback expired the staged fields
-                reason = (
-                    "secret"
-                    if isinstance(exc, SecretUnavailable)
-                    else "oidc"
-                    if isinstance(exc, WorkloadSigningError)
-                    else "dependency"
-                )
-                await transition(
-                    session,
-                    run,
-                    RunState.failed,
-                    actor=RunEventActor.system,
-                    fields={"error": str(exc)},
-                    audit_action="run.apply_failed",
-                    audit_context={"reason": reason, "detail": str(exc)},
-                )
-                await session.commit()
-                return Response(status_code=204)
-            await session.commit()
-            _log.info(
-                "job claimed",
-                extra={
-                    "event": "worker.claim",
-                    "worker_id": str(worker.id),
-                    "run_id": payload["job_id"],
-                    "phase": payload["phase"],
-                },
-            )
-            return payload
+            return await _hand_out(session, worker, run)
         if deadline <= 0:
             return Response(status_code=204)
+        # End the transaction before waiting: a long-poll must not sit idle in transaction on a
+        # pooled connection — a pool's worth of idle workers would starve every other request.
+        await session.rollback()
         await asyncio.sleep(min(2, deadline))
         deadline -= 2
+        # The rollback expired the worker (labels, tools): reload it for the next attempt.
+        reloaded = await session.get(Worker, worker_id, populate_existing=True)
+        if reloaded is None:
+            raise ProblemException(401, "Not authenticated", "Worker unregistered.")
+        worker = reloaded
+
+
+async def _hand_out(session: AsyncSession, worker: Worker, run: Run) -> dict[str, Any] | Response:
+    """Build the claimed run's job and hand it out, or undo / fail the claim (§7.2, §3.11). The
+    worker's row is written at the commit only: the payload build (secret fetches, KMS) must not
+    hold its lock, which the worker's own heartbeat and the scheduler's worker-lost sweep take."""
+    run_id = run.id
+    try:
+        # In a savepoint: what the payload build stages on the run (used_mocks, inputs,
+        # provenance, used_secret_fallback) and its audit events (`dependency.mock_consumed`,
+        # `secret.fallback_used`) only stand for a job actually handed out.
+        async with session.begin_nested():
+            payload = await build_job_payload(session, run)
+    except Exception as exc:
+        if isinstance(exc, WorkloadSigningUnavailable) or is_transient_db_error(exc):
+            # Transient (KMS throttled/unreachable, the database, §3.11): undo the claim — the run
+            # stays queued/confirmed, an approved apply keeps its approval —, keep the run out of
+            # the claim for its backoff so the runs behind it are claimed meanwhile, and tell the
+            # worker to come back.
+            code = exc.code if isinstance(exc, WorkloadSigningUnavailable) else "db_unavailable"
+            await session.rollback()
+            try:
+                await defer_claim(session, run_id)
+            except Exception as defer_exc:
+                await session.rollback()
+                _log.warning(
+                    "claim backoff not recorded",
+                    extra={
+                        "event": "worker.claim_defer_failed",
+                        "run_id": str(run_id),
+                        "error_type": type(defer_exc).__name__,
+                    },
+                )
+            _log.warning(
+                "job deferred",
+                extra={
+                    "event": "worker.claim_deferred",
+                    "run_id": str(run_id),
+                    "code": code,
+                    "error_type": type(exc).__name__,
+                },
+            )
+            raise ProblemException(
+                503,
+                "Job unavailable",
+                "The job cannot be built right now; retry later.",
+                code=code,
+                retryable=True,
+            ) from exc
+        # Anything else fails the run closed, the worker getting nothing: an unresolvable
+        # dependency (§9.3), external secret (§15.2) or workload token (§10) — or an unexpected
+        # error (an undecryptable stored secret, a bug), which would otherwise fail every poll on
+        # the same run at the head of the queue.
+        if isinstance(exc, (DependencyError, SecretUnavailable, WorkloadSigningError)):
+            error = str(exc)
+            reason = (
+                "secret"
+                if isinstance(exc, SecretUnavailable)
+                else "oidc"
+                if isinstance(exc, WorkloadSigningError)
+                else "dependency"
+            )
+        else:
+            # The exception's type only, on the run and in the audit: its message may carry a
+            # value. The stack goes to the server log.
+            error, reason = f"job_build_failed:{type(exc).__name__}", "internal"
+            _log.exception(
+                "job build failed",
+                extra={"event": "worker.claim_build_failed", "run_id": str(run_id)},
+            )
+        await session.refresh(run)  # the savepoint's rollback expired the staged fields
+        await transition(
+            session,
+            run,
+            RunState.failed,
+            actor=RunEventActor.system,
+            fields={"error": error},
+            audit_action="run.apply_failed",
+            audit_context={"reason": reason, "detail": error},
+        )
+        await session.commit()
+        return Response(status_code=204)
+    worker.status = WorkerStatus.busy
+    await session.commit()
+    _log.info(
+        "job claimed",
+        extra={
+            "event": "worker.claim",
+            "worker_id": str(worker.id),
+            "run_id": payload["job_id"],
+            "phase": payload["phase"],
+        },
+    )
+    return payload
 
 
 async def _load_owned_run(session: AsyncSession, worker: Worker, job_id: uuid.UUID) -> Run:
@@ -512,6 +665,7 @@ async def post_event(
             applied_env = await session.get(Environment, run.environment_id)
             if applied_env is not None and not run.is_targeted:
                 await clear_drift(session, applied_env, datetime.now(UTC))
+                await clear_on_apply(session, applied_env, run)
         checks = result.get("checks") or []
         failed_check = any(c.get("status") == "fail" for c in checks)
         action = "run.check_failed" if failed_check else "run.apply_failed"
@@ -595,13 +749,61 @@ async def post_event(
             env = await session.get(Environment, run.environment_id)
             if env is not None and not run.is_targeted:
                 await clear_drift(session, env, datetime.now(UTC))
+                # Its plan saw the out-of-band change and was reviewed (§19.7).
+                await clear_on_apply(session, env, run)
             await cascade(session, run)
         else:
             await _decide_after_plan(session, worker, run, result)
         await session.commit()
         return {"ok": True}
 
+    if body.event == "state_observed":
+        await _observe_state(session, run, result)
+        await session.commit()
+        return {"ok": True}
+
     raise ProblemException(400, "Unknown event", body.event)
+
+
+async def _observe_state(session: AsyncSession, run: Run, result: dict[str, Any]) -> None:
+    """A job's reading of its state's serial/lineage (§19.7) — no run state changes. Only from a
+    job that was handed `observe_state`, while it executes; a baseline only from a job holding
+    apply credentials (it wrote the state)."""
+    serial, lineage = parse_observation(result)
+    # Env then run, the claim's lock order: a run reclaimed meanwhile (worker_lost) and its env
+    # handed to the next run can't have its late observation recorded.
+    env = (
+        await session.execute(
+            select(Environment)
+            .where(Environment.id == run.environment_id)
+            .with_for_update()
+            .execution_options(populate_existing=True)
+        )
+    ).scalar_one()
+    run = (
+        await session.execute(
+            select(Run)
+            .where(Run.id == run.id)
+            .with_for_update()
+            .execution_options(populate_existing=True)
+        )
+    ).scalar_one()
+    if run.state not in WORKER_EXECUTING_STATES:
+        raise ProblemException(
+            409, "Job not executing", f"A {run.state.value} run has no job to observe the state."
+        )
+    if not observes_state(run, env):
+        raise ProblemException(
+            409, "State not observed", "This job's state is not observed (§19.7)."
+        )
+    baseline = result.get("baseline") is True
+    if baseline and not holds_apply_credentials(run):
+        raise ProblemException(
+            409, "Not a state write", "Only a job holding apply credentials records a baseline."
+        )
+    await record_observation(
+        session, env, run, serial, lineage, baseline=baseline, now=datetime.now(UTC)
+    )
 
 
 @router.post("/jobs/{job_id}/logs", status_code=202)
@@ -626,19 +828,6 @@ async def ingest_logs(
     return {"accepted": True}
 
 
-async def _read_capped(request: Request, limit: int) -> bytes:
-    """The request body, refused (413) past `limit` bytes without buffering more than that."""
-    declared = request.headers.get("content-length", "")
-    if declared.isdigit() and int(declared) > limit:
-        raise ProblemException(413, "Artifact too large", f"The limit is {limit} bytes.")
-    body = bytearray()
-    async for chunk in request.stream():
-        body += chunk
-        if len(body) > limit:
-            raise ProblemException(413, "Artifact too large", f"The limit is {limit} bytes.")
-    return bytes(body)
-
-
 def _check_plan_upload(run: Run, worker: Worker) -> None:
     if run.worker_id != worker.id:
         raise ProblemException(409, "Not your job", "This run is claimed by another worker.")
@@ -656,6 +845,8 @@ async def put_artifact(
     job_id: uuid.UUID, name: str, request: Request, worker: CurrentWorker, session: DbSession
 ) -> Response:
     run = await _load_owned_run(session, worker, job_id)
+    if name == ERRORED_STATE_FILE:
+        return await _put_errored_state(session, run, request)
     if name != PLAN_FILE:
         await request.body()  # drain — S3 archival of plan.json/outputs.json is a follow-up (§11.3)
         return Response(status_code=204)
@@ -664,26 +855,62 @@ async def put_artifact(
     # the run's variable values in clear (app.runs.artifacts).
     _check_plan_upload(run, worker)
     await session.commit()  # hold no DB connection while the body streams in
-    data = await _read_capped(request, MAX_PLAN_BYTES)
+    data = await read_capped(request, MAX_PLAN_BYTES, "Artifact too large")
     if not data:
         raise ProblemException(400, "Empty artifact", "The plan file is empty.")
-    # Re-check under the run's row lock, held until commit: a concurrent terminal transition
-    # (worker_lost, cancel) either runs first — and this upload is refused — or after, and then
-    # finds the key to purge. Never a saved plan left behind on a terminal run.
-    locked = (
-        await session.execute(
-            select(Run)
-            .where(Run.id == job_id)
-            .with_for_update()
-            .execution_options(populate_existing=True)
-        )
-    ).scalar_one()
-    _check_plan_upload(locked, worker)
-    locked.plan_artifact_key = await save_plan(locked.id, data)
+    # Encrypt and upload before taking the row lock (a fresh key per upload: the reviewed plan's
+    # object is never overwritten), then re-check under that lock, held until commit: a concurrent
+    # terminal transition either runs first — this upload is refused and its object dropped — or
+    # after, and then finds the key to purge. Never a saved plan left behind on a terminal run.
+    key = await save_plan(job_id, data)
+    try:
+        locked = (
+            await session.execute(
+                select(Run)
+                .where(Run.id == job_id)
+                .with_for_update()
+                .execution_options(populate_existing=True)
+            )
+        ).scalar_one()
+        _check_plan_upload(locked, worker)
+    except ProblemException:
+        await session.rollback()
+        await drop_unrecorded_plan(key)
+        raise
+    record_saved_plan(session, locked, key)
     await session.commit()
     _log.info(
         "saved plan stored",
         extra={"event": "worker.plan_saved", "run_id": str(job_id), "size_bytes": len(data)},
+    )
+    return Response(status_code=204)
+
+
+async def _put_errored_state(session: AsyncSession, run: Run, request: Request) -> Response:
+    """The state an apply (or a mutating command) could not persist (§7.3): stored encrypted and
+    audited, from the job holding the run's write credentials only, while it executes."""
+    if run.state not in WORKER_EXECUTING_STATES or not holds_apply_credentials(run):
+        raise ProblemException(
+            409, "Not a state write", "Only an executing job holding apply credentials sends one."
+        )
+    await session.commit()  # hold no DB connection while the body streams in
+    data = await read_capped(request, MAX_ERRORED_STATE_BYTES, "Artifact too large")
+    if not data:
+        raise ProblemException(400, "Empty artifact", "The errored state is empty.")
+    key = await save_errored_state(run.id, data)
+    await record_audit(
+        session,
+        action="run.errored_state_saved",
+        actor_kind=AuditActorKind.worker,
+        actor_id=run.worker_id,
+        target_kind="run",
+        target_id=run.id,
+        context={"environment_id": str(run.environment_id), "key": key, "size_bytes": len(data)},
+    )
+    await session.commit()
+    _log.warning(
+        "errored state stored",
+        extra={"event": "worker.errored_state_saved", "run_id": str(run.id), "key": key},
     )
     return Response(status_code=204)
 

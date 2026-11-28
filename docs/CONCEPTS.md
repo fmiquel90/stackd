@@ -186,6 +186,11 @@ or "overridden here". The provenance is also frozen onto the run (`variable_prov
   `TF_VAR_<name>`).
 - `environment` → injected as a process environment variable for the run.
 
+A repo that already keeps one tfvars file per environment keeps it: the environment lists it in
+`var_files` (e.g. `["envs/prod.tfvars"]`, relative to the project root, in order) and the worker
+passes it as `-var-file=`. Stackd's own variables still win over it — the worker passes its
+generated files after the repo's (SPECS §3.4).
+
 ### Sensitive variables are write-only
 
 Mark a variable `sensitive: true` and it is **AES-256-GCM encrypted at rest** and **never returned
@@ -346,8 +351,9 @@ hooks:
 **Repo hooks get nothing secret**: of the worker's environment only an allowlist (`PATH`, `HOME`,
 locale, proxies…), the run's non-sensitive environment variables, no cloud credentials, and a
 `plan.json` with every sensitive value masked. While a repo hook runs, neither the saved plan, the
-run's tfvars, the cloud token file nor the repo token is on disk. Platform hooks are trusted: they
-get the run's secrets, the cloud credentials and the raw `plan.json`. Neither tofu nor any hook sees
+run's tfvars, the cloud token file nor the repo credential is on disk. Platform hooks are trusted: they
+get the run's secrets, the cloud credentials and the raw `plan.json` — but not the repo credential
+(token or deploy key), which only the clone and `init` (module downloads) get. Neither tofu nor any hook sees
 the agent's own `STACKD_*` settings. See [Hooks](guide/hooks.md#what-hooks-can-see).
 
 ---
@@ -362,9 +368,10 @@ register (pool token) → heartbeat (every ~20s) → claim (long-poll)
    → clone → hooks → init → plan/apply → stream logs → report → repeat
 ```
 
-- **Claim** is concurrency-safe: `SELECT … FOR UPDATE OF environment SKIP LOCKED` serialises per
-  environment, and the `one_active_run_per_env` unique index is the hard guarantee (a losing racer gets a
-  `23505` and simply re-polls).
+- **Claim** is concurrency-safe: `SELECT … FOR NO KEY UPDATE OF environment SKIP LOCKED` serialises
+  per environment, and the `one_active_run_per_env` unique index is the hard guarantee (a losing racer
+  gets a `23505` and simply re-polls). A run whose job cannot be built never blocks the queue: a
+  transient failure sets it aside for a backoff, any other fails it.
 - **Labels** target work to pools (e.g. a dedicated `prod` pool): a worker claims only runs whose
   environment labels are a subset of its own, and whose stack's tool version it can run.
 - **Apply affinity**: the worker that produced a plan is preferred for the apply for ~60s; past
@@ -380,13 +387,17 @@ register (pool token) → heartbeat (every ~20s) → claim (long-poll)
   A job holding apply credentials (an `applying` run, a mutating command) is only reclaimed after
   the apply budget + grace (15 + 5 min by default), so a long apply isn't failed mid-flight and its
   tokens have expired before another worker takes the environment. `unconfirmed` and `confirmed` runs are
-  never reclaimed: they wait on a human or on the apply claim, not on the plan worker.
+  never reclaimed: they wait on a human or on the apply claim, not on the plan worker. A **live**
+  worker that lost a job (a claim response that never arrived) is caught too: its heartbeat lists
+  the jobs it runs, and a run it leaves out of 2 heartbeats is failed `job_not_running` (same
+  delays). An API or database outage doesn't count as worker silence.
 - **Command channel.** The heartbeat response is also the *downward* channel (still no inbound to
   the worker). It carries **diagnostics**: an admin clicks a button, a `pending` command is
   queued, the worker picks it up on its next heartbeat, runs a **read-only** bundle (versions, disk,
   environment variable *names* — never values, recent agent logs) and posts it back. It also carries
   `cancel_job`, which stops a job the worker is executing (§4): SIGINT to the tool, SIGKILL after
-  `STACKD_CANCEL_GRACE_SECONDS` (120 s). Delivery latency is bounded by the heartbeat interval (~20 s).
+  `STACKD_CANCEL_GRACE_SECONDS` (120 s). Delivery latency is bounded by the heartbeat interval (~20 s). Delivery is at least once: a command
+  without a result after 90 s is delivered again (3 times at most).
 - **Drain.** A worker stopped with SIGTERM/SIGINT claims nothing more, keeps heartbeating, lets
   its running jobs finish and report, then exits; past `STACKD_DRAIN_TIMEOUT_SECONDS` (20 min) or
   on a second signal it stops them as `cancel_job` would, and their runs fail `worker_shutdown`
@@ -414,7 +425,9 @@ terraform ──backend "http"──▶ Stackd API ──(bucket encryption)─�
 Why: per-job **scoped tokens**, **locking visible in the UI** with audited force-unlock, refusal
 of a regressive serial, and every write tied to the run that produced it. The token's scope follows
 the job: `ro` (PR plans, read-only commands: read only), `plan` (a plan may lock, never write),
-`rw` (an apply or a mutating command). Once its run has ended, a token can no longer write or lock.
+`rw` (an apply or a mutating command). Once its run has ended, a token can no longer write or lock,
+and the lock the run held is released with it (audited): a worker that dies mid-run does not leave
+the environment locked.
 
 The worker adds a bare `backend "http" {}` block and hands the address and the token to tofu
 **only**, as `TF_HTTP_*` environment variables — never `-backend-config`, which tofu would persist
@@ -494,11 +507,19 @@ runs. The
 `AWS_ROLE_SESSION_NAME = stackd-<run_id>` ties every CloudTrail action back to the run — and thus to
 the human who confirmed it.
 
+**Named profiles.** Code written for humans often says `profile = "tfstates"` (provider, backend
+config, remote state). The integration maps such names to their own plan/apply roles; the worker
+writes them into a generated AWS config file (`[profile tfstates]` with `role_arn` and the job's
+token file), so that code runs unchanged — each profile's role is assumed with the same token, so
+its trust policy pins tier and phase like the default roles' (SPECS §10.6).
+
 ```bash
 curl -s -X PUT localhost:8000/api/v1/environments/$PROD/cloud-integration -H "$AUTH" \
   -H 'content-type: application/json' -d '{
   "plan_role_arn":"arn:aws:iam::123:role/stackd-prod-plan",
-  "apply_role_arn":"arn:aws:iam::123:role/stackd-prod-apply","region":"eu-west-1"}'
+  "apply_role_arn":"arn:aws:iam::123:role/stackd-prod-apply","region":"eu-west-1",
+  "profiles":{"tfstates":{"plan_role_arn":"arn:aws:iam::456789012345:role/tfstates-plan",
+                          "apply_role_arn":"arn:aws:iam::456789012345:role/tfstates-apply"}}}'
 curl -s -X POST localhost:8000/api/v1/environments/$PROD/cloud-integration/test -H "$AUTH"  # verify AssumeRole
 ```
 
@@ -507,7 +528,8 @@ curl -s -X POST localhost:8000/api/v1/environments/$PROD/cloud-integration/test 
 ## 11. Webhooks & Git staleness
 
 A Git webhook (HMAC-verified, secret per stack) maps a pushed branch to the environments tracking it,
-filtered by `project_root`:
+filtered by the paths that concern the stack — its `project_root`, plus its `trigger_paths` globs
+(shared modules or configuration outside the folder, e.g. `modules/**`):
 
 - **push** → a `tracked` run per matching environment, and `head_sha` advances.
 - **pull request** → a `proposed` run: plan-only, read-only state, mocks allowed, and **no
@@ -598,15 +620,17 @@ curl -s -X POST localhost:8000/api/v1/environments/$ENV_ID/notifications -H "$AU
 
 **How it works — a transactional outbox, not a side-effect.** When `transition()` moves a run to a
 notify-worthy state, it inserts a row into `notification_outbox` **in the same DB transaction** as
-the state change (no HTTP in the request path). A background scheduler task drains the outbox under
+the state change (no HTTP in the request path). A background dispatcher loop drains the outbox under
 a `pg_try_advisory_lock` (one replica at a time) with `FOR UPDATE … SKIP LOCKED`, resolves the
 matching targets (those on the run's environment + those on its stack, filtered by `on_states`),
 and POSTs — with no DB transaction held during the HTTP call. Consequences worth knowing:
 
 - a **rolled-back** transition never notifies (the outbox row rolls back with it);
 - two API replicas never double-send (the lock + `SKIP LOCKED`);
-- delivery is **at-least-once** with retries (up to 5 attempts), then the row is dead-lettered and
-  the failure is logged — a flaky Slack never blocks or fails a run.
+- delivery is **at-least-once**: a failed target is retried alone (targets already reached aren't
+  sent the event again), with exponential backoff and jitter, honouring `Retry-After`, for about an
+  hour (12 attempts), then the row is dead-lettered and logged at error level — a flaky Slack never
+  blocks or fails a run.
 
 Deep links use `STACKD_APP_URL` (the SPA base, e.g. `http://localhost:5173`).
 
@@ -631,6 +655,10 @@ bypasses the apply gate.
   already ran with them). The outcome lands on the environment's `drift_status` — `drifted` (eligible
   approvers get an inbox alert), `in_sync` or `error` — and a successful apply clears it (not a
   targeted `-target` apply, which is partial). Drift is never auto-remediated.
+- **Changes made outside Stackd.** With `managed_state: false` someone can still apply by hand. Each
+  job of reviewed code reads the state's `serial`/`lineage` (nothing else) and the API compares them
+  with the last pair it saw: a difference flags the environment `⇄ CHANGED OUTSIDE`, notifies its
+  approvers and is audited, until a full apply or a human's acknowledgement (SPECS §19.7).
 - **Environment clones & rollouts.** `POST /api/v1/spaces/{space_id}/environment-clones` creates, in
   several stacks of a space at once, an environment modelled on an existing one — settings,
   governance and dependency edges. A **rollout** then plans and applies a set of environments along
@@ -688,10 +716,11 @@ bypasses the apply gate.
 | **Outbox** | run-event notifications enqueued in-txn, drained by the scheduler (at-least-once) |
 | **Cancel / stop** | ends a waiting run at once; asks the worker to stop an executing one (`failed` if it held apply credentials) |
 | **Drift run** | scheduled read-only `-refresh-only` plan of the applied commit; sets `drift_status`, never remediates |
+| **Out-of-band change** | an unmanaged state's serial/lineage differs from the last Stackd observed: written outside Stackd; flagged until a full apply or an acknowledgement |
 | **Environment clone** | one-shot creation of an environment in several stacks, modelled on an existing one |
 | **Rollout** | plan → apply of a set of environments along their dependencies under one approval |
 | **Plan comment** | threaded, optionally anchored review comment on a run; advisory |
-| **Inbox** | per-user in-app notifications (approval requests, run outcomes, mentions, drift, rollouts) |
+| **Inbox** | per-user in-app notifications (approval requests, run outcomes, mentions, drift, out-of-band changes, rollouts) |
 | **Secret source** | external secrets manager a variable references; fetched at claim, never stored |
 | **Service account** | a non-human user for automation, with expiring API tokens; reads and plans, never confirms (SPECS §23) |
 | **Config export / import** | a space's configuration as a JSON document by names (no secret); imported back by merge, never deleting (SPECS §22) |

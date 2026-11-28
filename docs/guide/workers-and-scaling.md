@@ -33,9 +33,13 @@ The **queue is Postgres**, not a broker. A claim is an atomic `SELECT … FOR UP
 
 ### One active run per environment
 
-`SKIP LOCKED` alone does not serialise two workers claiming two *distinct* queued runs of the **same** environment. The hard guarantee is the partial unique index `one_active_run_per_env`: the second claim violates it (SQLSTATE `23505`), is caught, and is treated as "nothing to claim" — that worker simply re-polls. The claim also locks the environment row (`FOR UPDATE OF environment`) so losers skip it and pick other work instead of wasting effort.
+`SKIP LOCKED` alone does not serialise two workers claiming two *distinct* queued runs of the **same** environment. The hard guarantee is the partial unique index `one_active_run_per_env`: the second claim violates it (SQLSTATE `23505`), is caught, and is treated as "nothing to claim" — that worker simply re-polls. The claim also locks the environment row (`FOR NO KEY UPDATE OF environment`) so losers skip it and pick other work instead of wasting effort.
 
 The practical consequence: **the unit of parallelism is the environment.** Two environments of the same stack run in parallel; two runs on the same environment never do.
+
+### A job that cannot be built
+
+When a run is claimed, the API builds its job: variables, [external secrets](external-secrets.md), dependency inputs, the [workload token](cloud-credentials.md). If that fails for a reason a retry can get past (KMS throttled or unreachable, a database hiccup), the claim is undone — the run stays `queued` (or `confirmed`, keeping its approval) — the worker gets a `503` and polls again, and the run is set aside for a backoff (10 s, doubling up to 5 min) so the runs queued behind it are claimed meanwhile. Any other failure — an unresolvable dependency or secret, a key that will never sign, a stored secret that no longer decrypts — fails the run at once (`run.apply_failed`). Either way, one bad run never blocks the queue.
 
 ### Apply affinity
 
@@ -43,7 +47,11 @@ After a plan is confirmed, the originating worker is **preferred** for the apply
 
 ### Worker loss
 
-A worker silent for > 60s (`STACKD_WORKER_OFFLINE_SECONDS` on the API) is marked `offline`. The scheduler (every 10 s) then fails the runs whose job is **executing** on an offline worker — `preparing`, `planning`, `checking`, `running` (a command) or `applying` — as `failed (worker_lost)`, once the job was claimed more than 120s ago (`STACKD_WORKER_LOST_SECONDS`). No human action required.
+A worker silent for > 60s (`STACKD_WORKER_OFFLINE_SECONDS` on the API) is marked `offline`. The scheduler (every 10 s) then fails the runs whose job is **executing** on an offline worker — `preparing`, `planning`, `checking`, `running` (a command) or `applying` — as `failed (worker_lost)`, once the job was claimed more than 120s ago (`STACKD_WORKER_LOST_SECONDS`). The state lock the run held is released with it, so the environment's next run is not blocked. No human action required.
+
+The silence is only counted while the API could hear the worker: after an API restart or a database outage, every worker gets a full offline period to heartbeat again before it is marked offline, so an outage never fails runs on healthy workers.
+
+A worker can also be alive and still not run a job it was assigned — a claim response lost to an API restart or a proxy error, say. Each heartbeat lists the jobs the worker is running; a run its worker leaves out of 2 heartbeats in a row is failed as `failed (job_not_running)`, with the same delays (and the same apply-window exception below). Stopping such a run ends it the same way: the worker answers that the job is not running there. Agents older than this listing are only covered by the offline rule.
 
 Runs that are **not executing** are never reclaimed: an `unconfirmed` run waits for a human and a `confirmed` one for the apply claim, and neither depends on the plan worker. Losing the worker that planned a run doesn't fail it; another worker applies the saved plan.
 
@@ -81,9 +89,18 @@ Each job's subprocesses run in their own process group: whatever a hook or a tof
 | `apply` of the saved plan | the apply budget, `apply_timeout_seconds` in the claim (`STACKD_APPLY_TIMEOUT_SECONDS` on the API, default 900 s) |
 | a command run's subcommand | the apply budget when the claim's `cred_phase` is `apply` (a mutating command); the default cap when it is `plan` (a read-only command). A missing or unknown `cred_phase` (an older API) gets the apply budget: it fails closed |
 | each hook | the hook timeout, `STACKD_HOOK_TIMEOUT_SECONDS` on the worker (default 600 s). A hook past it fails by its own `on_failure` ([Hooks](hooks.md#failures-warnings-and-timeouts)) |
+| each git command of the clone | `STACKD_GIT_TIMEOUT_SECONDS` on the worker (default 600 s). Before that, a transfer slower than 1 KB/s for 60 s (https) or an SSH host silent for a minute (30 s to connect) fails it. A stop request interrupts it like any command |
 | anything else (`init`, `plan`, `show`, `output`) | the agent's default cap, 2 h |
 
 The worker never decides on its own whether a command is mutating: it reads `cred_phase` from the claim. A plan fails on any exit code but 0 (no changes) and 2 (changes) — a killed plan never passes for "no changes".
+
+Every budget above is also cut to the job's **credentials**: the state token and the OIDC token handed over at the claim expire (the apply window for an apply, 30 min for a plan's OIDC token), and each step must end 60 s before the first of them does — so tofu's last state write and its unlock still go out with a valid token. An apply (or a mutating command) is **not started** when less than 5 minutes (or its whole budget, if shorter) are left by then, because the clone, `init` and the `before_apply` hooks used the rest: the run fails with `apply not started: the job's credentials expire in …`, nothing applied — trigger a new plan. Otherwise a shortened apply budget is shown in the run's log. If your `before_apply` hooks are slow, raise the API's `STACKD_APPLY_LOST_GRACE_SECONDS`: it lengthens the apply window, hence the tokens.
+
+If tofu still cannot write the state back (the backend unreachable, say), it leaves an `errored.tfstate`: the worker uploads it to the API, which keeps it encrypted (`artifacts/<run_id>/errored.tfstate`, audited `run.errored_state_saved`), or keeps it on the worker under `STACKD_WORKSPACE_ROOT/.errored-state/` when the upload fails. The run's log says where. Push it back to the state backend before any other run of that environment.
+
+### Restarting after a crash
+
+A worker killed without draining (OOM, `kill -9`) can leave job containers still running tofu, and workspaces holding the checkout and the run's variables. At its next start it removes them — the containers whose workspace no running job holds, and those workspaces — and logs `agent.orphans_reaped`. Agents sharing a host and a `STACKD_WORKSPACE_ROOT` never touch each other's running jobs: a job holds a lock on its workspace while it runs.
 
 ## Create a pool
 
@@ -98,7 +115,7 @@ POOL_TOKEN=$(curl -s -X POST localhost:8000/api/v1/worker-pools \
 
 ## Run a worker
 
-A worker needs only the API URL and the pool token (or `STACKD_POOL_TOKEN_FILE`, a file it re-reads until the token appears):
+A worker needs only the API URL and the pool token (or `STACKD_POOL_TOKEN_FILE`, a file it re-reads until the token appears, and again whenever the API answers `401` — a rotated token applies without a restart):
 
 ```bash
 cd worker
@@ -120,6 +137,8 @@ STACKD_POOL_TOKEN=$POOL_TOKEN \
 | `STACKD_CANCEL_GRACE_SECONDS` | `120` | after a stop request interrupts the tool (SIGINT), how long it gets to stop by itself before it is killed |
 | `STACKD_DRAIN_TIMEOUT_SECONDS` | `1200` | when the worker is stopped, how long its running jobs get to finish before they are stopped, see [Stopping a worker](#stopping-a-worker) |
 | `STACKD_HOOK_TIMEOUT_SECONDS` | `600` | each hook's time budget |
+| `STACKD_GIT_TIMEOUT_SECONDS` | `600` | each git command's time budget (the clone of the job's commit) |
+| `STACKD_PLUGIN_CACHE_DIR` | unset | a provider plugin cache shared by the worker's jobs, see [Provider plugin cache](#provider-plugin-cache); unset, every job downloads its providers |
 | `STACKD_LEAK_TRIPWIRE` | `warn` | `fail` fails a plan whose non-sensitive output shows a secret |
 | `STACKD_WORKSPACE_ROOT` | `/tmp/stackd-ws` | where each job's workspace is created, then removed |
 | `STACKD_HEARTBEAT_INTERVAL`, `STACKD_POLL_WAIT` | `20`, `25` (s) | heartbeat period, claim long-poll |
@@ -147,10 +166,20 @@ Every job runs in its own workspace, removed when the job ends. `STACKD_RUNNER` 
 | `STACKD_DOCKER_PIDS_LIMIT` | `1024` | per-container process limit |
 | `STACKD_DOCKER_TMP_SIZE` | `1g` | size of the writable `/tmp` tmpfs (the container's `HOME`) |
 | `STACKD_DOCKER_RUNTIME` | unset | an alternative OCI runtime, e.g. `runsc` (gVisor) |
+| `STACKD_DOCKER_PULL_TIMEOUT_SECONDS` | `600` | a runner image pull past it fails the job |
 | `STACKD_REGISTRY_AUTH_FILE` | unset | a Docker `config.json` whose `auths` entry for the image's registry authenticates the pull of a runner image from a private registry (credential helpers not supported), see [Installing](installing.md#6-runner-images) |
 
 !!! warning "The worker's host is privileged"
     Access to the Docker socket is root-equivalent on that host: give the worker a dedicated VM, ideally with rootless Docker. If the agent itself runs in a container, mount `STACKD_WORKSPACE_ROOT` at the **same path** on the host and in the agent's container: the job containers mount it by host path.
+
+### Provider plugin cache
+
+Without a cache, every job's `init` downloads every provider it uses (hundreds of MB for a big stack). Set `STACKD_PLUGIN_CACHE_DIR` to a directory of the worker's host to share them between its jobs (both runners):
+
+- tofu's cache is its `providers/` subdirectory, created on first use. Keep the directory **outside** `STACKD_WORKSPACE_ROOT`, and, when the agent runs in a container, mount it at the **same path** on the host and in the agent's container (the job containers mount it by host path), e.g. `/var/lib/stackd/plugin-cache` (see `deploy/production/worker.compose.yml`).
+- Only `init` writes it — the one command that installs providers and runs no repo code. Every other tofu command and platform hook gets it read-only; repo hooks don't see it.
+- A cached provider is used only when the job's dependency lock file (`.terraform.lock.hcl`) records its checksum; otherwise tofu downloads it from the registry, as without a cache. Commit your lock files to benefit from the cache. `TF_PLUGIN_CACHE_MAY_BREAK_DEPENDENCY_LOCK_FILE` is never passed to `init`.
+- Terraform's cache is not safe for concurrent installs: the jobs' `init`s take turns (a lock file next to the cache), so with `STACKD_MAX_CONCURRENT_JOBS` > 1 an `init` may wait for another. Workers on one host may share the directory; workers on different hosts must not (no network filesystem).
 
 !!! warning "Fargate"
     The `docker` runner launches containers; **AWS Fargate does not allow this**. A worker on Fargate can only use the `local` runner, which a production API refuses.
@@ -181,11 +210,32 @@ Because the environment is the unit of parallelism, **throughput ≈ min(workers
 There is **no built-in autoscaler**, but the signals you need are exposed:
 
 - `GET /api/v1/health` — DB, workers (online/total + last heartbeat), runs active/queued, recent errors.
-- `GET /api/v1/queue` — waiting runs and *why* they wait (`active_run` | `env_locked` | `no_compatible_worker` | `apply_affinity_hold`).
+- `GET /api/v1/queue` — waiting runs and *why* they wait (`active_run` | `env_locked` | `claim_backoff` | `no_compatible_worker` | `apply_affinity_hold`). `claim_backoff` is a run whose job could not be prepared for a transient reason (database, KMS); it is retried at `claimable_after` (up to 5 min apart, after `claim_attempts` failures) while the runs behind it keep moving.
 
 A `no_compatible_worker` backlog means no online worker carries the environment's labels or can run the stack's `tool_version` — not a capacity problem: adding generic workers will not help; you need workers with the right labels or tool versions. See [Observability](observability.md) for the Workers & health page.
 
-Drift detection adds background load: every environment with `drift_check_enabled` gets a read-only plan every 6 h (`STACKD_DRIFT_INTERVAL_SECONDS` on the API). A claim always takes user runs before these drift plans, then the oldest first.
+### Database connections
+
+A worker waiting on its claim long-poll holds **no** database connection: the API ends the claim's transaction before each 2 s wait (and caps `?wait=` at `STACKD_CLAIM_MAX_WAIT_SECONDS`, default 30). Idle workers therefore cost a few milliseconds of a connection every 2 s each, not a connection each. Size each API process's pool for the requests it serves **at once**:
+
+- the jobs being built at the same moment — a claim holds its connection while it fetches external secrets and signs the workload token (plus a second, briefly, the first time a KMS key is provisioned);
+- workers' events, logs and state-backend calls, and UI/API traffic;
+- up to 4 for the scheduler (two tasks, each with its session and its advisory-lock connection).
+
+| API setting | Default | What it does |
+|---|---|---|
+| `STACKD_DB_POOL_SIZE` | `10` | connections kept open per API process |
+| `STACKD_DB_MAX_OVERFLOW` | `10` | extra connections opened under load, closed when returned |
+| `STACKD_DB_POOL_TIMEOUT_SECONDS` | `30` | how long a request waits for a free connection before failing |
+| `STACKD_DB_IDLE_IN_TRANSACTION_TIMEOUT_SECONDS` | `300` | the server ends a session left idle inside a transaction this long (a leak, a stuck request), releasing its locks |
+| `STACKD_DB_LOCK_TIMEOUT_SECONDS` | `30` | a statement waiting this long for a row or advisory lock fails instead of queueing forever |
+| `STACKD_DB_STATEMENT_TIMEOUT_SECONDS` | `0` (the server's) | cap on any single statement; off by default, as a large retention purge can legitimately run long |
+
+The three timeouts apply to the API's own connections only — `0` leaves the server's (role or database) setting. Migrations (`alembic upgrade`, the `migrate` service) and the audit purge open their own connections and never inherit them.
+
+Postgres must accept every replica's pool at full overflow, plus one `LISTEN` connection per replica (live updates), the migrations and the audit purge: `max_connections` ≥ replicas × (`STACKD_DB_POOL_SIZE` + `STACKD_DB_MAX_OVERFLOW` + 1) + a few. With the defaults that is 21 per replica — Postgres' default of 100 fits four replicas.
+
+Drift detection adds background load: every environment with `drift_check_enabled` gets a read-only plan every 6 h (`STACKD_DRIFT_INTERVAL_SECONDS` on the API) — never a second one while the previous drift plan is still queued. A claim always takes user runs before these drift plans, then the oldest first.
 
 ## See also
 

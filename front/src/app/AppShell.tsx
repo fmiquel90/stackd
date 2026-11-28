@@ -20,14 +20,17 @@ import {
   Moon,
   Sun,
 } from "lucide-react";
-import { environments, observability, runs, stacks } from "@/api/resources";
+import { observability, stacks } from "@/api/resources";
 import { useConnectionStatus } from "@/api/stream";
 import type { User } from "@/api/types";
 import { useLogout } from "@/auth/session";
 import { Brand } from "./Brand";
+import { DocumentTitle, PAGE_TITLES } from "./DocumentTitle";
 import { NotificationBell } from "./NotificationBell";
+import { useRunIdentity } from "./runIdentity";
 import { Button } from "@/ui/Button";
 import { cn } from "@/ui/cn";
+import { RouteErrorBoundary } from "@/ui/ErrorBoundary";
 import {
   Dialog,
   DialogContent,
@@ -49,6 +52,7 @@ import { SpaceProvider, useEntitySpace, useSpaces } from "./SpaceContext";
 import { useSpaceEnvs } from "@/features/data/spaceEnvs";
 import { STUCK_AFTER_S, useQueueRows, waitedSeconds } from "@/features/queue/queueModel";
 import { useTheme } from "./theme";
+import { shortId } from "@/lib/ids";
 
 // Route-level code splitting: each page is its own chunk; the graph stack loads only on /graph.
 const OverviewPage = lazy(() =>
@@ -313,48 +317,23 @@ function Crumb({ to, children, last }: { to?: string; children: ReactNode; last?
 }
 
 function RunCrumbs({ runId }: { runId: string }) {
-  const run = useQuery({ queryKey: ["run", runId], queryFn: () => runs.get(runId) });
-  const env = useQuery({
-    queryKey: ["environment", run.data?.environment_id],
-    queryFn: () => environments.get(run.data!.environment_id),
-    enabled: Boolean(run.data?.environment_id),
-  });
-  const stack = useQuery({
-    queryKey: ["stack", env.data?.stack_id],
-    queryFn: () => stacks.get(env.data!.stack_id),
-    enabled: Boolean(env.data?.stack_id),
-  });
+  const { env, stack, space } = useRunIdentity(runId);
   // The run's space, so the breadcrumb and the nav follow the entity, not the last selection.
-  useEntitySpace(stack.data?.space_id);
-  const { list } = useSpaces();
-  const space = list.find((s) => s.id === stack.data?.space_id);
+  useEntitySpace(stack?.space_id);
   const base = space ? `/s/${encodeURIComponent(space.name)}` : undefined;
   return (
     <>
       {space && <Crumb to={base}>{space.name}</Crumb>}
-      {stack.data && (
-        <Crumb to={`${base}/stacks/${encodeURIComponent(stack.data.name)}`}>{stack.data.name}</Crumb>
-      )}
-      {stack.data && env.data && (
-        <Crumb
-          to={`${base}/stacks/${encodeURIComponent(stack.data.name)}/envs/${encodeURIComponent(env.data.name)}`}
-        >
-          {env.data.name}
+      {stack && <Crumb to={`${base}/stacks/${encodeURIComponent(stack.name)}`}>{stack.name}</Crumb>}
+      {stack && env && (
+        <Crumb to={`${base}/stacks/${encodeURIComponent(stack.name)}/envs/${encodeURIComponent(env.name)}`}>
+          {env.name}
         </Crumb>
       )}
-      <Crumb last>run {runId.slice(0, 8)}</Crumb>
+      <Crumb last>run {shortId(runId)}</Crumb>
     </>
   );
 }
-
-const PAGE_TITLES: Record<string, string> = {
-  graph: "Graph",
-  "variable-sets": "Variable sets",
-  queue: "Queue",
-  workers: "Workers",
-  audit: "Audit",
-  settings: "Settings",
-};
 
 function Breadcrumb() {
   const { pathname } = useLocation();
@@ -395,7 +374,9 @@ function Breadcrumb() {
   }
   return (
     <nav aria-label="Breadcrumb" className="min-w-0">
-      <ol className="flex min-w-0 items-center gap-1.5 font-data text-[12px] [&>li:first-child>span:first-child]:hidden">
+      {/* < 768 px only the last two crumbs: the page header repeats the rest, and four truncated
+          crumbs ("de… / demo-net… / pr…") say nothing. */}
+      <ol className="flex min-w-0 items-center gap-1.5 font-data text-[12px] [&>li:first-child>span:first-child]:hidden max-md:[&>li:nth-last-child(2)>span:first-child]:hidden max-md:[&>li:not(:nth-last-child(-n+2))]:hidden">
         {crumbs}
       </ol>
     </nav>
@@ -439,6 +420,7 @@ function TopBar({ user, onMenu, onPalette }: { user: User; onMenu: () => void; o
       >
         Menu
       </Button>
+      <DocumentTitle user={user} />
       <Breadcrumb />
       <div className="ml-auto flex shrink-0 items-center gap-3">
         <ConnectionIndicator />
@@ -641,9 +623,11 @@ function Shell({ user }: { user: User }) {
         <ReconnectBar />
         <main id="content" tabIndex={-1} className="min-h-0 flex-1 overflow-auto outline-none">
           <div className="mx-auto w-full max-w-[1440px] p-4 lg:p-6">
-            <Suspense fallback={<PageLoading />}>
-              <AppRoutes />
-            </Suspense>
+            <RouteErrorBoundary>
+              <Suspense fallback={<PageLoading />}>
+                <AppRoutes />
+              </Suspense>
+            </RouteErrorBoundary>
           </div>
         </main>
         <BottomBar onMenu={() => setDrawer(true)} />

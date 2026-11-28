@@ -22,6 +22,16 @@ run_duration = Histogram(
     buckets=(5, 15, 30, 60, 120, 300, 600, 1800, 3600),
 )
 webhook_total = Counter("stackd_webhook_total", "VCS webhooks received", ["result"])
+scheduler_task_failures = Counter(
+    "stackd_scheduler_task_failures_total",
+    "Periodic task runs that raised or overran their time budget (§7.5)",
+    ["task"],
+)
+outbox_dead_letters = Counter(
+    "stackd_outbox_dead_letters_total",
+    "Outbox rows abandoned after their last delivery attempt (§7.5)",
+    ["outbox"],
+)
 
 
 def render() -> tuple[bytes, str]:

@@ -2,17 +2,21 @@ import { useEffect, useMemo, useRef } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { comments, environments, graphApi, queue, runs, stacks, tiers, users } from "@/api/resources";
 import { useLiveSignals } from "@/api/stream";
-import type { LogChunk } from "@/api/types";
+import type { LogChunk, RunState } from "@/api/types";
 import { useAnnounce } from "@/app/announcer";
 import { useSession } from "@/auth/session";
 import { downstreamOf } from "@/lib/cascade";
-import { mergeChunks, planLines } from "@/lib/logModel";
+import { mergeChunks, PHASE_ORDER } from "@/lib/logModel";
 import { isTerminal } from "@/lib/runOutcome";
 import { parsePlan } from "@/lib/planParse";
+import { useLogModel } from "@/identity/LogViewer";
 import type { CascadeItem } from "@/identity/TypeToConfirm";
+import { shortId } from "@/lib/ids";
 
 // Everything the run page shows (DESIGN §5.2). Queries are the source of truth; WS signals invalidate
 // them — except logs, which are appended incrementally with `after_seq` (DESIGN §6, SPECS §5.3).
+
+const NO_LOGS: LogChunk[] = [];
 
 export function useRunPage(runId: string) {
   const qc = useQueryClient();
@@ -38,7 +42,12 @@ export function useRunPage(runId: string) {
   });
   const catalog = useQuery({ queryKey: ["tiers"], queryFn: tiers.list });
   const people = useQuery({ queryKey: ["mentionable"], queryFn: users.mentionable, staleTime: 5 * 60_000 });
-  const logs = useQuery({ queryKey: ["run-logs", runId], queryFn: () => runs.logs(runId) });
+  const logs = useQuery({
+    queryKey: ["run-logs", runId],
+    queryFn: () => runs.logs(runId),
+    // Caught up incrementally below, never refetched whole on a reconnect (api/stream.ts).
+    meta: { streamed: true },
+  });
   const threads = useQuery({ queryKey: ["run-comments", runId], queryFn: () => comments.list(runId) });
   const graph = useQuery({ queryKey: ["graph"], queryFn: graphApi.get, staleTime: 60_000 });
   const stackList = useQuery({ queryKey: ["stacks"], queryFn: stacks.list });
@@ -50,22 +59,49 @@ export function useRunPage(runId: string) {
     refetchInterval: queued ? 10_000 : false,
   });
 
-  // Incremental log fetch: one in flight per phase, from the highest seq we hold.
+  // Incremental log fetch, from the highest seq we hold: one request in flight per phase. A signal
+  // that lands meanwhile — or while the whole log is (re)loading, whose answer would overwrite ours —
+  // marks the phase dirty, and it is fetched again once that request settles. Keyed `run:phase`:
+  // the page stays mounted from one run to another.
   const inflight = useRef(new Set<string>());
+  const dirty = useRef(new Set<string>());
   const fetchLogs = async (phase: string) => {
-    if (inflight.current.has(phase)) return;
-    inflight.current.add(phase);
+    const key = ["run-logs", runId];
+    const id = `${runId}:${phase}`;
+    if (inflight.current.has(id) || qc.getQueryData(key) === undefined || qc.isFetching({ queryKey: key })) {
+      dirty.current.add(id);
+      return;
+    }
+    inflight.current.add(id);
     try {
-      const have = qc.getQueryData<LogChunk[]>(["run-logs", runId]) ?? [];
-      const after = Math.max(-1, ...have.filter((c) => c.phase === phase).map((c) => c.seq));
-      const fresh = await runs.logsAfter(runId, phase, after);
-      qc.setQueryData<LogChunk[]>(["run-logs", runId], (old) => mergeChunks(old ?? [], fresh));
+      do {
+        dirty.current.delete(id);
+        const have = qc.getQueryData<LogChunk[]>(key) ?? [];
+        const after = Math.max(-1, ...have.filter((c) => c.phase === phase).map((c) => c.seq));
+        const fresh = await runs.logsAfter(runId, phase, after);
+        qc.setQueryData<LogChunk[]>(key, (old) => mergeChunks(old ?? [], fresh));
+      } while (dirty.current.has(id));
     } finally {
-      inflight.current.delete(phase);
+      inflight.current.delete(id);
     }
   };
+  // Signals missed on a reconnect, last chunks shipped around the terminal event: every phase.
+  const fetchAllLogs = () => {
+    const have = qc.getQueryData<LogChunk[]>(["run-logs", runId]) ?? [];
+    for (const phase of new Set([...PHASE_ORDER, ...have.map((c) => c.phase)])) void fetchLogs(phase);
+  };
+  useEffect(() => {
+    if (logs.isFetching || !logs.isSuccess) return;
+    const prefix = `${runId}:`;
+    for (const id of [...dirty.current]) if (id.startsWith(prefix)) void fetchLogs(id.slice(prefix.length));
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- fetchLogs reads refs and the cache only
+  }, [logs.isFetching, logs.isSuccess, runId]);
 
   useLiveSignals([`run:${runId}`], (s) => {
+    if (s.kind === "resync") {
+      fetchAllLogs();
+      return;
+    }
     if (!("run_id" in s) || s.run_id !== runId) return;
     if (s.kind === "log" && typeof s.phase === "string") void fetchLogs(s.phase);
     else if (s.kind === "comment_event") qc.invalidateQueries({ queryKey: ["run-comments", runId] });
@@ -75,6 +111,7 @@ export function useRunPage(runId: string) {
         qc.invalidateQueries({ queryKey: ["environment", envId] });
         qc.invalidateQueries({ queryKey: ["env-runs", envId] });
       }
+      if (typeof s.to_state === "string" && isTerminal(s.to_state as RunState)) fetchAllLogs();
     }
   });
 
@@ -92,10 +129,10 @@ export function useRunPage(runId: string) {
     return (id: string | null | undefined) => (id ? (m.get(id) ?? null) : null);
   }, [people.data]);
 
-  const planText = useMemo(() => {
-    const lines = planLines(logs.data ?? []);
-    return lines.length ? lines : null;
-  }, [logs.data]);
+  const logModel = useLogModel(logs.data ?? NO_LOGS);
+  // `logModel.plan` keeps its identity while apply lines stream in, so the plan is parsed once — and
+  // only after planning: until then `tofu show` may still be streaming the section.
+  const planText = run.data?.state === "planning" || !logModel.plan.length ? null : logModel.plan;
   const parsed = useMemo(() => (planText ? parsePlan(planText) : null), [planText]);
 
   const cascade = useMemo<CascadeItem[]>(() => {
@@ -105,7 +142,7 @@ export function useRunPage(runId: string) {
     return downstreamOf(envId, graph.data.edges).map((step) => {
       const n = nodes.get(step.envId);
       return {
-        label: n ? `${stackName.get(n.stack_id) ?? "?"}/${n.name}` : step.envId.slice(0, 8),
+        label: n ? `${stackName.get(n.stack_id) ?? "?"}/${n.name}` : shortId(step.envId),
         likelihood: step.likelihood,
         mock: step.mockDefined,
       };
@@ -122,7 +159,8 @@ export function useRunPage(runId: string) {
     stack: stack.data ?? null,
     tier: catalog.data?.find((t) => t.name === env.data?.tier),
     tiersLoaded: catalog.isSuccess,
-    logs: logs.data ?? [],
+    logs: logs.data ?? NO_LOGS,
+    logModel,
     threads: threads.data ?? [],
     planText,
     parsed,

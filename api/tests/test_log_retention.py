@@ -96,6 +96,35 @@ async def test_logs_archived_then_hot_purged_and_served_from_s3(client: httpx.As
         assert len(one) == 2
 
 
+async def test_hot_log_purge_runs_in_batches(
+    client: httpx.AsyncClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A backlog of archived runs is purged a batch of runs per transaction, all of it."""
+    from app.db import SessionLocal
+    from app.runs import logs_archive
+
+    monkeypatch.setattr(logs_archive, "_HOT_PURGE_RUNS_PER_BATCH", 2)
+    with mock_aws():
+        runs = [(await _finished_run_with_logs(client, f"batch{i}"))[0] for i in range(5)]
+        now = datetime.now(UTC) + timedelta(minutes=2)
+        async with SessionLocal() as session:
+            await logs_archive.archive_run_logs(session, now)
+        commits = 0
+        async with SessionLocal() as session:
+            real_commit = session.commit
+
+            async def counting_commit() -> None:
+                nonlocal commits
+                commits += 1
+                await real_commit()
+
+            monkeypatch.setattr(session, "commit", counting_commit)
+            assert await logs_archive.purge_hot_logs(session, now + timedelta(days=8)) >= 10
+        for run_id in runs:
+            assert await _count_hot(run_id) == 0
+        assert commits >= 3  # 5 runs, 2 per batch
+
+
 async def test_archived_run_with_hot_rows_never_reads_s3(
     client: httpx.AsyncClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -217,6 +246,78 @@ async def test_download_phases_in_run_order_across_midnight(client: httpx.AsyncC
     ]
     heads = [ln for ln in render_text(chunks).splitlines() if ln.startswith("=====")]
     assert heads == [f"===== {p} =====" for p in ("planning", "applying", "alpha", "zeta")]
+
+
+async def test_log_limit_reads_only_the_phases_it_needs(
+    client: httpx.AsyncClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """`limit` caps the chunks by (phase, seq) on both tiers; the archive then downloads and
+    decompresses only the phases the answer needs, and a one-phase download only that phase."""
+    from app.db import SessionLocal
+    from app.runs import logs_archive
+
+    with mock_aws():
+        admin = await login(client, "admin")
+        wh = await register_worker(client, admin, "pool-loglimit")
+        stack = await make_stack(client, admin, "loglimit-stack")
+        env_id = await make_env(client, admin, stack, "dev", "dev")
+        run = (
+            await client.post(f"/api/v1/environments/{env_id}/runs", headers=admin, json={})
+        ).json()
+        logs = f"/worker/v1/jobs/{run['id']}/logs"
+
+        async def log(phase: str, seq: int) -> None:
+            body = {"phase": phase, "seq": seq, "lines": [{"t": "", "msg": f"{phase} {seq}"}]}
+            assert (await client.post(logs, headers=wh, json=body)).status_code == 202
+
+        await client.post("/worker/v1/jobs/claim", headers=wh)
+        await event(client, wh, run["id"], "phase_started", phase="planning")
+        await log("planning", 0)
+        await log("planning", 1)
+        await event(client, wh, run["id"], "phase_finished", result=CHANGES)
+        await client.post(f"/api/v1/runs/{run['id']}/confirm", headers=admin)
+        await client.post("/worker/v1/jobs/claim", headers=wh)
+        await log("applying", 0)
+        await event(client, wh, run["id"], "phase_finished")
+
+        url = f"/api/v1/runs/{run['id']}/logs"
+
+        async def chunks(**params: object) -> list[tuple[str, int]]:
+            resp = await client.get(url, headers=admin, params=params)
+            assert resp.status_code == 200, resp.text
+            return [(c["phase"], c["seq"]) for c in resp.json()]
+
+        async def check() -> None:
+            assert await chunks(limit=1) == [("applying", 0)]
+            assert await chunks(limit=2) == [("applying", 0), ("planning", 0)]
+            assert await chunks(phase="planning", after_seq=0, limit=1) == [("planning", 1)]
+            assert await chunks(limit=10) == await chunks()
+
+        await check()
+        assert (await client.get(url, headers=admin, params={"limit": 0})).status_code == 422
+
+        now = datetime.now(UTC) + timedelta(minutes=2)
+        async with SessionLocal() as session:
+            await logs_archive.archive_run_logs(session, now)
+            await logs_archive.purge_hot_logs(session, now + timedelta(days=8))
+        await check()
+
+        fetched: list[str] = []
+        real_get = logs_archive.get_object
+
+        async def spy(key: str) -> bytes | None:
+            fetched.append(key.rsplit("/", 1)[-1])
+            return await real_get(key)
+
+        monkeypatch.setattr(logs_archive, "get_object", spy)
+        assert await chunks(limit=1) == [("applying", 0)]
+        assert fetched == ["applying.log.gz"]
+
+        fetched.clear()
+        one = await client.get(f"{url}/download", headers=admin, params={"phase": "planning"})
+        assert one.status_code == 200
+        assert one.text.splitlines() == ["===== planning =====", " planning 0", " planning 1"]
+        assert fetched == ["planning.log.gz"]
 
 
 async def test_archive_waits_for_the_grace_window(client: httpx.AsyncClient) -> None:
@@ -350,3 +451,57 @@ async def test_audit_purge_needs_the_distinct_role(client: httpx.AsyncClient, mo
     assert "test.old" not in actions
     assert "test.recent" in actions
     assert "audit.purged" in actions  # the purge is itself audited, in the same transaction
+
+
+async def test_audit_purge_deletes_in_audited_batches(
+    client: httpx.AsyncClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A large backlog is purged in bounded batches, one transaction each — and each batch is
+    audited in its own transaction (§6.1)."""
+    from sqlalchemy.engine import make_url
+
+    from app.config import get_settings
+    from app.db import SessionLocal
+    from app.scheduler import tasks
+
+    now = datetime.now(UTC)
+    async with SessionLocal() as session:
+        await session.execute(
+            text(
+                "INSERT INTO audit_events (actor_kind, action, created_at)"
+                " SELECT 'system', 'test.batch_old', CAST(:t AS timestamptz) FROM generate_series(1, 5)"
+            ).bindparams(t=now - timedelta(days=800))
+        )
+        await session.execute(text("ALTER ROLE stackd_audit_purge LOGIN PASSWORD 'purge'"))
+        await session.commit()
+
+    purge_url = make_url(get_settings().database_url).set(
+        username="stackd_audit_purge", password="purge"
+    )
+    monkeypatch.setenv(
+        "STACKD_AUDIT_PURGE_DATABASE_URL", purge_url.render_as_string(hide_password=False)
+    )
+    monkeypatch.setattr(tasks, "_AUDIT_PURGE_BATCH", 2)
+    get_settings.cache_clear()
+    try:
+        assert await tasks.purge_audit_events(now) == 5
+    finally:
+        monkeypatch.delenv("STACKD_AUDIT_PURGE_DATABASE_URL")
+        get_settings.cache_clear()
+
+    async with SessionLocal() as session:
+        left = (
+            await session.execute(
+                text("SELECT count(*) FROM audit_events WHERE action = 'test.batch_old'")
+            )
+        ).scalar_one()
+        batches = (
+            await session.execute(
+                text(
+                    "SELECT (context->>'deleted')::int FROM audit_events"
+                    " WHERE action = 'audit.purged' AND context->>'before' = :c"
+                ).bindparams(c=(now - timedelta(days=730)).isoformat())
+            )
+        ).scalars()
+        assert left == 0
+        assert sorted(batches) == [1, 2, 2]

@@ -3,6 +3,7 @@ from __future__ import annotations
 import os
 from dataclasses import dataclass, field
 
+from agent.docker_engine import DEFAULT_PULL_TIMEOUT_SECONDS
 from agent.docker_runner import DockerLimits
 from agent.drain import DEFAULT_DRAIN_TIMEOUT_SECONDS
 from agent.registry_auth import load_auths
@@ -38,6 +39,17 @@ def parse_labels(value: str) -> dict[str, str]:
             raise ValueError(f"STACKD_WORKER_LABELS: label {key!r} is set twice")
         labels[key] = val
     return labels
+
+
+def pool_token_from_env() -> str:
+    """STACKD_POOL_TOKEN, else the content of STACKD_POOL_TOKEN_FILE (re-read on each call: the
+    file is how a rotated token reaches a running agent)."""
+    token = os.environ.get("STACKD_POOL_TOKEN", "")
+    token_file = os.environ.get("STACKD_POOL_TOKEN_FILE")
+    if not token and token_file and os.path.exists(token_file):
+        with open(token_file) as f:
+            token = f.read().strip()
+    return token
 
 
 def _docker_limits() -> DockerLimits:
@@ -78,6 +90,8 @@ class Settings:
     # STACKD_REGISTRY_AUTH_FILE (§7.4): a Docker config.json whose `auths` authenticate the pull of
     # a runner image from a private registry. Re-read at each pull (rotated credentials apply).
     registry_auth_file: str | None = None
+    # STACKD_DOCKER_PULL_TIMEOUT_SECONDS: a runner image pull past it fails the job
+    docker_pull_timeout_seconds: int = DEFAULT_PULL_TIMEOUT_SECONDS
 
     def __post_init__(self) -> None:
         # A typo must not fall back to `local` silently: that runner has no isolation (§7.4).
@@ -93,13 +107,9 @@ class Settings:
 
     @classmethod
     def from_env(cls) -> "Settings":
-        token = os.environ.get("STACKD_POOL_TOKEN", "")
-        token_file = os.environ.get("STACKD_POOL_TOKEN_FILE")
-        if not token and token_file and os.path.exists(token_file):
-            token = open(token_file).read().strip()
         return cls(
             api_url=os.environ.get("STACKD_API_URL", "http://api:8000").rstrip("/"),
-            pool_token=token,
+            pool_token=pool_token_from_env(),
             worker_name=os.environ.get("STACKD_WORKER_NAME", os.uname().nodename),
             runner=os.environ.get("STACKD_RUNNER", "local"),
             heartbeat_interval=int(os.environ.get("STACKD_HEARTBEAT_INTERVAL", "20")),
@@ -121,6 +131,13 @@ class Settings:
             docker_host=os.environ.get("STACKD_DOCKER_HOST") or None,
             docker_limits=_docker_limits(),
             registry_auth_file=os.environ.get("STACKD_REGISTRY_AUTH_FILE") or None,
+            docker_pull_timeout_seconds=max(
+                1,
+                int(
+                    os.environ.get("STACKD_DOCKER_PULL_TIMEOUT_SECONDS")
+                    or DEFAULT_PULL_TIMEOUT_SECONDS
+                ),
+            ),
         )
 
     def available_tools(self) -> dict[str, list[str]]:

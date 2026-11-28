@@ -53,6 +53,25 @@ describe("attentionOf", () => {
       attentionOf(entry(makeEnv(), [makeRun({ state: "finished", confirmed_at: "x" })]), "/env"),
     ).toBeNull();
   });
+  it("lists a state changed outside Stackd with drift, opening the env page", () => {
+    const changed = makeEnv({
+      out_of_band_change: {
+        detected_at: "2026-11-20T10:00:00Z",
+        run_id: "r",
+        expected_serial: 1,
+        expected_lineage: "l",
+        observed_serial: 2,
+        observed_lineage: "l",
+      },
+    });
+    const e = entry(changed, [makeRun({ state: "finished", confirmed_at: "x" })]);
+    expect(attentionOf(e, "/env")).toMatchObject({
+      group: "drift",
+      href: "/env",
+      reason: "the state was changed outside Stackd",
+    });
+    expect(matchesState(e, "drift", "/env")).toBe(true);
+  });
   it("flags a plan computed on a commit the branch moved past", () => {
     expect(isStalePlan(makeRun({ commit_sha: "aaaaaaa" }), makeEnv({ head_sha: "bbbbbbb1" }))).toBe(true);
     expect(isStalePlan(makeRun({ commit_sha: "aaaaaaa" }), makeEnv({ head_sha: "aaaaaaa123" }))).toBe(false);

@@ -51,11 +51,34 @@ def updated_at_col() -> MappedColumn[datetime]:
     return mapped_column(server_default=func.now(), onupdate=func.now())
 
 
+def _server_settings() -> dict[str, str]:
+    """Session GUCs of the API's connections (asyncpg `server_settings`, in ms). A leaked or stuck
+    transaction is ended by the server instead of pinning a pooled connection and its row locks;
+    a lock wait gives up instead of queueing forever. Alembic builds its own engine: a migration
+    never inherits them."""
+    s = get_settings()
+    timeouts = {
+        "idle_in_transaction_session_timeout": s.stackd_db_idle_in_transaction_timeout_seconds,
+        "lock_timeout": s.stackd_db_lock_timeout_seconds,
+        "statement_timeout": s.stackd_db_statement_timeout_seconds,
+    }
+    return {name: str(seconds * 1000) for name, seconds in timeouts.items() if seconds > 0}
+
+
 # Engine/sessionmaker are built lazily on first use — importing this module must never read
 # settings (tests set DATABASE_URL after import; doing it eagerly would cache the wrong URL).
 @lru_cache
 def get_engine() -> AsyncEngine:
-    return create_async_engine(get_settings().database_url, echo=False, pool_pre_ping=True)
+    s = get_settings()
+    return create_async_engine(
+        s.database_url,
+        echo=False,
+        pool_pre_ping=True,
+        pool_size=s.stackd_db_pool_size,
+        max_overflow=s.stackd_db_max_overflow,
+        pool_timeout=s.stackd_db_pool_timeout_seconds,
+        connect_args={"server_settings": _server_settings()},
+    )
 
 
 @lru_cache

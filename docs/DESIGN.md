@@ -262,8 +262,9 @@ Two forms:
 |---|---|---|---|
 | Mocked | `◆ MOCKED` | `mock` | not real; blocks apply unless `allow_mock_apply` (SPECS §9.3) |
 | Fallback | `◈ FALLBACK` | `state-decision` | a secret came from a fallback; blocks apply unless `allow_fallback_apply` (SPECS §15.5) — it demands a decision, hence amber |
-| Stale | `↑3` (or `↑` until AUDIT A6) | `text-secondary` | branch ahead of the deployed commit; attenuated (`text-secondary`, dotted underline) when `affects_project_root=false` |
+| Stale | `↑3` (or `↑` until AUDIT A6) | `text-secondary` | branch ahead of the deployed commit; attenuated (`text-secondary`, dotted underline) when `affects_project_root=false` (the commits ahead touch neither the project root nor the trigger paths, SPECS §3.1) |
 | Drift | `≈ DRIFT` / `≈? DRIFT CHECK FAILED` | `text-primary` | neutral per SPECS §19.5 — a fact to investigate, not a decision |
+| Changed outside | `⇄ CHANGED OUTSIDE` (compact `⇄ OUTSIDE`) | `text-primary` | unmanaged state written outside Stackd since its last observation (SPECS §19.7) — neutral, like drift |
 | Locked | `⚿ LOCKED` | `text-primary` | |
 | PR | `PR` | `state-queued` (outlined) | the env's active run is a proposed run |
 
@@ -287,6 +288,11 @@ button unrelated to a success, never amber for telemetry or log severity.
 (mono labels), 600. Fonts are **self-hosted** (`@fontsource`), Latin subset, only weights Sans 400/600 and
 Mono 400/500 imported (`main.tsx`), `font-display: swap`. Preloading and fallback metric overrides
 (against layout shift) are **[not built yet]**.
+
+**Short ID**: an entity UUID is shown as its **last eight hex characters** (`run 9ce3880b`,
+`shortId()` in `lib/ids.ts`), in mono. IDs are UUIDv7: the leading characters are a timestamp and only
+change every ~65 s, so a prefix makes runs planned moments apart look identical. Commit SHAs keep their
+first seven characters (git's convention).
 
 ### 3.4 Spacing, radius, elevation
 
@@ -326,7 +332,7 @@ is reserved to the decision. Zero counts are rendered in `text-secondary` withou
 | Neutral, waiting for a machine | grey | `○` | QUEUED |
 | Ended without effect | grey, struck | `⊘` | DISCARDED / CANCELED |
 | Focus, selection, brand | violet | ring / bar | — |
-| Drift, stale, lock, PR | no hue | `≈ ↑ ⚿ PR` | DRIFT / ↑3 / LOCKED / PR |
+| Drift, changed outside, stale, lock, PR | no hue | `≈ ⇄ ↑ ⚿ PR` | DRIFT / CHANGED OUTSIDE / ↑3 / LOCKED / PR |
 | Diff create / destroy / replace / update | green / red / red / neutral | `+ − ± ~` | CREATE / DESTROY / REPLACE / UPDATE |
 | Telemetry (HTTP status, log level, worker online) | neutral; red **only** for errors | — | the value itself |
 
@@ -354,7 +360,7 @@ is reserved to the decision. Zero counts are rendered in `text-secondary` withou
 
 - **Side nav (208 px, labels always visible — v1 decision kept)**: Overview (solid amber count badge = decisions that need *you*), Graph, Rollouts (§5.11), Queue (neutral outlined count badge = runs waiting > 2 min), Workers (`online/total` in mono, red when none is online or the API is down), Audit (admin only, §5.6), Variable sets, Settings. At the bottom: the **space switcher** (a Radix dropdown listing the space names, the current one marked; hidden when the user sees a single space) and the user block (email, role, allowed tiers) opening a menu with the theme toggle, keyboard shortcuts, single-key shortcuts on/off and sign out. Active item: selection mark (§2.1).
 - **Top bar**: entity breadcrumb, connection indicator (`● live` / `◌ reconnecting…`), ⌘K button ("Search ⌘K"), notification bell.
-- **Breadcrumb**: built from entities, never from path segments: `space / stack / env / run 01a1276c`. Each segment but the last is a link; the run segment is the current page (its URL is copied with ⌘K "Copy the link to this page").
+- **Breadcrumb**: built from entities, never from path segments: `space / stack / env / run 9ce3880b`. Each segment but the last is a link; the run segment is the current page (its URL is copied with ⌘K "Copy the link to this page"). Below 768 px only the **last two** segments are shown (`prod / run 9ce3880b`): the page header repeats the rest, and four truncated segments say nothing.
 - **Responsive**: ≥ 1024 px as above. 768–1023 px: the side nav becomes a drawer (a sheet from the right) opened from a menu button in the top bar. < 768 px: a **bottom bar** with three destinations (Overview, Queue, Menu — the Menu opens the same drawer; notifications stay in the top bar at every width) and the run page's action bar docked above it.
 
 ### 4.1 URLs (v2)
@@ -378,6 +384,12 @@ stay as redirects** (`/stacks/:uuid` → `/s/<space>/stacks/<name>`; `/stacks`, 
 `/variable-sets` → the current space's page), and the run URL stays UUID-based (it is the incident link).
 
 **Everything that determines what is on screen is in the URL**: tab (`?tab=plan`), filters (`?q=app&state=attention&tier=prod`), the overview's selected cell and cascade preview (`?sel=demo-network/prod&cascade=1`), log position (`?tab=logs&line=planning.87`), plan search (`?plan_q=nat`), graph filter, view and node (`?env=prod&tier=prod&view=list&node=<id>`), env run-history filter (`?kind=`), stack settings section (`?tab=settings&sub=hooks`). The active space is the URL's, never in-memory state. (No browser storage, CLAUDE §4.8.)
+
+**Tab title** (`app/DocumentTitle.tsx`): most specific name first, brand last, so pinned tabs stay
+readable — `demo-network/prod · demo — StackD`, `Queue — StackD`. A run reads
+`demo-network/staging · run 9ce3880b · unconfirmed — StackD` (the badge's word, lowercased, updated
+live). When decisions need the viewer in the current space, their count leads: `(3) Overview · demo —
+StackD`, so a background tab says a decision is waiting without a notification.
 
 ### 4.2 ⌘K command palette
 
@@ -447,7 +459,7 @@ Overview · demo                                       filter [ app____ ]  state
 
 **Attention zone** (pinned above the matrix, never auto-collapsed while it holds a *needs you* item):
 
-- Groups, in order: **Needs you** (unconfirmed, the user can confirm), **Waiting on someone** (unconfirmed, the user cannot confirm — with the missing condition in words), **Blocked** (unconfirmed, and nobody can confirm: mocked or fallback with apply not allowed on the env), **Failed** (env's primary run failed, during apply or before), **Drift** (`drifted` or check error). A row appears in the first matching group only. A stale plan (unconfirmed run whose commit ≠ env head) is a `↑ stale plan` tag on its row — every unconfirmed run already falls in one of the first three groups.
+- Groups, in order: **Needs you** (unconfirmed, the user can confirm), **Waiting on someone** (unconfirmed, the user cannot confirm — with the missing condition in words), **Blocked** (unconfirmed, and nobody can confirm: mocked or fallback with apply not allowed on the env), **Failed** (env's primary run failed, during apply or before), **Drift** (`drifted`, check error, or a state changed outside Stackd — SPECS §19.7). A row appears in the first matching group only. A stale plan (unconfirmed run whose commit ≠ env head) is a `↑ stale plan` tag on its row — every unconfirmed run already falls in one of the first three groups.
 - Row: badge (compact) + `stack / env` + plan summary + who/age + the reason or next step + Enter target (the run page: Plan tab for decisions, Logs tab — opening at the first error — for failures; for drift, the drift run's Plan tab, else the env page).
 - Empty zone: one line, "Nothing needs attention in demo." — not hidden, so its absence is never ambiguous.
 
@@ -455,7 +467,7 @@ Overview · demo                                       filter [ app____ ]  state
 
 - Rows = stacks of the space, by name (sorting by "worst state" or last activity is **[not built yet]**). Columns = environment **names** present in the space, ordered by tier `position`, then env `position`, then name; a stack without that env shows `—`. A column header shows the env name, plus `four-eyes` when every env in the column is on a `requires_four_eyes` tier.
 - Sticky header row and first column. A wide matrix scrolls horizontally inside its own container, never the page.
-- **`EnvCell`** (one per env, 180 px min): line 1 = mini rail + compact state badge (wrapping under the rail when the cell is narrow); line 2 = relative age (+ plan summary when unconfirmed) + modifiers (`↑` `≈` `⚿` `◆` `◈` `PR`). Cell background stays the matrix's `bg-surface`, except `decision-tint` when the cell *needs you*.
+- **`EnvCell`** (one per env, 180 px min): line 1 = mini rail + compact state badge (wrapping under the rail when the cell is narrow); line 2 = relative age (+ plan summary when unconfirmed) + modifiers (`↑` `≈` `⇄` `⚿` `◆` `◈` `PR`). Cell background stays the matrix's `bg-surface`, except `decision-tint` when the cell *needs you*.
 - **Selection details**: clicking or focusing a cell selects it (`?sel=stack/env`) and opens a panel under the matrix: `stack / env`, tier, branch, modifiers, deployed commit, branch head, active run or last outcome with who/age, "Confirm needs …" for a pending run, and the actions the user can take (Show downstream, Open run, Open environment, Plan — writer+, when no run is active). A hover popover on the cell is **[not built yet]**.
 - **Cascade preview on demand**: `s` (or "Show downstream" in the selection panel; `?cascade=1`) outlines the selected cell's downstream cells (BFS over `GET /graph` edges) with a dashed selection mark and a `↳ will plan` / `↳ plans if outputs change` line, and the panel lists them ("demo-app/prod (if outputs change)"). `s` again or "Hide downstream" clears.
 - **Filters** in a top bar, reflected in the URL: text (stack or env name), state (All, Needs attention, Needs you, Running, Failed, Drift, Branch ahead), tier. Filtering by state hides non-matching rows, not cells.
@@ -492,7 +504,7 @@ Overview · demo                                       filter [ app____ ]  state
 (a `PR plan` badge for proposed runs, a `− destroy` badge for destroys); commit SHA (copy) + message +
 author; branch; how it was triggered (`triggered by bob@…`, `via webhook`, `via dependency`, `via drift
 check` **[today]**; the upstream env / run of a cascade `[with A5]`); the rollout and level (§5.11);
-age (relative, absolute ISO on hover); total duration; the command and its arguments for a `command`
+age (relative, absolute ISO on hover); duration, labelled (`took 2m 33s` once finished, `elapsed 4m` while live); the command and its arguments for a `command`
 run. The worker is **[not shown yet]**.
 
 **`RunActionBar`** — sticky under the top bar on desktop, docked at the bottom on < 768 px:
@@ -546,7 +558,7 @@ permission check (`can_apply` is still evaluated by the API).
 - **Stop requested** (neutral): while an executing run has `cancel_requested_at` — "Stop requested — waiting for the worker." and what the worker does (interrupts the tool as a Ctrl-C would; the run ends when the worker reports it).
 - **Failed during apply** (`failed-tint`, red `✕`): "Failed during apply — infrastructure may be partially changed." + the run's error + "Jump to first error". A stop during apply (`error = canceled_during_apply`) reads "Stopped during apply on request — infrastructure may be partially changed." with "Review what was applied before planning again".
 - **Failed** (other phases): "Failed at <segment> — nothing was applied." + the run's `error`, or the failing check's name, stage and output when there is one **[today]**; "Jump to first error".
-- **Stale plan** (neutral, `↑`): when the run is `unconfirmed` and `env.head_sha ≠ run.commit_sha` — "Plan computed on `2af0351`. The branch head is now `125304e` (N commits ahead / ahead)." + **Re-plan on head** (= Discard + new tracked run, two audited calls). Confirming stays possible and still applies the planned commit.
+- **Stale plan** (neutral, `↑`): when the run is `unconfirmed` and `env.head_sha ≠ run.commit_sha` — "Plan computed on `2af0351`. The branch head is now `125304e` (N commits ahead / ahead)." + **Re-plan on head** (= Discard + new tracked run, two audited calls). Confirming stays possible and still applies the planned commit — said in the same paragraph ("Confirming still applies exactly `2af0351`."), so the banner takes one line on desktop.
 - **Mocked** (`mock-tint`, `◆`): "This plan used mock values — it is not real." The mocked inputs are listed, then "A mocked plan cannot be applied here (allow_mock_apply is off)" or that the env allows it.
 - **Fallback** (`decision` tone, `◈`): "A secret came from a fallback, not the real source." + whether `allow_fallback_apply` lets it through.
 - **Queued** (neutral): the `blocking_reason` from `GET /queue` in words ("Waiting: another run is active on this environment.") + a link to the queue.
@@ -557,7 +569,7 @@ tracked runs, Logs (following) for live runs, Logs at the first error for failed
 - **Plan** — `PlanDiff`:
   - Summary line in big mono (`+4 ~0 −1`, zeros neutral), then groups in a fixed order: **DESTROY**, **REPLACE**, CREATE, UPDATE, READ, MOVE, OTHER (e.g. "will no longer be managed"), then "**Tag-only updates · n**" and "Changes to outputs" collapsed, the tool's summary line, and the plan legend as printed (collapsed).
   - **DESTROY and REPLACE groups are always expanded, and cannot be collapsed, filtered out or scrolled away by search** — search highlights in them, filters the others.
-  - A resource row: action glyph + label, address in mono, a one-line hint (`2 attributes`, `forces replacement: ami`). Expanded: the attribute diff in `bg-sunken`, one line per attribute (`+ − ~` with diff tokens), `(sensitive value)` as tofu prints it, never a reveal.
+  - A resource row: action glyph + label, address in mono, a one-line hint (`2 attributes`, `forces replacement: ami`). The address wraps only at its structure (after `.` and `/`, before `[`), never inside a name; below 640 px the hint takes its own line under the address. Expanded: the attribute diff in `bg-sunken`, one line per attribute (`+ − ~` with diff tokens), `(sensitive value)` as tofu prints it, never a reveal.
   - Tag-only = an update whose changed attributes are all `tags` / `tags_all` (or nested under them).
   - Search (`/`, URL `?plan_q=`) on address and attribute name, with a match counter.
   - **[today]** parsed from the `section="plan"` log block (`tofu show -no-color`): blocks start at `  # <address> will be created | updated in-place | destroyed | must be replaced | read during apply | has moved to`. Anything the parser does not recognise is shown verbatim in a "Unparsed plan output" block **above** the groups, so no line is ever dropped; if the block is missing (older run, failed plan) the tab says so and links to the logs. **[with A1]** from `resource_changes`.
@@ -573,10 +585,18 @@ the attention zone), keeping the tab.
 **Live updates**: the badge, rail, banners and bar update in place on WS events; a polite live region
 announces state changes ("Run is now applying."); focus never moves.
 
+**Desktop bar layout**: the actions stay on the state line, top right; the text lines wrap in their
+own column beside them, never pushing the actions to a row of their own. "Your standing" and the
+cascade preview share one wrapping row.
+
 **< 768 px**: the action bar is docked at the bottom with 44 px buttons (Confirm stretches, Discard
 and Cancel/Stop stay visible beside it; Plan again and the next-decision arrows are hidden); the
-confirm popover becomes a bottom sheet; tabs scroll horizontally. Below 1024 px the rail is the
-horizontal strip above the tabs (§2.2). A condensed two-line header is **[not built yet]**.
+bar's text part (state, four-eyes, standing, cascade) stays in the page flow and scrolls away — only
+the docked actions are fixed, so the plan gets the screen. The confirm popover becomes a bottom
+sheet; tabs scroll horizontally, the active one kept in view (a deep link to `?tab=discussion`).
+Below 1024 px the rail is the horizontal strip above the tabs (§2.2). The header condenses to two
+lines: the title, then one line `sha · trigger · age · "message"` (message truncated; branch, author,
+duration, rollout and command are left to the desktop header).
 
 ### 5.3 Log viewer (`LogViewer`)
 
@@ -587,7 +607,7 @@ horizontal strip above the tabs (§2.2). A condensed two-line header is **[not b
 - **First error**: lines starting with `Error:` / `│ Error:` (ANSI codes allowed before it); "First error (n)" (`e`) in the toolbar, and a `✕ n` count on the Logs tab. A failed run opens the Logs tab at its first error, else at its failing hook's section.
 - **Search** `⌘F` / `/` when the viewer has focus: highlight, counter, `n` / `N` (Enter / Shift-Enter in the field).
 - **Toggles**: timestamps (`t`), wrap (`w`, on by default), full screen (`f`), "Save" — a client-side text file of the loaded lines **[today]**. The API now serves `GET /runs/{id}/logs/download` (A10) from either storage tier; the viewer does not use it yet.
-- **Streaming**: on a WS signal `{phase, max_seq}` fetch `GET /runs/{id}/logs?phase=&after_seq=<last>` and append (one fetch in flight per phase). Logs of a run archived to object storage are served by the same endpoint, transparently. Comment-on-line affordance: a comment button revealed on hover / focus of a line (always visible on coarse pointers).
+- **Streaming**: on a WS signal `{phase, max_seq}` fetch `GET /runs/{id}/logs?phase=&after_seq=<last>` and append (one fetch in flight per phase). The model (`lib/logModel`, `LogModelBuilder`) is incremental: an appended chunk costs its own lines only — no re-sort, no re-scan of earlier lines — and the order is rebuilt only when a chunk arrives before one already shown or the list is replaced. Search strips ANSI once per line; the plan section keeps its identity while apply lines stream, so the run page parses the plan once, after the run leaves `planning`. Logs of a run archived to object storage are served by the same endpoint, transparently. Comment-on-line affordance: a comment button revealed on hover / focus of a line (always visible on coarse pointers).
 - **Mobile** **[not built yet]**: toolbar collapsed into a menu, sections collapsed except the failing one.
 
 ### 5.4 `/s/:space/graph` and run groups
@@ -608,7 +628,7 @@ waited more than 2 minutes.
 - Three groups: **Executing** (`preparing`, `planning`, `checking`, `applying`, `running` — worker name, phase, duration), **Waiting for a worker** (`queued`, `confirmed` — age, blocking reason), and a one-line link "**N runs await a human decision** → Overview" (unconfirmed runs are not in the machine queue).
 - No WebSocket channel carries the queue: the page polls `GET /queue` every 3 s (the nav badge every 15 s).
 - Every row resolves names: `stack / env`, run short ID, type, worker name. Ages come from each run's `created_at` (**[today]** one `runs.get` per row; the queue rarely exceeds a few dozen).
-- Blocking reasons in words with a link: `another run is active on this environment → run 01a1276c`, `environment locked`, `no worker compatible with labels {…}`, `apply affinity reservation (worker vm, 38 s left)`.
+- Blocking reasons in words with a link: `another run is active on this environment → run 01a1276c`, `environment locked`, `no worker compatible with labels {…}`, `apply affinity reservation (worker vm, 38 s left)`, and for a run set aside after a transient job-build failure (SPECS §7.2 claim backoff) an hourglass glyph + `backing off after 2 transient failures preparing its job — next try in 38s`.
 - Filter by stack/env/pool (URL).
 - When the run holding the environment is an unconfirmed plan, the reason says so ("a plan on this environment awaits a human decision → run …"): the wait is on a person, not a machine. A claimable run reads "claimable — waiting for the next worker poll", or "no worker is online → workers" when `/health` reports none (needs API work A11 for the exact reason).
 - On phones each run is a card with the same labelled fields as the table columns.
@@ -632,7 +652,7 @@ waited more than 2 minutes.
 |---|---|
 | Delete a stack, an environment, a worker pool, a variable set, a tier | type the name (dialog) |
 | **Turn off** `requires_four_eyes` on a tier, `protected` or `require_second_pair_of_eyes` on an env; turn **on** `allow_mock_apply` / `allow_fallback_apply` on an env or `repo_hooks_at_apply` on a tier | type the tier / env name (dialog that states the consequence: "Members who trigger a prod run will be able to confirm it themselves"); its submit is the amber `decision` button |
-| Force-unlock a state (admin only; hidden for others) | type the env name; the dialog shows who holds the lock and since when if known |
+| Force-unlock a state (admin only; hidden for others, and offered only while a state lock is held) | type the env name; the dialog shows the lock ID, its holder run (or "no run"), operation, who and since when |
 | Change a user's role, allowed tiers or `can_destroy` | staged edit + "Save" with a summary of the change ("bob: + prod in allowed tiers") |
 | Delete a variable, a hook, a notification target, an attachment | confirmation popover anchored to the Delete button, button labelled "Delete variable region" |
 | Approve a rollout (SPECS §21.6) | dialog listing every member env with its tier and the gate ("creates-only plans will be applied without asking again, for 24 h"); type the rollout's environment name |
@@ -649,9 +669,9 @@ variables, hooks, notifications, secret sources; URL `?tab=settings&sub=`).
 
 **Environment page** `/s/:space/stacks/:stack/envs/:env` (new in v2):
 
-- **Header**: `stack / env`, badges (tier, `four-eyes`, `protected`, `second pair of eyes`, `autodeploy`, `managed state`); a summary strip with the env's `EnvCell` (active run or last outcome), branch, deployed commit and head (`↑` when ahead; a Refresh button, writer+), drift (`≈ DRIFT` + "see the drift" → drift run, or "No drift detected · checked 1h ago" / "Drift detection off"), lock.
+- **Header**: `stack / env`, badges (tier, `four-eyes`, `protected`, `second pair of eyes`, `autodeploy`, `managed state`); a summary strip with the env's `EnvCell` (active run or last outcome), branch, deployed commit and head (`↑` when ahead; a Refresh button, writer+), drift (`≈ DRIFT` + "see the drift" → drift run, or "No drift detected · checked 1h ago" / "Drift detection off"), a state changed outside Stackd (`⇄ CHANGED OUTSIDE` + "serial 41 expected, 43 found · 2h ago", "seen by this run" → the run that saw it, and *Acknowledge* for a user passing `can_apply`, SPECS §19.7), lock.
 - **Primary actions** (writer+): **Plan** (primary button), and a "More" menu: Plan with downstream (`with_downstream`), Promote from a sibling… (SPECS §9.7), Run a command… (allowlist, SPECS §4.3), New environment from… (this env preselected as the model), Roll out every “<name>” environment… (SPECS §21, DESIGN §5.11) and Plan a destroy… (shown only with `can_destroy`; opens a dialog explaining the run will need typed confirmation at apply).
-- **Tabs** (URL): **Runs** (default) — history table: run short ID, kind (`tracked`, `destroy`, `PR`, `drift`, `command`), outcome badge, mini rail, commit, trigger (who/how), start, duration; filter by kind (`?kind=`); paginated client-side, 50 at a time **[today]**. **Inputs** (Resolved with provenance / Environment overrides / Discover inputs), **Outputs**, **Dependencies**, **State** (versions; force-unlock admin-only per §5.7), **Settings** (name, tier, branch, flags with the §5.7 friction, backend config, labels, hooks, notifications, cloud integration), and a **Danger zone** at the bottom of Settings (delete environment, typed name).
+- **Tabs** (URL): **Runs** (default) — history table: run short ID, kind (`tracked`, `destroy`, `PR`, `drift`, `command`), outcome badge, mini rail, commit, trigger (who/how), start, duration; filter by kind (`?kind=`); paginated client-side, 50 at a time **[today]**. **Inputs** (Resolved with provenance / Environment overrides / Discover inputs), **Outputs**, **Dependencies**, **State** (the held state lock from `GET …/state/lock` — `⚿ locked` held by run `<link>` · operation · who since `<age>`, or "not held"; refreshed on the env's run events + a 60 s poll; it is the `state_locks` row, not `env.locked` — then versions; force-unlock admin-only per §5.7), **Settings** (name, tier, branch, flags with the §5.7 friction, backend config, variable files (one repo path per line, in `-var-file` order, SPECS §3.4), labels, hooks, notifications, cloud integration — default plan/apply roles, then its named AWS profiles as rows of name + roles + region, SPECS §10.6), and a **Danger zone** at the bottom of Settings (delete environment, typed name).
 
 ### 5.9 `/workers` — workers & pools
 
@@ -663,6 +683,7 @@ variables, hooks, notifications, secret sources; URL `?tab=settings&sub=`).
 ### 5.10 Variable sets, settings, login, notifications (new section in v2)
 
 - **Variable sets** (`/s/:space/variable-sets`): one row per set with how it reaches envs (`auto-attach · whole space`, `rule: team=payments`, `3 attachments`); the set opens its page (`/s/:space/variable-sets/:set`) with tabs Variables / Attachments / Settings (`?tab=`). Delete per §5.7.
+- **Variables editor** (variable sets, stack variables, environment overrides — one component): the two kinds (SPECS §3.3) are named by what they become, never by the bare API value — **Terraform variable** (badge `var.<name>`) and **Shell environment variable** (badge `$NAME`), because "environment" alone reads as a Stackd environment. The list is grouped by kind, each group with a one-line explanation; the add form picks the kind with labelled radios, explains the chosen one and previews the reference (`Used as var.region`). `hcl` is offered for terraform variables only.
 - **Settings** (`/settings`): **Preferences** for everyone (theme: follow the system / dark / light; single-key shortcuts on/off — in memory, for the tab only, until A8) and **Deployment** for everyone (environment, version, database status). Admin only: **Tiers** (name, `requires_four_eyes` and `repo_hooks_at_apply` with §5.7 friction, display order, envs using it, delete per §5.7), **Users** (role, allowed tiers, `can_destroy`, disabled — staged edits, §5.7; a filter Everyone / People / Service accounts; a service account carries a `service account` badge, is offered only `reader` / `writer` as instance role and no tier or destroy right — it never applies, SPECS §23), **Service accounts** (SPECS §23: list with role, `disabled`, active token count; "New service account" dialog — name, reader/writer; per account a **Tokens…** dialog listing name, prefix, status badge `active` / `expired` / `revoked`, expiry, last use, with **New token** — name, 1–365 days — whose raw value is shown **once** in a read-only field with a copy action and "you won't see it again", held in the dialog's state only and dropped when it closes; **Revoke…** behind a confirmation popover; **Disable…** behind a popover, Enable in one click; the section says plainly that a service account plans but never confirms an apply), **Spaces** (members, per-space role and tiers; the add picker groups People and Service accounts). For a **space admin** (an instance admin, or anyone whose space membership list answers): **Space configuration** (SPECS §22) — pick a space, **Export configuration** (a JSON download through an object URL), **Import configuration…** (dialog: pick a `.json` file, read in memory; **Run a dry run** → report: counts, secrets to fill first in an amber banner, warnings, skipped with the reason in words, changes grouped by op then kind with the changed fields, unchanged collapsed; **Apply import** only after a dry run → the final report, a created worker pool's token shown once like an API token; a 422 lists the fields at fault, never their input).
 - **Login**: brand mark, "Sign in with Google"; in dev, the personas show email and role, and their allowed tiers once the dev endpoint returns them (needs API work A12).
 - **First-login walkthrough**: a short dialog tour (overview, stacks and environments, runs, permissions, dependencies…) shown until the user completes it; closing it in any way completes it, persisted server-side (no browser storage).
@@ -736,11 +757,12 @@ approval)" — never a plain "confirmed by alice": she approved the rollout, not
 
 ## 6. Real-time patterns
 
-- **One multiplexed WebSocket per tab** (a shared hub in `api/stream.ts`): components declare the channels they need (`run:<id>`, `environment:<id>`, `user:<id>`, `rollout:<id>`); the hub subscribes with reference counting and re-subscribes after a reconnect (the server has no unsubscribe: a released channel stays on the socket until the next reconnect, and listeners filter signals on their payload). The token is sent as the first message, never in the URL; reconnects back off exponentially up to 30 s. TanStack Query remains the source of truth: WS events **invalidate** queries (they never patch the cache), except logs, which are fetched incrementally with `after_seq` on each signal and merged into the log query (§5.3).
+- **One multiplexed WebSocket per tab** (a shared hub in `api/stream.ts`): components declare the channels they need (`run:<id>`, `environment:<id>`, `user:<id>`, `rollout:<id>`); the hub subscribes once per channel, unsubscribes when the channel's last listener unmounts (deferred a microtask, so a remount costs nothing) and re-subscribes after a reconnect. The server tags each signal with its subscription and the hub hands it to that channel's listeners only. The token is sent as the first message, never in the URL; reconnects back off exponentially up to 30 s, except after a server resync close (1012) or the subscription cap (1008), which reconnect within ~1.5 s. **Catch-up on reconnect** (not the first connect): signals sent during the gap are lost, so the hub invalidates every query (the active ones refetch) except those marked `meta.streamed`, and hands each listener a `resync` signal — the run page then fetches every phase's log after its last `seq`. TanStack Query remains the source of truth: WS events **invalidate** queries (they never patch the cache), except logs, which are fetched incrementally with `after_seq` on each signal and merged into the log query (§5.3): one request in flight per phase, a signal arriving meanwhile (or while the whole log loads) marks the phase dirty and it is fetched again once that request settles; every phase is fetched once more when the run reaches a terminal state.
 - Slow safety-net polls run alongside the socket (60 s on the overview, stack and env pages, 15 s on a live run) — no fast permanent polling on socket-backed pages. Pages with no channel poll: the queue (3 s), workers health (5 s).
 - A state change is visible everywhere it appears (rail, badges, matrix, attention zone) without a refresh.
 - **Connection indicator** in the top bar (`● live`); on a disconnect a thin "Reconnecting…" bar under the top bar, catch-up on reconnect, never a blocking modal.
 - No toast for background events (a run that finishes is seen on its rail; the bell receives the notification). Toasts are reserved for feedback on the current user's own actions.
+- **Session upkeep** (`api/client.ts`): the access token (memory only) is renewed through `/auth/refresh` at ~80 % of its lifetime; a request that still gets a 401 triggers one refresh shared by every concurrent caller, then is replayed once. A socket closed with **4401** renews the token the same way and reconnects at once. A refused refresh loses the session: the session query goes to `null` and the login page shows. Queries never retry a 4xx (a 403/404 page shows its error at once); a 5xx or network error gets 2 more tries.
 
 ---
 
@@ -762,6 +784,7 @@ approval)" — never a plain "confirmed by alice": she approved the rollout, not
 - **Async action buttons**: `Confirm`/`Discard`/`Cancel`/`Plan`/`Re-plan` go into a `loading` state (spinner + disabled, label kept) during the call — distinct from the permission-disabled state, which carries its reason.
 - **Empty states** = invitations to act, in the product's vocabulary, with the action when the user has the right. No decorative illustrations.
 - **Errors**: factual, in clear technical English, with the way out; the API's problem `detail` is shown verbatim. Never apologies, never vague.
+- **Render failures** stay local (`ui/ErrorBoundary`): a component that throws (an unexpected payload shape, a missing tier) is replaced by a `failed` banner — "<What> failed to display." + the error message + **Retry** — instead of blanking the app. One boundary around the routes (the shell stays usable; navigating resets it), and one per panel on the run page (phase rail, plan, checks, logs — reset on another run) and the graph page (canvas or list, node drawer).
 - **Loading**: skeletons faithful to the final shape for tables, the matrix and the run page; spinners only for one-off actions.
 - **Time**: relative under 24 h ("12m ago"), absolute local ISO (`2026-10-10 20:06`) beyond, the other form on hover, always in mono. No locale date formats (`10/10/2026, 8:12 PM`).
 - **Responsive**: desktop-first; polished mobile for **the overview's attention zone, reading a run and its logs, and confirming/discarding**. Other screens must not scroll horizontally below 768 px but may simplify.
@@ -775,7 +798,7 @@ approval)" — never a plain "confirmed by alice": she approved the rollout, not
 - **Tokens**: `styles/tokens.css` defines the variables of §3 for `[data-theme="dark"]` and `[data-theme="light"]`; `index.css` maps them into Tailwind under distinct utility names, since `@theme` re-emits its variables and a same-name alias would be a cycle (`bg-base`/`surface`/`raised`/`sunken`, `border-line`, `border-control`, `bg-scrim`, `text-primary`, `text-muted` = text-secondary, `ring`, `logo`, `text-onfill`, `text-st-<state>`, `text-mocked`, `bg-tint-<state>`, `text-df-<action>`…), plus the type scale (`text-eyebrow` … `text-display`) and radii (`rounded-base`, `rounded-badge`). **Components use Tailwind utilities only**: no `style={{…}}` except for computed geometry (virtualized heights, graph positions). Enforced by a lint rule (`no-restricted-syntax` on colour properties inside `style` attributes, plus `no-restricted-globals` / `no-restricted-properties` on `localStorage` / `sessionStorage`) and by `pnpm check:invariants` in CI (`front/scripts/check-invariants.mjs`: no browser storage, no hex / `rgb()` / `hsl()` literal outside `tokens.css`, no `text-base` — a colour here, not a size).
 - **Theme**: follows `prefers-color-scheme`; the user menu toggle, Settings → Preferences or ⌘K overrides it **in memory** (lost on reload) — persistence needs a profile field (AUDIT A8). `<html data-theme>` is set before first paint by an inline script that reads only `matchMedia`.
 - **Folder structure**:
-  - `src/ui/` — re-skinned primitives: Button (`primary`, `secondary`, `ghost`, `decision`, `danger`; sizes `sm`, `md`, `touch`), Input, NativeSelect, Checkbox, Field, Tabs, Table (`Th`, `Td`), Badge, Banner (`info`, `decision`, `failed`, `mock`), Kbd, Skeleton, EmptyState, CopyButton, RelativeTime, Sha (`primitives.tsx`); Dialog, Sheet, Popover, Menu (DropdownMenu), Tooltip (`overlays.tsx`); ConfirmPopover, TypeNameDialog; OneTimeSecret (a credential the API returns once: read-only field, copy, "you won't see it again"), ProblemBanner (an API refusal: detail, and a 422's fields at fault); `cn`, `useMediaQuery`. No IconButton or Switch primitive (icon-only tools are `Button`s with an `aria-label`); ⌘K uses `cmdk` directly in `app/CommandPalette.tsx`.
+  - `src/ui/` — re-skinned primitives: Button (`primary`, `secondary`, `ghost`, `decision`, `danger`; sizes `sm`, `md`, `touch`), Input, NativeSelect, Checkbox, Field, Tabs, Table (`Th`, `Td`), Badge, Banner (`info`, `decision`, `failed`, `mock`), Kbd, Skeleton, EmptyState, CopyButton, RelativeTime, Sha (`primitives.tsx`); Dialog, Sheet, Popover, Menu (DropdownMenu), Tooltip (`overlays.tsx`); ConfirmPopover, TypeNameDialog; OneTimeSecret (a credential the API returns once: read-only field, copy, "you won't see it again"), ProblemBanner (an API refusal: detail, and a 422's fields at fault), ErrorBoundary / RouteErrorBoundary (§7 render failures); `cn`, `useMediaQuery`. No IconButton or Switch primitive (icon-only tools are `Button`s with an `aria-label`); ⌘K uses `cmdk` directly in `app/CommandPalette.tsx`.
   - `src/identity/` — the identity components, each with a Ladle story (below), plus `TypeToConfirm` and the shared story fixtures.
   - `src/app/` — the shell: routes and nav (`AppShell`, `nav.ts`), space context, ⌘K, keyboard map, theme, live-region announcer, notification bell, login, walkthrough, brand.
   - `src/features/<domain>/` — `overview`, `runs`, `environments`, `stacks`, `graph`, `queue`, `workers`, `audit`, `variableSets`, `settings`, `rollouts` (rollouts and the clone dialog), `data` (`useSpaceEnvs`, the space-wide env summaries shared by the overview, the graph, the run page and the nav badge): page components, their queries and local components. A page file stays under ~250 lines; data hooks live next to it (`useRunPage`, `useSpaceEnvs`).

@@ -28,6 +28,9 @@ class _FakeWorkspace:
     def git_clone(self, *args: object, **kw: object) -> Path:
         return self.root
 
+    def repo_credentials(self, *args: object, **kw: object) -> AbstractContextManager[dict]:
+        return nullcontext({})
+
     def tfvars(self, *args: object) -> AbstractContextManager[None]:
         return nullcontext()
 

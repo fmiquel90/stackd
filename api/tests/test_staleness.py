@@ -120,6 +120,7 @@ async def test_env_is_stale_when_head_moved_past_last_applied(client: httpx.Asyn
     env = await _get(client, admin, env_id)
     assert env["head_sha"] == "bbb222"
     assert env["stale"] is True
+    assert env["last_applied_sha"] == "aaa111"
 
     # A plan-only proposed run on the head applies nothing: still stale.
     await _run(client, admin, wh, env_id, "bbb222", run_type="proposed")
@@ -330,11 +331,23 @@ class _Clock:
         return cls.t
 
 
-async def _drive_loop(monkeypatch: pytest.MonkeyPatch, with_lock, ticks: int = 13) -> None:  # type: ignore[no-untyped-def]
+async def _drive_loop(  # type: ignore[no-untyped-def]
+    monkeypatch: pytest.MonkeyPatch, with_lock, ticks: int = 13, outbox_loops=None
+) -> None:
     """Run `scheduler_loop` for `ticks` 10 s ticks of a fake clock, with `with_lock` standing in
-    for `_with_lock`. Each tick yields to the event loop, so a spawned head poll runs meanwhile."""
+    for `_with_lock`. Each tick yields to the event loop, so a spawned head poll runs meanwhile.
+    The outbox dispatcher loops (not part of the tick) are replaced by idle tasks, recorded in
+    `outbox_loops` when given."""
     from app.config import get_settings
     from app.scheduler import tasks
+
+    async def _idle_outbox_loop(name, key, drain) -> None:  # type: ignore[no-untyped-def]
+        try:
+            await asyncio.Event().wait()
+        except asyncio.CancelledError:
+            if outbox_loops is not None:
+                outbox_loops.append(name)
+            raise
 
     class _Stop(Exception):
         pass
@@ -353,8 +366,16 @@ async def _drive_loop(monkeypatch: pytest.MonkeyPatch, with_lock, ticks: int = 1
     monkeypatch.setattr(get_settings(), "stackd_head_poll_interval", 60)
     monkeypatch.setattr(tasks, "datetime", _Clock)
     monkeypatch.setattr(
-        tasks, "asyncio", types.SimpleNamespace(sleep=_sleep, create_task=asyncio.create_task)
+        tasks,
+        "asyncio",
+        types.SimpleNamespace(
+            sleep=_sleep,
+            create_task=asyncio.create_task,
+            timeout=asyncio.timeout,
+            gather=asyncio.gather,
+        ),
     )
+    monkeypatch.setattr(tasks, "_outbox_loop", _idle_outbox_loop)
     monkeypatch.setattr(tasks, "SessionLocal", contextlib.nullcontext)
     monkeypatch.setattr(tasks, "_with_lock", with_lock)
     with pytest.raises(_Stop):
@@ -384,7 +405,7 @@ async def test_scheduler_loop_polls_heads_at_the_interval(monkeypatch: pytest.Mo
 async def test_slow_head_poll_never_blocks_the_other_tasks(monkeypatch: pytest.MonkeyPatch) -> None:
     """The head poll runs as a task of its own: one stuck on git calls doesn't delay worker-lost
     detection or the other tasks; while it still runs, the next due poll is skipped rather than
-    overlapping it; and it is cancelled with the loop."""
+    overlapping it; and it is cancelled with the loop, like the outbox dispatcher loops."""
     from app.scheduler import tasks
 
     calls: list[tuple[int, datetime]] = []
@@ -402,12 +423,14 @@ async def test_slow_head_poll_never_blocks_the_other_tasks(monkeypatch: pytest.M
             cancelled.set()
             raise
 
-    await _drive_loop(monkeypatch, _with_lock)
+    outbox_loops: list[str] = []
+    await _drive_loop(monkeypatch, _with_lock, outbox_loops=outbox_loops)
 
     assert polls == [datetime(2026, 1, 1, tzinfo=UTC)]  # the later due polls were skipped
     assert len([k for k, _ in calls if k == tasks._LOCK_WORKER_LOST]) == 13
-    assert len([k for k, _ in calls if k == tasks._LOCK_NOTIFY]) == 13
+    assert len([k for k, _ in calls if k == tasks._LOCK_DRIFT]) == 13
     await asyncio.wait_for(cancelled.wait(), timeout=1)
+    assert sorted(outbox_loops) == ["notifications", "vcs"]
 
 
 async def test_poll_bounds_its_concurrent_git_calls(

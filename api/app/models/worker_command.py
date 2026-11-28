@@ -3,7 +3,7 @@ from __future__ import annotations
 import uuid
 from datetime import datetime
 
-from sqlalchemy import ForeignKey, String
+from sqlalchemy import ForeignKey, Integer, String
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.dialects.postgresql import UUID as PGUUID
 from sqlalchemy.orm import Mapped, mapped_column
@@ -15,7 +15,8 @@ class WorkerCommand(Base):
     """Downward command for a worker, delivered on its next heartbeat (SPECS §7.1 — no inbound).
 
     Generic queue: `diagnostics` (a read-only debug bundle) and `cancel_job` (stop an executing
-    job, §4.1). Status: pending → sent (delivered) → done | failed.
+    job, §4.1). Status: pending → sent (delivered) → done | failed. A `sent` command without a
+    result is delivered again after a while, a bounded number of times (`attempts`), then `failed`.
     """
 
     __tablename__ = "worker_commands"
@@ -28,5 +29,7 @@ class WorkerCommand(Base):
     status: Mapped[str] = mapped_column(String, default="pending")
     payload: Mapped[dict | None] = mapped_column(JSONB, default=None)
     result: Mapped[dict | None] = mapped_column(JSONB, default=None)
+    sent_at: Mapped[datetime | None] = mapped_column(default=None)
+    attempts: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
     created_at: Mapped[datetime] = created_at_col()
     completed_at: Mapped[datetime | None] = mapped_column(default=None)

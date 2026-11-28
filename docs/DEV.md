@@ -33,28 +33,50 @@ services:
   localstack:      # profile "aws"  : simulated S3/STS/IAM (§6)
 ```
 
+**One command starts everything: `task dev`.** It brings up postgres, garage, the api, the worker *and* the front (http://localhost:5173), then provisions S3, applies the migrations, creates the fixture repos and seeds the demo data. It is idempotent: re-run it whenever you like. Nothing else needs to be started next to it.
+
+Start / stop — pick **one** of the `dev*` tasks; each variant is `task dev` plus one extra:
+
 ```bash
-task dev            # S3 bootstrap + compose up (base services) + migrations + fixture repos + seed
-task dev-git        # + Gitea (webhook testing)
-task dev-aws        # + LocalStack
-task dev-aws-creds  # dev stack with your ~/.aws mounted read-only into the worker (§6)
-task seed           # (re)creates the demo data, idempotent
-task s3             # provision the dev S3 (Garage layout, key into .env, bucket), idempotent; part of dev
-task s3-ls          # list the dev bucket (managed states, saved plans, archived logs)
-task reset          # down -v, drop .dev/pool.token, then dev : start from scratch
-task logs           # aggregated colored logs (api, worker)
-task test           # API pytest + front vitest (the worker suite runs apart, TESTING.md §2)
-task e2e            # complete automated scenario (§7)
-task lint           # ruff check + ruff format --check (api)
-task front          # Vite on the host (pnpm dev) — task dev already serves the front on :5173
-                    #   (compose `front` service): stop that service first
-task migrate        # alembic upgrade head; task makemigration NAME=... autogenerates one
-task seed-fixtures  # (re)creates the fixture git repos in .dev/repos (§4), idempotent
-task push-change    # commits a change in demo-network (staleness test, §4)
-task psql           # Postgres shell
-task build-runner-images  # builds the OpenTofu + Terraform runner images (deploy/images/)
-task docs           # serves the user documentation (mkdocs) on :8001; task docs-build builds it
+task dev            # START HERE: the whole stack, front included (:5173)
+task dev-git        # = task dev + Gitea on :3000 (real webhooks, §4)
+task dev-aws        # = task dev + LocalStack on :4566 (§6)
+task dev-aws-creds  # = task dev with your ~/.aws mounted read-only into the worker (§6)
+task reset          # down -v, drop .dev/pool.token, then task dev: start from scratch
+task front          # optional: Vite on the host instead of the compose `front` service
+                    #   (stop it first: docker compose -f deploy/docker-compose.dev.yml stop front)
 ```
+
+Steps of `task dev`, to redo one on its own (those marked *stack* exec into the running containers, so `task dev` must have run):
+
+```bash
+task env            # generate .env and the dev keys (first launch only)
+task s3             # provision the dev S3 (Garage layout, key into .env, bucket), idempotent
+task migrate        # alembic upgrade head (stack)
+task seed-fixtures  # (re)create the fixture git repos in .dev/repos (§4), idempotent
+task seed           # (re)create the demo data, idempotent (stack)
+```
+
+Day to day:
+
+```bash
+task makemigration NAME=...  # autogenerate an Alembic migration (stack)
+task push-change    # commit a change in demo-network (staleness test, §4)
+task logs           # follow the api + worker logs (stack)
+task psql           # Postgres shell (stack)
+task s3-ls          # list the dev bucket: managed states, saved plans, archived logs (stack)
+```
+
+Checks before a PR:
+
+```bash
+task test           # API pytest (host) + front vitest (container); the worker suite runs apart (TESTING.md §2)
+task e2e            # complete automated scenario (§7); runs task dev first
+task lint           # ruff check + ruff format --check on the api (stack)
+task version-check  # api, worker and front carry the same version
+```
+
+Docs, images, release: `task docs` (mkdocs on :8001), `task docs-build`, `task build-runner-images` (OpenTofu + Terraform runner images, `deploy/images/`), `task build-images`, `task release VERSION=X.Y.Z` (§10), `task prod-config`. `task --list` shows them all, sorted alphabetically; `Taskfile.yml` groups them by purpose with the same sections.
 
 Orchestration via **[Task](https://taskfile.dev)** (`Taskfile.yml` at the root) rather than Make: readable YAML syntax, cross-platform (single Go binary, no dependency on GNU Make), native `deps`/`status` for idempotence, namespaces per module, and self-documented `task --list`. Excerpt:
 
@@ -67,7 +89,7 @@ vars:
 
 tasks:
   dev:
-    desc: Full local stack (compose + S3 bootstrap + migrations + seed)
+    desc: "START HERE — whole dev stack incl. the front on :5173 (compose up + S3 + migrations + fixtures + seed; idempotent)"
     deps: [env]
     cmds:
       - task: s3                    # before `up`: compose reads the S3 key from .env at creation
@@ -251,3 +273,33 @@ Every tracked plan goes through S3 (saved encrypted after the plan, downloaded b
 | Real GitHub/GitLab webhooks | Gitea (git profile) covers 95%; the rest in staging |
 | Load (N workers × M runs) | not covered yet (no load scenario) |
 | Light theme / mobile responsive | Ladle stories + manual review |
+
+---
+
+## 10. CI and releases
+
+**Pull requests** run two workflows, both to be marked *required* in the branch protection of `main`:
+
+- `ci.yml` — lint, tests, typecheck and the production image builds of api/worker/front (TESTING.md), plus `scripts/check-version.sh` (every manifest carries the same version);
+- `e2e.yml` — the live scenario of §7 (the functional contract), ~10 min. A new push to the PR cancels the running one.
+
+**Versioning**: semver, one version for the whole product (api, worker, front, images). It lives in `api/pyproject.toml`, `api/uv.lock`, `api/app/__init__.py` (the OpenAPI `version`), `worker/pyproject.toml`, `worker/uv.lock` and `front/package.json` — never edit them by hand, `task release` bumps them together and `task version-check` checks them. A pre-release is `X.Y.Z-rc.N`.
+
+**Cutting a release**:
+
+```bash
+git switch main && git pull
+task release VERSION=1.4.0          # bump + commit "chore(release): v1.4.0" + annotated tag v1.4.0
+git push --atomic origin main v1.4.0
+```
+
+If `main` only accepts pull requests, run `task release` on a branch instead: it commits the bump only and prints the tag command to run on the merge commit once the PR is merged. The release workflow refuses a tag that is not on `main`.
+
+Pushing the tag starts `release.yml`:
+
+1. **verify** — the tag is `vX.Y.Z[-pre]`, on `main`, and matches every manifest;
+2. **ci** and **e2e** — both workflows again, on the tagged commit; nothing is published if either fails;
+3. **images** — `api`, `front`, `worker` and the OpenTofu runner image, `linux/amd64` + `linux/arm64`, pushed to `ghcr.io/<owner>/stackd/<name>` with SBOM and provenance attestations, then signed with cosign (keyless: the workflow's GitHub OIDC identity). Tags: `X.Y.Z`, plus `X.Y` and `latest` for a final release; the runner image is tagged by its tool version (`1.12.2`, and `1.12.2-stackdX.Y.Z`). The Terraform runner image is **not** published (BUSL, PLAN §5);
+4. **publish** — the GitHub release: generated notes, the image references pinned by digest, the `STACKD_RUNNER_IMAGES` line, the `cosign verify` command, and `stackd-deploy-X.Y.Z.tar.gz` (`deploy/production` with its env examples pointing at those digests) + `SHA256SUMS`.
+
+A failed release is re-run from the Actions tab once the cause is fixed outside the code (a flaky step, a registry outage). A fix in the code is a new version: never move a published tag. The first publish creates the ghcr.io packages as private — make them public in the package settings if the images are meant to be pulled anonymously.

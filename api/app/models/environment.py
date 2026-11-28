@@ -4,7 +4,7 @@ import uuid
 from datetime import datetime
 
 from sqlalchemy import Boolean, ForeignKey, Integer, String, UniqueConstraint
-from sqlalchemy.dialects.postgresql import JSONB
+from sqlalchemy.dialects.postgresql import ARRAY, JSONB
 from sqlalchemy.dialects.postgresql import UUID as PGUUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -40,6 +40,9 @@ class Environment(Base):
     # managed_state=false only: inline `-backend-config=key=value` settings (bucket/key/region/
     # dynamodb_table/use_lockfile…) for when there's no .config file. Applied after the file.
     backend_config: Mapped[dict | None] = mapped_column(JSONB(none_as_null=True), default=None)
+    # The repo's own tfvars files (§3.4), relative to the stack's project_root, passed in order as
+    # `-var-file=` to the tofu commands that read variables. Stackd's resolved values still win.
+    var_files: Mapped[list[str]] = mapped_column(ARRAY(String), default=list)
 
     # Git staleness (§9.6) — populated from Phase 5; columns exist now.
     head_sha: Mapped[str | None] = mapped_column(String, default=None)
@@ -54,6 +57,19 @@ class Environment(Base):
     last_drift_checked_at: Mapped[datetime | None] = mapped_column(default=None)
     drift_run_id: Mapped[uuid.UUID | None] = mapped_column(PGUUID(as_uuid=True), default=None)
     drift_check_enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+
+    # Out-of-band state changes (§19.7), unmanaged state only: the baseline is the last state
+    # serial/lineage Stackd observed; a later observation that differs flags the env until a full
+    # apply finishes or a human acknowledges it. Only these two fields of the state reach the API.
+    state_serial: Mapped[int | None] = mapped_column(Integer, default=None)
+    state_lineage: Mapped[str | None] = mapped_column(String, default=None)
+    state_observed_at: Mapped[datetime | None] = mapped_column(default=None)
+    out_of_band_detected_at: Mapped[datetime | None] = mapped_column(default=None)
+    out_of_band_run_id: Mapped[uuid.UUID | None] = mapped_column(PGUUID(as_uuid=True), default=None)
+    out_of_band_expected_serial: Mapped[int | None] = mapped_column(Integer, default=None)
+    out_of_band_expected_lineage: Mapped[str | None] = mapped_column(String, default=None)
+    out_of_band_observed_serial: Mapped[int | None] = mapped_column(Integer, default=None)
+    out_of_band_observed_lineage: Mapped[str | None] = mapped_column(String, default=None)
 
     locked: Mapped[bool] = mapped_column(Boolean, default=False)
     labels: Mapped[dict | None] = mapped_column(JSONB(none_as_null=True), default=None)

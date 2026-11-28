@@ -273,7 +273,9 @@ class FakeApi:
     def register(self, *a: object, **k: object) -> str:
         return "wt"
 
-    def heartbeat(self, in_flight: int = 0, capacity: int = 1) -> list[dict]:
+    def heartbeat(
+        self, in_flight: int = 0, capacity: int = 1, job_ids: list[str] | None = None
+    ) -> list[dict]:
         with self.lock:
             self.heartbeats.append(time.monotonic())
         return []
@@ -299,7 +301,7 @@ def agent_env(monkeypatch: pytest.MonkeyPatch) -> Iterator[threading.Event]:
     saved = {s: signal.getsignal(s) for s in (signal.SIGTERM, signal.SIGINT)}
     release = threading.Event()
 
-    def plan(client: Any, job: dict, settings: Settings, checks: list) -> None:
+    def plan(client: Any, job: dict, settings: Settings, checks: list, **_kw: Any) -> None:
         token = cancel.current()
         assert token is not None
         while not release.is_set():

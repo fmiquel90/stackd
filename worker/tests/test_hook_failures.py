@@ -225,6 +225,9 @@ class _Streamer:
     def emit(self, *args: Any, **kw: Any) -> None:
         pass
 
+    def flush(self, timeout: float | None = None) -> bool:
+        return True
+
 
 def _running(pid: int) -> bool:
     """True while `pid` runs (a killed process its reaper has yet to collect counts as gone)."""

@@ -1,17 +1,19 @@
 from __future__ import annotations
 
 import asyncio
+import functools
 import uuid
 from datetime import UTC, datetime, timedelta
+from typing import Any
 
-from sqlalchemy import delete, func, or_, select, text, update
+from sqlalchemy import delete, func, or_, select, text, tuple_, update
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 
 from app.config import get_settings
 from app.crypto import decrypt
 from app.db import SessionLocal, get_engine
 from app.drift.service import detect_drift
-from app.enums import ACTIVE_STATES, RepoAuthKind, RunEventActor, RunState, WorkerStatus
+from app.enums import ACTIVE_STATES, RepoAuthKind, RunState, WorkerStatus
 from app.logging import get_logger
 from app.models.environment import Environment
 from app.models.run import Run
@@ -19,14 +21,14 @@ from app.models.stack import Stack
 from app.models.user import RefreshToken
 from app.models.worker import Worker
 from app.notifications.dispatcher import dispatch_pending
+from app.observability.metrics import scheduler_task_failures
 from app.oidc.issuer import retire_keys
 from app.rollouts.service import expire_approvals
 from app.runs.logs_archive import archive_run_logs, purge_hot_logs
-from app.runs.transition import transition
 from app.stacks.git import ls_remote_sha
 from app.vcs.dispatcher import dispatch_vcs
 from app.webhooks.replay import purge_webhook_deliveries
-from app.workers.claim import holds_apply_credentials
+from app.workers.reaping import UNLISTED_HEARTBEATS_TO_REAP, fail_lost_job, reclaimable
 
 # Distinct advisory-lock keys so each periodic task runs once across replicas (§7.5).
 _LOCK_WORKER_LOST = 74001
@@ -42,6 +44,20 @@ _LOCK_RETENTION = 74010
 _RETENTION_PERIOD = timedelta(days=1)
 _TICK_SECONDS = 10  # the scheduler loop's period
 _HEAD_POLL_CONCURRENCY = 8  # `git ls-remote` calls a head poll runs at once (§9.6)
+_OUTBOX_BATCH = 20  # rows an outbox drain claims at once
+# Time budget of one run of each task (seconds): past it the run is cancelled and logged, and the
+# task runs again on its next turn. The head poll's budget is its interval, the retention's a day.
+_TASK_BUDGETS = {
+    "worker_lost": 30.0,
+    "drift": 60.0,
+    "oidc_keys": 30.0,
+    "rollouts": 60.0,
+    "log_archive": 120.0,  # S3 uploads, up to 20 runs
+    # The dispatchers bound each delivery themselves (30 s, a few in parallel): this is a backstop.
+    "notifications": 300.0,
+    "vcs": 300.0,
+}
+_AUDIT_PURGE_BATCH = 5000  # audit rows deleted per transaction (§6.1)
 _log = get_logger("stackd.scheduler")
 
 # Active states in which a worker is executing the run's job — the only ones worker-lost reclaims
@@ -53,71 +69,124 @@ _AWAITING_STATES = frozenset({RunState.unconfirmed, RunState.confirmed})
 _WORKER_EXECUTING_STATES = ACTIVE_STATES - _AWAITING_STATES
 
 
+class _ApiClock:
+    """When this process's reaper last reached the database, and the last stretch it could not
+    (§7.5). Heartbeats cannot reach a stopped or cut-off API either, so the silence of a worker
+    during such a stretch says nothing about the worker: it is not counted. Before the first run
+    in a process, nothing is known — the whole past is such a stretch, which gives every worker one
+    offline period after an API (re)start to heartbeat again before it is marked offline."""
+
+    def __init__(self) -> None:
+        self.last_seen: datetime | None = None
+        self.gap: tuple[datetime | None, datetime] | None = None
+
+    def observe(self, now: datetime) -> None:
+        if self.last_seen is None:
+            self.gap = (None, now)
+        elif now - self.last_seen > _OUTAGE_GAP:
+            self.gap = (self.last_seen, now)
+        self.last_seen = now
+
+    def silence(self, last_heartbeat_at: datetime, now: datetime) -> timedelta:
+        """How long the worker has been silent while the API could hear it."""
+        silent = now - last_heartbeat_at
+        if self.gap is None:
+            return silent
+        start, end = self.gap
+        hidden = end - (last_heartbeat_at if start is None else max(last_heartbeat_at, start))
+        return silent - max(hidden, timedelta(0))
+
+
+# A reaper run this much later than the previous one means the ticks were failing (DB or API
+# outage). Only that last stretch is discounted, so slow ticks never postpone reaping for good.
+_OUTAGE_GAP = timedelta(seconds=2 * _TICK_SECONDS)
+_api_clock = _ApiClock()
+
+
 async def detect_worker_lost(session: AsyncSession, now: datetime) -> int:
-    """Mark stale workers offline; fail runs whose job was executing on a dead worker (§3.7,
-    §7.5). Runs awaiting a human or the apply claim don't depend on their plan worker."""
+    """Mark stale workers offline; fail runs whose job no worker executes any more (§3.7, §7.5):
+    on an offline worker (`worker_lost`), or left unlisted by its live worker's heartbeats
+    (`job_not_running`). Runs awaiting a human or the apply claim don't depend on their plan
+    worker. Each run is failed in a transaction of its own: one that cannot be (changed
+    underneath) is logged and skipped, never holding back the others."""
     settings = get_settings()
-    offline_cutoff = now - timedelta(seconds=settings.stackd_worker_offline_seconds)
-    await session.execute(
-        update(Worker)
-        .where(Worker.last_heartbeat_at < offline_cutoff, Worker.status != WorkerStatus.offline)
-        .values(status=WorkerStatus.offline)
-    )
-    await session.flush()
+    offline_after = timedelta(seconds=settings.stackd_worker_offline_seconds)
+    _api_clock.observe(now)
+    beats = (
+        await session.execute(
+            select(Worker.id, Worker.last_heartbeat_at).where(
+                Worker.status != WorkerStatus.offline, Worker.last_heartbeat_at.is_not(None)
+            )
+        )
+    ).all()
+    stale = [(wid, beat) for wid, beat in beats if _api_clock.silence(beat, now) > offline_after]
+    if stale:
+        # Guarded on the heartbeat read: a worker that beat since is left alone.
+        await session.execute(
+            update(Worker)
+            .where(
+                tuple_(Worker.id, Worker.last_heartbeat_at).in_(stale),
+                Worker.status != WorkerStatus.offline,
+            )
+            .values(status=WorkerStatus.offline)
+        )
+    await session.commit()
 
-    offline_ids = (
-        (await session.execute(select(Worker.id).where(Worker.status == WorkerStatus.offline)))
-        .scalars()
-        .all()
-    )
-    if not offline_ids:
-        await session.commit()
-        return 0
-
-    lost_cutoff = now - timedelta(seconds=settings.stackd_worker_lost_seconds)
     # A job holding apply credentials — an applying run, or a mutating command run (§4.3) — is
     # not reclaimed before the apply budget + grace (§4.2): failing a healthy long apply mid-flight
     # would let a second run claim the env and write state concurrently (split-brain). Its state and
     # OIDC tokens are minted for exactly this window (same `holds_apply_credentials` definition as
     # the claim), so by the time this cutoff passes they have expired and a reclaimed job can no
-    # longer write state.
-    apply_cutoff = now - timedelta(seconds=settings.apply_reclaim_window_seconds)
+    # longer write state (`reclaimable`).
+    lost_cutoff = now - timedelta(seconds=settings.stackd_worker_lost_seconds)
     candidates = (
-        (
-            await session.execute(
-                select(Run).where(
-                    Run.worker_id.in_(offline_ids),
-                    Run.state.in_(_WORKER_EXECUTING_STATES),
-                    Run.claimed_at < max(lost_cutoff, apply_cutoff),
-                )
+        await session.execute(
+            select(Run.id, Worker.status)
+            .join(Worker, Worker.id == Run.worker_id)
+            .where(
+                Run.state.in_(_WORKER_EXECUTING_STATES),
+                Run.claimed_at < lost_cutoff,
+                or_(
+                    Worker.status == WorkerStatus.offline,
+                    Run.unlisted_heartbeats >= UNLISTED_HEARTBEATS_TO_REAP,
+                ),
             )
         )
-        .scalars()
-        .all()
-    )
-    runs = [
-        run
-        for run in candidates
-        if run.claimed_at is not None
-        and run.claimed_at < (apply_cutoff if holds_apply_credentials(run) else lost_cutoff)
-    ]
-    for run in runs:
-        await transition(
-            session,
-            run,
-            RunState.failed,
-            actor=RunEventActor.system,
-            fields={"error": "worker_lost"},
-            audit_action="run.apply_failed",
-            audit_context={"reason": "worker_lost"},
-        )
+    ).all()
     await session.commit()
-    if runs:
+
+    failed: dict[str, int] = {}
+    for run_id, worker_status in candidates:
+        reason = "worker_lost" if worker_status == WorkerStatus.offline else "job_not_running"
+        try:
+            run = await session.get(Run, run_id, populate_existing=True)
+            if (
+                run is None
+                or run.state not in _WORKER_EXECUTING_STATES
+                or not reclaimable(run, now)
+            ):
+                continue
+            await fail_lost_job(session, run, reason)
+            await session.commit()
+        except Exception as exc:  # one run must not hold back the others, tick after tick
+            await session.rollback()
+            _log.warning(
+                "worker_lost run not failed",
+                extra={
+                    "event": "scheduler.worker_lost_skipped",
+                    "run_id": str(run_id),
+                    "reason": reason,
+                    "error": str(exc) or type(exc).__name__,
+                },
+            )
+            continue
+        failed[reason] = failed.get(reason, 0) + 1
+    if failed:
         _log.warning(
             "worker_lost runs failed",
-            extra={"event": "scheduler.worker_lost", "count": len(runs)},
+            extra={"event": "scheduler.worker_lost", "count": sum(failed.values()), **failed},
         )
-    return len(runs)
+    return sum(failed.values())
 
 
 async def poll_branch_heads(session: AsyncSession, now: datetime) -> int:
@@ -240,36 +309,46 @@ async def purge_audit_events(now: datetime) -> int:
     """Delete the audit events older than `audit_retention_days` (§6.1). Runs on a connection of
     the distinct `stackd_audit_purge` role — the application role cannot delete, and the
     append-only trigger refuses everyone else — and records an `audit.purged` event in the same
-    transaction. Returns the number deleted; 0 (and nothing recorded) when the purge role's URL is
-    not configured."""
+    transaction. Deletes in batches of `_AUDIT_PURGE_BATCH`, one transaction (and one
+    `audit.purged` event) each, so a large backlog never becomes one huge, long-locking delete.
+    Returns the number deleted; 0 (and nothing recorded) when the purge role's URL is not
+    configured."""
     settings = get_settings()
     url = settings.stackd_audit_purge_database_url
     if not url:
         return 0
     cutoff = now - timedelta(days=settings.audit_retention_days)
     engine = create_async_engine(url)
+    total = 0
     try:
-        async with engine.begin() as conn:
-            deleted = (
-                await conn.execute(
-                    text(
-                        "WITH d AS (DELETE FROM audit_events WHERE created_at < :cutoff"
-                        " RETURNING 1) SELECT count(*) FROM d"
-                    ).bindparams(cutoff=cutoff)
-                )
-            ).scalar_one()
-            if deleted:
-                await conn.execute(
-                    text(
-                        "INSERT INTO audit_events (actor_kind, action, target_kind, context)"
-                        " VALUES ('system', 'audit.purged', 'audit',"
-                        " jsonb_build_object('deleted', CAST(:n AS int),"
-                        " 'before', CAST(:c AS text), 'retention_days', CAST(:d AS int)))"
-                    ).bindparams(n=deleted, c=cutoff.isoformat(), d=settings.audit_retention_days)
-                )
+        while True:
+            async with engine.begin() as conn:
+                deleted: int = (
+                    await conn.execute(
+                        text(
+                            "WITH d AS (DELETE FROM audit_events WHERE id IN (SELECT id FROM"
+                            " audit_events WHERE created_at < :cutoff ORDER BY created_at"
+                            " LIMIT :n) RETURNING 1) SELECT count(*) FROM d"
+                        ).bindparams(cutoff=cutoff, n=_AUDIT_PURGE_BATCH)
+                    )
+                ).scalar_one()
+                if deleted:
+                    await conn.execute(
+                        text(
+                            "INSERT INTO audit_events (actor_kind, action, target_kind, context)"
+                            " VALUES ('system', 'audit.purged', 'audit',"
+                            " jsonb_build_object('deleted', CAST(:n AS int),"
+                            " 'before', CAST(:c AS text), 'retention_days', CAST(:d AS int)))"
+                        ).bindparams(
+                            n=deleted, c=cutoff.isoformat(), d=settings.audit_retention_days
+                        )
+                    )
+            total += deleted
+            if deleted < _AUDIT_PURGE_BATCH:
+                break
     finally:
         await engine.dispose()
-    return int(deleted)
+    return total
 
 
 async def purge_retention(session: AsyncSession, now: datetime) -> None:
@@ -316,75 +395,112 @@ async def purge_retention(session: AsyncSession, now: datetime) -> None:
         )
 
 
-async def _with_lock(session: AsyncSession, key: int, coro) -> None:  # type: ignore[no-untyped-def]
-    """Run `coro(session, now)` only if no other replica holds `key` (§7.5). The session-level
-    advisory lock lives on a dedicated connection held for the task's whole run, never on the
-    task's session: the tasks commit mid-way, which hands the session's connection back to the
-    pool, so an unlock through the session could land on another pooled connection, miss, and leak
-    the lock (later ticks would then silently skip the task). AUTOCOMMIT keeps the lock connection
-    idle rather than idle-in-transaction, and the unlock runs even if the task's session failed."""
+async def _with_lock(session: AsyncSession, key: int, coro) -> Any:  # type: ignore[no-untyped-def]
+    """Run `coro(session, now)` only if no other replica holds `key` (§7.5); returns its result, or
+    None when the lock is taken. The session-level advisory lock lives on a dedicated connection
+    held for the task's whole run, never on the task's session: the tasks commit mid-way, which
+    hands the session's connection back to the pool, so an unlock through the session could land on
+    another pooled connection, miss, and leak the lock (later ticks would then silently skip the
+    task). AUTOCOMMIT keeps the lock connection idle rather than idle-in-transaction, and the unlock
+    runs even if the task's session failed."""
     async with get_engine().execution_options(isolation_level="AUTOCOMMIT").connect() as lock_conn:
         got = (
             await lock_conn.execute(text("SELECT pg_try_advisory_lock(:k)").bindparams(k=key))
         ).scalar()
         if not got:
-            return
+            return None
         try:
-            await coro(session, datetime.now(UTC))
+            return await coro(session, datetime.now(UTC))
         finally:
             await lock_conn.execute(text("SELECT pg_advisory_unlock(:k)").bindparams(k=key))
 
 
-async def _head_poll() -> None:
-    """One git staleness poll, under its own advisory lock (on `_with_lock`'s dedicated
-    connection). Run as a task of its own: its git calls can outlast a tick."""
+async def _run_task(name: str, key: int, coro, budget: float) -> Any:  # type: ignore[no-untyped-def]
+    """One run of a periodic task: its own session, its advisory lock and a time budget. A task
+    that raises or overruns is logged and counted, and only that run is lost — never the other
+    tasks (§7.5). Returns the task's result, None if it failed or another replica holds the lock."""
     try:
-        async with SessionLocal() as session:
-            await _with_lock(session, _LOCK_HEAD_POLL, poll_branch_heads)
-    except Exception as exc:
-        print(f"[scheduler] head poll error: {exc}", flush=True)
+        async with asyncio.timeout(budget):
+            async with SessionLocal() as session:
+                return await _with_lock(session, key, coro)
+    except TimeoutError:
+        scheduler_task_failures.labels(task=name).inc()
+        _log.error(
+            "scheduler task over its time budget",
+            extra={"event": "scheduler.task_failed", "task": name, "error": "timeout"},
+        )
+    except Exception:
+        scheduler_task_failures.labels(task=name).inc()
+        _log.exception(
+            "scheduler task failed", extra={"event": "scheduler.task_failed", "task": name}
+        )
+    return None
+
+
+async def _tick() -> None:
+    """The every-tick tasks, one after the other — each isolated by `_run_task`."""
+    for name, key, coro in (
+        ("worker_lost", _LOCK_WORKER_LOST, detect_worker_lost),
+        ("drift", _LOCK_DRIFT, detect_drift),
+        ("oidc_keys", _LOCK_OIDC_KEYS, retire_keys),
+        ("rollouts", _LOCK_ROLLOUTS, expire_approvals),
+        ("log_archive", _LOCK_LOG_ARCHIVE, archive_run_logs),
+    ):
+        await _run_task(name, key, coro, _TASK_BUDGETS[name])
+
+
+async def _outbox_loop(name: str, key: int, drain) -> None:  # type: ignore[no-untyped-def]
+    """An outbound dispatcher in a loop of its own, so its HTTP calls never delay the tick's tasks
+    (§7.5). A full batch is followed at once by the next one; otherwise the loop waits a tick."""
+    while True:
+        processed = await _run_task(
+            name, key, functools.partial(drain, limit=_OUTBOX_BATCH), _TASK_BUDGETS[name]
+        )
+        if processed != _OUTBOX_BATCH:
+            await asyncio.sleep(_TICK_SECONDS)
 
 
 async def scheduler_loop() -> None:
-    """Single background loop; each task is advisory-locked + idempotent (§7.5). A 10s tick keeps
-    outbound notifications responsive; worker_lost detection is cheap/idempotent at that rate. The
-    git staleness poll runs once per `stackd_head_poll_interval` only (§9.6), in a task of its own
-    so its git calls never delay the other tasks' ticks; a poll still running when the next one is
-    due skips that one."""
+    """The periodic tasks (§7.5), each advisory-locked + idempotent, isolated from one another
+    (`_run_task`). The cheap ones run every 10 s tick, in turn. Those making outbound or long calls
+    run in tasks of their own so they never delay a tick (worker_lost detection above all): the
+    two outbox dispatchers loop on their own, and the git staleness poll (§9.6) and the daily
+    retention purge are started when due — one still running when the next is due skips that one.
+    Cancelling the loop cancels and awaits them all."""
     next_head_poll: datetime | None = None
     next_retention: datetime | None = None
-    head_poll: asyncio.Task[None] | None = None
+    head_poll: asyncio.Task[Any] | None = None
+    retention: asyncio.Task[Any] | None = None
+    outboxes = [
+        asyncio.create_task(_outbox_loop("notifications", _LOCK_NOTIFY, dispatch_pending)),
+        asyncio.create_task(_outbox_loop("vcs", _LOCK_VCS, dispatch_vcs)),
+    ]
     try:
         while True:
-            try:
-                async with SessionLocal() as session:
-                    await _with_lock(session, _LOCK_WORKER_LOST, detect_worker_lost)
-                async with SessionLocal() as session:
-                    await _with_lock(session, _LOCK_NOTIFY, dispatch_pending)
-                async with SessionLocal() as session:
-                    await _with_lock(session, _LOCK_VCS, dispatch_vcs)
-                async with SessionLocal() as session:
-                    await _with_lock(session, _LOCK_DRIFT, detect_drift)
-                async with SessionLocal() as session:
-                    await _with_lock(session, _LOCK_OIDC_KEYS, retire_keys)
-                async with SessionLocal() as session:
-                    await _with_lock(session, _LOCK_ROLLOUTS, expire_approvals)
-                async with SessionLocal() as session:
-                    await _with_lock(session, _LOCK_LOG_ARCHIVE, archive_run_logs)
-                now = datetime.now(UTC)
-                if next_retention is None or now >= next_retention:
-                    next_retention = now + _RETENTION_PERIOD
-                    async with SessionLocal() as session:
-                        await _with_lock(session, _LOCK_RETENTION, purge_retention)
-                if next_head_poll is None or now >= next_head_poll:
-                    # Scheduled before it runs, so a failing poll also waits a full interval.
-                    interval = get_settings().stackd_head_poll_interval
-                    next_head_poll = now + timedelta(seconds=interval)
-                    if head_poll is None or head_poll.done():
-                        head_poll = asyncio.create_task(_head_poll())
-            except Exception as exc:
-                print(f"[scheduler] tick error: {exc}", flush=True)
+            await _tick()
+            # Each is scheduled before it runs, so a failing one also waits a full period.
+            now = datetime.now(UTC)
+            if next_retention is None or now >= next_retention:
+                next_retention = now + _RETENTION_PERIOD
+                if retention is None or retention.done():
+                    retention = asyncio.create_task(
+                        _run_task(
+                            "retention",
+                            _LOCK_RETENTION,
+                            purge_retention,
+                            _RETENTION_PERIOD.total_seconds(),
+                        )
+                    )
+            if next_head_poll is None or now >= next_head_poll:
+                interval = get_settings().stackd_head_poll_interval
+                next_head_poll = now + timedelta(seconds=interval)
+                if head_poll is None or head_poll.done():
+                    head_poll = asyncio.create_task(
+                        _run_task("head_poll", _LOCK_HEAD_POLL, poll_branch_heads, interval)
+                    )
             await asyncio.sleep(_TICK_SECONDS)
     finally:
-        if head_poll is not None:
-            head_poll.cancel()  # the loop is cancelled at shutdown: don't leave the poll behind
+        children = [t for t in (*outboxes, head_poll, retention) if t is not None]
+        for child in children:
+            child.cancel()
+        await asyncio.gather(*children, return_exceptions=True)

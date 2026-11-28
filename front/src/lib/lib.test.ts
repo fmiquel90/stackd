@@ -5,7 +5,7 @@ import type { LogChunk } from "@/api/types";
 import { ADMIN, ALICE, BOB, TIERS, makeEnv, makeRun } from "./__fixtures__/factories";
 import { downstreamOf } from "./cascade";
 import { severity, summarizeEnv } from "./envSummary";
-import { buildLogModel, planLines } from "./logModel";
+import { buildLogModel } from "./logModel";
 import { fourEyesOf, runRights, whoMayConfirm } from "./permissions";
 import { buildSegments } from "./phases";
 import { accountedLines, groupByAction, parsePlan } from "./planParse";
@@ -139,7 +139,21 @@ describe("envSummary (DESIGN §2.3)", () => {
     expect(s.primary?.id).toBe("a");
     expect(s.outcome).toBe("applied");
     expect(s.modifiers.drift).toBe("drifted");
+    expect(s.modifiers.outOfBand).toBe(false);
     expect(s.deployedSha).toBe("2af0351c9e");
+  });
+  it("marks a state changed outside Stackd (SPECS §19.7)", () => {
+    const change = {
+      detected_at: "2026-11-20T10:00:00Z",
+      run_id: null,
+      expected_serial: 1,
+      expected_lineage: "l",
+      observed_serial: 2,
+      observed_lineage: "l",
+    };
+    const s = summarizeEnv(makeEnv({ out_of_band_change: change }), []);
+    expect(s.modifiers.outOfBand).toBe(true);
+    expect(severity(s)).toBe(2);
   });
   it("marks an active PR run and stale envs", () => {
     const s = summarizeEnv(makeEnv({ stale: true }), [makeRun({ type: "proposed", state: "planning" })]);
@@ -338,7 +352,11 @@ describe("logModel", () => {
   });
   it("extracts the plan section in order", () => {
     expect(
-      planLines([chunk("planning", 3, "plan", ["second"]), chunk("planning", 2, "plan", ["first"])]),
+      buildLogModel([
+        chunk("planning", 3, "plan", ["second"]),
+        chunk("planning", 1, null, ["init"]),
+        chunk("planning", 2, "plan", ["first"]),
+      ]).plan,
     ).toEqual(["first", "second"]);
   });
 });

@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { MessageSquarePlus } from "lucide-react";
@@ -14,13 +14,13 @@ import { PhaseRail } from "@/identity/PhaseRail";
 import { PlanDiff } from "@/identity/PlanDiff";
 import { ProvenanceBadge, isNotReal, parseProvenance } from "@/identity/ProvenanceBadge";
 import { RunActionBar } from "@/identity/RunActionBar";
-import { buildLogModel } from "@/lib/logModel";
 import { runRights, whoMayConfirm } from "@/lib/permissions";
 import { buildSegments, checkEntries, failedSegment, type Segment } from "@/lib/phases";
 import { isStalePlan } from "@/features/overview/attention";
 import { formatCounts, outcomeOf, planCounts } from "@/lib/runOutcome";
 import { formatDuration } from "@/lib/time";
 import { Button } from "@/ui/Button";
+import { ErrorBoundary } from "@/ui/ErrorBoundary";
 import {
   Banner,
   Badge,
@@ -39,6 +39,7 @@ import {
 import { CheckList } from "./CheckList";
 import { CommentComposer, CommentThread, Discussion, commentLineKey, isRoot, lineKey } from "./comments";
 import { useRunPage } from "./useRunPage";
+import { shortId } from "@/lib/ids";
 
 // The run page (DESIGN §5.2): the decision first, then the evidence — plan, checks, logs, inputs,
 // discussion. Every piece of on-screen state that matters is in the URL (?tab, ?line, ?plan_q).
@@ -58,6 +59,7 @@ const REASONS: Record<string, string> = {
   env_locked: "the environment is locked",
   no_compatible_worker: "no worker is compatible with this environment",
   apply_affinity_hold: "the apply is reserved for the worker that planned it (affinity window)",
+  claim_backoff: "a transient failure preparing its job — it is retried after a backoff",
 };
 
 const durationOf = (from: string, to: string | null) =>
@@ -89,7 +91,7 @@ export function RunPage() {
   } | null>(null);
 
   const { run, env, stack, me } = d;
-  const model = useMemo(() => buildLogModel(d.logs), [d.logs]);
+  const model = d.logModel;
 
   const rights = run && env && me ? runRights(run, env, d.tier, me) : null;
   if (rights && run && run.type !== "tracked" && run.type !== "destroy") rights.replan.visible = false;
@@ -224,7 +226,7 @@ export function RunPage() {
           ) : (
             "…"
           )}
-          <span className="font-data text-[13px] font-normal text-muted">run {run.id.slice(0, 8)}</span>
+          <span className="font-data text-[13px] font-normal text-muted">run {shortId(run.id)}</span>
           {run.type !== "tracked" && (
             <Badge
               tone={run.type === "destroy" ? "failed" : "neutral"}
@@ -234,21 +236,24 @@ export function RunPage() {
             </Badge>
           )}
         </h1>
-        <p className="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[12px] text-muted">
+        {/* < 768 px: one condensed line (sha · age · trigger · message), DESIGN §5.2. */}
+        <p className="flex items-center gap-x-2 gap-y-0.5 overflow-hidden text-[12px] whitespace-nowrap text-muted md:flex-wrap md:whitespace-normal">
           <Sha value={run.commit_sha} copy />
-          {run.commit_message && <span className="text-primary">“{run.commit_message}”</span>}
-          {run.commit_author && <span>· {run.commit_author}</span>}
-          <span>
+          {run.commit_message && (
+            <span className="min-w-0 truncate text-primary max-md:order-last">“{run.commit_message}”</span>
+          )}
+          {run.commit_author && <span className="max-md:hidden">· {run.commit_author}</span>}
+          <span className="max-md:hidden">
             · branch <span className="font-data">{env.branch}</span>
           </span>
-          <span>
+          <span className="shrink-0">
             ·{" "}
             {run.triggered_by === "manual"
               ? `triggered by ${triggererEmail ?? "a user"}`
               : `via ${run.triggered_by === "schedule" ? "drift check" : run.triggered_by}`}
           </span>
           {rollout.data && (
-            <span>
+            <span className="max-md:hidden">
               · part of{" "}
               <Link className="link font-data" to={`/rollouts/${rollout.data.id}`}>
                 rollout {rollout.data.name}
@@ -256,12 +261,15 @@ export function RunPage() {
               {rolloutMember ? ` · level ${rolloutMember.level}` : ""}
             </span>
           )}
-          <span>
+          <span className="shrink-0">
             · <RelativeTime value={run.created_at} />
           </span>
-          <span className="font-data">· {durationOf(run.created_at, run.finished_at)}</span>
+          <span className="max-md:hidden">
+            · {run.finished_at ? "took" : "elapsed"}{" "}
+            <span className="font-data">{durationOf(run.created_at, run.finished_at)}</span>
+          </span>
           {run.command && (
-            <span className="font-data">
+            <span className="font-data max-md:hidden">
               · {run.command.name} {run.command.args.join(" ")}
             </span>
           )}
@@ -271,7 +279,7 @@ export function RunPage() {
 
       {/* ---------- decision ---------- */}
       <RunActionBar
-        className="sticky top-0 z-20"
+        className="z-20 md:sticky md:top-0"
         run={run}
         env={env}
         rights={rights}
@@ -361,6 +369,7 @@ export function RunPage() {
         )}
         {stale && (
           <Banner
+            inline
             title={
               <>
                 Plan computed on <span className="font-data">{run.commit_sha!.slice(0, 7)}</span>. The branch
@@ -385,7 +394,6 @@ export function RunPage() {
             }
           >
             Confirming still applies exactly <span className="font-data">{run.commit_sha!.slice(0, 7)}</span>.
-            Re-plan discards this plan and plans the head.
           </Banner>
         )}
         {run.used_mocks && (
@@ -418,11 +426,17 @@ export function RunPage() {
       <div className="flex gap-6 px-4 pt-3 pb-6 lg:px-6">
         <aside className="hidden w-44 shrink-0 lg:block">
           <div className="sticky top-40">
-            <PhaseRail segments={segments} onSelect={openSegment} />
+            <ErrorBoundary what="The phase rail" resetKey={runId}>
+              <PhaseRail segments={segments} onSelect={openSegment} />
+            </ErrorBoundary>
           </div>
         </aside>
         <div className="flex min-w-0 flex-1 flex-col gap-3">
-          <PhaseRail variant="horizontal" segments={segments} onSelect={openSegment} className="lg:hidden" />
+          <div className="lg:hidden">
+            <ErrorBoundary what="The phase rail" resetKey={runId}>
+              <PhaseRail variant="horizontal" segments={segments} onSelect={openSegment} />
+            </ErrorBoundary>
+          </div>
           <Tabs value={tab} onValueChange={(v) => setParam({ tab: v, line: null }, false)}>
             <TabsList>
               <TabsTrigger value="plan">
@@ -480,47 +494,51 @@ export function RunPage() {
                   </Banner>
                 </div>
               )}
-              <PlanDiff
-                lines={d.planText}
-                counts={counts}
-                query={params.get("plan_q") ?? ""}
-                onQueryChange={(q) => setParam({ plan_q: q })}
-                emptyHint={
-                  <>
-                    {run.state === "failed"
-                      ? "The run failed before the plan output was produced."
-                      : ["queued", "preparing", "planning"].includes(run.state)
-                        ? "The plan is not computed yet."
-                        : "This run produced no plan output."}{" "}
-                    <button type="button" className="link" onClick={() => setParam({ tab: "logs" }, false)}>
-                      Open the logs
-                    </button>
-                  </>
-                }
-                resourceAction={(r) => {
-                  const n = resourceThreads(r.address).length;
-                  return (
-                    <Button
-                      size="sm"
-                      variant="ghost"
-                      onClick={(e) => {
-                        e.preventDefault();
-                        setResourceDraft(r.address);
-                      }}
-                      icon={<MessageSquarePlus size={13} aria-hidden />}
-                      aria-label={`Comment on ${r.address}`}
-                    >
-                      {n > 0 ? `${n}` : ""}
-                    </Button>
-                  );
-                }}
-              />
+              <ErrorBoundary what="The plan" resetKey={runId}>
+                <PlanDiff
+                  lines={d.planText}
+                  counts={counts}
+                  query={params.get("plan_q") ?? ""}
+                  onQueryChange={(q) => setParam({ plan_q: q })}
+                  emptyHint={
+                    <>
+                      {run.state === "failed"
+                        ? "The run failed before the plan output was produced."
+                        : ["queued", "preparing", "planning"].includes(run.state)
+                          ? "The plan is not computed yet."
+                          : "This run produced no plan output."}{" "}
+                      <button type="button" className="link" onClick={() => setParam({ tab: "logs" }, false)}>
+                        Open the logs
+                      </button>
+                    </>
+                  }
+                  resourceAction={(r) => {
+                    const n = resourceThreads(r.address).length;
+                    return (
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        onClick={(e) => {
+                          e.preventDefault();
+                          setResourceDraft(r.address);
+                        }}
+                        icon={<MessageSquarePlus size={13} aria-hidden />}
+                        aria-label={`Comment on ${r.address}`}
+                      >
+                        {n > 0 ? `${n}` : ""}
+                      </Button>
+                    );
+                  }}
+                />
+              </ErrorBoundary>
             </TabsContent>
 
             <TabsContent value="checks" className="pt-3">
               <h2 className="sr-only">Checks</h2>
               {checks.length ? (
-                <CheckList checkResults={run.check_results} />
+                <ErrorBoundary what="The checks" resetKey={runId}>
+                  <CheckList checkResults={run.check_results} />
+                </ErrorBoundary>
               ) : (
                 <EmptyState title="No hook checks ran for this run." />
               )}
@@ -528,69 +546,72 @@ export function RunPage() {
 
             <TabsContent value="logs" className="pt-3">
               <h2 className="sr-only">Logs</h2>
-              <LogViewer
-                chunks={d.logs}
-                live={!outcome}
-                failedHooks={failedHooks}
-                initialLine={params.get("line") ?? (run.state === "failed" ? firstErrorId : null)}
-                onLineLink={(id) => {
-                  setParam({ tab: "logs", line: id });
-                  const url = new URL(window.location.href);
-                  url.searchParams.set("tab", "logs");
-                  url.searchParams.set("line", id);
-                  void navigator.clipboard?.writeText(url.toString());
-                }}
-                lineAction={(l) => (
-                  <button
-                    type="button"
-                    aria-label={`Comment on line ${l.id}`}
-                    className="rounded-base p-0.5 text-muted hover:bg-raised hover:text-primary"
-                    onClick={() =>
-                      setLineDraft({ phase: l.phase, seq: l.seq, idx: l.idx, snippet: l.msg.slice(0, 120) })
-                    }
-                  >
-                    <MessageSquarePlus size={13} strokeWidth={1.5} aria-hidden />
-                  </button>
-                )}
-                renderAfterLine={(l) => {
-                  const k = lineKey(l.phase, l.seq, l.idx);
-                  const roots = threadsByLine.get(k) ?? [];
-                  const drafting = lineDraft && lineKey(lineDraft.phase, lineDraft.seq, lineDraft.idx) === k;
-                  if (!roots.length && !drafting) return null;
-                  return (
-                    <div className="my-1 ml-14 flex flex-col gap-2 border-l-2 border-line pl-3 font-sans whitespace-normal">
-                      {roots.map((root) => (
-                        <CommentThread
-                          key={root.id}
-                          runId={run.id}
-                          root={root}
-                          replies={repliesOf(root.id)}
-                          meId={me.id}
-                          hideAnchor
-                        />
-                      ))}
-                      {drafting && (
-                        <CommentComposer
-                          runId={run.id}
-                          anchor={{
-                            kind: "plan_line",
-                            phase: l.phase,
-                            seq: l.seq,
-                            line_start: l.idx,
-                            line_end: l.idx,
-                            snippet: lineDraft.snippet,
-                          }}
-                          placeholder="Comment on this line…"
-                          autoFocus
-                          onPosted={() => setLineDraft(null)}
-                          onCancel={() => setLineDraft(null)}
-                        />
-                      )}
-                    </div>
-                  );
-                }}
-                className="h-[70vh] min-h-[420px]"
-              />
+              <ErrorBoundary what="The logs" resetKey={runId}>
+                <LogViewer
+                  chunks={d.logs}
+                  live={!outcome}
+                  failedHooks={failedHooks}
+                  initialLine={params.get("line") ?? (run.state === "failed" ? firstErrorId : null)}
+                  onLineLink={(id) => {
+                    setParam({ tab: "logs", line: id });
+                    const url = new URL(window.location.href);
+                    url.searchParams.set("tab", "logs");
+                    url.searchParams.set("line", id);
+                    void navigator.clipboard?.writeText(url.toString());
+                  }}
+                  lineAction={(l) => (
+                    <button
+                      type="button"
+                      aria-label={`Comment on line ${l.id}`}
+                      className="rounded-base p-0.5 text-muted hover:bg-raised hover:text-primary"
+                      onClick={() =>
+                        setLineDraft({ phase: l.phase, seq: l.seq, idx: l.idx, snippet: l.msg.slice(0, 120) })
+                      }
+                    >
+                      <MessageSquarePlus size={13} strokeWidth={1.5} aria-hidden />
+                    </button>
+                  )}
+                  renderAfterLine={(l) => {
+                    const k = lineKey(l.phase, l.seq, l.idx);
+                    const roots = threadsByLine.get(k) ?? [];
+                    const drafting =
+                      lineDraft && lineKey(lineDraft.phase, lineDraft.seq, lineDraft.idx) === k;
+                    if (!roots.length && !drafting) return null;
+                    return (
+                      <div className="my-1 ml-14 flex flex-col gap-2 border-l-2 border-line pl-3 font-sans whitespace-normal">
+                        {roots.map((root) => (
+                          <CommentThread
+                            key={root.id}
+                            runId={run.id}
+                            root={root}
+                            replies={repliesOf(root.id)}
+                            meId={me.id}
+                            hideAnchor
+                          />
+                        ))}
+                        {drafting && (
+                          <CommentComposer
+                            runId={run.id}
+                            anchor={{
+                              kind: "plan_line",
+                              phase: l.phase,
+                              seq: l.seq,
+                              line_start: l.idx,
+                              line_end: l.idx,
+                              snippet: lineDraft.snippet,
+                            }}
+                            placeholder="Comment on this line…"
+                            autoFocus
+                            onPosted={() => setLineDraft(null)}
+                            onCancel={() => setLineDraft(null)}
+                          />
+                        )}
+                      </div>
+                    );
+                  }}
+                  className="h-[70vh] min-h-[420px]"
+                />
+              </ErrorBoundary>
             </TabsContent>
 
             <TabsContent value="inputs" className="pt-3">

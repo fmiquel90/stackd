@@ -485,7 +485,12 @@ async def test_admin_copies_the_cloud_integration(client: httpx.AsyncClient) -> 
     r = await client.put(
         f"/api/v1/environments/{ids['app_prod']}/cloud-integration",
         headers=admin,
-        json={"plan_role_arn": PLAN_ROLE, "apply_role_arn": PLAN_ROLE, "region": "eu-west-1"},
+        json={
+            "plan_role_arn": PLAN_ROLE,
+            "apply_role_arn": PLAN_ROLE,
+            "region": "eu-west-1",
+            "profiles": {"tfstates": {"plan_role_arn": PLAN_ROLE, "apply_role_arn": PLAN_ROLE}},
+        },
     )
     assert r.status_code == 200, r.text
     r = await _clone(client, admin, ids["space"], copy_cloud_integration=True)
@@ -495,8 +500,12 @@ async def test_admin_copies_the_cloud_integration(client: httpx.AsyncClient) -> 
     ci = await client.get(f"/api/v1/environments/{new_app}/cloud-integration", headers=admin)
     assert ci.status_code == 200, ci.text
     assert ci.json()["plan_role_arn"] == PLAN_ROLE
+    assert ci.json()["profiles"] == {
+        "tfstates": {"plan_role_arn": PLAN_ROLE, "apply_role_arn": PLAN_ROLE, "region": None}
+    }
     audits = await _audits(action="cloud_integration.created", target_id=uuid.UUID(new_app))
     assert len(audits) == 1 and audits[0].context["cloned_from"] == ids["app_prod"]
+    assert audits[0].context["profiles"] == ["tfstates"]
 
 
 async def test_per_item_copies_and_their_audit(client: httpx.AsyncClient) -> None:
