@@ -1,5 +1,7 @@
+import { createElement, type ReactNode } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { act, renderHook } from "@testing-library/react";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { setAccessToken } from "./client";
 import { useConnectionStatus, useLiveSignals } from "./stream";
 
@@ -30,6 +32,10 @@ class FakeSocket {
   }
 }
 
+// useLiveSignals hands the query client to the hub (a reconnect invalidates queries).
+const wrapper = ({ children }: { children: ReactNode }) =>
+  createElement(QueryClientProvider, { client: new QueryClient() }, children);
+
 afterEach(() => {
   setAccessToken(null);
   vi.unstubAllGlobals();
@@ -48,10 +54,13 @@ describe("WebSocket auth (SPECS §5.3)", () => {
     vi.stubGlobal("fetch", refresh);
     setAccessToken("stale");
 
-    const { unmount } = renderHook(() => {
-      useLiveSignals(["run:r1"], () => undefined);
-      return useConnectionStatus();
-    });
+    const { unmount } = renderHook(
+      () => {
+        useLiveSignals(["run:r1"], () => undefined);
+        return useConnectionStatus();
+      },
+      { wrapper },
+    );
     expect(FakeSocket.all).toHaveLength(1);
     act(() => FakeSocket.all[0].open());
     expect(FakeSocket.all[0].sent[0]).toEqual({ type: "auth", token: "stale" });
@@ -76,10 +85,13 @@ describe("WebSocket auth (SPECS §5.3)", () => {
     );
     setAccessToken("stale");
 
-    const { result, unmount } = renderHook(() => {
-      useLiveSignals(["run:r2"], () => undefined);
-      return useConnectionStatus();
-    });
+    const { result, unmount } = renderHook(
+      () => {
+        useLiveSignals(["run:r2"], () => undefined);
+        return useConnectionStatus();
+      },
+      { wrapper },
+    );
     act(() => FakeSocket.all[0].open());
     await act(async () => {
       FakeSocket.all[0].closeWith(4401);

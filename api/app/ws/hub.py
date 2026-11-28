@@ -18,12 +18,13 @@ from app.spaces import guard_env, guard_run
 
 log = logging.getLogger(__name__)
 
-# `None` in a subscriber queue is the resync marker: signals may have been missed, re-read state.
-SignalQueue = asyncio.Queue[str | None]
+# A subscriber queue holds `(channel, payload)` signals; `None` is the resync marker: signals may
+# have been missed, re-read state.
+SignalQueue = asyncio.Queue[tuple[str, str] | None]
 RESYNC = None
 
 
-def offer(queue: SignalQueue, item: str | None) -> None:
+def offer(queue: SignalQueue, item: tuple[str, str] | None) -> None:
     """Put without blocking, dropping the oldest pending item when full: signals are re-read hints,
     so a client that stops reading must not grow the process memory."""
     if queue.full():
@@ -92,7 +93,7 @@ class NotifyHub:
 
     def _on_notify(self, _conn, _pid, channel: str, payload: str) -> None:  # type: ignore[no-untyped-def]
         for queue in self._subs.get(channel, ()):
-            offer(queue, payload)
+            offer(queue, (channel, payload))
 
     def _resync_all(self) -> None:
         for queue in {q for subs in self._subs.values() for q in subs}:
