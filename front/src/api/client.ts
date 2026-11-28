@@ -75,6 +75,8 @@ interface RequestOptions {
   body?: unknown;
   /** Send the double-submit CSRF header (cookie-borne endpoints: /auth/refresh, /auth/logout). */
   csrf?: boolean;
+  /** Read the response headers (a paged list's `X-Next-Cursor`). */
+  onHeaders?: (headers: Headers) => void;
   /** No refresh-and-replay on a 401: the endpoints that open, renew or close the session. */
   noAuthRetry?: boolean;
 }
@@ -151,6 +153,7 @@ export async function api<T>(path: string, opts: RequestOptions = {}): Promise<T
     opts,
   );
 
+  opts.onHeaders?.(resp.headers);
   if (resp.status === 204) return undefined as T;
   const data = resp.headers.get("content-type")?.includes("json") ? await resp.json() : null;
   if (!resp.ok) throw problem(resp, data);

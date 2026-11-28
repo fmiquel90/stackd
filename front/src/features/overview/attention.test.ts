@@ -17,7 +17,6 @@ function entry(env: Environment, runs: Run[], me = ALICE): EnvEntry {
     stack: STACK,
     env,
     tier,
-    runs,
     summary,
     rights,
     whoMayConfirm: pending && rights ? whoMayConfirm(pending, env, rights) : null,

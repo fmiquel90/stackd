@@ -1,4 +1,3 @@
-import { useState } from "react";
 import { Link } from "react-router-dom";
 import type { Run } from "@/api/types";
 import { PhaseRail } from "@/identity/PhaseRail";
@@ -36,20 +35,24 @@ const KIND_LABEL: Record<Exclude<RunKind, "all">, string> = {
   command: "command",
 };
 
-const PAGE = 50;
-
+/** `runs`: the pages loaded so far, newest first; `more`: older runs remain on the server. */
 export function RunsHistory({
   runs,
+  more = false,
+  loadingMore = false,
+  onMore,
   kind,
   onKind,
   emailOf,
 }: {
   runs: Run[];
+  more?: boolean;
+  loadingMore?: boolean;
+  onMore?: () => void;
   kind: RunKind;
   onKind: (k: RunKind) => void;
   emailOf: (id: string | null) => string | null;
 }) {
-  const [limit, setLimit] = useState(PAGE);
   const filtered = runs.filter((r) => kind === "all" || kindOf(r) === kind);
   return (
     <div className="flex flex-col gap-2">
@@ -62,10 +65,15 @@ export function RunsHistory({
             </option>
           ))}
         </NativeSelect>
-        <span className="font-data text-[12px] text-muted">{filtered.length} runs</span>
+        <span className="font-data text-[12px] text-muted">
+          {filtered.length}
+          {more ? "+" : ""} runs
+        </span>
       </label>
       {filtered.length === 0 ? (
-        <EmptyState title="No run of this kind yet." />
+        <EmptyState
+          title={more ? "No run of this kind among the latest runs." : "No run of this kind yet."}
+        />
       ) : (
         <div className="overflow-x-auto">
           <Table>
@@ -82,7 +90,7 @@ export function RunsHistory({
               </tr>
             </thead>
             <tbody>
-              {filtered.slice(0, limit).map((r) => (
+              {filtered.map((r) => (
                 <tr key={r.id} className="hover:bg-raised">
                   <Td>
                     <Link to={`/runs/${r.id}`} className="cell-link font-data text-[12px]">
@@ -122,9 +130,9 @@ export function RunsHistory({
           </Table>
         </div>
       )}
-      {filtered.length > limit && (
-        <Button className="self-start" onClick={() => setLimit((l) => l + PAGE)}>
-          Show {Math.min(PAGE, filtered.length - limit)} more
+      {more && (
+        <Button className="self-start" onClick={onMore} disabled={loadingMore}>
+          {loadingMore ? "Loading older runs…" : "Load older runs"}
         </Button>
       )}
     </div>

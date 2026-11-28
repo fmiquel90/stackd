@@ -104,6 +104,8 @@ export interface Environment {
   commits_ahead: number | null;
   affects_project_root: boolean | null;
   stale: boolean;
+  /** Commit of the last finished, untargeted tracked run — what `stale` compares (SPECS §9.6). */
+  last_applied_sha: string | null;
   drift_status: "unknown" | "in_sync" | "drifted" | "error";
   last_drift_checked_at: string | null;
   drift_run_id: string | null;
@@ -233,6 +235,9 @@ export interface Run {
   finished_at: string | null;
   created_at: string;
 }
+
+/** An item of `GET /environments/{id}/runs?view=summary`: a run without its heavy JSONB. */
+export type RunSummary = Omit<Run, "check_results" | "variable_provenance">;
 
 export interface LogChunk {
   phase: string;

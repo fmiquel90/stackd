@@ -36,3 +36,5 @@ async def test_transition_emits_listen_notify(client: httpx.AsyncClient) -> None
     assert "preparing" in states
     assert "planning" in states
     assert all(m["kind"] == "run_event" and m["run_id"] == run["id"] for m in received)
+    # The env lets a listener refresh only the env that owns the run, even one it has not seen.
+    assert all(m["environment_id"] == env_id for m in received)

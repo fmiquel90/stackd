@@ -1,10 +1,9 @@
 import { useState } from "react";
-import { useMutation, useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { Plus } from "lucide-react";
 import { ApiError } from "@/api/client";
-import { runs, stacks, tiers, type NewEnvironment } from "@/api/resources";
-import { useLiveSignals } from "@/api/stream";
+import { stacks, tiers, type NewEnvironment } from "@/api/resources";
 import { useSpaces } from "@/app/SpaceContext";
 import { useSession } from "@/auth/session";
 import { Checkbox } from "@/components/ui";
@@ -13,8 +12,8 @@ import { NotificationsPanel } from "@/components/NotificationsPanel";
 import { SecretSourcesPanel } from "@/components/SecretSourcesPanel";
 import { StackGeneralPanel } from "@/components/StackGeneralPanel";
 import { VariablesEditor } from "@/components/VariablesEditor";
+import { useEnvSummaries } from "@/features/data/envRuns";
 import { EnvCell } from "@/identity/EnvCell";
-import { summarizeEnv } from "@/lib/envSummary";
 import { needsYouOn } from "@/lib/permissions";
 import { Button } from "@/ui/Button";
 import { Dialog, DialogContent, DialogTrigger } from "@/ui/overlays";
@@ -51,7 +50,6 @@ const SUBS: { key: Sub; label: string }[] = [
 export function StackPage({ stackId }: { stackId: string }) {
   const { current: space } = useSpaces();
   const me = useSession().data;
-  const qc = useQueryClient();
   const [params, setParams] = useSearchParams();
   const stack = useQuery({ queryKey: ["stack", stackId], queryFn: () => stacks.get(stackId) });
   const envs = useQuery({ queryKey: ["environments", stackId], queryFn: () => stacks.environments(stackId) });
@@ -59,19 +57,7 @@ export function StackPage({ stackId }: { stackId: string }) {
   const envList = [...(envs.data ?? [])].sort(
     (a, b) => a.position - b.position || a.name.localeCompare(b.name),
   );
-  const runQueries = useQueries({
-    queries: envList.map((e) => ({
-      queryKey: ["env-runs", e.id],
-      queryFn: () => runs.list(e.id),
-      refetchInterval: 60_000,
-    })),
-  });
-  useLiveSignals(
-    envList.map((e) => `environment:${e.id}`),
-    (s) => {
-      if (s.kind === "run_event") qc.invalidateQueries({ queryKey: ["env-runs"] });
-    },
-  );
+  const summaries = useEnvSummaries(envList);
 
   const tab: Tab = params.get("tab") === "settings" ? "settings" : "environments";
   const sub = (SUBS.find((s) => s.key === params.get("sub"))?.key ?? "general") as Sub;
@@ -137,7 +123,7 @@ export function StackPage({ stackId }: { stackId: string }) {
                 </thead>
                 <tbody>
                   {envList.map((e, i) => {
-                    const summary = summarizeEnv(e, runQueries[i]?.data ?? []);
+                    const summary = summaries[i].summary;
                     const tierDef = catalog.data?.find((t) => t.name === e.tier);
                     const four = tierDef?.requires_four_eyes;
                     return (

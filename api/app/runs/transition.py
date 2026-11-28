@@ -215,7 +215,14 @@ async def transition(
         await on_run_transition(session, locked, to_state)
 
     # Light WS fan-out signal in the same transaction (§5.3) — content is re-read by replicas.
-    signal = json.dumps({"kind": "run_event", "run_id": str(run.id), "to_state": to_state.value})
+    signal = json.dumps(
+        {
+            "kind": "run_event",
+            "run_id": str(run.id),
+            "environment_id": str(run.environment_id),
+            "to_state": to_state.value,
+        }
+    )
     await session.execute(
         text("SELECT pg_notify(:chan, :payload)").bindparams(chan=f"run_{run.id}", payload=signal)
     )

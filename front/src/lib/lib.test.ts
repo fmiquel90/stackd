@@ -135,12 +135,22 @@ describe("envSummary (DESIGN §2.3)", () => {
       state: "finished",
       created_at: "2026-10-10T21:00:00Z",
     });
-    const s = summarizeEnv(makeEnv({ drift_status: "drifted" }), [drift, pr, applied]);
+    const s = summarizeEnv(makeEnv({ drift_status: "drifted", last_applied_sha: "2af0351c9e" }), [
+      drift,
+      pr,
+      applied,
+    ]);
     expect(s.primary?.id).toBe("a");
     expect(s.outcome).toBe("applied");
     expect(s.modifiers.drift).toBe("drifted");
     expect(s.modifiers.outOfBand).toBe(false);
     expect(s.deployedSha).toBe("2af0351c9e");
+  });
+  it("takes the deployed commit from the env, not from a run list that may not reach the deploy", () => {
+    const pr = makeRun({ type: "proposed", state: "finished", commit_sha: "feedbee" });
+    expect(summarizeEnv(makeEnv({ last_applied_sha: "c0ffee1" }), [pr]).deployedSha).toBe("c0ffee1");
+    const applied = makeRun({ state: "finished", confirmed_at: "x", commit_sha: "feedbee" });
+    expect(summarizeEnv(makeEnv({ last_applied_sha: null }), [applied]).deployedSha).toBeNull();
   });
   it("marks a state changed outside Stackd (SPECS §19.7)", () => {
     const change = {

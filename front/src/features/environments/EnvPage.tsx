@@ -5,7 +5,6 @@ import { ChevronDown, RefreshCw } from "lucide-react";
 import { ApiError } from "@/api/client";
 import { environments, rollouts, runs, stacks, tiers, users } from "@/api/resources";
 import type { PlanOptions, TierDef } from "@/api/types";
-import { useLiveSignals } from "@/api/stream";
 import { useSpaces } from "@/app/SpaceContext";
 import { useSession } from "@/auth/session";
 import { CommandPanel } from "@/components/CommandPanel";
@@ -15,10 +14,10 @@ import { HooksPanel } from "@/components/HooksPanel";
 import { NotificationsPanel } from "@/components/NotificationsPanel";
 import { CloudPanel } from "@/components/CloudPanel";
 import { PromotePanel } from "@/components/PromotePanel";
+import { useEnvSummaries, useRunHistory } from "@/features/data/envRuns";
 import { NewEnvironmentDialog, useCloneEntries } from "@/features/rollouts/NewEnvironmentDialog";
 import { EnvCell } from "@/identity/EnvCell";
 import { ModifierChips } from "@/identity/StateBadge";
-import { summarizeEnv } from "@/lib/envSummary";
 import { applyReasonsOn, needsYouOn } from "@/lib/permissions";
 import { Button } from "@/ui/Button";
 import { Dialog, DialogContent, Menu, MenuContent, MenuItem, MenuTrigger } from "@/ui/overlays";
@@ -74,12 +73,10 @@ export function EnvPage() {
     enabled: !!stack,
   });
   const env = envs.data?.find((e) => e.name === envName);
-  const runList = useQuery({
-    queryKey: ["env-runs", env?.id],
-    queryFn: () => runs.list(env!.id),
-    enabled: !!env,
-    refetchInterval: 60_000,
-  });
+  const tab = (TABS as string[]).includes(params.get("tab") ?? "") ? (params.get("tab") as Tab) : "runs";
+  const [envSummary] = useEnvSummaries(env ? [env] : []);
+  const history = useRunHistory(env?.id, tab === "runs");
+  const historyRuns = history.data?.pages.flatMap((p) => p.runs);
   const catalog = useQuery({ queryKey: ["tiers"], queryFn: tiers.list });
   // A rollout of every environment of this name in the space (SPECS §21): created awaiting
   // approval; its page shows the order and the approval.
@@ -88,12 +85,6 @@ export function EnvPage() {
     onSuccess: (r) => navigate(`/rollouts/${r.id}`),
   });
   const people = useQuery({ queryKey: ["mentionable"], queryFn: users.mentionable, staleTime: 5 * 60_000 });
-
-  useLiveSignals(env ? [`environment:${env.id}`] : [], (s) => {
-    if (s.kind !== "run_event" || !env) return;
-    qc.invalidateQueries({ queryKey: ["env-runs", env.id] });
-    qc.invalidateQueries({ queryKey: ["environments", env.stack_id] });
-  });
 
   const plan = useMutation({
     mutationFn: (opts: {
@@ -124,7 +115,6 @@ export function EnvPage() {
       </EmptyState>
     );
 
-  const tab = (TABS as string[]).includes(params.get("tab") ?? "") ? (params.get("tab") as Tab) : "runs";
   const setParam = (patch: Record<string, string | null>) => {
     const next = new URLSearchParams(params);
     for (const [k, v] of Object.entries(patch)) {
@@ -133,7 +123,7 @@ export function EnvPage() {
     }
     setParams(next, { replace: true });
   };
-  const summary = summarizeEnv(env, runList.data ?? []);
+  const summary = envSummary.summary;
   const tier = catalog.data?.find((t) => t.name === env.tier);
   const canWrite = !!me && !me.disabled && me.role !== "reader";
   const isAdmin = me?.role === "admin";
@@ -283,7 +273,10 @@ export function EnvPage() {
       <Tabs value={tab} onValueChange={(v) => setParam({ tab: v === "runs" ? null : v })}>
         <TabsList>
           <TabsTrigger value="runs">
-            Runs <span className="font-data text-[12px] text-muted">{runList.data?.length ?? ""}</span>
+            Runs{" "}
+            <span className="font-data text-[12px] text-muted">
+              {historyRuns ? `${historyRuns.length}${history.hasNextPage ? "+" : ""}` : ""}
+            </span>
           </TabsTrigger>
           <TabsTrigger value="inputs">Inputs</TabsTrigger>
           <TabsTrigger value="outputs">Outputs</TabsTrigger>
@@ -292,11 +285,14 @@ export function EnvPage() {
           <TabsTrigger value="settings">Settings</TabsTrigger>
         </TabsList>
         <TabsContent value="runs" className="pt-3">
-          {runList.isLoading ? (
+          {history.isLoading ? (
             <Skeleton className="h-40 w-full" />
           ) : (
             <RunsHistory
-              runs={runList.data ?? []}
+              runs={historyRuns ?? []}
+              more={history.hasNextPage}
+              loadingMore={history.isFetchingNextPage}
+              onMore={() => history.fetchNextPage()}
               kind={(params.get("kind") as RunKind) ?? "all"}
               onKind={(k) => setParam({ kind: k })}
               emailOf={emailOf}
