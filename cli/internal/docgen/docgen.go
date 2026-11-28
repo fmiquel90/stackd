@@ -24,6 +24,9 @@ Every ` + "`stackd`" + ` command and flag, as ` + "`stackd <command> --help`" + 
 // between commands become in-page anchors (MkDocs slugs "## stackd runs plan" as
 // "stackd-runs-plan").
 func Reference(root *cobra.Command) ([]byte, error) {
+	// cobra adds its default `completion` command only inside Execute: add it now so the
+	// reference lists it like every other command.
+	root.InitDefaultCompletionCmd()
 	var buf bytes.Buffer
 	buf.WriteString(header)
 	link := func(file string) string {

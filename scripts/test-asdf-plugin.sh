@@ -10,7 +10,7 @@ plugin="$root/bin"
 work="$(mktemp -d)"
 server_pid=""
 cleanup() {
-	[ -n "$server_pid" ] && kill "$server_pid" 2>/dev/null || true
+	if [ -n "$server_pid" ]; then kill "$server_pid" 2>/dev/null || true; fi
 	rm -rf "$work"
 }
 trap cleanup EXIT
@@ -41,24 +41,32 @@ sed -i.bak 's/^[0-9a-f]\{8\}/00000000/' "$work/releases/cli-v0.3.0/SHA256SUMS"
 port="$(python3 -c 'import socket; s=socket.socket(); s.bind(("127.0.0.1", 0)); print(s.getsockname()[1])')"
 python3 -m http.server "$port" --bind 127.0.0.1 --directory "$work/releases" >/dev/null 2>&1 &
 server_pid=$!
-for _ in $(seq 50); do curl -fs "http://127.0.0.1:$port/" >/dev/null && break || sleep 0.1; done
+for _ in $(seq 50); do
+	if curl -fs "http://127.0.0.1:$port/" >/dev/null; then break; fi
+	sleep 0.1
+done
 
 # 2. A repo whose tags are the versions asdf lists (non-CLI tags must be ignored).
 git init -q "$work/repo"
 git -C "$work/repo" -c user.email=t@t -c user.name=t commit -q --allow-empty -m init
-for t in cli-v0.1.0 cli-v0.2.0 cli-v0.10.0-rc1 cli-v0.3.0 v9.9.9 cli-vbogus; do git -C "$work/repo" tag "$t"; done
+for t in cli-v0.1.0 cli-v0.2.0 cli-v0.10.0-rc1 cli-v0.10.0-rc10 cli-v0.10.0-rc2 cli-v0.3.0 cli-v0.3.1+build1 v9.9.9 cli-vbogus; do git -C "$work/repo" tag "$t"; done
 
 export ASDF_STACKD_REPO="$work/repo"
 export ASDF_STACKD_DOWNLOAD_BASE="http://127.0.0.1:$port"
 
 # 3. list-all / latest-stable.
 got="$("$plugin/list-all")"
-[ "$got" = "0.1.0 0.2.0 0.3.0 0.10.0-rc1" ] || die "list-all: got '$got'"
-ok "list-all sorts versions and ignores other tags"
+[ "$got" = "0.1.0 0.2.0 0.3.0 0.10.0-rc1 0.10.0-rc2 0.10.0-rc10" ] || die "list-all: got '$got'"
+ok "list-all sorts versions (rc numbers numerically) and ignores other tags and build metadata"
 got="$("$plugin/latest-stable")"
 [ "$got" = "0.3.0" ] || die "latest-stable: got '$got'"
 got="$("$plugin/latest-stable" 0.2)"
 [ "$got" = "0.2.0" ] || die "latest-stable 0.2: got '$got'"
+git -C "$work/repo" tag cli-v0.1.3
+git -C "$work/repo" tag cli-v0.11.0
+got="$("$plugin/latest-stable" 0.1)"
+[ "$got" = "0.1.3" ] || die "latest-stable 0.1 matched a longer component: got '$got'"
+git -C "$work/repo" tag -d cli-v0.1.3 cli-v0.11.0 >/dev/null
 ok "latest-stable skips pre-releases and honours a prefix"
 
 # 4. download + install of a good release.

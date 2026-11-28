@@ -8,12 +8,14 @@ source "$(dirname "$0")/utils.bash"
 src="${ASDF_DOWNLOAD_PATH:?}"
 dest="${ASDF_INSTALL_PATH:?}"
 
-(
-	mkdir -p "$dest/bin"
-	install -m 0755 "$src/$TOOL_NAME" "$dest/bin/$TOOL_NAME"
-	"$dest/bin/$TOOL_NAME" version >/dev/null
-	echo "* $TOOL_NAME ${ASDF_INSTALL_VERSION:-} installed"
-) || {
+# Each step chained with &&: `set -e` is ignored on the left of `||`, so a failed step would not
+# stop the group otherwise.
+if ! {
+	mkdir -p "$dest/bin" &&
+		install -m 0755 "$src/$TOOL_NAME" "$dest/bin/$TOOL_NAME" &&
+		"$dest/bin/$TOOL_NAME" version >/dev/null
+}; then
 	rm -rf "$dest"
 	fail "installing $TOOL_NAME ${ASDF_INSTALL_VERSION:-} failed"
-}
+fi
+echo "* $TOOL_NAME ${ASDF_INSTALL_VERSION:-} installed"

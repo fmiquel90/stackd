@@ -112,7 +112,7 @@ tasks:
     desc: Build the stackd CLI into cli/dist/stackd (SPECS §24)
     dir: cli
     cmds:
-      - CGO_ENABLED=0 go build -ldflags "-s -w -X github.com/fmiquel90/stackd/cli/internal/cmd.Version=$(git describe --tags --always --dirty)" -o dist/stackd .
+      - CGO_ENABLED=0 go build -ldflags "-s -w -X github.com/fmiquel90/stackd/cli/internal/cmd.Version=$(git describe --tags --match 'cli-v*' --always --dirty | sed 's/^cli-//')" -o dist/stackd .
 
   cli-test:
     desc: gofmt check + go vet + go test for the stackd CLI

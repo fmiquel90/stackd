@@ -2,9 +2,11 @@ package cmd
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/url"
 	"sort"
@@ -49,16 +51,28 @@ func runsList(a *app) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			var runs []client.Run
-			raw, err := c.JSON(cmd.Context(), http.MethodGet, "/environments/"+e.ID+"/runs", nil, nil, &runs)
-			if err != nil {
+			// The endpoint has no paging yet: --limit trims client-side, in both output modes.
+			var items []json.RawMessage
+			if _, err := c.JSON(cmd.Context(), http.MethodGet, "/environments/"+e.ID+"/runs", nil, nil, &items); err != nil {
 				return err
 			}
+			if limit > 0 && len(items) > limit {
+				items = items[:limit]
+			}
 			if a.json() {
+				raw, err := json.Marshal(items)
+				if err != nil {
+					return err
+				}
 				return printJSON(a.out, raw)
 			}
-			if limit > 0 && len(runs) > limit {
-				runs = runs[:limit]
+			runs := make([]client.Run, 0, len(items))
+			for _, it := range items {
+				var r client.Run
+				if err := json.Unmarshal(it, &r); err != nil {
+					return fmt.Errorf("decode run: %w", err)
+				}
+				runs = append(runs, r)
 			}
 			rows := make([][]string, 0, len(runs))
 			for _, r := range runs {
@@ -71,7 +85,7 @@ func runsList(a *app) *cobra.Command {
 		},
 	}
 	c.Flags().StringVar(&space, "space", "", "space of the stack, when its name is not unique")
-	c.Flags().IntVar(&limit, "limit", 20, "rows shown in text output (0 = all)")
+	c.Flags().IntVar(&limit, "limit", 20, "runs shown, newest first (0 = all)")
 	return c
 }
 
@@ -95,6 +109,9 @@ exits 0 if it reached unconfirmed or finished, 2 if it failed, was canceled or d
   stackd runs plan network/dev --target module.vpc --output json`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if logs && !wait {
+				return errors.New("--logs needs --wait (the logs are streamed while following the run)")
+			}
 			c, err := a.client()
 			if err != nil {
 				return err
@@ -294,14 +311,19 @@ func withOptionalTimeout(ctx context.Context, d time.Duration) (context.Context,
 	return context.WithTimeout(ctx, d)
 }
 
-// transient reports whether a failed call is worth retrying while following a run: a network
-// error, a 5xx (an API restarting behind its proxy) or a 429. A 4xx is an answer, not a blip.
+// transient reports whether a failed call is worth retrying while following a run: a transport
+// error (connection refused/reset, timeout, truncated body), a 5xx (an API restarting behind its
+// proxy) or a 429. A 4xx is an answer, not a blip; so is a body that does not decode or is too
+// large (e.g. STACKD_URL pointing at the front, which answers 200 with its HTML) — retrying
+// those would only spin until the timeout.
 func transient(err error) bool {
 	var p *client.Problem
 	if errors.As(err, &p) {
 		return p.Status >= 500 || p.Status == http.StatusTooManyRequests
 	}
-	return true
+	var ne net.Error
+	var ue *url.Error
+	return errors.As(err, &ne) || errors.As(err, &ue) || errors.Is(err, io.ErrUnexpectedEOF)
 }
 
 // workerPhases are the log phases a worker writes while a run executes, in order (SPECS §4.1:

@@ -42,18 +42,42 @@ github_slug() {
 	esac
 }
 
-# Sort versions semver-wise (oldest first): pre-releases (x.y.z-rc1) sort before their release.
+# Sort versions semver-wise (oldest first): a pre-release (x.y.z-rc2) sorts before its release,
+# and its trailing number compares as a number (rc2 < rc10, rc.2 < rc.10).
 sort_versions() {
-	sed 'h; s/[+-]/./g; s/$/.zzzzzz/; G; s/\n/ /' |
-		LC_ALL=C sort -t. -k 1,1n -k 2,2n -k 3,3n -k 4,4 -k 5,5n | awk '{print $2}'
+	awk '{
+		core = $0; sub(/-.*/, "", core); split(core, c, ".")
+		pre = substr($0, length(core) + 2)
+		if (pre == "") { stable = 1; label = ""; num = 0 }
+		else {
+			stable = 0; label = pre; sub(/[0-9]+$/, "", label)
+			num = substr(pre, length(label) + 1); if (num == "") num = 0
+		}
+		printf "%d\t%d\t%d\t%d\t%s\t%d\t%s\n", c[1], c[2], c[3], stable, label, num, $0
+	}' | LC_ALL=C sort -t "$(printf '\t')" -k1,1n -k2,2n -k3,3n -k4,4n -k5,5 -k6,6n | cut -f7
 }
 
-# Every released version, oldest first, from the repository's cli-v* tags.
+# Every released version, oldest first, from the repository's cli-v* tags. Build metadata
+# (x.y.z+build) is not a release version and is ignored.
 list_all_versions() {
-	git ls-remote --tags --refs "$STACKD_REPO" "refs/tags/${TAG_PREFIX}*" 2>/dev/null |
+	list_tags |
 		sed -n "s#.*refs/tags/${TAG_PREFIX}##p" |
-		grep -E '^[0-9]+\.[0-9]+\.[0-9]+([-+][0-9A-Za-z.-]+)?$' |
+		grep -E '^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$' |
 		sort_versions || true
+}
+
+# The repository's cli-v* tag refs, one "refs/tags/cli-v…" per line. With GITHUB_API_TOKEN and a
+# github.com repository, through the API (works for a private repository); otherwise git
+# ls-remote, never prompting for credentials.
+list_tags() {
+	local slug
+	slug="$(github_slug)"
+	if [ -n "${GITHUB_API_TOKEN:-}" ] && [ -n "$slug" ]; then
+		curl_cmd "https://api.github.com/repos/$slug/git/matching-refs/tags/${TAG_PREFIX}" |
+			grep -o '"ref": *"refs/tags/[^"]*"' | sed -e 's/.*"refs/refs/' -e 's/"$//'
+	else
+		GIT_TERMINAL_PROMPT=0 git ls-remote --tags --refs "$STACKD_REPO" "refs/tags/${TAG_PREFIX}*"
+	fi
 }
 
 detect_os() {
@@ -82,7 +106,7 @@ sha256_of() {
 
 # download_asset <version> <asset name> <output file>
 download_asset() {
-	local version="$1" asset="$2" out="$3" tag="${TAG_PREFIX}$1" slug
+	local asset="$2" out="$3" tag="${TAG_PREFIX}$1" slug
 	if [ -n "${ASDF_STACKD_DOWNLOAD_BASE:-}" ]; then
 		curl_cmd -o "$out" "${ASDF_STACKD_DOWNLOAD_BASE%/}/$tag/$asset"
 		return
