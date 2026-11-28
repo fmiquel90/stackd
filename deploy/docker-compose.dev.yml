@@ -98,6 +98,9 @@ services:
       API_PROXY_TARGET: http://api:8000
     volumes:
       - ../front:/app
+      # Keep the container's node_modules (Linux binaries) off the host's front/node_modules,
+      # so `task front` on the host gets its own native deps (rollup, esbuild…).
+      - front_node_modules:/app/node_modules
     ports: ["5173:5173"]
     depends_on:
       api:
@@ -124,3 +127,4 @@ volumes:
   garage_meta:
   garage_data:
   gitea_data:
+  front_node_modules:
