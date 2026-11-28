@@ -163,9 +163,17 @@ export function QueuePage() {
     {
       header: "Why it has not started",
       cell: (r) => {
-        const b = blockerOf(r, rows, onlineWorkers);
+        const b = blockerOf(r, rows, onlineWorkers, now);
         return (
           <span className="text-[13px]">
+            {b.icon && (
+              <b.icon
+                size={13}
+                strokeWidth={1.5}
+                aria-hidden
+                className="mr-1 inline align-[-2px] text-muted"
+              />
+            )}
             {b.text}
             {b.link && (
               <>

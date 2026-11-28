@@ -118,7 +118,7 @@ refresh_tokens (
 )
 ```
 
-On each `/auth/refresh`: the presented token must exist, not be revoked, not be expired, `used_at IS NULL`. We mark it `used_at`, issue a new token (same `family_id`, `parent_id = id`). If a token already `used_at` is presented again → **reuse**: revocation of the whole family + `audit auth.refresh_reuse_detected`. Purge of expired families as a periodic task (§7.5).
+On each `/auth/refresh`: the presented token must exist, not be revoked, not be expired, `used_at IS NULL`. The row is read `FOR UPDATE`, so two refreshes presenting the same token serialize. We mark it `used_at`, issue a new token (same `family_id`, `parent_id = id`). If a token already `used_at` is presented again → **reuse**: revocation of the whole family + `audit auth.refresh_reuse_detected` — **except within the grace window** `STACKD_REFRESH_REUSE_GRACE_SECONDS` (default 30) after its rotation: the browser's tabs share one refresh cookie, so a second tab whose refresh left before the first one's rotated cookie landed presents the parent. That presentation gets a fresh access token for the same user and **no cookie** (the browser already holds the child): the family is neither revoked nor forked, and a stolen token presented in the window gains no refresh token — its holder's next presentation, past the window, is caught as reuse. Purge of expired families as a periodic task (§7.5).
 
 ---
 
@@ -678,7 +678,7 @@ POST /worker/v1/jobs/{id}/logs
 
 Single multiplexed WebSocket `/api/v1/ws` (the access token goes in the first message, `{"type": "auth", "token": …}`, not in the URL): `{"sub": "run:<id>"}` → light signals `{"kind": "log", run_id, phase, max_seq}` and `{"kind": "run_event", run_id, environment_id, to_state}` — never the content. On a `log` signal the front fetches the new chunks with REST `GET …/logs?phase=&after_seq=`; on a `run_event` it invalidates its queries. Reconnection → the same REST GET `after_seq` fills the gap, then the stream.
 
-**Auth in the first message, never in the URL.** The server accepts the connection, then the client's first message must be `{"type": "auth", "token": "<access token>"}` (a fresh one on every reconnect); anything else, an invalid or expired token, or a disabled user closes the socket with code **4401**. A `?token=` query parameter is ignored: a URL leaks to proxy/LB logs, browser history and `Referer`. Subscriptions are checked per channel against the caller's spaces.
+**Auth in the first message, never in the URL.** The server accepts the connection, then the client's first message must be `{"type": "auth", "token": "<access token>"}` (a fresh one on every reconnect); anything else, an invalid or expired token, or a disabled user closes the socket with code **4401**. The front answers a 4401 with a token refresh (§2.5), then reconnects; a refused refresh ends the session. A `?token=` query parameter is ignored: a URL leaks to proxy/LB logs, browser history and `Referer`. Subscriptions are checked per channel against the caller's spaces.
 
 **Multi-replica fan-out (without a broker).** A WS client is connected to **one** API replica; the event (transition or log chunk) may be produced on **another** replica. The bridge is **Postgres `LISTEN/NOTIFY`**:
 
@@ -1007,7 +1007,8 @@ the worker's heartbeat and worker-lost detection (§7.5) take. A failed build is
   the claim is undone — the run keeps its state, an approved apply its approval — and gets a **claim
   backoff**: `claimable_after = now() + min(300 s, 10 s × 2^claim_attempts)`, `claim_attempts + 1`.
   The candidate selection skips it until then, so the runs queued behind it keep being claimed; a
-  later successful claim resets both. The worker gets **503** `retryable: true`. Not a state change
+  later successful claim resets both. `GET /queue` reports such a run as `claim_backoff` with its
+  `claimable_after` and `claim_attempts` (§12). The worker gets **503** `retryable: true`. Not a state change
   (no `transition()`, no audit; logged `worker.claim_deferred`);
 - **anything else** fails the run closed (`→ failed`, `run.apply_failed`), the worker getting **204**:
   an unresolvable dependency (§9.3, `reason: dependency`), external secret (§15.2, `secret`) or
@@ -1745,7 +1746,7 @@ The API builds one S3 client per process (KMS: one per region), and every AWS cl
 | `LOCK` | `/state/v1/{env_id}/lock` | `plan` or `rw` scope; the body (tofu's lock info) must carry an `ID` (400 otherwise); 200 or **423** + holder; the lock records the token's `run_id` as its holder run (`NULL` for an import session); **403** once the token's run is no longer active — and, for a `plan` token, once its run has left the plan phase |
 | `UNLOCK` | `/state/v1/{env_id}/lock` | `plan` or `rw` scope (a `ro` token never locks); releases the lock only for its holder: the body's `ID` must be the held lock's — missing or different → **423** + holder, like a `LOCK` conflict (tofu always sends the lock info it locked with; `tofu force-unlock <id>` sends that id); 200 if nothing is held; still allowed after the run ended |
 
-These four are the whole Terraform-protocol surface: there is no state deletion route. Breaking a lock whose ID one does not hold is the human **force-unlock**, `DELETE /api/v1/environments/{env_id}/state/lock` (admin, audited `state.force_unlocked`, §12) — never a state token.
+These four are the whole Terraform-protocol surface: there is no state deletion route. Breaking a lock whose ID one does not hold is the human **force-unlock**, `DELETE /api/v1/environments/{env_id}/state/lock` (admin, audited `state.force_unlocked`, §12) — never a state token. `GET` on the same path (any member of the env's space) shows the held lock — its holder run and the operation / who / version / created / info fields of tofu's lock info — or `null`; this lock is not `environments.locked`, the env's own lock that keeps the claim away (§7.2).
 
 **A run's lock ends with the run.** When a run reaches a terminal state, `transition()` (§4.2) deletes the lock whose holder run is that run, in the same transaction, and audits `state.lock_released` (actor `system`, target the environment, context `reason = run_ended`, `run_id`, `run_state`, `lock_id`). This is what frees an environment whose worker died mid-plan or mid-apply (`worker_lost`, §3.7) — tofu never got to UNLOCK — instead of failing every later run on it (drift included) with 423 until an admin force-unlocks. Only that run's lock: a lock held by another run, or by a run-less holder (an import session, or a lock recorded before holder runs were tracked), is never touched and keeps the behaviour above — its holder's UNLOCK or the admin force-unlock. It cannot release a lock still in use: a plan token never writes state, and a job holding apply credentials is reclaimed only once the apply window has passed (§3.7), when its `rw` token has expired; a lost worker's late UNLOCK then gets 200 (nothing held) or 423 (a new holder), never another holder's lock.
 
@@ -1922,7 +1923,9 @@ GET /api/v1/tiers ; POST /api/v1/tiers ; PATCH|DELETE /api/v1/tiers/{id}
 GET|POST /api/v1/worker-pools ; DELETE /api/v1/worker-pools/{id}       # admin
 GET /api/v1/workers
 GET /api/v1/queue          # runs in progress + waiting, with computed blocking reason
-                           # (active_run|env_locked|no_compatible_worker|apply_affinity_hold)
+                           # (env_locked|active_run|claim_backoff|apply_affinity_hold|
+                           #  no_compatible_worker) + the run's claimable_after / claim_attempts
+                           #  (§7.2 claim backoff: `claim_backoff` while claimable_after is ahead)
 POST|GET /api/v1/workers/{id}/diagnostics   # admin: read-only debug bundle (via heartbeat)
 
 # Observability
@@ -1934,6 +1937,10 @@ GET /api/v1/logs           # admin: structured JSON buffer, filters level/logger
 
 # State
 GET /api/v1/environments/{id}/state/versions
+GET /api/v1/environments/{id}/state/lock                 # the held state lock or null (§11.2):
+                                                         #   lock_id, run_id (holder run), locked_at,
+                                                         #   operation/who/version/created/info from
+                                                         #   tofu's lock info; membership-gated read
 POST /api/v1/environments/{id}/state/import-session      # admin, audited (§11.4)
 DELETE /api/v1/environments/{id}/state/lock              # force-unlock (admin, audited)
 

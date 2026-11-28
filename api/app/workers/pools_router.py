@@ -153,11 +153,14 @@ def _blocking_reason(
         return "env_locked"
     if active_by_env.get(run.environment_id, set()) - {run.id}:
         return "active_run"
+    now = now or datetime.now(UTC)
+    if run.claimable_after is not None and run.claimable_after > now:
+        return "claim_backoff"
     if run.state == RunState.confirmed and run.confirmed_at is not None:
         # Reserved for the plan's worker until the affinity window ends — whether that worker is
         # still online or not, as the claim does (§7.2): past it, any compatible worker takes it.
         held_until = run.confirmed_at + timedelta(seconds=affinity_seconds)
-        if (now or datetime.now(UTC)) < held_until:
+        if now < held_until:
             return "apply_affinity_hold"
     if not compatible:
         return "no_compatible_worker"
@@ -239,6 +242,8 @@ async def queue(user: CurrentUser, session: DbSession) -> list[QueueEntry]:
                 environment_id=r.environment_id,
                 state=r.state.value,
                 worker_id=r.worker_id,
+                claimable_after=r.claimable_after,
+                claim_attempts=r.claim_attempts,
                 blocking_reason=_blocking_reason(
                     r,
                     active_by_env,

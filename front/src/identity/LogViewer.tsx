@@ -11,7 +11,7 @@ import {
   X,
 } from "lucide-react";
 import type { LogChunk } from "@/api/types";
-import { buildLogModel, type LogLine, type LogSection } from "@/lib/logModel";
+import { LogModelBuilder, type LogLine, type LogModel, type LogRow, type LogSection } from "@/lib/logModel";
 import { formatDuration } from "@/lib/time";
 import { Button } from "@/ui/Button";
 import { Input, Kbd } from "@/ui/primitives";
@@ -21,7 +21,22 @@ import { AnsiText, stripAnsi } from "./Ansi";
 // The log viewer (DESIGN §5.3): virtualized, sections per phase and hook, line anchors, follow-tail,
 // search, first error, timestamps / wrap / full screen. Shortcuts apply while the viewer has focus.
 
-type Item = { kind: "section"; section: LogSection } | { kind: "line"; line: LogLine };
+/** The log model of a chunk list that grows by appending: each update processes only new chunks. */
+export function useLogModel(chunks: LogChunk[]): LogModel {
+  const [builder] = useState(() => new LogModelBuilder());
+  return useMemo(() => builder.update(chunks), [builder, chunks]);
+}
+
+// A line's searchable text, ANSI stripped once per line rather than on every keystroke or chunk.
+const searchTexts = new WeakMap<LogLine, string>();
+function searchText(line: LogLine): string {
+  let text = searchTexts.get(line);
+  if (text === undefined) {
+    text = stripAnsi(line.msg).toLowerCase();
+    searchTexts.set(line, text);
+  }
+  return text;
+}
 
 export interface LogViewerProps {
   chunks: LogChunk[];
@@ -51,7 +66,7 @@ export function LogViewer({
   lineAction,
   className,
 }: LogViewerProps) {
-  const model = useMemo(() => buildLogModel(chunks), [chunks]);
+  const model = useLogModel(chunks);
   const [collapsed, setCollapsed] = useState<Set<number>>(new Set());
   const [timestamps, setTimestamps] = useState(false);
   const [wrap, setWrap] = useState(true);
@@ -67,12 +82,13 @@ export function LogViewer({
   const failedSet = useMemo(() => new Set(failedHooks.map((h) => `hook:${h}`)), [failedHooks]);
 
   const items = useMemo(() => {
-    const out: Item[] = [];
+    if (!collapsed.size) return model.rows;
+    const out: LogRow[] = [];
     for (const section of model.sections) {
-      out.push({ kind: "section", section });
+      const header = section.start + section.index;
+      out.push(model.rows[header]);
       if (!collapsed.has(section.index)) {
-        for (let i = section.start; i < section.start + section.count; i++)
-          out.push({ kind: "line", line: model.lines[i] });
+        for (let i = header + 1; i <= header + section.count; i++) out.push(model.rows[i]);
       }
     }
     return out;
@@ -83,7 +99,7 @@ export function LogViewer({
   const hits = useMemo(() => {
     const q = query.trim().toLowerCase();
     if (!q) return [] as string[];
-    return model.lines.filter((l) => stripAnsi(l.msg).toLowerCase().includes(q)).map((l) => l.id);
+    return model.lines.filter((l) => searchText(l).includes(q)).map((l) => l.id);
   }, [model, query]);
 
   const reveal = (id: string) => {
@@ -96,14 +112,20 @@ export function LogViewer({
       });
     }
     setFollowing(false);
+    scrolledTo.current = null;
     setTarget(id);
   };
 
-  // Scroll to the target once it is in the item list (after an expand, or on mount).
+  // Scroll to the target once it is in the item list (after an expand, or on mount) — once: later
+  // chunks must not pull the view back to it.
+  const scrolledTo = useRef<string | null>(null);
   useEffect(() => {
-    if (!target) return;
+    if (!target || scrolledTo.current === target) return;
     const i = indexOfLine(target);
-    if (i >= 0) ref.current?.scrollToIndex({ index: i, align: "center" });
+    if (i >= 0) {
+      ref.current?.scrollToIndex({ index: i, align: "center" });
+      scrolledTo.current = target;
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [target, items]);
 
@@ -262,20 +284,18 @@ export function LogViewer({
                 setSeenCount(model.lines.length);
               }
             }}
-            computeItemKey={(_, it) => (it.kind === "section" ? `s${it.section.index}` : it.line.id)}
+            computeItemKey={(_, it) => (it.kind === "section" ? `s${it.index}` : it.line.id)}
             itemContent={(_, it) =>
               it.kind === "section" ? (
                 <SectionHeader
-                  section={it.section}
-                  collapsed={collapsed.has(it.section.index)}
-                  failed={
-                    it.section.hasError || (it.section.section ? failedSet.has(it.section.section) : false)
-                  }
+                  section={model.sections[it.index]}
+                  collapsed={collapsed.has(it.index)}
+                  failedHooks={failedSet}
                   onToggle={() =>
                     setCollapsed((c) => {
                       const n = new Set(c);
-                      if (n.has(it.section.index)) n.delete(it.section.index);
-                      else n.add(it.section.index);
+                      if (n.has(it.index)) n.delete(it.index);
+                      else n.add(it.index);
                       return n;
                     })
                   }
@@ -319,14 +339,15 @@ export function LogViewer({
 function SectionHeader({
   section,
   collapsed,
-  failed,
+  failedHooks,
   onToggle,
 }: {
   section: LogSection;
   collapsed: boolean;
-  failed: boolean;
+  failedHooks: Set<string>;
   onToggle: () => void;
 }) {
+  const failed = section.hasError || (section.section !== null && failedHooks.has(section.section));
   const Chevron = collapsed ? ChevronRight : ChevronDown;
   return (
     <button
@@ -371,7 +392,7 @@ function Line({
   action?: ReactNode;
   after?: ReactNode;
 }) {
-  const matched = query && stripAnsi(line.msg).toLowerCase().includes(query.toLowerCase());
+  const matched = query && searchText(line).includes(query.toLowerCase());
   return (
     <div id={`L-${line.id}`}>
       <div

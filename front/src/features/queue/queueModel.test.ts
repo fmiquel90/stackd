@@ -10,6 +10,8 @@ function row(entry: Partial<QueueEntry>, extra: Partial<QueueRow> = {}): QueueRo
     state: "queued",
     worker_id: null,
     blocking_reason: null,
+    claimable_after: null,
+    claim_attempts: 0,
     ...entry,
   };
   return {
@@ -53,8 +55,27 @@ describe("queue model", () => {
   });
 
   it("never shows a bare unknown code without words", () => {
-    expect(blockerOf(row({ blocking_reason: "env_locked" }), [], 1).text).toBe(
-      "the environment's state is locked",
+    // The env's own lock, not the state lock (SPECS §11.2) — the two are not conflated.
+    expect(blockerOf(row({ blocking_reason: "env_locked" }), [], 1).text).toBe("the environment is locked");
+  });
+
+  it("says a run is backing off after transient failures, with the time left and a glyph", () => {
+    const now = new Date("2026-10-10T20:00:00Z");
+    const r = row({
+      blocking_reason: "claim_backoff",
+      claimable_after: "2026-10-10T20:00:38Z",
+      claim_attempts: 3,
+    });
+    const b = blockerOf(r, [r], 1, now);
+    expect(b.text).toBe("backing off after 3 transient failures preparing its job — next try in 38s");
+    expect(b.icon).toBeDefined();
+    const due = row({
+      blocking_reason: "claim_backoff",
+      claimable_after: "2026-10-10T19:59:59Z",
+      claim_attempts: 1,
+    });
+    expect(blockerOf(due, [due], 1, now).text).toBe(
+      "backing off after 1 transient failure preparing its job — next try at the next worker poll",
     );
   });
 

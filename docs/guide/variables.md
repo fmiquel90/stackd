@@ -6,10 +6,14 @@ Stackd composes the configuration of every run from layers. The same variable na
 
 Each variable has a `kind` that decides how the worker injects it:
 
-| Kind | Injection |
-|---|---|
-| `terraform` | written to an auto-loaded tfvars file, present only while a tofu command runs (listed as `TF_VAR_<name>`); hooks only see it inside `plan.json` |
-| `environment` | exposed as a plain process environment variable for the run: to tofu and hooks — to repo hooks only when it is not sensitive |
+| Kind (API) | In the UI | Injection |
+|---|---|---|
+| `terraform` | **Terraform variable**, shown as `var.<name>` | written to an auto-loaded tfvars file, present only while a tofu command runs (listed as `TF_VAR_<name>`); hooks only see it inside `plan.json` |
+| `environment` | **Shell environment variable**, shown as `$NAME` | exposed as a plain process environment variable for the run: to tofu and hooks — to repo hooks only when it is not sensitive |
+
+The UI never says just "environment" for the second kind: an *environment* is also a Stackd
+environment (dev, prod…), which variable sets attach to. An `environment`-kind variable has nothing
+to do with which environment it applies to; that is decided by where it lives (below).
 
 A `terraform` variable is passed as a string; set `hcl: true` to write its value verbatim as an HCL
 expression instead (a list, a map, a number…).

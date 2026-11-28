@@ -75,7 +75,22 @@ async def test_refresh_rotation_and_reuse_detection(client: httpx.AsyncClient) -
     new_refresh, new_csrf = ck2["stackd_refresh"], ck2["stackd_csrf"]
     assert new_refresh != old_refresh  # rotated
 
-    # Reusing the consumed token is detected → 401 and the whole family is revoked.
+    # Past the grace window, reusing the consumed token is detected → 401 and the whole family
+    # is revoked (SPECS §2.5).
+    from sqlalchemy import text
+
+    from app.db import SessionLocal
+    from app.security import hash_token
+
+    async with SessionLocal() as s:
+        await s.execute(
+            text(
+                "UPDATE refresh_tokens SET used_at = now() - interval '31 seconds' "
+                "WHERE token_hash = :h"
+            ),
+            {"h": hash_token(old_refresh)},
+        )
+        await s.commit()
     reuse = await client.post(
         "/api/v1/auth/refresh", headers=_auth_cookie_header(old_refresh, csrf)
     )
@@ -129,3 +144,64 @@ def test_google_admission_fails_closed(monkeypatch: pytest.MonkeyPatch) -> None:
     assert not _admit("", hd="acme.com")  # nothing configured → nobody
     assert not _admit("")
     assert not _admit("acme.com", hd="acme.com", email_verified=False)
+
+
+async def _family(refresh: str) -> tuple[int, int]:
+    """(rows, revoked rows) of the family the given refresh token belongs to."""
+    from sqlalchemy import text
+
+    from app.db import SessionLocal
+    from app.security import hash_token
+
+    async with SessionLocal() as s:
+        row = (
+            await s.execute(
+                text(
+                    "SELECT count(*), count(revoked_at) FROM refresh_tokens WHERE family_id = "
+                    "(SELECT family_id FROM refresh_tokens WHERE token_hash = :h)"
+                ),
+                {"h": hash_token(refresh)},
+            )
+        ).one()
+    return row[0], row[1]
+
+
+async def test_refresh_reuse_within_grace_keeps_the_session(client: httpx.AsyncClient) -> None:
+    """Two tabs share the refresh cookie: the second one's refresh, sent before the first one's
+    rotated cookie landed, presents the parent token. Within the grace window it gets an access
+    token, sets no cookie, and the family is neither revoked nor forked (SPECS §2.5)."""
+    login = await client.post("/api/v1/auth/dev/login", json={"persona": "admin"})
+    ck = _set_cookies(login)
+    parent = _auth_cookie_header(ck["stackd_refresh"], ck["stackd_csrf"])
+
+    first = await client.post("/api/v1/auth/refresh", headers=parent)
+    assert first.status_code == 200
+    second = await client.post("/api/v1/auth/refresh", headers=parent)
+    assert second.status_code == 200
+    assert second.json()["access_token"]
+    assert second.headers.get_list("set-cookie") == []
+    me = await client.get(
+        "/api/v1/auth/me", headers={"Authorization": f"Bearer {second.json()['access_token']}"}
+    )
+    assert me.status_code == 200
+
+    child = _set_cookies(first)
+    assert await _family(child["stackd_refresh"]) == (2, 0)
+    after = await client.post(
+        "/api/v1/auth/refresh",
+        headers=_auth_cookie_header(child["stackd_refresh"], child["stackd_csrf"]),
+    )
+    assert after.status_code == 200
+
+
+async def test_concurrent_refreshes_do_not_fork_the_family(client: httpx.AsyncClient) -> None:
+    import asyncio
+
+    login = await client.post("/api/v1/auth/dev/login", json={"persona": "admin"})
+    ck = _set_cookies(login)
+    h = _auth_cookie_header(ck["stackd_refresh"], ck["stackd_csrf"])
+    rs = await asyncio.gather(*(client.post("/api/v1/auth/refresh", headers=h) for _ in range(3)))
+    assert [r.status_code for r in rs] == [200, 200, 200]
+    rotated = [r for r in rs if r.headers.get_list("set-cookie")]
+    assert len(rotated) == 1  # one child minted, the others served in the grace window
+    assert await _family(ck["stackd_refresh"]) == (2, 0)

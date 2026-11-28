@@ -5,7 +5,7 @@ import type { LogChunk } from "@/api/types";
 import { ADMIN, ALICE, BOB, TIERS, makeEnv, makeRun } from "./__fixtures__/factories";
 import { downstreamOf } from "./cascade";
 import { severity, summarizeEnv } from "./envSummary";
-import { buildLogModel, planLines } from "./logModel";
+import { buildLogModel } from "./logModel";
 import { fourEyesOf, runRights, whoMayConfirm } from "./permissions";
 import { buildSegments } from "./phases";
 import { accountedLines, groupByAction, parsePlan } from "./planParse";
@@ -362,7 +362,11 @@ describe("logModel", () => {
   });
   it("extracts the plan section in order", () => {
     expect(
-      planLines([chunk("planning", 3, "plan", ["second"]), chunk("planning", 2, "plan", ["first"])]),
+      buildLogModel([
+        chunk("planning", 3, "plan", ["second"]),
+        chunk("planning", 1, null, ["init"]),
+        chunk("planning", 2, "plan", ["first"]),
+      ]).plan,
     ).toEqual(["first", "second"]);
   });
 });

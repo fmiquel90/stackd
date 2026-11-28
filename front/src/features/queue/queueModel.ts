@@ -1,7 +1,9 @@
 import { useQueries, useQuery } from "@tanstack/react-query";
+import { Hourglass, type LucideIcon } from "lucide-react";
 import { observability, queue, runs, stacks } from "@/api/resources";
 import type { Environment, HealthWorker, QueueEntry, Run, Stack } from "@/api/types";
 import { shortId } from "@/lib/ids";
+import { formatDuration } from "@/lib/time";
 
 // The execution queue (DESIGN §5.5): `/queue` returns ids only, so names come from the stack and
 // environment lists, worker names from `/health`, and ages from one `runs.get` per row.
@@ -34,10 +36,17 @@ export interface Blocker {
   text: string;
   /** Where to look next. */
   link?: { to: string; label: string };
+  /** A glyph beside the words, so the reason never rests on colour (DESIGN §7). */
+  icon?: LucideIcon;
 }
 
 /** Why a waiting run has not started, in words. `rows` lets "another run is active" name that run. */
-export function blockerOf(row: QueueRow, rows: QueueRow[], onlineWorkers: number | null): Blocker {
+export function blockerOf(
+  row: QueueRow,
+  rows: QueueRow[],
+  onlineWorkers: number | null,
+  now: Date = new Date(),
+): Blocker {
   const { entry } = row;
   switch (entry.blocking_reason) {
     case "active_run": {
@@ -59,7 +68,19 @@ export function blockerOf(row: QueueRow, rows: QueueRow[], onlineWorkers: number
       };
     }
     case "env_locked":
-      return { text: "the environment's state is locked" };
+      // `Environment.locked`, the env's own lock — not the state lock a running job holds.
+      return { text: "the environment is locked" };
+    case "claim_backoff": {
+      const n = entry.claim_attempts;
+      const failures = `${n} transient failure${n === 1 ? "" : "s"} preparing its job`;
+      const left = entry.claimable_after
+        ? (new Date(entry.claimable_after).getTime() - now.getTime()) / 1000
+        : 0;
+      return {
+        text: `backing off after ${failures} — ${left >= 1 ? `next try in ${formatDuration(left)}` : "next try at the next worker poll"}`,
+        icon: Hourglass,
+      };
+    }
     case "no_compatible_worker":
       return { text: "no worker matches this run's labels", link: { to: "/workers", label: "workers" } };
     case "apply_affinity_hold":

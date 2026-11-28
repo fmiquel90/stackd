@@ -406,6 +406,9 @@ export interface QueueEntry {
   state: string;
   worker_id: string | null;
   blocking_reason: string | null;
+  /** Claim backoff (SPECS §7.2): not claimed before this, after `claim_attempts` transient failures. */
+  claimable_after: string | null;
+  claim_attempts: number;
 }
 
 export interface HealthWorker {
