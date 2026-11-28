@@ -1,3 +1,17 @@
+# Stackd — developer tasks. Full guide: docs/DEV.md.
+#
+# Start here:
+#   task dev       starts EVERYTHING: postgres, garage (S3), api, worker and the front (:5173),
+#                  then provisions S3, runs the migrations and seeds the demo data. Idempotent:
+#                  re-run it any time. Open http://localhost:5173 and log in as admin/alice/bob.
+#   task reset     same, from scratch (wipes the DB, S3 and the worker's pool token).
+#
+# The other `dev-*` tasks are `task dev` plus one extra (Gitea, LocalStack, or your ~/.aws):
+# use one of them INSTEAD of `task dev`, not on top of it.
+#
+# Tasks marked "needs the stack" exec into the running containers: run `task dev` first.
+# `task --list` shows every task, sorted alphabetically; this file groups them by purpose.
+
 version: '3'
 dotenv: ['.env']
 
@@ -9,13 +23,12 @@ tasks:
     cmds: [task --list]
     silent: true
 
-  env:
-    desc: Generate .env and dev keys on first launch
-    cmds: [bash scripts/bootstrap-env.sh]
-    status: [test -f .env]
+  # ---------------------------------------------------------------------------
+  # Start / stop the dev stack
+  # ---------------------------------------------------------------------------
 
   dev:
-    desc: Full local stack (compose + S3 bootstrap + migrations + seed)
+    desc: "START HERE — whole dev stack incl. the front on :5173 (compose up + S3 + migrations + fixtures + seed; idempotent)"
     deps: [env]
     cmds:
       # S3 first: it writes the key into .env, which compose reads when it creates the api.
@@ -26,7 +39,7 @@ tasks:
       - task: seed
 
   dev-git:
-    desc: Dev stack + Gitea (real webhooks)
+    desc: "Variant of `task dev` that also starts Gitea on :3000 (real webhooks) — use instead of `task dev`"
     deps: [env]
     cmds:
       - task: s3
@@ -36,7 +49,7 @@ tasks:
       - task: seed
 
   dev-aws:
-    desc: Dev stack + LocalStack
+    desc: "Variant of `task dev` that also starts LocalStack on :4566 (fake S3/STS/IAM) — use instead of `task dev`"
     deps: [env]
     cmds:
       - task: s3
@@ -46,55 +59,18 @@ tasks:
       - task: seed
 
   dev-aws-creds:
-    desc: Dev stack with your local ~/.aws profiles mounted into the worker (real terraform plan)
+    desc: "Variant of `task dev` that mounts your ~/.aws into the worker (real terraform plan) — use instead of `task dev`"
     deps: [env]
     cmds:
-      # Adds the opt-in overlay so the worker keeps the ~/.aws mount across restarts — use this
-      # instead of `task dev` whenever you want to plan against real AWS with your named profiles.
+      # Adds the opt-in overlay so the worker keeps the ~/.aws mount across restarts.
       - task: s3
       - "{{.COMPOSE}} -f deploy/docker-compose.dev.aws.yml up -d --wait"
       - task: migrate
       - task: seed-fixtures
       - task: seed
 
-  s3:
-    desc: Provision the dev S3 (Garage layout, access key into .env, bucket; idempotent)
-    env:
-      COMPOSE: "{{.COMPOSE}}"
-    cmds: [bash scripts/bootstrap-s3.sh]
-
-  front-install:
-    desc: Install front-end dependencies (idempotent)
-    dir: front
-    cmds: [pnpm install]
-    status: [test -d node_modules]
-
-  front:
-    # `task dev` already serves the front (compose `front` service, :5173): stop that service
-    # first (`docker compose -f deploy/docker-compose.dev.yml stop front`) to run Vite on the host.
-    desc: Front-end dev server on the host (Vite :5173; stop the compose front service first)
-    deps: [front-install]
-    dir: front
-    cmds: [pnpm dev]
-
-  migrate:
-    desc: Apply Alembic migrations
-    cmds: ["{{.COMPOSE}} exec -T api uv run alembic upgrade head"]
-
-  makemigration:
-    desc: Autogenerate an Alembic migration (pass NAME=...)
-    cmds: ['{{.COMPOSE}} exec -T api uv run alembic revision --autogenerate -m "{{.NAME}}"']
-
-  seed-fixtures:
-    desc: Create the demo fixture git repos in .dev/repos (host git, idempotent)
-    cmds: [bash scripts/seed-fixtures.sh]
-
-  seed:
-    desc: Demo data (idempotent — spaces, stacks, envs, deps, worker pool token)
-    cmds: ["{{.COMPOSE}} exec -T api uv run python -m app.seed"]
-
   reset:
-    desc: Tear everything down and start fresh
+    desc: "Wipe the dev stack (DB, S3, volumes, pool token) and run `task dev` again from scratch"
     cmds:
       - "{{.COMPOSE}} down -v"
       # The pool token belongs to the wiped DB: drop it so the worker waits for the new seed
@@ -102,38 +78,74 @@ tasks:
       - rm -f .dev/pool.token
       - task: dev
 
-  test:
-    desc: pytest + vitest
-    cmds:
-      # On the host: testcontainers needs the Docker socket, which the api container does not have.
-      # A clean env: the dotenv above carries the dev stack's settings (S3 endpoint, poll intervals).
-      - 'cd api && env -i PATH="$PATH" HOME="$HOME" uv run pytest'
-      # In a throwaway front container: front/node_modules is the container's (Linux binaries).
-      - '{{.COMPOSE}} run --rm --no-deps front sh -c "corepack enable && pnpm test"'
+  front:
+    # Optional: `task dev` already serves the front from the compose `front` service. Stop that
+    # service first (`docker compose -f deploy/docker-compose.dev.yml stop front`), otherwise
+    # :5173 is taken and Vite falls back to :5174.
+    desc: "Optional — run Vite on the host instead of in the compose `front` service (stop that service first)"
+    deps: [front-install]
+    dir: front
+    cmds: [pnpm dev]
+
+  # ---------------------------------------------------------------------------
+  # Building blocks of `task dev` (run them alone to redo one step)
+  # ---------------------------------------------------------------------------
+
+  env:
+    desc: "Step of `task dev` — generate .env and the dev keys (first launch only)"
+    cmds: [bash scripts/bootstrap-env.sh]
+    status: [test -f .env]
+
+  s3:
+    desc: "Step of `task dev` — provision the dev S3 (Garage layout, access key into .env, bucket; idempotent)"
+    env:
+      COMPOSE: "{{.COMPOSE}}"
+    cmds: [bash scripts/bootstrap-s3.sh]
+
+  migrate:
+    desc: "Step of `task dev` — apply the Alembic migrations (needs the stack)"
+    cmds: ["{{.COMPOSE}} exec -T api uv run alembic upgrade head"]
+
+  seed-fixtures:
+    desc: "Step of `task dev` — create the demo fixture git repos in .dev/repos (host git; idempotent)"
+    cmds: [bash scripts/seed-fixtures.sh]
+
+  seed:
+    desc: "Step of `task dev` — demo data: spaces, stacks, envs, deps, worker pool token (needs the stack; idempotent)"
+    cmds: ["{{.COMPOSE}} exec -T api uv run python -m app.seed"]
+
+  front-install:
+    desc: "Step of `task front` — install the front dependencies on the host (skipped if front/node_modules exists)"
+    dir: front
+    cmds: [pnpm install]
+    status: [test -d node_modules]
+
+  # ---------------------------------------------------------------------------
+  # Day-to-day development
+  # ---------------------------------------------------------------------------
+
+  makemigration:
+    desc: "Autogenerate an Alembic migration: task makemigration NAME=add_foo (needs the stack)"
+    cmds: ['{{.COMPOSE}} exec -T api uv run alembic revision --autogenerate -m "{{.NAME}}"']
 
   push-change:
-    desc: Simulate a merge in demo-network (staleness test)
+    desc: "Commit a change in the demo-network fixture repo (to test staleness)"
     dir: .dev/repos/demo-network
     cmds:
       - date >> CHANGELOG.txt
       # Quote the whole command: the ": " in the commit message is a YAML mapping token otherwise.
       - 'git add -A && git commit -m "feat: simulated merge"'
 
-  e2e:
-    desc: Full non-regression scenario against the live stack + real worker (DEV §7)
-    deps: [dev]
-    cmds: ["{{.COMPOSE}} exec -T api uv run pytest e2e -v"]
-
   logs:
-    desc: Aggregated colored logs (api, worker)
+    desc: "Follow the api and worker logs (needs the stack)"
     cmds: ["{{.COMPOSE}} logs -f api worker"]
 
   psql:
-    desc: Postgres shell
+    desc: "Postgres shell on the dev DB (needs the stack)"
     cmds: ["{{.COMPOSE}} exec postgres psql -U stackd stackd"]
 
   s3-ls:
-    desc: List the dev S3 bucket (managed states, saved plans), with the API's own S3 settings
+    desc: "List the dev S3 bucket: managed states, saved plans, archived logs (needs the stack)"
     cmds:
       - >-
         {{.COMPOSE}} exec -T api uv run python -c "import boto3; from app.config import get_settings;
@@ -144,22 +156,58 @@ tasks:
         [print(o['LastModified'].isoformat(), o['Size'], o['Key'], sep='  ')
         for p in pages for o in p.get('Contents', [])]"
 
+  # ---------------------------------------------------------------------------
+  # Checks — run before opening a PR
+  # ---------------------------------------------------------------------------
+
+  test:
+    desc: "API pytest (host, testcontainers) + front vitest (throwaway container); the worker suite runs apart"
+    cmds:
+      # On the host: testcontainers needs the Docker socket, which the api container does not have.
+      # A clean env: the dotenv above carries the dev stack's settings (S3 endpoint, poll intervals).
+      - 'cd api && env -i PATH="$PATH" HOME="$HOME" uv run pytest'
+      # In a throwaway front container: front/node_modules is the container's (Linux binaries).
+      - '{{.COMPOSE}} run --rm --no-deps front sh -c "corepack enable && pnpm test"'
+
+  e2e:
+    desc: "Full non-regression scenario against the live stack + real worker (starts `task dev` first; DEV §7)"
+    deps: [dev]
+    cmds: ["{{.COMPOSE}} exec -T api uv run pytest e2e -v"]
+
+  lint:
+    desc: "ruff check + ruff format --check on the api (needs the stack; mypy runs in CI only)"
+    cmds:
+      - "{{.COMPOSE}} exec -T api uv run ruff check ."
+      - "{{.COMPOSE}} exec -T api uv run ruff format --check ."
+
+  version-check:
+    desc: "Check that api, worker and front carry the same version (as CI does)"
+    cmds: ["bash scripts/check-version.sh"]
+
+  # ---------------------------------------------------------------------------
+  # Documentation
+  # ---------------------------------------------------------------------------
+
   docs:
-    desc: Serve the user documentation locally (http://localhost:8001)
+    desc: "Serve the user documentation locally on http://localhost:8001 (mkdocs)"
     cmds: ["uv run mkdocs serve -a localhost:8001"]
 
   docs-build:
-    desc: Build the static documentation site into ./site
+    desc: "Build the static documentation site into ./site"
     cmds: ["uv run mkdocs build"]
 
+  # ---------------------------------------------------------------------------
+  # Images, release, production
+  # ---------------------------------------------------------------------------
+
   build-runner-images:
-    desc: Build the OpenTofu + Terraform runner images (host arch, loaded locally)
+    desc: "Build the OpenTofu + Terraform runner images (host arch, loaded locally)"
     cmds:
       - docker build -f deploy/images/opentofu.Dockerfile -t stackd/opentofu:1.12.2 .
       - docker build -f deploy/images/terraform.Dockerfile -t stackd/terraform:1.14.9 .
 
   build-images:
-    desc: Build the production api/front/worker images (TAG=…, PREFIX=…; extra docker args after --)
+    desc: "Build the production api/front/worker images (TAG=…, PREFIX=…; extra docker args after --)"
     vars:
       PREFIX: '{{.PREFIX | default "stackd"}}'
       TAG: '{{.TAG | default "latest"}}'
@@ -169,22 +217,12 @@ tasks:
       - docker build -f worker/Dockerfile -t {{.PREFIX}}/worker:{{.TAG}} {{.CLI_ARGS}} worker
 
   release:
-    desc: Cut a release — bump the version everywhere, commit, tag (VERSION=X.Y.Z; never pushes, see DEV.md §10)
+    desc: "Cut a release — bump the version everywhere, commit, tag (VERSION=X.Y.Z; never pushes, see DEV.md §10)"
     requires:
       vars: [VERSION]
     cmds: ["bash scripts/release.sh {{.VERSION}}"]
 
-  version-check:
-    desc: Check that api, worker and front carry the same version (as CI does)
-    cmds: ["bash scripts/check-version.sh"]
-
   prod-config:
-    desc: Validate the production compose file against your env files (deploy/production)
+    desc: "Validate the production compose file against your env files (deploy/production)"
     dir: deploy/production
     cmds: ["docker compose config --quiet && echo 'deploy/production: compose config OK'"]
-
-  lint:
-    desc: ruff check + ruff format --check (api; mypy runs in CI only)
-    cmds:
-      - "{{.COMPOSE}} exec -T api uv run ruff check ."
-      - "{{.COMPOSE}} exec -T api uv run ruff format --check ."

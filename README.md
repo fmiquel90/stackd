@@ -98,12 +98,13 @@ Each concept is explained with examples in **[Concepts](docs/CONCEPTS.md)**.
 
 ## Quick start
 
-> **Prerequisites:** Docker, [Task](https://taskfile.dev), [`uv`](https://docs.astral.sh/uv/) and
-> `pnpm` (via corepack), plus `git`, `openssl` and `python3` on the host (used by the bootstrap and
-> fixture scripts).
+> **Prerequisites:** Docker, [Task](https://taskfile.dev) and [`uv`](https://docs.astral.sh/uv/),
+> plus `git`, `openssl` and `python3` on the host (used by the bootstrap and fixture scripts).
+> Node and `pnpm` (via corepack) are only needed to run the front on the host (`task front`):
+> by default it runs in a container.
 
 ```bash
-task dev    # brings up the full stack (incl. local S3), migrates and seeds demo data
+task dev    # starts everything (api, worker, front, Postgres, local S3), migrates and seeds demo data
 ```
 
 Open **<http://localhost:5173>** and use **Dev login** as `admin`, `alice` or `bob`. No cloud
@@ -115,7 +116,9 @@ task e2e    # the full plan → approve → apply → cascade scenario
 task reset  # start from scratch
 ```
 
-The worker agent has its own suite: `cd worker && uv run pytest`.
+The worker agent has its own suite: `cd worker && uv run pytest`. Every other task (logs, psql,
+migrations, the Gitea / LocalStack variants…) is listed in [DEV.md §2](docs/DEV.md) and by
+`task --list`.
 
 This is the dev stack — never expose it. To run Stackd for real, follow
 [Installing in production](https://fmiquel90.github.io/stackd/guide/installing/): production
