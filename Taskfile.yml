@@ -213,7 +213,7 @@ tasks:
       TAG: '{{.TAG | default "latest"}}'
     cmds:
       - docker build -f api/Dockerfile -t {{.PREFIX}}/api:{{.TAG}} {{.CLI_ARGS}} api
-      - docker build -f front/Dockerfile -t {{.PREFIX}}/front:{{.TAG}} {{.CLI_ARGS}} front
+      - docker build --build-context repo=. -f front/Dockerfile -t {{.PREFIX}}/front:{{.TAG}} {{.CLI_ARGS}} front
       - docker build -f worker/Dockerfile -t {{.PREFIX}}/worker:{{.TAG}} {{.CLI_ARGS}} worker
 
   release:

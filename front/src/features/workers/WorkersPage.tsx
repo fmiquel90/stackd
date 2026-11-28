@@ -13,6 +13,7 @@ import {
   CopyButton,
   EmptyState,
   Field,
+  HelpLink,
   Input,
   NativeSelect,
   Skeleton,
@@ -101,7 +102,8 @@ export function WorkersPage() {
             </p>
             {h.workers.items.length === 0 ? (
               <EmptyState title="No worker registered.">
-                Create a pool below and start an agent with its token.
+                Create a pool below and start an agent with its token.{" "}
+                <HelpLink topic="runWorker">Running a worker</HelpLink>
               </EmptyState>
             ) : (
               groupByPool(h.workers.items).map(([pool, items]) => (

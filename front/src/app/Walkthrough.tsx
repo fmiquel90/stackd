@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { Button } from "@/ui/Button";
+import { HelpLink } from "@/ui/primitives";
 import { cn } from "@/ui/cn";
 import { Dialog, DialogContent } from "@/ui/overlays";
 
@@ -41,7 +42,7 @@ const STEPS: Step[] = [
   {
     eyebrow: "getting around",
     title: "Keyboard first",
-    body: "⌘K finds any stack, environment or run. Press ? for the shortcuts; single-key ones can be turned off in Settings.",
+    body: "⌘K finds any stack, environment or run. Press ? for the shortcuts; single-key ones can be turned off in Settings. The user guide is under Documentation in your menu.",
   },
 ];
 
@@ -58,6 +59,11 @@ export function Walkthrough({ onDone }: { onDone: () => void }) {
           </span>
           <h2 className="text-title font-semibold">{step.title}</h2>
           <p className="text-muted">{step.body}</p>
+          {last && (
+            <p>
+              <HelpLink topic="guide">Open the user guide</HelpLink>
+            </p>
+          )}
           <div className="mt-3 flex flex-wrap items-center justify-between gap-3">
             <div className="flex items-center gap-1.5" aria-hidden>
               {STEPS.map((s, idx) => (

@@ -96,6 +96,7 @@ services:
     command: sh -c "corepack enable && pnpm install && pnpm dev --host 0.0.0.0"
     environment:
       API_PROXY_TARGET: http://api:8000
+      DOCS_PROXY_TARGET: http://docs:8001
     volumes:
       - ../front:/app
       # Keep the container's node_modules (Linux binaries) off the host's front/node_modules,
@@ -105,6 +106,23 @@ services:
     depends_on:
       api:
         condition: service_healthy
+
+  # The user guide (mkdocs serve, live reload): the front proxies /docs to it, as the front image
+  # serves the built guide under /docs in production (DESIGN §7, Help). Also on :8001 directly.
+  docs:
+    image: ghcr.io/astral-sh/uv:0.11.32-python3.13-trixie-slim
+    working_dir: /repo
+    environment:
+      UV_PROJECT_ENVIRONMENT: /uv/venv
+      UV_CACHE_DIR: /uv/cache
+    command: sh -c "uv sync --frozen --no-install-project && uv run --no-sync mkdocs serve -a 0.0.0.0:8001 --livereload"
+    volumes:
+      - ../mkdocs.yml:/repo/mkdocs.yml:ro
+      - ../pyproject.toml:/repo/pyproject.toml:ro
+      - ../uv.lock:/repo/uv.lock:ro
+      - ../docs:/repo/docs:ro
+      - docs_uv:/uv
+    ports: ["8001:8001"]
 
   # --- optional profiles ---
   gitea:
@@ -128,3 +146,4 @@ volumes:
   garage_data:
   gitea_data:
   front_node_modules:
+  docs_uv:

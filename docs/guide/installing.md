@@ -29,7 +29,7 @@ flowchart LR
 | Service | Image | Role |
 |---|---|---|
 | `proxy` | `caddy` (official) | TLS (automatic HTTPS), the single public origin, routes the API prefixes, blocks `/metrics` |
-| `front` | `front/Dockerfile` | the built SPA served by Caddy on `:8080`, fallback to `index.html` |
+| `front` | `front/Dockerfile` | the built SPA served by Caddy on `:8080`, fallback to `index.html`; this user guide under `/docs/`, the target of the UI's help links |
 | `api` | `api/Dockerfile` | the API (REST, WebSocket, worker protocol, state backend, OIDC issuer, scheduler) |
 | `migrate` | `api/Dockerfile` | one-shot: `alembic upgrade head`, then the bootstrap seed (`default` space + tier catalog) |
 | `postgres` | `postgres:18` | optional (profile `bundled-postgres`) — an external server is recommended |
@@ -108,7 +108,8 @@ docker push registry.example.com/stackd/worker:1.4.0
 host's architecture (pass extra `docker build` arguments after `--`, e.g.
 `task build-images -- --platform linux/arm64`). The base images are pinned by digest; behind a
 registry mirror, override them with build arguments (`--build-arg PYTHON_IMAGE=…`, `UV_IMAGE`,
-`NODE_IMAGE`, `CADDY_IMAGE`).
+`NODE_IMAGE`, `CADDY_IMAGE`). The front image also builds this guide from the repository root, passed
+as a named build context: by hand, `docker build --build-context repo=. -f front/Dockerfile front`.
 
 ## 2. Prepare the database
 

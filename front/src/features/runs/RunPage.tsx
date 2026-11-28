@@ -22,9 +22,10 @@ import { formatDuration } from "@/lib/time";
 import { Button } from "@/ui/Button";
 import { ErrorBoundary } from "@/ui/ErrorBoundary";
 import {
-  Banner,
   Badge,
+  Banner,
   EmptyState,
+  HelpLink,
   RelativeTime,
   Sha,
   Skeleton,
@@ -401,14 +402,16 @@ export function RunPage() {
             Mocked inputs: <span className="font-data">{mocked.join(", ") || "see Inputs"}</span>.{" "}
             {env.allow_mock_apply
               ? "This environment allows applying a mocked plan."
-              : "A mocked plan cannot be applied here (allow_mock_apply is off)."}
+              : "A mocked plan cannot be applied here (allow_mock_apply is off)."}{" "}
+            <HelpLink topic="mocks">How mocks work</HelpLink>
           </Banner>
         )}
         {run.used_secret_fallback && (
           <Banner tone="decision" title="A secret came from a fallback, not the real source.">
             {env.allow_fallback_apply
               ? "This environment allows applying it."
-              : "Apply is disabled (allow_fallback_apply is off)."}
+              : "Apply is disabled (allow_fallback_apply is off)."}{" "}
+            <HelpLink topic="secretFallback">How secret fallbacks work</HelpLink>
           </Banner>
         )}
         {d.queueEntry?.blocking_reason && (

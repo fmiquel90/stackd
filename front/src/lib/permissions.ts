@@ -1,5 +1,6 @@
 import { COMMANDS_MUTATING } from "@/api/resources";
 import type { Environment, Role, Run, TierDef, User } from "@/api/types";
+import type { DocTopic } from "./docs";
 
 // What the viewer may do on a run, and why not (DESIGN §5.2). Mirrors the API's gates in order:
 // can_apply (role, tier, destroy) → mock gate → fallback gate → four-eyes (api/app/runs/service.py,
@@ -15,6 +16,8 @@ export interface ActionRight {
   visible: boolean;
   /** Reasons the viewer cannot do it; empty = allowed. */
   reasons: string[];
+  /** The guide section that explains the first blocking gate (DESIGN §7, Help). */
+  help?: DocTopic;
 }
 
 export interface FourEyes {
@@ -109,18 +112,32 @@ export function runRights(run: Run, env: Environment, tier: TierDef | undefined,
     (run.type === "command" && COMMANDS_MUTATING.includes(run.command?.name ?? ""));
   const cancelKind = executing ? (holdsApply ? "stop_apply" : "stop") : "cancel";
 
-  const confirm = { visible: unconfirmed, reasons: confirmReasons };
+  // The gate a help link explains: the viewer's own rights first, then what blocks everyone.
+  const writerHelp: DocTopic | undefined = writerReasons.length ? "canApply" : undefined;
+  const confirmHelp: DocTopic | undefined = !confirmReasons.length
+    ? undefined
+    : applyReasons.length
+      ? "canApply"
+      : run.used_mocks && !env.allow_mock_apply
+        ? "mocks"
+        : run.used_secret_fallback && !env.allow_fallback_apply
+          ? "secretFallback"
+          : "fourEyes";
+
+  const confirm = { visible: unconfirmed, reasons: confirmReasons, help: confirmHelp };
   return {
     confirm,
-    discard: { visible: unconfirmed, reasons: writerReasons },
+    discard: { visible: unconfirmed, reasons: writerReasons, help: writerHelp },
     cancel: {
       visible: run.state === "queued" || run.state === "confirmed" || unconfirmed || executing,
       reasons: cancelKind === "stop_apply" ? [...writerReasons, ...applyReasons] : writerReasons,
+      help: writerHelp ?? (cancelKind === "stop_apply" && applyReasons.length ? "canApply" : undefined),
     },
     cancelKind,
     replan: {
       visible: unconfirmed || ["finished", "failed", "discarded", "canceled"].includes(run.state),
       reasons: writerReasons,
+      help: writerHelp,
     },
     fourEyes,
     blockedForAll,

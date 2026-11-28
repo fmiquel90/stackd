@@ -182,6 +182,18 @@ describe("permissions (mirrors the API gates)", () => {
     expect(r.discard.reasons).toEqual([]);
     expect(r.needsYou).toBe(false);
   });
+  it("points each refusal at the guide section that explains its first gate", () => {
+    // bob: his own rights first (role), even though four-eyes also blocks him.
+    expect(runRights(run, prodEnv, prodTier, BOB).confirm.help).toBe("canApply");
+    // alice on bob's mocked run: nothing about her, the mock gate blocks everyone.
+    expect(runRights(makeRun({ used_mocks: true }), prodEnv, prodTier, ALICE).confirm.help).toBe("mocks");
+    // alice on her own run: four-eyes is the only gate.
+    const own = makeRun({ trigger_user_id: ALICE.id });
+    expect(runRights(own, prodEnv, prodTier, ALICE).confirm.help).toBe("fourEyes");
+    // Allowed: no link.
+    expect(runRights(run, prodEnv, prodTier, ALICE).confirm.help).toBeUndefined();
+    expect(runRights(run, prodEnv, prodTier, BOB).discard.help).toBeUndefined();
+  });
   it("stopping a plan is a request to the worker, open to a writer", () => {
     const planning = makeRun({ state: "planning" });
     const r = runRights(planning, prodEnv, prodTier, BOB);
