@@ -108,8 +108,8 @@ tasks:
       # On the host: testcontainers needs the Docker socket, which the api container does not have.
       # A clean env: the dotenv above carries the dev stack's settings (S3 endpoint, poll intervals).
       - 'cd api && env -i PATH="$PATH" HOME="$HOME" uv run pytest'
-      # In a throwaway front container: front/node_modules is the container's (Linux binaries).
-      - '{{.COMPOSE}} run --rm --no-deps front sh -c "corepack enable && pnpm test"'
+      # In a throwaway front container, on its own node_modules volume (Linux binaries).
+      - '{{.COMPOSE}} run --rm --no-deps front sh -c "corepack enable && pnpm install && pnpm test"'
 
   push-change:
     desc: Simulate a merge in demo-network (staleness test)
