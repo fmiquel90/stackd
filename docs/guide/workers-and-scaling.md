@@ -210,7 +210,7 @@ Because the environment is the unit of parallelism, **throughput ≈ min(workers
 There is **no built-in autoscaler**, but the signals you need are exposed:
 
 - `GET /api/v1/health` — DB, workers (online/total + last heartbeat), runs active/queued, recent errors.
-- `GET /api/v1/queue` — waiting runs and *why* they wait (`active_run` | `env_locked` | `no_compatible_worker` | `apply_affinity_hold`).
+- `GET /api/v1/queue` — waiting runs and *why* they wait (`active_run` | `env_locked` | `claim_backoff` | `no_compatible_worker` | `apply_affinity_hold`). `claim_backoff` is a run whose job could not be prepared for a transient reason (database, KMS); it is retried at `claimable_after` (up to 5 min apart, after `claim_attempts` failures) while the runs behind it keep moving.
 
 A `no_compatible_worker` backlog means no online worker carries the environment's labels or can run the stack's `tool_version` — not a capacity problem: adding generic workers will not help; you need workers with the right labels or tool versions. See [Observability](observability.md) for the Workers & health page.
 

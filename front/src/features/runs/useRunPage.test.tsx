@@ -3,8 +3,10 @@ import { act, renderHook, waitFor } from "@testing-library/react";
 import type { ReactNode } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { Signal } from "@/api/stream";
-import type { LogChunk } from "@/api/types";
-import { PHASE_ORDER } from "@/lib/logModel";
+import type { LogChunk, Run } from "@/api/types";
+import { makeRun } from "@/lib/__fixtures__/factories";
+import { mergeChunks, PHASE_ORDER } from "@/lib/logModel";
+import { parsePlan } from "@/lib/planParse";
 import { useRunPage } from "./useRunPage";
 
 const mocks = vi.hoisted(() => ({
@@ -19,6 +21,10 @@ vi.mock("@/api/stream", () => ({
   },
 }));
 vi.mock("@/auth/session", () => ({ useSession: () => ({ data: null }) }));
+vi.mock("@/lib/planParse", async (original) => {
+  const real = await original<typeof import("@/lib/planParse")>();
+  return { ...real, parsePlan: vi.fn(real.parsePlan) };
+});
 vi.mock("@/api/resources", () => {
   const never = () => new Promise(() => {});
   return {
@@ -115,5 +121,46 @@ describe("useRunPage log fetching", () => {
     mocks.logsAfter.mockClear();
     act(() => mocks.signal!({ kind: "run_event", run_id: "r1", to_state: "finished" }));
     await waitFor(() => expect(mocks.logsAfter).toHaveBeenCalledTimes(PHASE_ORDER.length));
+  });
+});
+
+const sectionChunk = (phase: string, seq: number, section: string | null, msgs: string[]): LogChunk => ({
+  phase,
+  seq,
+  section,
+  lines: msgs.map((msg) => ({ t: "20:00:00", msg })),
+});
+
+describe("useRunPage — plan parsing", () => {
+  it("parses the plan once planning is over, not again for each apply chunk", async () => {
+    const qc = new QueryClient({ defaultOptions: { queries: { retry: false, staleTime: Infinity } } });
+    const wrapper = ({ children }: { children: ReactNode }) => (
+      <QueryClientProvider client={qc}>{children}</QueryClientProvider>
+    );
+    const run: Run = makeRun({ id: "r1", state: "planning" });
+    qc.setQueryData(["run", "r1"], run);
+    let logs = [
+      sectionChunk("planning", 0, null, ["Initializing..."]),
+      sectionChunk("planning", 1, "plan", ["  # null_resource.a will be created"]),
+    ];
+    qc.setQueryData(["run-logs", "r1"], logs);
+    const parse = vi.mocked(parsePlan);
+    parse.mockClear();
+
+    const { result } = renderHook(() => useRunPage("r1"), { wrapper });
+    // Still planning: `tofu show` may not have streamed the whole section yet.
+    expect(result.current.parsed).toBeNull();
+    expect(parse).not.toHaveBeenCalled();
+
+    act(() => qc.setQueryData(["run", "r1"], { ...run, state: "applying" }));
+    await waitFor(() => expect(result.current.parsed).not.toBeNull());
+    expect(parse).toHaveBeenCalledTimes(1);
+
+    for (let seq = 0; seq < 5; seq++) {
+      logs = mergeChunks(logs, [sectionChunk("applying", seq, null, ["null_resource.a: Creating..."])]);
+      act(() => qc.setQueryData(["run-logs", "r1"], logs));
+    }
+    await waitFor(() => expect(result.current.logModel.lines).toHaveLength(7));
+    expect(parse).toHaveBeenCalledTimes(1);
   });
 });

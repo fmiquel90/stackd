@@ -8,14 +8,17 @@ import "@fontsource/ibm-plex-sans/latin-600.css";
 import "@fontsource/jetbrains-mono/latin-400.css";
 import "@fontsource/jetbrains-mono/latin-500.css";
 import App from "./App";
+import { retryQuery } from "./api/client";
 import { ThemeProvider } from "./app/theme";
+import { bindSessionCache } from "./auth/session";
 import "./index.css";
 
 const queryClient = new QueryClient({
   defaultOptions: {
-    queries: { staleTime: 5_000, refetchOnWindowFocus: false },
+    queries: { staleTime: 5_000, refetchOnWindowFocus: false, retry: retryQuery },
   },
 });
+bindSessionCache(queryClient);
 
 createRoot(document.getElementById("root")!).render(
   <StrictMode>
