@@ -1712,8 +1712,8 @@ all. Counts in parentheses include parametrized cases and drift as tests are add
 </thead>
 <tbody>
 <tr>
-<td><code>test_auth.py</code> (6)</td>
-<td>Dev-login personas; <code>/refresh</code> CSRF double-submit; refresh rotation and reuse detection (the family is revoked); onboarding flag; unauthenticated <code>/me</code> → 401 problem+json; Google admission fails closed (no allowlist → nobody).</td>
+<td><code>test_auth.py</code> (9)</td>
+<td>Dev-login personas; <code>/refresh</code> CSRF double-submit; refresh rotation and reuse detection past the grace window (the family is revoked); a reuse within the grace window (a second tab) gets an access token and no cookie, and concurrent refreshes mint one child (no revocation, no forked family); onboarding flag; unauthenticated <code>/me</code> → 401 problem+json; Google admission fails closed (no allowlist → nobody).</td>
 </tr>
 <tr>
 <td><code>test_permissions.py</code> (9)</td>
@@ -1721,7 +1721,7 @@ all. Counts in parentheses include parametrized cases and drift as tests are add
 </tr>
 <tr>
 <td><code>test_spaces.py</code> (10)</td>
-<td>Per-space RBAC: non-members blocked on env-scoped reads, <code>/graph</code> and space listing scoped to memberships, grant then revoke, create = instance admin, members listing = space admin, create in an unknown space → 404; a membership's <code>allowed_tiers</code> validated against the catalog and audited with the grant; a space writer with an instance <code>reader</code> role writes in that space (variables, trigger, cancel, discard) and nowhere else.</td>
+<td>Per-space RBAC: non-members blocked on env-scoped reads (state versions and lock included), <code>/graph</code> and space listing scoped to memberships, grant then revoke, create = instance admin, members listing = space admin, create in an unknown space → 404; a membership's <code>allowed_tiers</code> validated against the catalog and audited with the grant; a space writer with an instance <code>reader</code> role writes in that space (variables, trigger, cancel, discard) and nowhere else.</td>
 </tr>
 <tr>
 <td><code>test_tiers.py</code> (7)</td>
@@ -1804,8 +1804,8 @@ all. Counts in parentheses include parametrized cases and drift as tests are add
 <td><code>before_apply</code>/<code>after_apply</code> checks are recorded and audited (<code>run.check_warned</code>); an apply without checks keeps the plan's; a failing <code>after_apply</code> hook records the outputs, clears the drift and cascades nothing; a failed apply records no outputs and leaves the drift.</td>
 </tr>
 <tr>
-<td><code>test_state_backend.py</code> (19)</td>
-<td>HTTP state backend (moto S3): LOCK/POST/GET/UNLOCK and serial regression; a bucket the API creates gets versioning and default encryption (an S3 without them only warns); <code>ro</code> tokens can't write or unlock, <code>plan</code> tokens lock but can't write, proposed runs never lock; env scoping; TTL follows the credential phase; a terminal run's token can't write; UNLOCK and a locked POST need the holder's lock ID; a run's lock is released (audited) when the run ends — a lost plan at once, a lost apply only past the apply window — never another run's or a run-less holder's; import session (adopt, admin-only, managed state only).</td>
+<td><code>test_state_backend.py</code> (20)</td>
+<td>HTTP state backend (moto S3): LOCK/POST/GET/UNLOCK and serial regression; a bucket the API creates gets versioning and default encryption (an S3 without them only warns); <code>ro</code> tokens can't write or unlock, <code>plan</code> tokens lock but can't write, proposed runs never lock; env scoping; TTL follows the credential phase; a terminal run's token can't write; UNLOCK and a locked POST need the holder's lock ID; a run's lock is released (audited) when the run ends — a lost plan at once, a lost apply only past the apply window — never another run's or a run-less holder's; import session (adopt, admin-only, managed state only); <code>GET …/state/lock</code> shows the holder run and tofu's lock info to any member, <code>null</code> once force-unlocked.</td>
 </tr>
 <tr>
 <td><code>test_oidc.py</code> (6)</td>
@@ -1852,8 +1852,8 @@ all. Counts in parentheses include parametrized cases and drift as tests are add
 <td>Runs whose job no worker executes (SPECS §3.7, §7.1, §7.5): a run its live worker leaves out of 2 heartbeats is failed <code>job_not_running</code> (never on a fresh claim, nor after one beat), a listed run or an agent sending no job ids is spared, a job holding apply credentials waits the apply window; a stop answered <code>running_here: false</code> ends the run (not on a fresh claim); one run that cannot be failed doesn't hold back the others; an API/DB outage is not counted as worker silence (only the last outage is discounted); a command without result is delivered again, 3 times at most, then failed.</td>
 </tr>
 <tr>
-<td><code>test_queue.py</code> (3)</td>
-<td><code>/queue</code> blocking reasons: a <code>confirmed</code> run is held for its plan worker only within the affinity window (never blocked by itself), a run behind it waits on <code>active_run</code>, a locked env reports <code>env_locked</code>; an apply's claim latency counts from its confirmation.</td>
+<td><code>test_queue.py</code> (4)</td>
+<td><code>/queue</code> blocking reasons: a <code>confirmed</code> run is held for its plan worker only within the affinity window (never blocked by itself), a run behind it waits on <code>active_run</code>, a locked env reports <code>env_locked</code>, a run in its claim backoff reports <code>claim_backoff</code> with <code>claimable_after</code> / <code>claim_attempts</code> until it has passed; an apply's claim latency counts from its confirmation.</td>
 </tr>
 <tr>
 <td><code>test_staleness.py</code> (11)</td>
@@ -2178,8 +2178,12 @@ The tier gate (an approver without <code>prod</code>) and staleness stay manual 
 <td>Overview attention buckets (needs you / waiting / mocked / failures, drift and state changed outside Stackd, stale plans) and matrix columns and filters.</td>
 </tr>
 <tr>
-<td><code>src/features/queue/queueModel.test.ts</code> (8)</td>
-<td>Queue grouping and blocking reasons in words (holder run, no worker, apply reservation, a decision pending), filters, wait time.</td>
+<td><code>src/features/queue/queueModel.test.ts</code> (9)</td>
+<td>Queue grouping and blocking reasons in words (holder run, no worker, apply reservation, a decision pending, the env's own lock, a claim backoff with its glyph and time left), filters, wait time.</td>
+</tr>
+<tr>
+<td><code>src/features/environments/EnvState.test.tsx</code> (5)</td>
+<td>State tab lock: the held state lock with its holder run (or none), force-unlock admin-only and offered only while a state lock is held (not on <code>env.locked</code>), typed-name confirmation then reload.</td>
 </tr>
 <tr>
 <td><code>src/components/PlanOptions.test.tsx</code> (6)</td>
@@ -2212,6 +2216,14 @@ The tier gate (an approver without <code>prod</code>) and staleness stay manual 
 <tr>
 <td><code>src/components/CloudPanel.test.tsx</code> (4)</td>
 <td>Named AWS profiles (SPECS §10.6): the API map round-trips through sorted rows (empty region → null); a nameless, duplicated or <code>default</code> profile blocks Save; editable by an admin, listed read-only for others.</td>
+</tr>
+<tr>
+<td><code>src/auth/refresh.test.ts</code> (6)</td>
+<td>Session upkeep: a 401 refreshes once and replays with the new token (CSRF header kept); concurrent 401s share one refresh; a refused refresh loses the session (no replay, session query → <code>null</code>); no refresh for a request sent without a token; the proactive refresh at ~80% of the token's lifetime; queries never retry a 4xx, a 5xx or network error twice.</td>
+</tr>
+<tr>
+<td><code>src/api/streamAuth.test.ts</code> (2)</td>
+<td>A socket closed with 4401 refreshes the token and reconnects at once with the new one; a refused refresh stops reconnecting (<code>idle</code>).</td>
 </tr>
 </tbody>
 </table>

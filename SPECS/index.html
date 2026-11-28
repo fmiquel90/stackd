@@ -4240,7 +4240,7 @@ migration). The WS <code>run:</code>/<code>environment:</code> subscriptions are
 <a id="__codelineno-2-10" name="__codelineno-2-10" href="#__codelineno-2-10"></a><span class="w">  </span><span class="k">UNIQUE</span><span class="w"> </span><span class="p">(</span><span class="n">token_hash</span><span class="p">)</span>
 <a id="__codelineno-2-11" name="__codelineno-2-11" href="#__codelineno-2-11"></a><span class="p">)</span>
 </code></pre></div>
-<p>On each <code>/auth/refresh</code>: the presented token must exist, not be revoked, not be expired, <code>used_at IS NULL</code>. We mark it <code>used_at</code>, issue a new token (same <code>family_id</code>, <code>parent_id = id</code>). If a token already <code>used_at</code> is presented again → <strong>reuse</strong>: revocation of the whole family + <code>audit auth.refresh_reuse_detected</code>. Purge of expired families as a periodic task (§7.5).</p>
+<p>On each <code>/auth/refresh</code>: the presented token must exist, not be revoked, not be expired, <code>used_at IS NULL</code>. The row is read <code>FOR UPDATE</code>, so two refreshes presenting the same token serialize. We mark it <code>used_at</code>, issue a new token (same <code>family_id</code>, <code>parent_id = id</code>). If a token already <code>used_at</code> is presented again → <strong>reuse</strong>: revocation of the whole family + <code>audit auth.refresh_reuse_detected</code> — <strong>except within the grace window</strong> <code>STACKD_REFRESH_REUSE_GRACE_SECONDS</code> (default 30) after its rotation: the browser's tabs share one refresh cookie, so a second tab whose refresh left before the first one's rotated cookie landed presents the parent. That presentation gets a fresh access token for the same user and <strong>no cookie</strong> (the browser already holds the child): the family is neither revoked nor forked, and a stolen token presented in the window gains no refresh token — its holder's next presentation, past the window, is caught as reuse. Purge of expired families as a periodic task (§7.5).</p>
 <hr />
 <h2 id="3-data-model">3. Data model<a class="headerlink" href="#3-data-model" title="Permanent link">&para;</a></h2>
 <h3 id="30-spaces-the-root-container">3.0 <code>spaces</code> — the root container<a class="headerlink" href="#30-spaces-the-root-container" title="Permanent link">&para;</a></h3>
@@ -4793,7 +4793,7 @@ application code. A chunk ingested after its run was archived is not re-archived
 </blockquote>
 <h3 id="53-live-distribution">5.3 Live distribution<a class="headerlink" href="#53-live-distribution" title="Permanent link">&para;</a></h3>
 <p>Single multiplexed WebSocket <code>/api/v1/ws</code> (the access token goes in the first message, <code>{"type": "auth", "token": …}</code>, not in the URL): <code>{"sub": "run:&lt;id&gt;"}</code> → light signals <code>{"kind": "log", run_id, phase, max_seq}</code> and <code>{"kind": "run_event", run_id, to_state}</code> — never the content. On a <code>log</code> signal the front fetches the new chunks with REST <code>GET …/logs?phase=&amp;after_seq=</code>; on a <code>run_event</code> it invalidates its queries. Reconnection → the same REST GET <code>after_seq</code> fills the gap, then the stream.</p>
-<p><strong>Auth in the first message, never in the URL.</strong> The server accepts the connection, then the client's first message must be <code>{"type": "auth", "token": "&lt;access token&gt;"}</code> (a fresh one on every reconnect); anything else, an invalid or expired token, or a disabled user closes the socket with code <strong>4401</strong>. A <code>?token=</code> query parameter is ignored: a URL leaks to proxy/LB logs, browser history and <code>Referer</code>. Subscriptions are checked per channel against the caller's spaces.</p>
+<p><strong>Auth in the first message, never in the URL.</strong> The server accepts the connection, then the client's first message must be <code>{"type": "auth", "token": "&lt;access token&gt;"}</code> (a fresh one on every reconnect); anything else, an invalid or expired token, or a disabled user closes the socket with code <strong>4401</strong>. The front answers a 4401 with a token refresh (§2.5), then reconnects; a refused refresh ends the session. A <code>?token=</code> query parameter is ignored: a URL leaks to proxy/LB logs, browser history and <code>Referer</code>. Subscriptions are checked per channel against the caller's spaces.</p>
 <p><strong>Multi-replica fan-out (without a broker).</strong> A WS client is connected to <strong>one</strong> API replica; the event (transition or log chunk) may be produced on <strong>another</strong> replica. The bridge is <strong>Postgres <code>LISTEN/NOTIFY</code></strong>:</p>
 <ul>
 <li><code>transition()</code> (§4.2) and log ingestion (§5.1) emit a <code>NOTIFY</code> on a per-entity channel (<code>run_&lt;id&gt;</code>, <code>env_&lt;id&gt;</code>) <strong>in the same transaction</strong> as the write.</li>
@@ -5076,7 +5076,8 @@ the worker's heartbeat and worker-lost detection (§7.5) take. A failed build is
   the claim is undone — the run keeps its state, an approved apply its approval — and gets a <strong>claim
   backoff</strong>: <code>claimable_after = now() + min(300 s, 10 s × 2^claim_attempts)</code>, <code>claim_attempts + 1</code>.
   The candidate selection skips it until then, so the runs queued behind it keep being claimed; a
-  later successful claim resets both. The worker gets <strong>503</strong> <code>retryable: true</code>. Not a state change
+  later successful claim resets both. <code>GET /queue</code> reports such a run as <code>claim_backoff</code> with its
+  <code>claimable_after</code> and <code>claim_attempts</code> (§12). The worker gets <strong>503</strong> <code>retryable: true</code>. Not a state change
   (no <code>transition()</code>, no audit; logged <code>worker.claim_deferred</code>);</li>
 <li><strong>anything else</strong> fails the run closed (<code>→ failed</code>, <code>run.apply_failed</code>), the worker getting <strong>204</strong>:
   an unresolvable dependency (§9.3, <code>reason: dependency</code>), external secret (§15.2, <code>secret</code>) or
@@ -5808,7 +5809,7 @@ so that code runs unchanged — and the same code keeps working by hand, on the 
 </tr>
 </tbody>
 </table>
-<p>These four are the whole Terraform-protocol surface: there is no state deletion route. Breaking a lock whose ID one does not hold is the human <strong>force-unlock</strong>, <code>DELETE /api/v1/environments/{env_id}/state/lock</code> (admin, audited <code>state.force_unlocked</code>, §12) — never a state token.</p>
+<p>These four are the whole Terraform-protocol surface: there is no state deletion route. Breaking a lock whose ID one does not hold is the human <strong>force-unlock</strong>, <code>DELETE /api/v1/environments/{env_id}/state/lock</code> (admin, audited <code>state.force_unlocked</code>, §12) — never a state token. <code>GET</code> on the same path (any member of the env's space) shows the held lock — its holder run and the operation / who / version / created / info fields of tofu's lock info — or <code>null</code>; this lock is not <code>environments.locked</code>, the env's own lock that keeps the claim away (§7.2).</p>
 <p><strong>A run's lock ends with the run.</strong> When a run reaches a terminal state, <code>transition()</code> (§4.2) deletes the lock whose holder run is that run, in the same transaction, and audits <code>state.lock_released</code> (actor <code>system</code>, target the environment, context <code>reason = run_ended</code>, <code>run_id</code>, <code>run_state</code>, <code>lock_id</code>). This is what frees an environment whose worker died mid-plan or mid-apply (<code>worker_lost</code>, §3.7) — tofu never got to UNLOCK — instead of failing every later run on it (drift included) with 423 until an admin force-unlocks. Only that run's lock: a lock held by another run, or by a run-less holder (an import session, or a lock recorded before holder runs were tracked), is never touched and keeps the behaviour above — its holder's UNLOCK or the admin force-unlock. It cannot release a lock still in use: a plan token never writes state, and a job holding apply credentials is reclaimed only once the apply window has passed (§3.7), when its <code>rw</code> token has expired; a lost worker's late UNLOCK then gets 200 (nothing held) or 423 (a new holder), never another holder's lock.</p>
 <p>Auth: Basic (username ignored, <code>env</code>), password = JWT <code>{env_id, run_id, scope, typ: "state", iat, exp}</code> (HS256, <code>STACKD_JWT_SECRET</code>; invalid → 401, another env's → 403), minted at the claim (§7.2) for <strong>one job</strong>, not for the whole run. Its <code>scope</code> is fixed at mint time from the job, so a run's plan token and its apply token are different tokens with different rights:</p>
 <table>
@@ -5988,33 +5989,39 @@ second backend block fails <code>init</code>. For stacks that should keep their 
 <a id="__codelineno-44-113" name="__codelineno-44-113" href="#__codelineno-44-113"></a>GET|POST /api/v1/worker-pools ; DELETE /api/v1/worker-pools/{id}       # admin
 <a id="__codelineno-44-114" name="__codelineno-44-114" href="#__codelineno-44-114"></a>GET /api/v1/workers
 <a id="__codelineno-44-115" name="__codelineno-44-115" href="#__codelineno-44-115"></a>GET /api/v1/queue          # runs in progress + waiting, with computed blocking reason
-<a id="__codelineno-44-116" name="__codelineno-44-116" href="#__codelineno-44-116"></a>                           # (active_run|env_locked|no_compatible_worker|apply_affinity_hold)
-<a id="__codelineno-44-117" name="__codelineno-44-117" href="#__codelineno-44-117"></a>POST|GET /api/v1/workers/{id}/diagnostics   # admin: read-only debug bundle (via heartbeat)
-<a id="__codelineno-44-118" name="__codelineno-44-118" href="#__codelineno-44-118"></a>
-<a id="__codelineno-44-119" name="__codelineno-44-119" href="#__codelineno-44-119"></a># Observability
-<a id="__codelineno-44-120" name="__codelineno-44-120" href="#__codelineno-44-120"></a>GET /healthz               # unauthenticated liveness probe
-<a id="__codelineno-44-121" name="__codelineno-44-121" href="#__codelineno-44-121"></a>GET /metrics               # unauthenticated Prometheus scrape (§20.1)
-<a id="__codelineno-44-122" name="__codelineno-44-122" href="#__codelineno-44-122"></a>GET /api/v1/health         # any auth: DB, workers (online + heartbeat), active/queued runs, recent errors
-<a id="__codelineno-44-123" name="__codelineno-44-123" href="#__codelineno-44-123"></a>GET /api/v1/logs           # admin: structured JSON buffer, filters level/logger/event/worker_id/
-<a id="__codelineno-44-124" name="__codelineno-44-124" href="#__codelineno-44-124"></a>                           #   run_id/request_id/q, limit
-<a id="__codelineno-44-125" name="__codelineno-44-125" href="#__codelineno-44-125"></a>
-<a id="__codelineno-44-126" name="__codelineno-44-126" href="#__codelineno-44-126"></a># State
-<a id="__codelineno-44-127" name="__codelineno-44-127" href="#__codelineno-44-127"></a>GET /api/v1/environments/{id}/state/versions
-<a id="__codelineno-44-128" name="__codelineno-44-128" href="#__codelineno-44-128"></a>POST /api/v1/environments/{id}/state/import-session      # admin, audited (§11.4)
-<a id="__codelineno-44-129" name="__codelineno-44-129" href="#__codelineno-44-129"></a>DELETE /api/v1/environments/{id}/state/lock              # force-unlock (admin, audited)
-<a id="__codelineno-44-130" name="__codelineno-44-130" href="#__codelineno-44-130"></a>
-<a id="__codelineno-44-131" name="__codelineno-44-131" href="#__codelineno-44-131"></a># Webhooks
-<a id="__codelineno-44-132" name="__codelineno-44-132" href="#__codelineno-44-132"></a>POST /api/v1/webhooks/github                             # HMAC + X-GitHub-Delivery anti-replay (§13)
-<a id="__codelineno-44-133" name="__codelineno-44-133" href="#__codelineno-44-133"></a>
-<a id="__codelineno-44-134" name="__codelineno-44-134" href="#__codelineno-44-134"></a># Worker API (agents — detail §7)
-<a id="__codelineno-44-135" name="__codelineno-44-135" href="#__codelineno-44-135"></a>POST /worker/v1/register | /heartbeat | /jobs/claim
-<a id="__codelineno-44-136" name="__codelineno-44-136" href="#__codelineno-44-136"></a>POST /worker/v1/jobs/{id}/events | /jobs/{id}/logs
-<a id="__codelineno-44-137" name="__codelineno-44-137" href="#__codelineno-44-137"></a>PUT  /worker/v1/jobs/{id}/artifacts/{name}               # plan.tfplan (saved plan) | plan.json | outputs.json
-<a id="__codelineno-44-138" name="__codelineno-44-138" href="#__codelineno-44-138"></a>GET  /worker/v1/jobs/{id}/artifacts/plan.tfplan          # the apply job&#39;s saved plan (§7.3)
-<a id="__codelineno-44-139" name="__codelineno-44-139" href="#__codelineno-44-139"></a>POST /worker/v1/commands/{id}/result        # result of a downstream command (diagnostics…)
-<a id="__codelineno-44-140" name="__codelineno-44-140" href="#__codelineno-44-140"></a>
-<a id="__codelineno-44-141" name="__codelineno-44-141" href="#__codelineno-44-141"></a># State backend HTTP (Terraform — detail §11)
-<a id="__codelineno-44-142" name="__codelineno-44-142" href="#__codelineno-44-142"></a>GET|POST /state/v1/{env_id} ; LOCK|UNLOCK /state/v1/{env_id}/lock
+<a id="__codelineno-44-116" name="__codelineno-44-116" href="#__codelineno-44-116"></a>                           # (env_locked|active_run|claim_backoff|apply_affinity_hold|
+<a id="__codelineno-44-117" name="__codelineno-44-117" href="#__codelineno-44-117"></a>                           #  no_compatible_worker) + the run&#39;s claimable_after / claim_attempts
+<a id="__codelineno-44-118" name="__codelineno-44-118" href="#__codelineno-44-118"></a>                           #  (§7.2 claim backoff: `claim_backoff` while claimable_after is ahead)
+<a id="__codelineno-44-119" name="__codelineno-44-119" href="#__codelineno-44-119"></a>POST|GET /api/v1/workers/{id}/diagnostics   # admin: read-only debug bundle (via heartbeat)
+<a id="__codelineno-44-120" name="__codelineno-44-120" href="#__codelineno-44-120"></a>
+<a id="__codelineno-44-121" name="__codelineno-44-121" href="#__codelineno-44-121"></a># Observability
+<a id="__codelineno-44-122" name="__codelineno-44-122" href="#__codelineno-44-122"></a>GET /healthz               # unauthenticated liveness probe
+<a id="__codelineno-44-123" name="__codelineno-44-123" href="#__codelineno-44-123"></a>GET /metrics               # unauthenticated Prometheus scrape (§20.1)
+<a id="__codelineno-44-124" name="__codelineno-44-124" href="#__codelineno-44-124"></a>GET /api/v1/health         # any auth: DB, workers (online + heartbeat), active/queued runs, recent errors
+<a id="__codelineno-44-125" name="__codelineno-44-125" href="#__codelineno-44-125"></a>GET /api/v1/logs           # admin: structured JSON buffer, filters level/logger/event/worker_id/
+<a id="__codelineno-44-126" name="__codelineno-44-126" href="#__codelineno-44-126"></a>                           #   run_id/request_id/q, limit
+<a id="__codelineno-44-127" name="__codelineno-44-127" href="#__codelineno-44-127"></a>
+<a id="__codelineno-44-128" name="__codelineno-44-128" href="#__codelineno-44-128"></a># State
+<a id="__codelineno-44-129" name="__codelineno-44-129" href="#__codelineno-44-129"></a>GET /api/v1/environments/{id}/state/versions
+<a id="__codelineno-44-130" name="__codelineno-44-130" href="#__codelineno-44-130"></a>GET /api/v1/environments/{id}/state/lock                 # the held state lock or null (§11.2):
+<a id="__codelineno-44-131" name="__codelineno-44-131" href="#__codelineno-44-131"></a>                                                         #   lock_id, run_id (holder run), locked_at,
+<a id="__codelineno-44-132" name="__codelineno-44-132" href="#__codelineno-44-132"></a>                                                         #   operation/who/version/created/info from
+<a id="__codelineno-44-133" name="__codelineno-44-133" href="#__codelineno-44-133"></a>                                                         #   tofu&#39;s lock info; membership-gated read
+<a id="__codelineno-44-134" name="__codelineno-44-134" href="#__codelineno-44-134"></a>POST /api/v1/environments/{id}/state/import-session      # admin, audited (§11.4)
+<a id="__codelineno-44-135" name="__codelineno-44-135" href="#__codelineno-44-135"></a>DELETE /api/v1/environments/{id}/state/lock              # force-unlock (admin, audited)
+<a id="__codelineno-44-136" name="__codelineno-44-136" href="#__codelineno-44-136"></a>
+<a id="__codelineno-44-137" name="__codelineno-44-137" href="#__codelineno-44-137"></a># Webhooks
+<a id="__codelineno-44-138" name="__codelineno-44-138" href="#__codelineno-44-138"></a>POST /api/v1/webhooks/github                             # HMAC + X-GitHub-Delivery anti-replay (§13)
+<a id="__codelineno-44-139" name="__codelineno-44-139" href="#__codelineno-44-139"></a>
+<a id="__codelineno-44-140" name="__codelineno-44-140" href="#__codelineno-44-140"></a># Worker API (agents — detail §7)
+<a id="__codelineno-44-141" name="__codelineno-44-141" href="#__codelineno-44-141"></a>POST /worker/v1/register | /heartbeat | /jobs/claim
+<a id="__codelineno-44-142" name="__codelineno-44-142" href="#__codelineno-44-142"></a>POST /worker/v1/jobs/{id}/events | /jobs/{id}/logs
+<a id="__codelineno-44-143" name="__codelineno-44-143" href="#__codelineno-44-143"></a>PUT  /worker/v1/jobs/{id}/artifacts/{name}               # plan.tfplan (saved plan) | plan.json | outputs.json
+<a id="__codelineno-44-144" name="__codelineno-44-144" href="#__codelineno-44-144"></a>GET  /worker/v1/jobs/{id}/artifacts/plan.tfplan          # the apply job&#39;s saved plan (§7.3)
+<a id="__codelineno-44-145" name="__codelineno-44-145" href="#__codelineno-44-145"></a>POST /worker/v1/commands/{id}/result        # result of a downstream command (diagnostics…)
+<a id="__codelineno-44-146" name="__codelineno-44-146" href="#__codelineno-44-146"></a>
+<a id="__codelineno-44-147" name="__codelineno-44-147" href="#__codelineno-44-147"></a># State backend HTTP (Terraform — detail §11)
+<a id="__codelineno-44-148" name="__codelineno-44-148" href="#__codelineno-44-148"></a>GET|POST /state/v1/{env_id} ; LOCK|UNLOCK /state/v1/{env_id}/lock
 </code></pre></div>
 <p>Specified but <strong>not served yet</strong>: <code>GET /api/v1/run-groups/{id}</code> (§9.4).</p>
 <hr />

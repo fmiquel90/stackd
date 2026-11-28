@@ -1885,7 +1885,7 @@ can't read the pool token from its environment.</p>
 <p>There is <strong>no built-in autoscaler</strong>, but the signals you need are exposed:</p>
 <ul>
 <li><code>GET /api/v1/health</code> — DB, workers (online/total + last heartbeat), runs active/queued, recent errors.</li>
-<li><code>GET /api/v1/queue</code> — waiting runs and <em>why</em> they wait (<code>active_run</code> | <code>env_locked</code> | <code>no_compatible_worker</code> | <code>apply_affinity_hold</code>).</li>
+<li><code>GET /api/v1/queue</code> — waiting runs and <em>why</em> they wait (<code>active_run</code> | <code>env_locked</code> | <code>claim_backoff</code> | <code>no_compatible_worker</code> | <code>apply_affinity_hold</code>). <code>claim_backoff</code> is a run whose job could not be prepared for a transient reason (database, KMS); it is retried at <code>claimable_after</code> (up to 5 min apart, after <code>claim_attempts</code> failures) while the runs behind it keep moving.</li>
 </ul>
 <p>A <code>no_compatible_worker</code> backlog means no online worker carries the environment's labels or can run the stack's <code>tool_version</code> — not a capacity problem: adding generic workers will not help; you need workers with the right labels or tool versions. See <a href="../observability/">Observability</a> for the Workers &amp; health page.</p>
 <h3 id="database-connections">Database connections<a class="headerlink" href="#database-connections" title="Permanent link">&para;</a></h3>
