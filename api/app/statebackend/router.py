@@ -25,6 +25,7 @@ from app.models.environment import Environment
 from app.models.run import Run
 from app.models.state import StateLock, StateVersion
 from app.spaces import guard_env_id
+from app.statebackend.schemas import StateLockOut
 from app.statebackend.store import open_object, put_object, state_key
 from app.statebackend.tokens import decode_state_token, mint_state_token
 
@@ -309,6 +310,14 @@ async def list_versions(env_id: uuid.UUID, user: CurrentUser, session: DbSession
         }
         for v in rows
     ]
+
+
+@human_router.get("/{env_id}/state/lock", response_model=StateLockOut | None)
+async def get_lock(env_id: uuid.UUID, user: CurrentUser, session: DbSession) -> StateLockOut | None:
+    """The held state lock, or null (§11.2) — what an admin checks before a force-unlock."""
+    await guard_env_id(session, user, env_id)
+    lock = await session.get(StateLock, env_id)
+    return StateLockOut.of(lock) if lock is not None else None
 
 
 _IMPORT_TTL_SECONDS = 30 * 60

@@ -59,6 +59,7 @@ const REASONS: Record<string, string> = {
   env_locked: "the environment is locked",
   no_compatible_worker: "no worker is compatible with this environment",
   apply_affinity_hold: "the apply is reserved for the worker that planned it (affinity window)",
+  claim_backoff: "a transient failure preparing its job — it is retried after a backoff",
 };
 
 const durationOf = (from: string, to: string | null) =>
