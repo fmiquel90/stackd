@@ -1940,8 +1940,8 @@ all. Counts in parentheses include parametrized cases and drift as tests are add
 <td>Each <code>transition()</code> emits a <code>LISTEN/NOTIFY</code> signal on the run channel.</td>
 </tr>
 <tr>
-<td><code>test_ws_hub.py</code> (8)</td>
-<td>LISTEN connection supervision: after <code>pg_terminate_backend</code> or a half-open connection (a frozen TCP relay) the hub signals a resync, reconnects and the existing subscriptions receive notifications again; subscriber queues are bounded and keep the newest; a socket's repeated subscription is deduplicated (one copy per signal), the distinct-channel cap closes with 1008 and unsubscribes, a lost hub connection closes sockets with 1012, a missing auth message times out with 4401.</td>
+<td><code>test_ws_hub.py</code> (9)</td>
+<td>LISTEN connection supervision: after <code>pg_terminate_backend</code> or a half-open connection (a frozen TCP relay) the hub signals a resync, reconnects and the existing subscriptions receive notifications again; subscriber queues are bounded and keep the newest; a socket's repeated subscription is deduplicated (one copy per signal, tagged with its <code>sub</code>), an <code>unsub</code> releases the channel and its slot under the cap, the distinct-channel cap closes with 1008 and unsubscribes, a lost hub connection closes sockets with 1012, a missing auth message times out with 4401.</td>
 </tr>
 <tr>
 <td><code>test_ws_auth.py</code> (2)</td>
@@ -2174,10 +2174,6 @@ The tier gate (an approver without <code>prod</code>) and staleness stay manual 
 <td>Search strips ANSI once per line: an appended chunk strips only its own lines.</td>
 </tr>
 <tr>
-<td><code>src/features/runs/useRunPage.test.tsx</code> (1)</td>
-<td>The run page parses the plan once the run has left <code>planning</code>, and not again as apply chunks stream in.</td>
-</tr>
-<tr>
 <td><code>src/ui/ErrorBoundary.test.tsx</code> (4)</td>
 <td>A throwing child renders the failed banner while siblings survive; Retry renders it again; a new reset key (another run) clears it; at the route level, navigating clears it.</td>
 </tr>
@@ -2232,6 +2228,14 @@ The tier gate (an approver without <code>prod</code>) and staleness stay manual 
 <tr>
 <td><code>src/components/CloudPanel.test.tsx</code> (4)</td>
 <td>Named AWS profiles (SPECS §10.6): the API map round-trips through sorted rows (empty region → null); a nameless, duplicated or <code>default</code> profile blocks Save; editable by an admin, listed read-only for others.</td>
+</tr>
+<tr>
+<td><code>src/api/stream.test.tsx</code> (7)</td>
+<td>The WS hub against a fake socket: a signal reaches its channel's listeners only; a channel is unsubscribed when its last listener unmounts, not on a same-commit remount; a reconnect re-subscribes, invalidates every query but <code>meta.streamed</code> ones and hands listeners <code>resync</code>; 1012 reconnects promptly whatever the backoff, 1008 too unless it repeats.</td>
+</tr>
+<tr>
+<td><code>src/features/runs/useRunPage.test.tsx</code> (4)</td>
+<td>Run log catch-up: a phase signalled while its fetch is in flight is fetched again; a signal received while the whole log loads waits for it; every phase is fetched after a reconnect and when the run ends. The plan is parsed once the run has left <code>planning</code>, and not again as apply chunks stream in.</td>
 </tr>
 <tr>
 <td><code>src/auth/refresh.test.ts</code> (6)</td>
