@@ -50,6 +50,9 @@ curl -s -X POST $STACKD/api/v1/environments/$ENV_ID/runs -H "Authorization: Bear
 A service account reads and plans — it **never confirms** an apply, a destroy, a mutating command
 or a rollout: that stays a named human's decision.
 
+The [`stackd` CLI](guide/cli.md) wraps the same API for scripts and CI (`stackd runs plan
+network/prod --wait`).
+
 ## Interactive reference
 
 The API is FastAPI, so the full, always-current schema is served by the running instance:

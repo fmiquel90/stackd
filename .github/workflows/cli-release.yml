@@ -1,0 +1,74 @@
+name: CLI release
+
+# Push a tag `cli-vX.Y.Z` to publish static stackd binaries (SPECS §24) as a GitHub release.
+# The CLI is versioned on its own: its tags never collide with the platform's.
+on:
+  push:
+    tags: ["cli-v*"]
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          - { goos: linux, goarch: amd64 }
+          - { goos: linux, goarch: arm64 }
+          - { goos: darwin, goarch: amd64 }
+          - { goos: darwin, goarch: arm64 }
+          - { goos: windows, goarch: amd64 }
+          - { goos: windows, goarch: arm64 }
+    defaults:
+      run:
+        working-directory: cli
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: cli/go.mod
+          cache-dependency-path: cli/go.sum
+      - run: go test ./...
+      - name: Build ${{ matrix.goos }}/${{ matrix.goarch }}
+        env:
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+          CGO_ENABLED: "0"
+        run: |
+          version="${GITHUB_REF_NAME#cli-}"
+          name="stackd_${version#v}_${GOOS}_${GOARCH}"
+          bin=stackd; [ "$GOOS" = windows ] && bin=stackd.exe
+          mkdir -p "dist/$name"
+          go build -trimpath -ldflags "-s -w -X github.com/fmiquel90/stackd/cli/internal/cmd.Version=${version}" \
+            -o "dist/$name/$bin" .
+          cp ../LICENSE.md "dist/$name/"
+          cd dist
+          if [ "$GOOS" = windows ]; then zip -qr "$name.zip" "$name"; else tar czf "$name.tar.gz" "$name"; fi
+      - uses: actions/upload-artifact@v4
+        with:
+          name: stackd-${{ matrix.goos }}-${{ matrix.goarch }}
+          path: |
+            cli/dist/*.tar.gz
+            cli/dist/*.zip
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      - name: Checksums
+        working-directory: dist
+        run: sha256sum * > SHA256SUMS
+      - name: Publish the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" dist/* --repo "$GITHUB_REPOSITORY" \
+            --title "stackd CLI ${GITHUB_REF_NAME#cli-}" --notes "Static stackd CLI binaries. See docs/guide/cli.md."

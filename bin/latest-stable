@@ -1,0 +1,13 @@
+#!/usr/bin/env bash
+# asdf: print the newest stable version (no pre-release), optionally matching a prefix ($1).
+set -euo pipefail
+# shellcheck source=bin/utils.bash
+source "$(dirname "$0")/utils.bash"
+
+query="${1:-}"
+# A prefix matches whole components: 0.1 matches 0.1.x, not 0.10.x.
+pattern="^"
+[ -z "$query" ] || pattern="^${query//./\\.}(\\.|$)"
+latest="$(list_all_versions | grep -vE -- '-' | grep -E "$pattern" | tail -n1 || true)"
+[ -n "$latest" ] || fail "no stable version${query:+ matching $query}"
+echo "$latest"
