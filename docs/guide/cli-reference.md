@@ -33,12 +33,235 @@ confirms an apply or a destroy: that stays a named human's decision (SPECS §23)
 
 **SEE ALSO**
 
+* [stackd completion](#stackd-completion)	 - Generate the autocompletion script for the specified shell
 * [stackd config](#stackd-config)	 - Export and import a space's configuration (stackd.config, SPECS §22)
 * [stackd envs](#stackd-envs)	 - Manage a stack's environments
 * [stackd runs](#stackd-runs)	 - Trigger plans, follow runs, read logs
 * [stackd spaces](#stackd-spaces)	 - List and create spaces
 * [stackd stacks](#stackd-stacks)	 - Manage stacks
 * [stackd version](#stackd-version)	 - Print the CLI version
+
+## stackd completion
+
+Generate the autocompletion script for the specified shell
+
+**Synopsis**
+
+Generate the autocompletion script for stackd for the specified shell.
+See each sub-command's help for details on how to use the generated script.
+
+
+**Options**
+
+```
+  -h, --help   help for completion
+```
+
+**Options inherited from parent commands**
+
+```
+      --allow-http      allow a plain http URL to a non-loopback host (env STACKD_ALLOW_HTTP=1)
+  -o, --output string   output format: text or json (env STACKD_OUTPUT) (default "text")
+      --token string    API token (env STACKD_TOKEN)
+      --url string      Stackd instance URL (env STACKD_URL)
+```
+
+**SEE ALSO**
+
+* [stackd](#stackd)	 - Command-line client for the Stackd API
+* [stackd completion bash](#stackd-completion-bash)	 - Generate the autocompletion script for bash
+* [stackd completion fish](#stackd-completion-fish)	 - Generate the autocompletion script for fish
+* [stackd completion powershell](#stackd-completion-powershell)	 - Generate the autocompletion script for powershell
+* [stackd completion zsh](#stackd-completion-zsh)	 - Generate the autocompletion script for zsh
+
+## stackd completion bash
+
+Generate the autocompletion script for bash
+
+**Synopsis**
+
+Generate the autocompletion script for the bash shell.
+
+This script depends on the 'bash-completion' package.
+If it is not installed already, you can install it via your OS's package manager.
+
+To load completions in your current shell session:
+
+	source <(stackd completion bash)
+
+To load completions for every new session, execute once:
+
+#### Linux:
+
+	stackd completion bash > /etc/bash_completion.d/stackd
+
+#### macOS:
+
+	stackd completion bash > $(brew --prefix)/etc/bash_completion.d/stackd
+
+You will need to start a new shell for this setup to take effect.
+
+
+```
+stackd completion bash
+```
+
+**Options**
+
+```
+  -h, --help              help for bash
+      --no-descriptions   disable completion descriptions
+```
+
+**Options inherited from parent commands**
+
+```
+      --allow-http      allow a plain http URL to a non-loopback host (env STACKD_ALLOW_HTTP=1)
+  -o, --output string   output format: text or json (env STACKD_OUTPUT) (default "text")
+      --token string    API token (env STACKD_TOKEN)
+      --url string      Stackd instance URL (env STACKD_URL)
+```
+
+**SEE ALSO**
+
+* [stackd completion](#stackd-completion)	 - Generate the autocompletion script for the specified shell
+
+## stackd completion fish
+
+Generate the autocompletion script for fish
+
+**Synopsis**
+
+Generate the autocompletion script for the fish shell.
+
+To load completions in your current shell session:
+
+	stackd completion fish | source
+
+To load completions for every new session, execute once:
+
+	stackd completion fish > ~/.config/fish/completions/stackd.fish
+
+You will need to start a new shell for this setup to take effect.
+
+
+```
+stackd completion fish [flags]
+```
+
+**Options**
+
+```
+  -h, --help              help for fish
+      --no-descriptions   disable completion descriptions
+```
+
+**Options inherited from parent commands**
+
+```
+      --allow-http      allow a plain http URL to a non-loopback host (env STACKD_ALLOW_HTTP=1)
+  -o, --output string   output format: text or json (env STACKD_OUTPUT) (default "text")
+      --token string    API token (env STACKD_TOKEN)
+      --url string      Stackd instance URL (env STACKD_URL)
+```
+
+**SEE ALSO**
+
+* [stackd completion](#stackd-completion)	 - Generate the autocompletion script for the specified shell
+
+## stackd completion powershell
+
+Generate the autocompletion script for powershell
+
+**Synopsis**
+
+Generate the autocompletion script for powershell.
+
+To load completions in your current shell session:
+
+	stackd completion powershell | Out-String | Invoke-Expression
+
+To load completions for every new session, add the output of the above command
+to your powershell profile.
+
+
+```
+stackd completion powershell [flags]
+```
+
+**Options**
+
+```
+  -h, --help              help for powershell
+      --no-descriptions   disable completion descriptions
+```
+
+**Options inherited from parent commands**
+
+```
+      --allow-http      allow a plain http URL to a non-loopback host (env STACKD_ALLOW_HTTP=1)
+  -o, --output string   output format: text or json (env STACKD_OUTPUT) (default "text")
+      --token string    API token (env STACKD_TOKEN)
+      --url string      Stackd instance URL (env STACKD_URL)
+```
+
+**SEE ALSO**
+
+* [stackd completion](#stackd-completion)	 - Generate the autocompletion script for the specified shell
+
+## stackd completion zsh
+
+Generate the autocompletion script for zsh
+
+**Synopsis**
+
+Generate the autocompletion script for the zsh shell.
+
+If shell completion is not already enabled in your environment you will need
+to enable it.  You can execute the following once:
+
+	echo "autoload -U compinit; compinit" >> ~/.zshrc
+
+To load completions in your current shell session:
+
+	source <(stackd completion zsh)
+
+To load completions for every new session, execute once:
+
+#### Linux:
+
+	stackd completion zsh > "${fpath[1]}/_stackd"
+
+#### macOS:
+
+	stackd completion zsh > $(brew --prefix)/share/zsh/site-functions/_stackd
+
+You will need to start a new shell for this setup to take effect.
+
+
+```
+stackd completion zsh [flags]
+```
+
+**Options**
+
+```
+  -h, --help              help for zsh
+      --no-descriptions   disable completion descriptions
+```
+
+**Options inherited from parent commands**
+
+```
+      --allow-http      allow a plain http URL to a non-loopback host (env STACKD_ALLOW_HTTP=1)
+  -o, --output string   output format: text or json (env STACKD_OUTPUT) (default "text")
+      --token string    API token (env STACKD_TOKEN)
+      --url string      Stackd instance URL (env STACKD_URL)
+```
+
+**SEE ALSO**
+
+* [stackd completion](#stackd-completion)	 - Generate the autocompletion script for the specified shell
 
 ## stackd config
 
@@ -477,7 +700,7 @@ stackd runs list <stack>/<env> | <env-id> [flags]
 
 ```
   -h, --help           help for list
-      --limit int      rows shown in text output (0 = all) (default 20)
+      --limit int      runs shown, newest first (0 = all) (default 20)
       --space string   space of the stack, when its name is not unique
 ```
 
