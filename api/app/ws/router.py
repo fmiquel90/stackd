@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import uuid
 
 import jwt
@@ -49,25 +50,39 @@ async def ws_endpoint(websocket: WebSocket) -> None:
         return
 
     out: SignalQueue = asyncio.Queue(maxsize=_QUEUE_SIZE)
-    channels: set[str] = set()
+    channels: dict[str, str] = {}  # NOTIFY channel → the subscription the client named it by
+    subs: dict[str, str] = {}  # and back
 
     async def receive() -> None:
         while True:
             msg = await websocket.receive_json()
+            if "unsub" in msg:
+                channel = subs.pop(msg["unsub"], None)
+                if channel is not None:
+                    del channels[channel]
+                    await _hub.unsubscribe(channel, out)
+                continue
+            sub = msg.get("sub", "")
             async with SessionLocal() as session:
-                channel = await channel_for(msg.get("sub", ""), user, session)
+                channel = await channel_for(sub, user, session)
             if channel is None or channel in channels:
                 continue
             if len(channels) >= settings.stackd_ws_max_subscriptions:
-                # The front never unsubscribes: on close it reconnects with only what it wants now.
+                # The client reconnects and re-subscribes only to what it still wants.
                 await websocket.close(code=1008)
                 return
-            channels.add(channel)
+            channels[channel] = sub
+            subs[sub] = channel
             await _hub.subscribe(channel, out)
 
     async def send() -> None:
-        while (signal := await out.get()) is not RESYNC:
-            await websocket.send_text(signal)
+        while (item := await out.get()) is not RESYNC:
+            channel, payload = item
+            sub = channels.get(channel)
+            if sub is None:  # unsubscribed while the signal was queued
+                continue
+            # Tagged with its subscription: the client routes it to that channel's listeners only.
+            await websocket.send_text(json.dumps({"sub": sub, **json.loads(payload)}))
         # Signals were lost while the hub was disconnected: make the client reconnect (§5.3).
         await websocket.close(code=1012)
 
