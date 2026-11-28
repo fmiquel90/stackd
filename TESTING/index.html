@@ -2166,6 +2166,22 @@ The tier gate (an approver without <code>prod</code>) and staleness stay manual 
 <td><code>runOutcome</code>, the phase rail's segments, <code>envSummary</code> (DESIGN §2.3, the out-of-band modifier), permissions mirroring the API gates (stop, cancel, confirm, mock, destroy, missing tier, a rollout creator held to four-eyes), <code>planParse</code>, <code>logModel</code>, the cascade walk, time formatting.</td>
 </tr>
 <tr>
+<td><code>src/lib/logModel.test.ts</code> (8)</td>
+<td>The incremental log model: an appended chunk processes only its own lines, same result as a full build whatever the arrival order (out-of-order chunks rebuild), earlier snapshots untouched, the plan section's identity kept while other lines stream, a replaced list rebuilt; <code>mergeChunks</code> does not re-key merged chunks and still de-duplicates.</td>
+</tr>
+<tr>
+<td><code>src/identity/LogViewer.test.tsx</code> (1)</td>
+<td>Search strips ANSI once per line: an appended chunk strips only its own lines.</td>
+</tr>
+<tr>
+<td><code>src/features/runs/useRunPage.test.tsx</code> (1)</td>
+<td>The run page parses the plan once the run has left <code>planning</code>, and not again as apply chunks stream in.</td>
+</tr>
+<tr>
+<td><code>src/ui/ErrorBoundary.test.tsx</code> (4)</td>
+<td>A throwing child renders the failed banner while siblings survive; Retry renders it again; a new reset key (another run) clears it; at the route level, navigating clears it.</td>
+</tr>
+<tr>
 <td><code>src/styles/tokens.test.ts</code> (4 <code>it.each</code>, 136 cases)</td>
 <td>Re-checks the DESIGN §3.1 contrast table against <code>tokens.css</code>, both themes.</td>
 </tr>
