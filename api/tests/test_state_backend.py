@@ -674,6 +674,57 @@ async def test_run_end_keeps_a_lock_it_does_not_hold(client: httpx.AsyncClient) 
     assert await _lock_releases(env_id) == []
 
 
+async def test_state_lock_is_readable_with_its_holder_run(client: httpx.AsyncClient) -> None:
+    """`GET …/state/lock` shows the held lock (§11.2): its holder run and tofu's lock info, so an
+    admin sees who holds it before a force-unlock; null once nothing is held."""
+    admin = await login(client, "admin")
+    bob = await login(client, "bob")
+    wh = await register_worker(client, admin, "state-lock-read-pool")
+    stack = await make_stack(client, admin, "state-lock-read")
+    env_id = await make_env(client, admin, stack, "dev", "dev")
+    url = f"/api/v1/environments/{env_id}/state/lock"
+    assert (await client.get(url, headers=admin)).json() is None
+
+    run = (await client.post(f"/api/v1/environments/{env_id}/runs", headers=admin, json={})).json()
+    plan = (await client.post("/worker/v1/jobs/claim", headers=wh)).json()
+    await event(client, wh, run["id"], "phase_started", phase="planning")
+    info = {
+        "ID": "read-lock",
+        "Operation": "OperationTypePlan",
+        "Info": "",
+        "Who": "runner@worker-1",
+        "Version": "1.12.0",
+        "Created": "2026-11-27T10:00:00.000000Z",
+        "Path": "",
+    }
+    locked = await client.request(
+        "LOCK",
+        f"/state/v1/{env_id}/lock",
+        headers=_basic(plan["backend"]["password"]),
+        content=json.dumps(info),
+    )
+    assert locked.status_code == 200
+
+    for headers in (admin, bob):  # any member reads it; the force-unlock stays admin-only
+        got = await client.get(url, headers=headers)
+        assert got.status_code == 200, got.text
+        body = got.json()
+        assert body.pop("locked_at")
+        assert body == {
+            "lock_id": "read-lock",
+            "run_id": run["id"],
+            "operation": "OperationTypePlan",
+            "who": "runner@worker-1",
+            "version": "1.12.0",
+            "created": "2026-11-27T10:00:00.000000Z",
+            "info": None,
+        }
+
+    assert (await client.delete(url, headers=bob)).status_code == 403
+    assert (await client.delete(url, headers=admin)).status_code == 204
+    assert (await client.get(url, headers=admin)).json() is None
+
+
 def test_created_bucket_gets_versioning_and_encryption() -> None:
     """§11.3: a bucket the API creates has versioning ON and default encryption."""
     from app.statebackend.store import _client, _ensure_bucket

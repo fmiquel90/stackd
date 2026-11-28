@@ -1,5 +1,5 @@
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ApiError, auth } from "@/api/client";
+import { type QueryClient, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { ApiError, auth, onSessionChange } from "@/api/client";
 import type { User } from "@/api/types";
 
 const SESSION_KEY = ["session"] as const;
@@ -20,8 +20,14 @@ export function useSession() {
       }
     },
     retry: false,
-    staleTime: 10 * 60 * 1000,
+    // Kept current by the client's own refreshes (`bindSessionCache`): a re-mount never rotates.
+    staleTime: Infinity,
   });
+}
+
+/** Mirror the client's refreshes into the session query: a lost session shows the login page. */
+export function bindSessionCache(qc: QueryClient): () => void {
+  return onSessionChange((user) => qc.setQueryData(SESSION_KEY, user));
 }
 
 /** Current user's admin status, read from the cached session (no extra request). */

@@ -30,6 +30,7 @@ import { NotificationBell } from "./NotificationBell";
 import { useRunIdentity } from "./runIdentity";
 import { Button } from "@/ui/Button";
 import { cn } from "@/ui/cn";
+import { RouteErrorBoundary } from "@/ui/ErrorBoundary";
 import {
   Dialog,
   DialogContent,
@@ -622,9 +623,11 @@ function Shell({ user }: { user: User }) {
         <ReconnectBar />
         <main id="content" tabIndex={-1} className="min-h-0 flex-1 overflow-auto outline-none">
           <div className="mx-auto w-full max-w-[1440px] p-4 lg:p-6">
-            <Suspense fallback={<PageLoading />}>
-              <AppRoutes />
-            </Suspense>
+            <RouteErrorBoundary>
+              <Suspense fallback={<PageLoading />}>
+                <AppRoutes />
+              </Suspense>
+            </RouteErrorBoundary>
           </div>
         </main>
         <BottomBar onMenu={() => setDrawer(true)} />
