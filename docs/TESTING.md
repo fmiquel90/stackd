@@ -136,7 +136,7 @@ all. Counts in parentheses include parametrized cases and drift as tests are add
 
 | File | Covers |
 |---|---|
-| `test_auth.py` (6) | Dev-login personas; `/refresh` CSRF double-submit; refresh rotation and reuse detection (the family is revoked); onboarding flag; unauthenticated `/me` → 401 problem+json; Google admission fails closed (no allowlist → nobody). |
+| `test_auth.py` (9) | Dev-login personas; `/refresh` CSRF double-submit; refresh rotation and reuse detection past the grace window (the family is revoked); a reuse within the grace window (a second tab) gets an access token and no cookie, and concurrent refreshes mint one child (no revocation, no forked family); onboarding flag; unauthenticated `/me` → 401 problem+json; Google admission fails closed (no allowlist → nobody). |
 | `test_permissions.py` (9) | `can_apply` (pure): approver + tier set, writer refused, non-contiguous sets, empty set, custom tier, `can_destroy`; a space membership overrides the instance tiers, role and destroy right. |
 | `test_spaces.py` (10) | Per-space RBAC: non-members blocked on env-scoped reads (state versions and lock included), `/graph` and space listing scoped to memberships, grant then revoke, create = instance admin, members listing = space admin, create in an unknown space → 404; a membership's `allowed_tiers` validated against the catalog and audited with the grant; a space writer with an instance `reader` role writes in that space (variables, trigger, cancel, discard) and nowhere else. |
 | `test_tiers.py` (7) | Tier catalog: name charset (OIDC `sub` safety), `allowed_tiers` validated, deleting a tier strips grants and removes its variable-set attachments (audited), a tier in use can't be deleted; `repo_hooks_at_apply` reaches the claim only from a tier that allows it, off on the default catalog. |
@@ -283,6 +283,8 @@ The tier gate (an approver without `prod`) and staleness stay manual checks (DEV
 | `src/features/settings/userChanges.test.ts` (2) | Staged user changes: only real differences, summarised in words. |
 | `src/components/StackGeneralPanel.test.tsx` (5) | The webhook secret field follows the API's writer gate: shown to a writer, hidden from a reader; a deploy key goes in a multi-line field and is sent whole, a stored one is never filled back and is omitted when left blank; a token stays a password input. |
 | `src/components/CloudPanel.test.tsx` (4) | Named AWS profiles (SPECS §10.6): the API map round-trips through sorted rows (empty region → null); a nameless, duplicated or `default` profile blocks Save; editable by an admin, listed read-only for others. |
+| `src/auth/refresh.test.ts` (6) | Session upkeep: a 401 refreshes once and replays with the new token (CSRF header kept); concurrent 401s share one refresh; a refused refresh loses the session (no replay, session query → `null`); no refresh for a request sent without a token; the proactive refresh at ~80% of the token's lifetime; queries never retry a 4xx, a 5xx or network error twice. |
+| `src/api/streamAuth.test.ts` (2) | A socket closed with 4401 refreshes the token and reconnects at once with the new one; a refused refresh stops reconnecting (`idle`). |
 
 - **Playwright** (`pnpm e2e`, `e2e/happy-path.spec.ts`): one smoke test — dev login as admin
   reaches the overview of a space (`/s/<space>`) — against a running dev stack (`PW_BASE_URL`,

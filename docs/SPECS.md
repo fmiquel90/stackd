@@ -118,7 +118,7 @@ refresh_tokens (
 )
 ```
 
-On each `/auth/refresh`: the presented token must exist, not be revoked, not be expired, `used_at IS NULL`. We mark it `used_at`, issue a new token (same `family_id`, `parent_id = id`). If a token already `used_at` is presented again → **reuse**: revocation of the whole family + `audit auth.refresh_reuse_detected`. Purge of expired families as a periodic task (§7.5).
+On each `/auth/refresh`: the presented token must exist, not be revoked, not be expired, `used_at IS NULL`. The row is read `FOR UPDATE`, so two refreshes presenting the same token serialize. We mark it `used_at`, issue a new token (same `family_id`, `parent_id = id`). If a token already `used_at` is presented again → **reuse**: revocation of the whole family + `audit auth.refresh_reuse_detected` — **except within the grace window** `STACKD_REFRESH_REUSE_GRACE_SECONDS` (default 30) after its rotation: the browser's tabs share one refresh cookie, so a second tab whose refresh left before the first one's rotated cookie landed presents the parent. That presentation gets a fresh access token for the same user and **no cookie** (the browser already holds the child): the family is neither revoked nor forked, and a stolen token presented in the window gains no refresh token — its holder's next presentation, past the window, is caught as reuse. Purge of expired families as a periodic task (§7.5).
 
 ---
 
@@ -678,7 +678,7 @@ POST /worker/v1/jobs/{id}/logs
 
 Single multiplexed WebSocket `/api/v1/ws` (the access token goes in the first message, `{"type": "auth", "token": …}`, not in the URL): `{"sub": "run:<id>"}` → light signals `{"kind": "log", run_id, phase, max_seq}` and `{"kind": "run_event", run_id, to_state}` — never the content. On a `log` signal the front fetches the new chunks with REST `GET …/logs?phase=&after_seq=`; on a `run_event` it invalidates its queries. Reconnection → the same REST GET `after_seq` fills the gap, then the stream.
 
-**Auth in the first message, never in the URL.** The server accepts the connection, then the client's first message must be `{"type": "auth", "token": "<access token>"}` (a fresh one on every reconnect); anything else, an invalid or expired token, or a disabled user closes the socket with code **4401**. A `?token=` query parameter is ignored: a URL leaks to proxy/LB logs, browser history and `Referer`. Subscriptions are checked per channel against the caller's spaces.
+**Auth in the first message, never in the URL.** The server accepts the connection, then the client's first message must be `{"type": "auth", "token": "<access token>"}` (a fresh one on every reconnect); anything else, an invalid or expired token, or a disabled user closes the socket with code **4401**. The front answers a 4401 with a token refresh (§2.5), then reconnects; a refused refresh ends the session. A `?token=` query parameter is ignored: a URL leaks to proxy/LB logs, browser history and `Referer`. Subscriptions are checked per channel against the caller's spaces.
 
 **Multi-replica fan-out (without a broker).** A WS client is connected to **one** API replica; the event (transition or log chunk) may be produced on **another** replica. The bridge is **Postgres `LISTEN/NOTIFY`**:
 
