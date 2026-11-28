@@ -1401,21 +1401,27 @@
 <table>
 <thead>
 <tr>
-<th>Kind</th>
+<th>Kind (API)</th>
+<th>In the UI</th>
 <th>Injection</th>
 </tr>
 </thead>
 <tbody>
 <tr>
 <td><code>terraform</code></td>
+<td><strong>Terraform variable</strong>, shown as <code>var.&lt;name&gt;</code></td>
 <td>written to an auto-loaded tfvars file, present only while a tofu command runs (listed as <code>TF_VAR_&lt;name&gt;</code>); hooks only see it inside <code>plan.json</code></td>
 </tr>
 <tr>
 <td><code>environment</code></td>
+<td><strong>Shell environment variable</strong>, shown as <code>$NAME</code></td>
 <td>exposed as a plain process environment variable for the run: to tofu and hooks — to repo hooks only when it is not sensitive</td>
 </tr>
 </tbody>
 </table>
+<p>The UI never says just "environment" for the second kind: an <em>environment</em> is also a Stackd
+environment (dev, prod…), which variable sets attach to. An <code>environment</code>-kind variable has nothing
+to do with which environment it applies to; that is decided by where it lives (below).</p>
 <p>A <code>terraform</code> variable is passed as a string; set <code>hcl: true</code> to write its value verbatim as an HCL
 expression instead (a list, a map, a number…).</p>
 <h2 id="where-a-variable-can-live">Where a variable can live<a class="headerlink" href="#where-a-variable-can-live" title="Permanent link">&para;</a></h2>
