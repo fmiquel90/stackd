@@ -9,6 +9,7 @@ import { useSpaces } from "./SpaceContext";
 import { useTheme } from "./theme";
 import { NAV } from "./nav";
 import { Kbd } from "@/ui/primitives";
+import { docsUrl } from "@/lib/docs";
 import { shortId } from "@/lib/ids";
 
 // ⌘K (DESIGN §4.2): the keyboard-first primary navigation. It never performs a state-changing
@@ -146,6 +147,12 @@ export function CommandPalette({
                   }
                 >
                   Copy the link to this page
+                </Item>
+                <Item
+                  value="action documentation docs help guide"
+                  onSelect={() => run(() => window.open(docsUrl("guide"), "_blank", "noopener,noreferrer"))}
+                >
+                  Open the documentation <span className="ml-auto text-[12px] text-muted">new tab</span>
                 </Item>
               </Group>
 

@@ -75,7 +75,7 @@ jobs:
       matrix:
         include:
           - { name: api, context: api, file: api/Dockerfile }
-          - { name: front, context: front, file: front/Dockerfile }
+          - { name: front, context: front, file: front/Dockerfile, build-contexts: "repo=." }
           - { name: worker, context: worker, file: worker/Dockerfile }
           - { name: opentofu, context: ., file: deploy/images/opentofu.Dockerfile, runner: true }
     steps:
@@ -126,6 +126,8 @@ jobs:
         with:
           context: ${{ matrix.context }}
           file: ${{ matrix.file }}
+          # The front image also builds the user guide from the repository root (front/Dockerfile).
+          build-contexts: ${{ matrix.build-contexts || '' }}
           platforms: linux/amd64,linux/arm64
           push: true
           tags: ${{ steps.meta.outputs.tags }}

@@ -5,6 +5,8 @@ import path from "node:path";
 
 // Not VITE_-prefixed: Vite would also expose it to the browser bundle, which never needs it.
 const apiTarget = process.env.API_PROXY_TARGET ?? "http://localhost:8000";
+// The user guide (mkdocs serve: the compose `docs` service, or `task docs` on the host).
+const docsTarget = process.env.DOCS_PROXY_TARGET ?? "http://localhost:8001";
 
 export default defineConfig({
   plugins: [react(), tailwindcss()],
@@ -30,6 +32,10 @@ export default defineConfig({
     proxy: {
       // ws: true also proxies the /api/v1/ws WebSocket upgrade to the API.
       "/api": { target: apiTarget, changeOrigin: true, ws: true },
+      // Same /docs/ path as the front image in production, so help links have one URL (lib/docs.ts).
+      "/docs": { target: docsTarget, changeOrigin: true, rewrite: (p) => p.replace(/^\/docs/, "") || "/" },
+      // mkdocs serve's live-reload long-poll asks for an absolute /livereload/… path.
+      "/livereload": { target: docsTarget, changeOrigin: true },
     },
   },
 });

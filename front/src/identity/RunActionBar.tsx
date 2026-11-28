@@ -2,12 +2,13 @@ import { useEffect, useId, useState, type ReactNode } from "react";
 import { Link } from "react-router-dom";
 import { ChevronLeft, ChevronRight } from "lucide-react";
 import type { Environment, Run } from "@/api/types";
+import type { DocTopic } from "@/lib/docs";
 import type { RunRights } from "@/lib/permissions";
 import { formatCounts, outcomeOf, planCounts } from "@/lib/runOutcome";
 import { relative } from "@/lib/time";
 import { Button } from "@/ui/Button";
 import { Dialog, DialogTrigger, Popover, PopoverContent, PopoverTrigger, SheetContent } from "@/ui/overlays";
-import { Banner, Kbd } from "@/ui/primitives";
+import { Banner, HelpLink, Kbd } from "@/ui/primitives";
 import { MOBILE, useMediaQuery } from "@/ui/useMediaQuery";
 import { cn } from "@/ui/cn";
 import { ModifierChips, RunStateBadge } from "./StateBadge";
@@ -102,10 +103,34 @@ function cancelLabel(kind: "cancel" | "stop" | "stop_apply", requested: boolean,
   return armed ? "Stop the apply? It may be left partly applied — click again" : "Stop apply";
 }
 
-function Reason({ id, action, reasons }: { id: string; action: string; reasons: string[] }) {
+/** The help link under a disabled action names what it explains (DESIGN §7, Help). */
+const HELP_TEXT: Partial<Record<DocTopic, string>> = {
+  canApply: "Who may confirm an apply",
+  fourEyes: "How four-eyes works",
+  mocks: "Why mocks block apply",
+  secretFallback: "Why fallback secrets block apply",
+};
+
+function Reason({
+  id,
+  action,
+  reasons,
+  help,
+}: {
+  id: string;
+  action: string;
+  reasons: string[];
+  help?: DocTopic;
+}) {
   return (
     <li id={id}>
       <span className="font-semibold">{action} unavailable:</span> {reasons.join("; ")}.
+      {help && HELP_TEXT[help] && (
+        <>
+          {" "}
+          <HelpLink topic={help}>{HELP_TEXT[help]}</HelpLink>
+        </>
+      )}
     </li>
   );
 }
@@ -343,8 +368,15 @@ export function RunActionBar(props: RunActionBarProps) {
 
       {unavailable.length > 0 && (
         <ul className="text-[12px] text-muted">
-          {unavailable.map(([action, r, key]) => (
-            <Reason key={key} id={`${rid}-${key}`} action={action} reasons={r.reasons} />
+          {unavailable.map(([action, r, key], i) => (
+            <Reason
+              key={key}
+              id={`${rid}-${key}`}
+              action={action}
+              reasons={r.reasons}
+              // One link per topic: Discard and Cancel blocked for the same reason share the first's.
+              help={unavailable.slice(0, i).some(([, prev]) => prev.help === r.help) ? undefined : r.help}
+            />
           ))}
         </ul>
       )}

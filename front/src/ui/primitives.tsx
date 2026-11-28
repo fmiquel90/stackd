@@ -11,9 +11,10 @@ import {
   type ThHTMLAttributes,
 } from "react";
 import * as TabsPrimitive from "@radix-ui/react-tabs";
-import { Check, Copy, TriangleAlert, Info, X, CircleSlash } from "lucide-react";
+import { Check, Copy, TriangleAlert, Info, X, CircleSlash, ExternalLink } from "lucide-react";
 import { cn } from "./cn";
 import { Tooltip } from "./overlays";
+import { docsUrl, type DocTopic } from "@/lib/docs";
 import { isoLocal, relative } from "@/lib/time";
 
 // Small token-based primitives (DESIGN §8 inventory). No inline colour, no opacity for meaning.
@@ -246,6 +247,36 @@ export function Banner({
       )}
       {action && <div className="shrink-0 max-sm:ml-7">{action}</div>}
     </div>
+  );
+}
+
+/* ---------- Help ---------- */
+
+/**
+ * A link into the user guide (DESIGN §7, Help). The text names the destination ("How four-eyes
+ * works"), never "Learn more"; it opens in a new tab — the user is mid-task — and says so to
+ * assistive tech. Never inside a <label> or a tooltip; at most one per block.
+ */
+export function HelpLink({
+  topic,
+  children,
+  className,
+}: {
+  topic: DocTopic;
+  children: ReactNode;
+  className?: string;
+}) {
+  return (
+    <a
+      href={docsUrl(topic)}
+      target="_blank"
+      rel="noopener noreferrer"
+      className={cn("link whitespace-nowrap", className)}
+    >
+      {children}
+      <ExternalLink size={12} aria-hidden className="ml-0.5 inline align-[-1px]" />
+      <span className="sr-only"> (opens in a new tab)</span>
+    </a>
   );
 }
 

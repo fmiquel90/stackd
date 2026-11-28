@@ -10,7 +10,16 @@ import { EnvCell } from "@/identity/EnvCell";
 import { ModifierChips, RunStateBadge } from "@/identity/StateBadge";
 import { downstreamOf, type CascadeStep } from "@/lib/cascade";
 import { Button } from "@/ui/Button";
-import { Banner, EmptyState, Input, NativeSelect, RelativeTime, Sha, Skeleton } from "@/ui/primitives";
+import {
+  Banner,
+  EmptyState,
+  HelpLink,
+  Input,
+  NativeSelect,
+  RelativeTime,
+  Sha,
+  Skeleton,
+} from "@/ui/primitives";
 import { AttentionZone } from "./AttentionZone";
 import { attentionOf, envColumns, matchesState, STATE_FILTERS, type StateFilter } from "./attention";
 import { Matrix, type Selection } from "./Matrix";
@@ -164,7 +173,7 @@ export function OverviewPage() {
           title={`No stack in ${space.name} yet.`}
           action={canWrite ? <NewStackDialog spaceId={space.id} spaceName={space.name} /> : undefined}
         >
-          Connect a repository to get started.
+          Connect a repository to get started. <HelpLink topic="defineStack">Defining a stack</HelpLink>
           {otherSpacesWithStacks.length > 0 && (
             <span>
               {" "}

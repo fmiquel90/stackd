@@ -102,7 +102,12 @@ jobs:
     steps:
       - uses: actions/checkout@v6
       - name: Build ${{ matrix.component }} image
-        run: docker build -f ${{ matrix.component }}/Dockerfile -t stackd/${{ matrix.component }}:ci ${{ matrix.component }}
+        # `repo` (the repository root) is the front image's named context: the MkDocs user guide it
+        # serves under /docs/. The other images ignore it.
+        run: docker build --build-context repo=. -f ${{ matrix.component }}/Dockerfile -t stackd/${{ matrix.component }}:ci ${{ matrix.component }}
+      - name: The front image serves the user guide
+        if: matrix.component == 'front'
+        run: docker run --rm --entrypoint sh stackd/front:ci -c 'test -f /srv/docs/index.html && test -f /srv/docs/guide/runs-and-approvals/index.html'
       - name: The API image has no dev login
         if: matrix.component == 'api'
         run: |

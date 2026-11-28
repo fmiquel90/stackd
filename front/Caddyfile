@@ -26,6 +26,13 @@
 
 	# Everything else: the file if it exists (favicon, manifest…), else the SPA shell — the
 	# client-side router resolves the path. The shell is never cached, so a deploy is picked up.
+	# The user guide (MkDocs build): plain files, no SPA fallback — a missing page is a 404.
+	redir /docs /docs/ 308
+	handle /docs/* {
+		header Cache-Control "no-cache"
+		file_server
+	}
+
 	handle {
 		header Cache-Control "no-cache"
 		try_files {path} /index.html

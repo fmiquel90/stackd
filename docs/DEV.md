@@ -76,7 +76,7 @@ task lint           # ruff check + ruff format --check on the api (stack)
 task version-check  # api, worker and front carry the same version
 ```
 
-Docs, images, release: `task docs` (mkdocs on :8001), `task docs-build`, `task build-runner-images` (OpenTofu + Terraform runner images, `deploy/images/`), `task build-images`, `task release VERSION=X.Y.Z` (§10), `task prod-config`. `task --list` shows them all, sorted alphabetically; `Taskfile.yml` groups them by purpose with the same sections.
+Docs, images, release: `task docs` (mkdocs on :8001, for the host; `task dev` already runs it as the `docs` service, which the front proxies under `/docs/` — the same path the front image serves the guide on in production), `task docs-build`, `task build-runner-images` (OpenTofu + Terraform runner images, `deploy/images/`), `task build-images`, `task release VERSION=X.Y.Z` (§10), `task prod-config`. `task --list` shows them all, sorted alphabetically; `Taskfile.yml` groups them by purpose with the same sections.
 
 Orchestration via **[Task](https://taskfile.dev)** (`Taskfile.yml` at the root) rather than Make: readable YAML syntax, cross-platform (single Go binary, no dependency on GNU Make), native `deps`/`status` for idempotence, namespaces per module, and self-documented `task --list`. Excerpt:
 

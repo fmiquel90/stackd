@@ -1,0 +1,10 @@
+# Build context of the images built from the repository root: the runner images
+# (deploy/images/*.Dockerfile, which copy nothing from it) and the front image's `repo` named
+# context (front/Dockerfile: the MkDocs user guide). Allowlist — never send .env, .dev or sources.
+*
+!mkdocs.yml
+!pyproject.toml
+!uv.lock
+!docs/
+docs/redesign/
+docs/showcase/

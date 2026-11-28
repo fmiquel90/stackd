@@ -5,7 +5,7 @@ import { environments, tiers, type EnvironmentPatch } from "@/api/resources";
 import type { Environment } from "@/api/types";
 import { Checkbox, LabelsEditor } from "@/components/ui";
 import { Button } from "@/ui/Button";
-import { Banner, Field, Input, NativeSelect } from "@/ui/primitives";
+import { Banner, Field, HelpLink, Input, NativeSelect } from "@/ui/primitives";
 import { TypeNameDialog } from "@/ui/TypeNameDialog";
 
 // Environment settings (DESIGN §5.8) with friction on the safety switches (§5.7): turning off
@@ -135,6 +135,10 @@ export function EnvSettings({
 
         <fieldset disabled={disabled} className="flex flex-col gap-2">
           <legend className="eyebrow mb-1 text-muted">Protections</legend>
+          <p className="text-[12px] text-muted">
+            The tier decides who may confirm; these switches act on top of it.{" "}
+            <HelpLink topic="envSettings">What each setting does</HelpLink>
+          </p>
           <Checkbox
             checked={!!form.protected}
             onChange={(v) => set({ protected: v })}
@@ -172,6 +176,10 @@ export function EnvSettings({
 
         <fieldset disabled={disabled} className="flex flex-col gap-3">
           <legend className="eyebrow mb-1 text-muted">State</legend>
+          <p className="text-[12px] text-muted">
+            Managed: Stackd stores and locks the state behind its HTTP backend. Off: the repository's own
+            backend block is used. <HelpLink topic="managedState">Which to choose</HelpLink>
+          </p>
           <Checkbox
             checked={!!form.managed_state}
             onChange={(v) => set({ managed_state: v })}

@@ -12,6 +12,7 @@ import {
   useParams,
 } from "react-router-dom";
 import {
+  BookOpen,
   ChevronsUpDown,
   Command as CommandIcon,
   Keyboard,
@@ -52,6 +53,7 @@ import { SpaceProvider, useEntitySpace, useSpaces } from "./SpaceContext";
 import { useSpaceEnvs } from "@/features/data/spaceEnvs";
 import { STUCK_AFTER_S, useQueueRows, waitedSeconds } from "@/features/queue/queueModel";
 import { useTheme } from "./theme";
+import { docsUrl } from "@/lib/docs";
 import { shortId } from "@/lib/ids";
 
 // Route-level code splitting: each page is its own chunk; the graph stack loads only on /graph.
@@ -223,6 +225,13 @@ function UserMenu({ user, onHelp }: { user: User; onHelp: () => void }) {
         </MenuItem>
         <MenuItem onSelect={() => setEnabled(!enabled)}>
           <Keyboard size={14} aria-hidden /> {enabled ? "Turn off" : "Turn on"} single-key shortcuts
+        </MenuItem>
+        <MenuItem asChild>
+          {/* The user guide (DESIGN §7, Help): a real link, in a new tab. */}
+          <a href={docsUrl("guide")} target="_blank" rel="noopener noreferrer">
+            <BookOpen size={14} aria-hidden /> Documentation
+            <span className="sr-only"> (opens in a new tab)</span>
+          </a>
         </MenuItem>
         <MenuSeparator />
         <MenuItem onSelect={() => logout.mutate()}>
